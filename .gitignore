@@ -1,0 +1,31 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+# Editor-based HTTP Client requests
+/httpRequests/
+# Datasource local storage ignored files
+/dataSources/
+/dataSources.local.xml
+/.idea
+/.vscode
+**/__pycache__
+**/build
+**/dist
+/MumuAdaptor.egg-info
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.DS_Store
+**/.venv
+**/.env
+**/.env.local
+
+# 忽略根目录下的 PNG 和 LOG 文件
+/*.png
+/*.log
+
+/output/
+/errors/
+/examples/
+/logs/
+/config.json
