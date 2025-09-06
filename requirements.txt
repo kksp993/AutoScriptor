@@ -1,0 +1,35 @@
+# 配置cuda==12.0，对应安装cudnn=8.9.7
+# 如需加速C++扩展编译，建议（可选）安装ccache（非Python包，见 https://github.com/ccache/ccache）
+adbutils==1.2.15
+numpy==1.24.4
+pandas>=2.0.0
+opencv-python
+questionary==2.1.0
+pure-python-adb==0.3.0.dev0
+pillow>=10.0.0
+loguru>=0.7.0
+typing-extensions>=4.0.0
+pyscrcpy
+pypinyin>=0.54.0
+cryptography
+# 请根据你的CUDA版本选择合适的paddlepaddle-gpu，例如：
+# pip install paddlepaddle-gpu==0.0.0.postxx -f https://www.paddlepaddle.org.cn/whl/linux/mkl/avx/stable.html
+paddlepaddle
+paddleocr==2.7.0
+fuzzywuzzy
+python-Levenshtein
+mkl>=2023.0.0
+mkl-include>=2023.0.0
+colormath
+uiautomator2==2.16.17
+uiautomator2cache==0.3.1
+questionary
+colorama>=0.4.6
+astor>=0.8.1
+# gui
+pywebio==1.8.3
+starlette==0.14.2
+uvicorn[standard]==0.17.6
+aiofiles
+fastapi
+websockets

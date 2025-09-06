@@ -1,0 +1,12 @@
+route,login,village,heaven,hell,penglai,hyperborea,hypervillage,alliance,union,polar_chasm
+login,login,village,village,village,village,village,village,village,village,village
+village,login,village,heaven,hell,penglai,hyperborea,hypervillage,alliance,alliance,hyperborea
+heaven,village,village,heaven,hell,penglai,hyperborea,hypervillage,alliance,union,hyperborea
+hell,village,village,heaven,hell,penglai,hyperborea,hypervillage,village,village,hyperborea
+penglai,village,village,heaven,hell,penglai,hyperborea,hypervillage,village,village,hyperborea
+hyperborea,hypervillage,village,heaven,hell,penglai,hyperborea,hypervillage,village,village,polar_chasm
+hypervillage,login,village,heaven,hell,penglai,hyperborea,hypervillage,alliance,alliance,hyperborea
+alliance,login,village,heaven,heaven,village,village,village,alliance,union,hyperborea
+union,village,village,village,village,village,village,village,alliance,union,hyperborea
+battle,Map,Map,Map,Map,Map,Map,Map,Map,Map,Map
+Map,village,village,heaven,hell,penglai,hyperborea,hyperborea,alliance,village,hyperborea
