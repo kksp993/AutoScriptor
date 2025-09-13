@@ -105,8 +105,11 @@ class MixControl(BaseMumuControl):
 
     
     def long_click(self, x, y, duration=1.0)->None:
-        logger.info(f"LongClick: {x}, {y} % {duration:0.3f}sec")
-        self.nemu_control.long_click(x, y, duration)
+        logger.info(f"{self.mode} LongClick: {x}, {y} % {duration:0.3f}sec")
+        # if self.mode=="mumu":
+        self.mumu.adb.swipe(x, y, x, y, int(duration*1000))
+        # else:
+        #     self.nemu_control.long_click(x, y, duration)
 
 
 

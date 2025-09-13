@@ -197,6 +197,7 @@ def run_cli_navigation():
             choices.append(questionary.Choice(title="🚪 退出程序【Q】", value="--exit--"))
             choices.append(questionary.Choice(title="👤 账号管理【A】", value="--Account--")) 
             choices.append(questionary.Choice(title="🏷 标注目标【L】", value="--label--"))
+            choices.append(questionary.Choice(title=f"💾 保存配置{unsaved_marker}【S】", value="--save--"))
             choices.append(questionary.Choice(title="🚀 开始执行【R】", value="--execute--"))
 
         action = questionary.select("请选择:", choices=choices, use_search_filter=True, use_jk_keys=False).ask()

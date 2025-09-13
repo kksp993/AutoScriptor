@@ -4,6 +4,15 @@ from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 
+def reset_task():
+    if extract_info(B(1053,581,213,48), lambda x: int(x.strip()[-1])==0):
+        logger.info("今日天选阁已通关")
+        return False
+    click(T("重置"))
+    click(T("确定"),if_exist=True,timeout=2)
+    sleep(2)
+    return True
+
 @register_task
 def task():
     print(cfg["weekday"])
@@ -37,9 +46,7 @@ def task():
         sleep(2)
         click(T(f"第{task_idx}关"))
         if task_idx==5 and ui_F(I("加载中"),2):
-            click(T("重置"))
-            click(T("确定"),timeout=2,if_exist=True)
-            sleep(2)
+            if not reset_task(): break
             not_finish = False
             continue
         bg.add(
@@ -58,12 +65,10 @@ def task():
         if ui_T(T("恭喜本次通关，请重置或等待"),timeout=3):
             click(T("确定"))
             sleep(1)
-            click(T("重置"))
-            click(T("确定"),if_exist=True,timeout=2)
-            sleep(2)
+            if not reset_task(): break
             not_finish = False
     click(T("回家", box=Box(18,607,87,109)))
-    wait_for_disappear(T("天选阁"))
+    wait_for_appear(T("天选阁"))
     sleep(0.5)
     click(B(1200,30,30,30))
 

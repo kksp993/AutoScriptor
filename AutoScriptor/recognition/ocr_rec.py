@@ -34,7 +34,7 @@ class OCRManager:
                 logger.info("正在初始化 PaddleOCR 引擎，这可能需要一些时间...")
                 start_time = time.time()
                 self.ocr_engine = PaddleOCR(
-                    use_gpu=True,
+                    use_gpu=cfg["ocr"]["use_gpu"],
                     gpu_mem=8192,
                     enable_mkldnn=True,
                     use_angle_cls=False,
@@ -82,7 +82,7 @@ def get_ocr_engine():
     if not hasattr(_thread_local, 'ocr_engine') or _thread_local.ocr_engine is ocr_manager.ocr_engine:
         # 复制与全局相同的初始化参数
         _thread_local.ocr_engine = PaddleOCR(
-            use_gpu=True,
+            use_gpu=cfg["ocr"]["use_gpu"],
             gpu_mem=8192,
             enable_mkldnn=True,
             use_angle_cls=False,
