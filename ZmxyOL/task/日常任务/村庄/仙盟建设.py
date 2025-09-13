@@ -16,6 +16,7 @@ def daily_alliance_task():
     wait_for_appear(T("优秀建设"))
     click(B(1200,30,30,30))
     logger.info("====日常任务====")
+    sleep(2)
     click(I("导航-任务"))
     click(T("经典任务"))
     click(T("日常任务"))
