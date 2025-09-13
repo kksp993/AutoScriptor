@@ -1,6 +1,7 @@
 from functools import partial
 from typing import Any
 from AutoScriptor import *
+from logzero import logger
 NORMAL_SPEED_1X = 0.025
 NORMAL_SPEED_3X = 0.012
 
@@ -32,6 +33,9 @@ class Hero:
 
     def zhenwu(self):
         click(B("战斗-本命神"))
+        return self
+    def zhenling(self):
+        click(B("战斗-真灵"))
         return self
     
     def huashen(self):

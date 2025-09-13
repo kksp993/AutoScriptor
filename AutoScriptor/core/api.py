@@ -3,13 +3,14 @@ import sys
 import threading
 import time
 import traceback
+import getpass
 from AutoScriptor.core.control import MixControl
 from AutoScriptor.core.targets import Target, B,I,T
 from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget
 from AutoScriptor.recognition.ocr_rec import ocr_for_box
 from AutoScriptor.recognition.rec import get_box_color
 from AutoScriptor.utils.box import Box, b2p
-from AutoScriptor.logger import logger
+from logzero import logger
 from AutoScriptor.utils.constant import cfg
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
 from AutoScriptor.utils.edit_img import launch_editor
@@ -53,17 +54,18 @@ if not success:
     from AutoScriptor.core.background import bg
     bg.stop()
     os.execv(sys.executable, [sys.executable] + sys.argv)
-
+mixctrl.window.hidden() if cfg["app"]["run_in_background"] else None
+cfg.load_config(getpass.getpass("请输入安全密码: "))
 
 def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=10)->bool:
     tuple_tgt, list_tgt = tuple(t for t in target), [t for t in target]
-    res = locate(tuple_tgt, timeout)
+    res = locate(tuple_tgt, timeout, assure_stable=False)
     if not res: raise Exception(f"{target} 没有找到:" + traceback.print_exc())
-    boxes = locate(list_tgt, 0)
+    boxes = locate(list_tgt, 0, assure_stable=False)
     return index(boxes)
 
 def ui_T(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->bool:
-    boxes = locate(target, timeout)
+    boxes = locate(target, timeout, assure_stable=False)
     if isinstance(target, list):
         return full(boxes)
     else:
@@ -168,10 +170,10 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
     
     # 单个Target对象，转换为元组处理
     if isinstance(target, Target):
-        return locate((target,), timeout)
+        return locate((target,), timeout, assure_stable=assure_stable)
     
 def wait_for_appear(target: Target|tuple[Target, ...], timeout: float=30)->bool:
-    return locate(target, timeout) is not None
+    return locate(target, timeout, assure_stable=False) is not None
 
 def wait_for_disappear(target: Target|tuple[Target, ...], timeout: float=30)->bool:
     wait_for_appear(target, timeout=5)
@@ -228,7 +230,7 @@ def swipe(
         delay: float = 0,
     ):
     start_box = locate(start_target, 3) if not isinstance(start_target, BoxTarget) else start_target.box
-    end_box = locate(end_target, 3) if not isinstance(end_target, BoxTarget) else end_target.box
+    end_box = locate(end_target, 3, assure_stable=False) if not isinstance(end_target, BoxTarget) else end_target.box
     if start_box is None or end_box is None: return RuntimeError(f"Swipe {start_target} to {end_target} failed, for failed to locate target")
     time.sleep(delay)
     mixctrl.swipe(*b2p(start_box), *b2p(end_box), duration_s)
@@ -269,7 +271,7 @@ def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), re
     # 处理生成器对象，转换为列表
     if hasattr(targets, '__iter__') and not isinstance(targets, (list, tuple, str)): targets = list(targets)
     targets = targets if isinstance(targets, list|tuple) else [targets]
-    boxes = _locate_all(targets, screenshot=screenshot)
+    boxes = _locate_all(targets, screenshot=screenshot, assure_stable=False)
     # 应用offset和resize到boxes
     if offset != (0, 0) or resize != (-1, -1):
         for i in range(len(boxes)):
