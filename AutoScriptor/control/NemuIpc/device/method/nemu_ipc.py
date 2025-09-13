@@ -15,6 +15,7 @@ from AutoScriptor.logger import logger
 from AutoScriptor.control.NemuIpc.device.method.utils import RETRY_TRIES, retry_sleep
 from AutoScriptor.control.NemuIpc.device.method.pool import WORKER_POOL
 from AutoScriptor.control.NemuIpc.config.deep import deep_get
+from AutoScriptor.utils.constant import cfg
 
 class RequestHumanTakeover(Exception):
     pass
@@ -540,7 +541,7 @@ class NemuIpc():
             #     raise RequestHumanTakeover
             #  C:\Program Files\Netease\MuMu Player 12\shell\MuMuPlayer.exe
             # folder = os.path.abspath(os.path.join(self.config.EmulatorInfo_path, '../../'))
-        folder = r'C:\Program Files\Netease\MuMu Player 12'
+        folder = cfg["emulator"]["mumu_folder"]
         # folder = "D:/Program Files/Netease/MuMu"
         index = NemuIpcImpl.serial_to_id(self.serial)
         if index is not None:

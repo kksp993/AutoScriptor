@@ -50,9 +50,9 @@ def locate_region(cnt = 0) -> tuple[str, str]:
         if check_loc_exists(loc_name):
             loc = mm.locs[loc_name]
             return mm.set_region(loc.envs[0].name, loc_name)
-    if cnt % 3 == 0:
+    if cnt % 2 == 0:
         try_close_via_x()
-    if cnt > 20:
+    if cnt > 10:
         raise ValueError("无法找到当前位置，请检查环境是否正确")
     return locate_region(cnt + 1)
 

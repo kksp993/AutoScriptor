@@ -104,6 +104,16 @@ def index(box_matrixes: list[list[Box]])-> int:
         if box: return i
     return -1
 
+
+def stable(boxes1: list[list[Box]], boxes2: list[list[Box]])->bool:
+    if not boxes1 or not boxes2: return False
+    assert len(boxes1) == len(boxes2)
+    for i in range(len(boxes1)):
+        if not (boxes1[i] and boxes2[i]): continue
+        for j in range(len(boxes1[i])):
+            if not boxes1[i][j].sim_box(boxes2[i][j]): return False
+    return True
+
 def switch_base(base: str):
     if base == "mumu":
         mixctrl.switch_to_mumu()
@@ -112,12 +122,8 @@ def switch_base(base: str):
     else:
         raise ValueError(f"Invalid base: {base}")
 
-pre_target = None
-pre_found = None
 
 def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=None)->list[list[Box]]:
-    global pre_target, pre_found
-    logger.info(f"Locate: {target}") if target != pre_target else None
     def genertate_source(target):
         if isinstance(target, ImageTarget|TextTarget):
             return target.get_source(),target.ui.box,target.ui.color
@@ -127,30 +133,36 @@ def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=No
             raise ValueError(f"Unsupported target type: {type(target)}")
     tgt_triples = [genertate_source(tgt) for tgt in target]
     boxes = mixctrl.locate(tgt_triples, screenshot=screenshot)
-    logger.info(f"Found: {boxes}") if boxes != pre_found else None
-    pre_target, pre_found = target, boxes
     return boxes
 
-def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->Box|None|list[Box]:
+def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, assure_stable: bool = True)->Box|None|list[Box]:
     """
     在屏幕上查找文本或图片目标，返回第一个匹配的 Box 或 False
     支持多目标等待：列表需全满足，元组任一满足
+    Args:
+        target: 目标对象或目标对象元组
+        timeout: 超时时间
+        assure_stable: 是否保证稳定,如果为True，则每次定位都会保证稳定，直到找到目标或超时
     """
     first_attempt = True
     t = time.time()
     # 元组任一满足
     if isinstance(target, tuple):
+        logger.info(f"Locate: {target}")
         while first_attempt or time.time() - t < timeout:
             first_attempt = False
             boxes = _locate_all(target)
+            if assure_stable and not stable(boxes, _locate_all(target)): continue
             if first(boxes): return first(boxes)  # 确保返回单个Box或None
         return None
     
     # 列表需全满足
     if isinstance(target, list):
+        logger.info(f"Locate: {target}")
         while first_attempt or time.time() - t < timeout:
             first_attempt = False
             boxes = _locate_all(target)
+            if assure_stable and not stable(boxes, _locate_all(target)): continue
             if full(boxes): return simple(boxes)
         return simple(boxes)
     
@@ -162,8 +174,11 @@ def wait_for_appear(target: Target|tuple[Target, ...], timeout: float=30)->bool:
     return locate(target, timeout) is not None
 
 def wait_for_disappear(target: Target|tuple[Target, ...], timeout: float=30)->bool:
-    locate(target, timeout=5) is not None
-    while locate(target, timeout=0) is not None:
+    wait_for_appear(target, timeout=5)
+    t = time.time()
+    while locate(target, timeout=0, assure_stable=False) is not None:
+        if time.time() - t > timeout:
+            raise RuntimeError(f"Wait for disappear {target} timeout, for failed to locate target in {timeout} seconds")
         time.sleep(0.5)
     return True
 
@@ -178,16 +193,21 @@ def click(
         interval: float = 0,
         offset:tuple=(0,0), 
         resize:tuple=(-1,-1),
-        until: callable = None
+        until: callable = None,
+        assure_stable: bool = True
     ):
     if until:
+        t = time.time()
         click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize)
         while not until():
             click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize)
+            if time.time() - t > timeout:
+                raise RuntimeError(f"Click {target} until {until.__name__} failed, for until function not satisfied in {timeout} seconds")
         return True
     if isinstance(target, list): target = tuple(target)
     if isinstance(target, BoxTarget): box = target.box
-    else: box = locate(target, timeout if not if_exist else max(2, timeout))    # 至少2s
+    else: 
+        box = locate(target, timeout if not if_exist else max(2, timeout) if timeout != 30 else 2, assure_stable)    # 至少2s
     if if_exist and first(box) is None: return False
     if first(box) is None: raise RuntimeError(f"Click {target} failed, for failed to locate target in {timeout} seconds")
     time.sleep(delay)
@@ -274,24 +294,3 @@ def sleep(seconds: float):
 
 def edit_img():
     launch_editor(mixctrl,is_screenshot=True) 
-
-if __name__ == "__main__":
-    # print(locate(T("服务器")))
-    # print(locate(T("可莉不知道哦")))
-    # print(locate([T("服务器"),T("可莉不知道哦")]))
-    # print(locate((T("服务器"),T("可莉不知道哦"))))
-    # assert ui_T(T("服务器"))
-    # assert ui_T(T("可莉不知道哦"))
-    # assert ui_T((T("服务器"),T("可莉不知道哦")))
-    # assert ui_T([T("服务器"),T("可莉不知道哦")])
-    # print(locate([I("aaa"),I("12+"),T("服务器"),T("可莉不知道哦")]))
-    # print(locate((I("aaa"),I("12+"),T("服务器",color="绿色"),T("可莉不知道哦"))))
-    # print(simple(_locate_all([I("aaa"),I("12+"),T("服务器"),T("可莉不知道哦")])))
-    # print(full(_locate_all([I("aaa"),I("12+"),T("服务器"),T("可莉不知道哦")])))
-    # print(first(_locate_all([I("aaa"),I("12+"),T("服务器"),T("可莉不知道哦")])))
-    # print(count(_locate_all([I("aaa"),I("12+"),T("服务器"),T("可莉不知道哦")])))
-
-    # print(get_colors((I("aaa"),I("12+"),T("服务器"),T("可莉不知道哦"))))
-    print(click(T("进入游戏")))
-    # edit_img()
-    exit(0)

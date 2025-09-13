@@ -16,9 +16,13 @@ def daily_qianghua_task():
         click(I("炼丹炉-进阶-右"))
         sleep(1)
     swipe(I("法宝-戮仙剑"),I("炼丹炉-进阶-添加装备"),duration_s=1)
+    sleep(1)
     click(I("炼丹炉-批量进阶"))
+    sleep(0.5)
     click(I("炼丹炉-选择全部"))
+    sleep(0.5)
     click(T("确定进阶"))
+    sleep(1)
     click(T("确定",color="绿色"))
     while ui_F(I("炼丹炉-启灵-添加装备")):
         click(T(key="炼丹炉-启灵"))
