@@ -22,12 +22,13 @@ class ImageEditor:
         self.rect = None
         self.crop_coords = None
         self.start_x = self.start_y = 0
-        self.scale = 0.5
-        self.window_width = 640
+        # self.scale = 0.5
+        self.scale = 1
+        self.window_width = 1280
         self.thr = 100  # 默认色差阈值
         
         # 初始化OCR引擎
-        self.ocr_engine = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False, use_gpu=False)
+        self.ocr_engine = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False, use_gpu=cfg["ocr.use_gpu"])
 
         self._init_root()
         self._init_variables()

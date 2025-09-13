@@ -13,7 +13,7 @@ __all__ = [
     "click", "locate", "input", "get_colors", "edit_img", "swipe", "ui_T", "ui_F", "ui_idx", "key_event",
     "wait_for_appear", "wait_for_disappear",
     "first", "simple", "full", "count", "switch_base", "sleep", "extract_info",
-    "bg",
+    "bg", "mixctrl"
 ] 
 
 

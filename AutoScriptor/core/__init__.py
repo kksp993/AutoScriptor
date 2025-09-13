@@ -24,5 +24,6 @@ __all__ = [
  "switch_base",
  "sleep",
  "extract_info",
- "key_event"
+ "key_event",
+ "mixctrl"
 ]
