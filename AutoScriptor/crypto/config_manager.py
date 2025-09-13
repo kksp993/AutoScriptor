@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import base64
 import hmac
 import hashlib
-from AutoScriptor import logger
+from logzero import logger
 
 class ConfigManager:
     def __init__(self, config_path):

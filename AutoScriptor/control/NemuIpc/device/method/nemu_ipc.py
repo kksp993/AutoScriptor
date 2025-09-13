@@ -11,7 +11,7 @@ import numpy as np
 from AutoScriptor.control.NemuIpc.base.decorator import cached_property, del_cached_property, has_cached_property
 from AutoScriptor.control.NemuIpc.base.timer import Timer
 from AutoScriptor.control.NemuIpc.base.utils import ensure_time, random_rectangle_point
-from AutoScriptor.logger import logger
+from logzero import logger
 from AutoScriptor.control.NemuIpc.device.method.utils import RETRY_TRIES, retry_sleep
 from AutoScriptor.control.NemuIpc.device.method.pool import WORKER_POOL
 from AutoScriptor.control.NemuIpc.config.deep import deep_get

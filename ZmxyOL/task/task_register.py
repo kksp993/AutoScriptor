@@ -53,6 +53,19 @@ def register_task(func):
             current_level[last_key].setdefault('next_exec_time', 0)
         else:
             current_level[last_key] = {'fn': func, 'on': True, 'next_exec_time': 0}
+        # 为任务添加参数配置
+        sig = inspect.signature(func)
+        defaults = {}
+        for name, param in sig.parameters.items():
+            if param.default is inspect._empty:
+                defaults[name] = None
+            else:
+                defaults[name] = param.default
+        task_cfg = current_level[last_key]
+        existing_params = task_cfg.get('params', {})
+        merged_params = defaults.copy()
+        merged_params.update(existing_params)
+        task_cfg['params'] = merged_params
         a = {k:v for k,v in current_level[last_key].items() if k!= 'fn'}
         print(f"✅ 【{'/'.join(keys)}】 => {a}")
     except Exception as e:

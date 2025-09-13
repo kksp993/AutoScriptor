@@ -13,7 +13,7 @@ import time
 from AutoScriptor import *
 from ZmxyOL.nav.envs.decorators import LOC_ENV
 from .map_manager import mm
-
+from logzero import logger
 
 
 def check_loc_exists(loc_name: str) -> bool:

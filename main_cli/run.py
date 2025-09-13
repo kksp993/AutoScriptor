@@ -9,6 +9,7 @@ from AutoScriptor import *
 from AutoScriptor.crypto.update_config import set_config, verify_config
 from ZmxyOL import *
 from ZmxyOL.nav.envs.decorators import LOC_ENV
+from logzero import logger
 task_menu = cfg["tasks"]
 ui_tasks = copy.deepcopy(cfg["tasks"])
 
@@ -66,6 +67,7 @@ def find_and_execute_tasks(
     该版本通过在循环开始时就获取主配置节点，使逻辑更健壮，避免了因在位修改导致的状态不同步问题。
     """
     executed_count = 0
+    failed_count = 0
     now = datetime.now()
 
     for key, ui_node in list(ui_branch.items()):
@@ -75,7 +77,7 @@ def find_and_execute_tasks(
         # Case A: UI中是目录，Master中也应该是目录
         if isinstance(ui_node, dict) and not is_ui_task_node(ui_node):
             if isinstance(master_node, dict):
-                executed_count += find_and_execute_tasks(master_node, ui_node, path_list)
+                executed_count += find_and_execute_tasks(master_node, ui_node, path_list)[0]
             else:
                 logger.warning(f"⚠️ 跳过目录: {path_str} - 主配置与UI状态不同步 (UI为目录，主配置中不存在或不是目录)。")
                 continue
@@ -92,7 +94,7 @@ def find_and_execute_tasks(
 
             logger.info(f"▶️  正在执行: {path_str}")
             try:
-                master_node['fn']()
+                master_node['fn'](**master_node.get('params', {}))
                 update_task_post_execution(master_node, ui_node, path_list)
                 executed_count += 1
                 logger.info(f"▶️  执行完毕: {path_str}")
@@ -100,10 +102,16 @@ def find_and_execute_tasks(
                 logger.info(f"▶️  等待3秒")
                 sleep(3)
             except Exception as e:
+                failed_count += 1
                 logger.error(f"❌ 执行失败: {path_str}，错误: {e}")
                 traceback.print_exc()
-        
-    return executed_count
+                if cfg["app"]["restart_on_error"]:
+                    mixctrl.app.close(cfg["app"]["app_to_start"])
+                    sleep(1)
+                    mixctrl.app.launch(cfg["app"]["app_to_start"])
+                    sleep(5)
+
+    return executed_count, executed_count+failed_count
 
 def update_task_post_execution(
     master_task_node: Dict[str, Any], 
@@ -173,6 +181,19 @@ def run_cli_navigation():
         os.system('cls' if os.name == 'nt' else 'clear')
         
         current_node = get_node_by_path(ui_tasks, navigation_path)
+        # 如果当前节点是叶子任务且有参数，进入参数编辑模式
+        if is_leaf_node(current_node) and current_node.get('params'):
+            for param, val in current_node['params'].items():
+                answer = questionary.text(f"设置参数 \"{param}\" (当前: {val}):", default=str(val)).ask()
+                try:
+                    current_node['params'][param] = type(val)(answer)
+                except Exception:
+                    current_node['params'][param] = answer
+            questionary.press_any_key_to_continue().ask()
+            # 返回上一级菜单
+            if navigation_path:
+                navigation_path.pop()
+            continue
         
         has_unsaved_changes = (ui_tasks != cfg["tasks"])
         unsaved_marker = " *" if has_unsaved_changes else ""
@@ -181,7 +202,10 @@ def run_cli_navigation():
 
         choices = []
         for key, value in current_node.items():
-            if is_leaf_node(value):
+            # 带参数的叶子节点当作可进入的分支显示
+            if is_leaf_node(value) and value.get('params'):
+                display_text = f"[{'✔' if value['on'] else ' '}] {key} [可编辑]"
+            elif is_leaf_node(value):
                 display_text = f"[{'✔' if value['on'] else ' '}] {key} (任务)"
             else:
                 display_text = f"[{'✔' if is_branch_active(value) else ' '}] {key}/"
@@ -197,7 +221,6 @@ def run_cli_navigation():
             choices.append(questionary.Choice(title="🚪 退出程序【Q】", value="--exit--"))
             choices.append(questionary.Choice(title="👤 账号管理【A】", value="--Account--")) 
             choices.append(questionary.Choice(title="🏷 标注目标【L】", value="--label--"))
-            choices.append(questionary.Choice(title=f"💾 保存配置{unsaved_marker}【S】", value="--save--"))
             choices.append(questionary.Choice(title="🚀 开始执行【R】", value="--execute--"))
 
         action = questionary.select("请选择:", choices=choices, use_search_filter=True, use_jk_keys=False).ask()
@@ -227,11 +250,11 @@ def run_cli_navigation():
             master_node_to_execute = get_node_by_path(cfg["tasks"], navigation_path)
             ui_node_counterpart = get_node_by_path(ui_tasks, navigation_path)
             
-            total_executed = find_and_execute_tasks(master_node_to_execute, ui_node_counterpart, navigation_path)
+            total_executed, total_count = find_and_execute_tasks(master_node_to_execute, ui_node_counterpart, navigation_path)
 
             if total_executed > 0:
                 cfg.save_config()
-                logger.info(f"\n✅ 执行完毕，{total_executed}个任务的状态变更已自动保存！")
+                logger.info(f"\n✅ 执行完毕，{total_executed}/{total_count}个任务的状态变更已自动保存！")
             else:
                 logger.info("\n🔵 没有需要执行的任务。")
             questionary.press_any_key_to_continue().ask()
@@ -259,8 +282,10 @@ def run_cli_navigation():
         
         else:
             selected_node = current_node.get(action)
-            if selected_node and not is_leaf_node(selected_node):
-                navigation_path.append(action)
+            if selected_node:
+                # 目录或带参数的任务可进入以进行参数设置
+                if not is_leaf_node(selected_node) or selected_node.get('params'):
+                    navigation_path.append(action)
 
     logger.info("程序已退出。")
 

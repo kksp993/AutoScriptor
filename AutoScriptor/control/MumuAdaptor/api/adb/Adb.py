@@ -5,7 +5,6 @@
 # @File : Adb.py
 # @Software: PyCharm
 from AutoScriptor.utils.constant import cfg
-from AutoScriptor.logger import logger
 import json
 import os.path
 import warnings
