@@ -18,17 +18,16 @@ def login(account: str=None, password: str=None, character_name: str=None):
         click(T("授权并登录"), if_exist=True, timeout=3)
         click(T("添加账号"), if_exist=True)
         locate(T("手机号验证登录"), 10)
-        if ui_idx((T("请输入手机号或用户名"),T("账号登录"),T("进入游戏",color="橙色"))) in [0,1]:
-            click(T("账号登录"), delay=1, repeat=2)
+        click(T("账号登录"), delay=1, repeat=2)
+        if ui_idx((T("请输入手机号或用户名"), T("进入游戏",color="橙色"))) == 0:
             click(T("请输入手机号或用户名"))
             input(account)
             click(T("请输入密码"))
             input(password)
-            click(T("登录",color="青色"))
+            click(B(200, 435))
             time.sleep(1)
-            click(T("同意并登录",color="青色", box=Box(160,707,442,95)))
+            click(B(40, 450, 650, 70))
             click(T("授权并登录"), if_exist=True)
-    click(T("开心收下"), if_exist=True)
     click(T(character_name),delay=1) if character_name else None
     click(T("进入游戏",color="橙色"))
     locate(I("活动公告页面"), 30)

@@ -1,3 +1,4 @@
+import time
 
 from AutoScriptor.logger import logger
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
@@ -9,7 +10,7 @@ class BaseMumuControl:
     def screenshot(self):
         raise NotImplementedError
 
-    def locate(self, tgt_triples, confidence=0.8, screenshot=None)->Box|None:
+    def locate(self, tgt_triples, confidence=0.9, screenshot=None)->Box|None:
         tgt_sources, tgt_boxes, tgt_colors = zip(*tgt_triples)
         if screenshot is None: screenshot = self.screenshot()
         boxes = locate_on_screen(screenshot, tgt_sources, confidence, tgt_boxes, tgt_colors)
@@ -24,10 +25,6 @@ class BaseMumuControl:
     def key_event(self, key_code: int)->None:
         """AndroidKey"""
         self.mumu.adb.key_event(key_code)
-
-    def __getattr__(self, name):
-        from AutoScriptor.utils.constant import cfg
-        return getattr(Mumu().select(cfg["emulator"]["index"]), name)
     
 class NemuIpcControl(BaseMumuControl):
     def __init__(self, mumu: Mumu, serial: str = '127.0.0.1:16416'):

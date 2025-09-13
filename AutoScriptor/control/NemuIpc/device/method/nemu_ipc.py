@@ -16,8 +16,6 @@ from AutoScriptor.control.NemuIpc.device.method.utils import RETRY_TRIES, retry_
 from AutoScriptor.control.NemuIpc.device.method.pool import WORKER_POOL
 from AutoScriptor.control.NemuIpc.config.deep import deep_get
 
-from AutoScriptor.utils.constant import cfg
-
 class RequestHumanTakeover(Exception):
     pass
 
@@ -536,7 +534,14 @@ class NemuIpc():
         Initialize a nemu ipc implementation
         """
         # Try existing settings first
-        folder = cfg["emulator"]["mumu_folder"]
+        # if self.config.EmulatorInfo_path:
+            # if 'MuMuPlayerGlobal' in self.config.EmulatorInfo_path:
+            #     logger.info(f'nemu_ipc is not available on MuMuPlayerGlobal, {self.config.EmulatorInfo_path}')
+            #     raise RequestHumanTakeover
+            #  C:\Program Files\Netease\MuMu Player 12\shell\MuMuPlayer.exe
+            # folder = os.path.abspath(os.path.join(self.config.EmulatorInfo_path, '../../'))
+        folder = r'C:\Program Files\Netease\MuMu Player 12'
+        # folder = "D:/Program Files/Netease/MuMu"
         index = NemuIpcImpl.serial_to_id(self.serial)
         if index is not None:
             try:

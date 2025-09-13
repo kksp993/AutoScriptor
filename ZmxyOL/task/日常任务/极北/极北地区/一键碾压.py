@@ -12,7 +12,8 @@ def task():
     click(I("一键碾压-一键碾压"))
     sleep(1)
     if ui_F(I("一键碾压-一键碾压")):
-        click(T("不使用祝福"), until=lambda: ui_T(T("碾压奖励")))
+        click(T("不使用祝福"), if_exist=True, until=lambda: ui_F(T("碾压奖励")))
+        wait_for_appear(T("碾压奖励"))
         click(B(1040,170,30,30), until= lambda: ui_F(I("暂无可以碾压的关卡")))
     ensure_in("极北",-1)
 

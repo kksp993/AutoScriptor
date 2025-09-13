@@ -21,7 +21,7 @@ ITEM_TABLE = {
     "蛇年":{
         "武器": {"bag_class": BAG.SHIZHUANG, "item_name": "影蛇之刃"},
         "衣服": {"bag_class": BAG.SHIZHUANG, "item_name": "影蛇灵袍"},
-        "翅膀": {"bag_class": BAG.SHIZHUANG, "item_name": "影蛇风翼"},
+        "翅膀": {"bag_class": BAG.SHIZHUANG, "item_name": "影蛇凤翼"},
     },
     "风虎":{
         "武器": {"bag_class": BAG.SHIZHUANG, "item_name": "风虎之怒"},
@@ -56,27 +56,19 @@ def find_in_bag(bag_class: BAG, item: str):
 
 
 def wear_item(item_dict: dict):
-    ensure_in("背包")
     find_in_bag(item_dict["bag_class"], item_dict["item_name"])
     sleep(1)
     click(get_pos_tgt(0,0))
     click(T("装备", color="红色"))
 
-def wear_suite(suite_name: str):
-    ensure_in("背包")
-    for item_dict in ITEM_TABLE[suite_name].values():
-        wear_item(item_dict)
-    
-
 if __name__ == "__main__":
     try:
-        # wear_item(ITEM_TABLE["风虎"]["武器"])
-        # wear_item(ITEM_TABLE["风虎"]["衣服"])
-        # wear_item(ITEM_TABLE["风虎"]["翅膀"])
-        # wear_item(ITEM_TABLE["蛇年"]["武器"])
-        # wear_item(ITEM_TABLE["蛇年"]["衣服"])
-        # wear_item(ITEM_TABLE["蛇年"]["翅膀"])
-        wear_suite("风虎")
+        wear_item(ITEM_TABLE["风虎"]["武器"])
+        wear_item(ITEM_TABLE["风虎"]["衣服"])
+        wear_item(ITEM_TABLE["风虎"]["翅膀"])
+        wear_item(ITEM_TABLE["蛇年"]["武器"])
+        wear_item(ITEM_TABLE["蛇年"]["衣服"])
+        wear_item(ITEM_TABLE["蛇年"]["翅膀"])
     except Exception as e:
         traceback.print_exc()
     finally:
