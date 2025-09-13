@@ -107,5 +107,4 @@ class AutoConfig:
 # 创建全局单例配置实例
 global cfg
 cfg = AutoConfig()
-# cfg.load_config(getpass.getpass("请输入安全密码: "))
 cfg.load_config()

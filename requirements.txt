@@ -6,15 +6,14 @@ pandas>=2.0.0
 opencv-python
 questionary==2.1.0
 pure-python-adb==0.3.0.dev0
-prompt_toolkit<3.0.0
 pillow>=10.0.0
 loguru>=0.7.0
 typing-extensions>=4.0.0
 pyscrcpy
 pypinyin>=0.54.0
 cryptography
-# 请根据你的CUDA版本选择合适的paddlepaddle-gpu，例如：https://www.paddlepaddle.org.cn/
-#  python -m pip install paddlepaddle-gpu==3.1.1 -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
+# 请根据你的CUDA版本选择合适的paddlepaddle-gpu，例如：
+# pip install paddlepaddle-gpu==0.0.0.postxx -f https://www.paddlepaddle.org.cn/whl/linux/mkl/avx/stable.html
 paddlepaddle
 paddleocr==2.7.0
 fuzzywuzzy
