@@ -24,7 +24,13 @@ class Loc:
         return self
     
     def env(self) -> "Env":
-        return mm.envs[mm.get_nearest_env([e.name for e in self.envs])]
+        # 如果当前位置环境属于该 loc 的所属环境，优先返回当前环境
+        env_names = [e.name for e in self.envs]
+        if mm.cur_env in env_names:
+            return mm.envs[mm.cur_env]
+        # 否则根据路由选择最近的环境
+        nearest = mm.get_nearest_env(env_names)
+        return mm.envs[nearest]
     
 
 class Env:

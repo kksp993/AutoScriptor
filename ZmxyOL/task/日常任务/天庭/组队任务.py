@@ -15,17 +15,24 @@ def zudui_task():
     click(T("组队挑战"))
     wait_for_appear(T("队伍列表"))
     click(T("快速加入"), until=lambda: ui_T(T("我的队伍")))
-    start_battle = False
-    while not start_battle:
+    bg.add(
+        name="组队进图",
+        identifier=I("加载中"),
+        task=lambda:[
+            bg.set_signal("组队进图", True),
+            bg.clear(),
+        ]
+    )
+    bg.set_signal("组队进图", False)
+    while not bg.signal("组队进图"):
         cnt = 0
-        while not start_battle:
+        while not bg.signal("组队进图"):
             cnt += 1
             if cnt % 5 == 0 :
                 click(B(1050,50,30,30),delay=1.5)
                 click(T("快速加入"), until=lambda: ui_T(T("我的队伍")))
             click((T("开始"),T("准备")), if_exist=True, timeout=1)
             sleep(1)
-            start_battle = ui_T(I("加载中"))
     h.set(True,1).heaven_battle(exit_loc=get_task_table("东天王殿")["exit_loc"])
     click(B(1050,50,30,30),delay=1.5)
     click(B(1200,30,30,30))

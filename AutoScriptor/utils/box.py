@@ -2,6 +2,8 @@ from typing import Tuple, Union
 import collections
 import random
 
+from logzero import logger
+
 
 class Box(collections.namedtuple('Box', 'left top width height')):
     __slots__ = ()
@@ -72,6 +74,27 @@ class Box(collections.namedtuple('Box', 'left top width height')):
         center1 = self.center()
         center2 = other.center()
         return ((center1[0] - center2[0]) ** 2 + (center1[1] - center2[1]) ** 2) ** 0.5
+
+    @property
+    def area(self) -> int:
+        return self.width * self.height
+
+    def intersection(self, other: 'Box') -> 'Box':
+        left_overlap = max(self.left, other.left)
+        top_overlap = max(self.top, other.top)
+        right_overlap = min(self.left + self.width, other.left + other.width)
+        bottom_overlap = min(self.top + self.height, other.top + other.height)
+        if left_overlap >= right_overlap or top_overlap >= bottom_overlap:
+            return Box(0, 0, 0, 0)
+        return Box(left_overlap, top_overlap, right_overlap - left_overlap, bottom_overlap - top_overlap)
+    
+    def sim_box(self, other: 'Box', threshold: float = 0.8)->bool:
+        # 交并比，这个指标要求很高，https://blog.csdn.net/weixin_43272781/article/details/113757298
+        inter = self.intersection(other)
+        union_area = self.area + other.area - inter.area
+        if union_area == 0: return False
+        logger.debug(f"{self} {other} => {inter.area / union_area > threshold}({inter.area / union_area})")
+        return inter.area / union_area > threshold
     
     @staticmethod
     def merge_overlapping_boxes(boxes: list, overlap_threshold: float = 0.5, distance_threshold: int = 5) -> list:

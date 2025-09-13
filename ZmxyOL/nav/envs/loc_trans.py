@@ -16,7 +16,9 @@ def way():
     click(T("角色"))
     locate(T("伤害率"))
     sleep(0.5)
-    click(B(1200,30,30,30),repeat=2)
+    click(B(1200,30,30,30))
+    sleep(1)
+    click(B(1200,30,30,30))
     mm.set_loc(mm.get_region()[0])
 
 @path("极北#-1", "幽冥冰窟")
