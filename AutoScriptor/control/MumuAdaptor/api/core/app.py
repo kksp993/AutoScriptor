@@ -6,7 +6,7 @@
 # @Software: PyCharm
 import json
 import os.path
-from AutoScriptor.logger import logger
+from logzero import logger
 
 
 class App:

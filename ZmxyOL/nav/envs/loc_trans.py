@@ -19,6 +19,7 @@ def way():
     click(B(1200,30,30,30))
     sleep(1)
     click(B(1200,30,30,30))
+    click(B(0,0))
     mm.set_loc(mm.get_region()[0])
 
 @path("极北#-1", "幽冥冰窟")
@@ -44,9 +45,23 @@ def way():
 
 @path(LOC_ENV, "炼器师")
 def way():
-    if ui_idx((T('莫邪'),T("欧冶子")),2)==0:
+    if ui_idx((T('莫邪'),T("欧冶子")),30)==0:
         click(T('莫邪'),offset=(-230,100),resize=(80,120))
     else:
         click(T('欧冶子'),offset=(-480,100),resize=(80,120))
     click(T('炼器师'))
     mm.set_loc("炼器师")
+
+@path("背包", LOC_ENV)
+def way():
+    click(B(1200,30,30,30))
+    sleep(1)
+    click(B(1200,30,30,30))
+    mm.set_loc(mm.get_region()[0])
+
+@path(LOC_ENV, "背包")
+def way():
+    click(T("菜单"))
+    click(I("菜单-背包"),delay=0.5)
+    wait_for_appear(I("背包背景"))
+    mm.set_loc("背包")

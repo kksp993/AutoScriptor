@@ -88,7 +88,7 @@ class Box(collections.namedtuple('Box', 'left top width height')):
             return Box(0, 0, 0, 0)
         return Box(left_overlap, top_overlap, right_overlap - left_overlap, bottom_overlap - top_overlap)
     
-    def sim_box(self, other: 'Box', threshold: float = 0.8)->bool:
+    def sim_box(self, other: 'Box', threshold: float = 0.75)->bool:
         # 交并比，这个指标要求很高，https://blog.csdn.net/weixin_43272781/article/details/113757298
         inter = self.intersection(other)
         union_area = self.area + other.area - inter.area

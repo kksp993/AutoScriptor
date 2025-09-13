@@ -1,8 +1,7 @@
 from collections.abc import Callable
 import threading
-import time
 from typing import Any
-from AutoScriptor import logger
+from logzero import logger
 from AutoScriptor.core.api import ui_T
 from AutoScriptor.core.targets import Target
 DEFAULT_INTERVAL = 0.2

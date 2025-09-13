@@ -3,7 +3,7 @@ from abc import ABC
 from typing import Union
 from numpy import ndarray
 import copy
-from AutoScriptor import logger
+from logzero import logger
 from AutoScriptor.utils.box import Box
 from AutoScriptor.recognition.img_rec import _load_cv2
     
