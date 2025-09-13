@@ -3,7 +3,6 @@ import sys
 import threading
 import time
 import traceback
-import getpass
 from AutoScriptor.core.control import MixControl
 from AutoScriptor.core.targets import Target, B,I,T
 from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget
@@ -54,13 +53,12 @@ if not success:
     from AutoScriptor.core.background import bg
     bg.stop()
     os.execv(sys.executable, [sys.executable] + sys.argv)
-mixctrl.window.hidden() if cfg["app"]["run_in_background"] else None
-cfg.load_config(getpass.getpass("请输入安全密码: "))
+
 
 def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=10)->bool:
     tuple_tgt, list_tgt = tuple(t for t in target), [t for t in target]
     res = locate(tuple_tgt, timeout)
-    if not res: raise Exception(f"{target} 没有找到: {traceback.format_exc()}")
+    if not res: raise Exception(f"{target} 没有找到:" + traceback.print_exc())
     boxes = locate(list_tgt, 0)
     return index(boxes)
 
@@ -189,7 +187,7 @@ def click(
         return True
     if isinstance(target, list): target = tuple(target)
     if isinstance(target, BoxTarget): box = target.box
-    else: box = locate(target, timeout if not if_exist else max(2, timeout) if timeout != 30 else 2)    # 至少2s
+    else: box = locate(target, timeout if not if_exist else max(2, timeout))    # 至少2s
     if if_exist and first(box) is None: return False
     if first(box) is None: raise RuntimeError(f"Click {target} failed, for failed to locate target in {timeout} seconds")
     time.sleep(delay)

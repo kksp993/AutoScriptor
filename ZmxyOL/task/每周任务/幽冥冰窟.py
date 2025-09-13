@@ -51,9 +51,8 @@ def bingku_battle():
 
 @register_task
 def task():
-    from ZmxyOL.battle.utils import wear_suite
-    wear_suite("风虎")
     ensure_in("幽冥冰窟")
+
     h.set(True,1)
     while ui_F(T("重新挑战")):
         if ui_T(T("下一轮")):
@@ -63,7 +62,6 @@ def task():
             click(T("确定"), delay=0.5)
         bingku_battle()
     click(T("返回主界面"))
-    wear_suite("蛇年")
 
 
 
