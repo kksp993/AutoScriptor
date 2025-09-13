@@ -33,6 +33,9 @@ class Hero:
     def zhenwu(self):
         click(B("战斗-本命神"))
         return self
+    def zhenling(self):
+        click(B("战斗-真灵"))
+        return self
     
     def huashen(self):
         click(B("战斗-化身"), repeat=2)

@@ -5,6 +5,7 @@ from AutoScriptor.utils.box import Box
 from AutoScriptor.utils.constant import cfg
 from fuzzywuzzy import fuzz
 import threading
+import paddle
 import time
 
 class OCRManager:
@@ -31,17 +32,20 @@ class OCRManager:
     def _start_async_init(self):
         def init_ocr():
             try:
+                # 打印 PaddleGPU 支持情况和可用 GPU 数量
+                logger.info(f"Paddle 支持 GPU 编译: {paddle.device.is_compiled_with_cuda()}, 可用 GPU 数量: {paddle.device.cuda.device_count()}")
                 logger.info("正在初始化 PaddleOCR 引擎，这可能需要一些时间...")
                 start_time = time.time()
                 self.ocr_engine = PaddleOCR(
-                    use_gpu=True,
-                    gpu_mem=8192,
+                    use_gpu=cfg["ocr.use_gpu"],
+                    gpu_mem=4096,
                     enable_mkldnn=True,
                     use_angle_cls=False,
                     lang='ch',
                     ocr_version='PP-OCRv4',
                     show_log=False,
                 )
+                logger.info(f"PaddleOCR 初始化参数 use_gpu={cfg['ocr.use_gpu']}, 当前设备={paddle.get_device()}")
                 elapsed_time = time.time() - start_time
                 logger.info(f"PaddleOCR 引擎初始化完成，耗时 {elapsed_time:.2f} 秒")
             except Exception as e:
@@ -82,7 +86,7 @@ def get_ocr_engine():
     if not hasattr(_thread_local, 'ocr_engine') or _thread_local.ocr_engine is ocr_manager.ocr_engine:
         # 复制与全局相同的初始化参数
         _thread_local.ocr_engine = PaddleOCR(
-            use_gpu=True,
+            use_gpu=cfg["ocr.use_gpu"],
             gpu_mem=8192,
             enable_mkldnn=True,
             use_angle_cls=False,
