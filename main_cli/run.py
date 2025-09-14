@@ -1,15 +1,48 @@
 import copy
-from datetime import datetime,  timedelta
+from datetime import timedelta
 import traceback
 import questionary
 import os
 from questionary import Separator
 from typing import Dict, Any, List
+from datetime import datetime as _datetime, datetime
 from AutoScriptor import *
 from AutoScriptor.crypto.update_config import set_config, verify_config
 from ZmxyOL import *
 from ZmxyOL.nav.envs.decorators import LOC_ENV
-from logzero import logger
+from logzero import logfile, logger
+
+# 判断分支下是否存在未完成的任务
+def branch_uncompleted(branch: dict, now_ts: float) -> bool:
+    # 遍历分支中所有值，仅处理字典类型节点
+    for v in branch.values():
+        if not isinstance(v, dict):
+            continue
+        # 叶子任务节点
+        if 'fn' in v and 'on' in v and v.get('on', False):
+            # 判断是否已执行
+            if now_ts >= v.get('next_exec_time', 0):
+                return True
+        # 目录节点，递归检查
+        else:
+            if branch_uncompleted(v, now_ts):
+                return True
+    return False
+
+# 异常日志写入及全量日志文件切换
+def dump_error_and_log(path_str: str, exc: Exception):
+    ts = datetime.now().strftime('%y%m%d_%H%M%S')
+    safe = path_str.replace(' -> ', '_')
+    err_dir = os.path.join(os.getcwd(), 'logs', 'errors')
+    log_dir = os.path.join(os.getcwd(), 'logs', 'log')
+    os.makedirs(err_dir, exist_ok=True); os.makedirs(log_dir, exist_ok=True)
+    err_file = os.path.join(err_dir, f"[{ts}][{safe}].log")
+    log_file = os.path.join(log_dir, f"[{ts}][{safe}].log")
+    with open(err_file, 'w', encoding='utf-8') as ef:
+        ef.write(f"[{ts}] {path_str} 执行错误: {exc}\n")
+        ef.write(traceback.format_exc())
+    logfile(log_file, encoding='utf-8')
+
 task_menu = cfg["tasks"]
 ui_tasks = copy.deepcopy(cfg["tasks"])
 
@@ -105,19 +138,7 @@ def find_and_execute_tasks(
             except Exception as e:
                 failed_count += 1
                 logger.error(f"❌ 执行失败: {path_str}，错误: {e}")
-                # 写入单独错误文件和全量日志文件
-                from datetime import datetime
-                import os, traceback
-                timestamp = datetime.now().strftime('%y%m%d_%H%M%S')
-                safe_task = path_str.replace(' -> ', '_')
-                error_dir = os.path.join(os.getcwd(), 'logs', 'errors')
-                log_dir = os.path.join(os.getcwd(), 'logs', 'log')
-                os.makedirs(error_dir, exist_ok=True)
-                os.makedirs(log_dir, exist_ok=True)
-                error_file = os.path.join(error_dir, f"[{timestamp}][{safe_task}].log")
-                with open(error_file, 'w', encoding='utf-8') as ef:
-                    ef.write(f"[{timestamp}] {path_str} execution error: {e}\n")
-                    ef.write(traceback.format_exc())
+                dump_error_and_log(path_str, e)
                 traceback.print_exc()
                 if cfg["app"]["restart_on_error"]:
                     mixctrl.app.close(cfg["app"]["app_to_start"])
@@ -182,6 +203,26 @@ def update_task_post_execution(
     cfg.save_config()
 
 
+def format_display(key: str, node: dict, now_ts: float) -> str:
+    """返回任务或目录的显示文本，包括勾选和完成状态后缀"""
+    if 'fn' in node and 'on' in node:
+        if not node['on']:
+            base = f"[ ] {key}"
+            return base + (" [可编辑]" if node.get('params') else "")
+        check = '✔'
+        done = now_ts < node.get('next_exec_time', 0)
+        suffix = " ✅已完成" if done else " ❌未完成"
+        base = f"[{check}] {key}"
+        if node.get('params'): base += " [可编辑]"
+        return base + suffix
+    # 目录节点
+    check = '✔' if is_branch_active(node) else ' '
+    suffix = ''
+    if check == '✔':
+        suffix = " ❌未完成" if branch_uncompleted(node, now_ts) else " ✅已完成"
+    return f"[{check}] {key}/{suffix}"
+
+
 def run_cli_navigation():
     """运行CLI导航的主函数，实现了UI状态与主配置的正确分离。"""
     try:
@@ -214,15 +255,38 @@ def run_cli_navigation():
         path_display = " -> ".join(navigation_path) if navigation_path else "主菜单"
         logger.info(f"当前位置: {path_display}{unsaved_marker}\n")
 
-        choices = []
+        # 构建对齐的任务/目录列表
+        now_ts = _datetime.now().timestamp()
+        items = []
         for key, value in current_node.items():
-            # 带参数的叶子节点当作可进入的分支显示
-            if is_leaf_node(value) and value.get('params'):
-                display_text = f"[{'✔' if value['on'] else ' '}] {key} [可编辑]"
-            elif is_leaf_node(value):
-                display_text = f"[{'✔' if value['on'] else ' '}] {key} (任务)"
+            # 构建 base 文本和 suffix
+            if 'fn' in value and 'on' in value:
+                if not value['on']:
+                    base = f"[ ] {key}"
+                    if value.get('params'): base += " [可编辑]"
+                    suffix = ''
+                else:
+                    base = f"[✔] {key}"
+                    if value.get('params'): base += " [可编辑]"
+                    done = now_ts < value.get('next_exec_time', 0)
+                    suffix = " ✅已完成" if done else " ❌未完成"
             else:
-                display_text = f"[{'✔' if is_branch_active(value) else ' '}] {key}/"
+                # 目录节点
+                check = '✔' if is_branch_active(value) else ' '
+                base = f"[{check}] {key}/"
+                suffix = ''
+                if check == '✔':
+                    incomplete = branch_uncompleted(value, now_ts)
+                    suffix = " ❌未完成" if incomplete else " ✅已完成"
+            items.append((key, base, suffix))
+        # 计算显示宽度，考虑中英文宽度差异
+        def display_width(text: str) -> int:
+            return sum(2 if ord(c) > 127 else 1 for c in text)
+        max_base = max(display_width(base) for _, base, _ in items) if items else 0
+        choices = []
+        for key, base, suffix in items:
+            pad = max_base - display_width(base)
+            display_text = base + ' ' * pad + suffix
             choices.append(questionary.Choice(title=display_text, value=key))
         choices.append(Separator())
         if navigation_path:
@@ -233,7 +297,8 @@ def run_cli_navigation():
             choices.append(questionary.Choice(title="🚀 开始执行【R】", value="--execute--"))
         else:
             choices.append(questionary.Choice(title="🚪 退出程序【Q】", value="--exit--"))
-            choices.append(questionary.Choice(title="👤 账号管理【A】", value="--Account--")) 
+            auth_status = "✅已验证" if cfg["game"].get("character_name", None) else "❌未验证"
+            choices.append(questionary.Choice(title=f"👤 账号管理【A】{auth_status}", value="--Account--"))
             choices.append(questionary.Choice(title="🏷 标注目标【L】", value="--label--"))
             choices.append(questionary.Choice(title="🚀 开始执行【R】", value="--execute--"))
 
@@ -275,15 +340,27 @@ def run_cli_navigation():
 
         elif action == "--Account--":
             res = questionary.select(
-                "请选择操作:", 
+                "请选择操作:",
                 choices=["更新账号信息【U】","验证账号配置【V】","返回上一级【B】"],
-                use_search_filter=True, 
+                use_search_filter=True,
                 use_jk_keys=False,
             ).ask()
             if res == "更新账号信息【U】":
                 set_config()
+                cfg.save_config()
+                logger.info("账号信息已更新并保存！")
+                questionary.press_any_key_to_continue().ask()
             elif res == "验证账号配置【V】":
-                verify_config()
+                data = verify_config()
+                if data:
+                    # 同步到 cfg
+                    for key in ["account","password","character_name"]:
+                        cfg["game"][key] = data.get(key)
+                    # cfg.save_config()
+                    logger.info("账号验证成功，配置已同步更新！")
+                else:
+                    logger.info("账号验证失败，配置未更新。")
+                questionary.press_any_key_to_continue().ask()
             elif res == "返回上一级【B】":
                 continue
         elif action == "--label--":
