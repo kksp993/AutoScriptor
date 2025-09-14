@@ -38,19 +38,21 @@ def set_config():
     os.system('cls' if os.name == 'nt' else 'clear')
     logger.info("配置已更新并加密！")
     
-def verify_config():
-    # 演示解密
+def verify_config() -> dict | None:
+    """验证并返回解密后的配置，失败返回 None"""
     os.system('cls' if os.name == 'nt' else 'clear')
     logger.info("\n验证解密：")
     verify_key = getpass("请输入安全密钥进行解密: ")
     decrypted_data = config_manager.decrypt_config(verify_key)
     if decrypted_data:
         logger.info("解密成功！")
-        logger.info(f"账号: {mask_string(decrypted_data['account'], 3, 4)}")  # 显示前2位和后2位
-        logger.info(f"密码: {'*' * 8}")  # 密码完全隐藏
-        logger.info(f"角色名称: {mask_string(decrypted_data['character_name'], 2, 1)}")  # 显示首尾各1位
+        logger.info(f"账号: {mask_string(decrypted_data['account'], 3, 4)}")
+        logger.info(f"密码: {'*' * 8}")
+        logger.info(f"角色名称: {mask_string(decrypted_data['character_name'], 2, 1)}")
+        return decrypted_data
     else:
         logger.info("解密失败！")
+        return None
 
 if __name__ == "__main__":
     res = get_selected_columns(avail_cols=["更新账号信息","验证账号配置"],prompt="请选择操作")[0]

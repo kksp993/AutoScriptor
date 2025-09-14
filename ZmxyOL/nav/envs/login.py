@@ -43,6 +43,10 @@ def login(account: str=None, password: str=None, character_name: str=None, chara
             click(B(104,63+70*(character_index-6),149,54))
     else:
         if character_name: click(T(character_name),delay=1)
+        else:
+            if not cfg["game"].get("character_name", None):
+                raise ValueError("请先配合完成安全密码验证")
+            click(T(cfg["game"].get("character_name", None)),delay=1)
     click(T("进入游戏",color="橙色"))
     locate(I("活动公告页面"), 30)
     click(B(1240, 5, 40, 60))
