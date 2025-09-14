@@ -14,7 +14,17 @@ from logzero import logger
 from AutoScriptor.utils.constant import cfg
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
 from AutoScriptor.utils.edit_img import launch_editor
+# 初始化编排器
 logger.info("编排器初始化开始...")
+# 初始化 logzero 全量日志文件（UTF-8 编码）
+from logzero import logfile
+import os
+from datetime import datetime
+log_dir = os.path.join(os.getcwd(), 'logs', 'log')
+os.makedirs(log_dir, exist_ok=True)
+timestamp = datetime.now().strftime('%y%m%d_%H%M%S')
+# 指定 encoding='utf-8' 确保中文正常写入
+logfile(os.path.join(log_dir, f"[{timestamp}].log"), encoding='utf-8')
 selected_emulator_index = cfg["emulator"]["index"]
 adb_addr = cfg["emulator"]["adb_addr"]
 app_to_start = cfg["app"]["app_to_start"]
@@ -271,7 +281,7 @@ def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), re
     # 处理生成器对象，转换为列表
     if hasattr(targets, '__iter__') and not isinstance(targets, (list, tuple, str)): targets = list(targets)
     targets = targets if isinstance(targets, list|tuple) else [targets]
-    boxes = _locate_all(targets, screenshot=screenshot, assure_stable=False)
+    boxes = _locate_all(targets, screenshot=screenshot)
     # 应用offset和resize到boxes
     if offset != (0, 0) or resize != (-1, -1):
         for i in range(len(boxes)):

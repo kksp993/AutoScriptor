@@ -3,6 +3,7 @@ from AutoScriptor.core.api import _locate_all
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
+from logzero import logger
 
 def reset_task():
     if extract_info(B(1053,581,213,48), lambda x: int(x.strip()[-1])==0):

@@ -68,6 +68,7 @@ def find_and_execute_tasks(
     """
     executed_count = 0
     failed_count = 0
+    from datetime import datetime
     now = datetime.now()
 
     for key, ui_node in list(ui_branch.items()):
@@ -104,6 +105,19 @@ def find_and_execute_tasks(
             except Exception as e:
                 failed_count += 1
                 logger.error(f"❌ 执行失败: {path_str}，错误: {e}")
+                # 写入单独错误文件和全量日志文件
+                from datetime import datetime
+                import os, traceback
+                timestamp = datetime.now().strftime('%y%m%d_%H%M%S')
+                safe_task = path_str.replace(' -> ', '_')
+                error_dir = os.path.join(os.getcwd(), 'logs', 'errors')
+                log_dir = os.path.join(os.getcwd(), 'logs', 'log')
+                os.makedirs(error_dir, exist_ok=True)
+                os.makedirs(log_dir, exist_ok=True)
+                error_file = os.path.join(error_dir, f"[{timestamp}][{safe_task}].log")
+                with open(error_file, 'w', encoding='utf-8') as ef:
+                    ef.write(f"[{timestamp}] {path_str} execution error: {e}\n")
+                    ef.write(traceback.format_exc())
                 traceback.print_exc()
                 if cfg["app"]["restart_on_error"]:
                     mixctrl.app.close(cfg["app"]["app_to_start"])

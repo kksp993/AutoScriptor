@@ -2,12 +2,12 @@ import traceback
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
-
+from logzero import logger
 
 
 @register_task
 def daily_arena_task():
-    ensure_in(["村庄","仙盟","极北村庄"])
+    ensure_in(["村庄","仙盟"])
     logger.info("====斗兽场====")
     click(I("导航-竞技"), delay=0.5)
     click(I("竞技-斗兽场"))
