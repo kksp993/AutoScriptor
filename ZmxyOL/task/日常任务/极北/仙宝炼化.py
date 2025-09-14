@@ -2,6 +2,8 @@ import traceback
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
+from logzero import logger
+
 def destory_item():
     click((I("A"), I("B")))
     sleep(0.5)

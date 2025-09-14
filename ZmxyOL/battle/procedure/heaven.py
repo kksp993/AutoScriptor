@@ -94,7 +94,9 @@ def heaven_battle(
             self.way_to_exit(until=lambda:ui_T(T("抽牌", box=Box(514,513,253,97))), exit_loc=exit_loc),
             self.heaven_draw_card_exit(),
             switch_base("mumu"),
-            bg.set_signal("try_exit", True)
+            bg.set_signal("try_exit", True),
+            sleep(4),
+            bg.clear()
         ]
     )
     bg.add(

@@ -2,6 +2,7 @@ import traceback
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
+from logzero import logger
 @register_task
 def daily_qujing_task():
     ensure_in("村庄")

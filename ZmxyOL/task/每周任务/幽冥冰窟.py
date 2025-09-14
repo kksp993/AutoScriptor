@@ -2,6 +2,7 @@ import traceback
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
+from logzero import logger
 
 def Shield_handle_bk():
     """默认4号位藤蔓，2-3号位无位移技能"""

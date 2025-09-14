@@ -3,6 +3,7 @@ from AutoScriptor.core.targets import ui_point
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
+from logzero import logger
 
 @register_task
 def eunan_fuBen():

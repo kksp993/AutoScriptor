@@ -113,7 +113,6 @@ key,text,left,top,width,height,img
 厄难副本-开始挑战,,930,615,169,86,enanfuben-kaishitiaozhan@940#625#149#66.png
 倍战奖励,,340,539,601,47,beizhanjiangli@350#549#581#27.png
 战斗-角色,,16,4,273,148,zhandou-juese@26#14#253#128.png
-战斗-真灵,,10,114,268,111,zhandou-zhenling@20#124#248#91.png
 战斗-合体,,39,222,88,82,zhandou-heti@49#232#68#62.png
 战斗-法宝,,23,301,120,118,zhandou-fabao@33#311#100#98.png
 战斗-本命神,,20,422,122,119,zhandou-benmingshen@30#432#102#99.png
@@ -270,3 +269,4 @@ S,S,0,0,1280,720,S@0#0#1280#720.png
 词条开关,词条开关,0,0,1280,720,citiaokaiguan@0#0#1280#720.png
 背包背景,背包背景,834,611,258,77,beibaobeijing@844#621#238#57.png
 战斗-真武,真武,32,438,96,91,zhandou-zhenwu@42#448#76#71.png
+战斗-合体,合体,42,233,81,61,zhandou-heti@52#243#61#41.png

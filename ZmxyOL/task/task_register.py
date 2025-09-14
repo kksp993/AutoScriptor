@@ -4,7 +4,7 @@ import os
 import traceback
 from ZmxyOL import *
 from AutoScriptor.utils.constant import cfg
-
+from logzero import logger
 
 def register_task(func):
     """

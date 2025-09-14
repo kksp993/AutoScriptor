@@ -3,6 +3,7 @@ from ZmxyOL.battle.tasks import JIBEI_CHAOS_TABLE
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
+from logzero import logger
 
 @register_task
 def task():

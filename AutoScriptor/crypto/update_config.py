@@ -2,7 +2,7 @@ from AutoScriptor.utils.filter import get_selected_columns
 from AutoScriptor.crypto.config_manager import ConfigManager
 import os
 from getpass import getpass
-from AutoScriptor import logger
+from logzero import logger
 
 def mask_string(text: str, show_first: int = 1, show_last: int = 1) -> str:
     """
