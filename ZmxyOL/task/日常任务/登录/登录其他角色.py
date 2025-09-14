@@ -3,6 +3,7 @@ from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from ZmxyOL.nav.envs.login import login
+from logzero import logger
 
 @register_task
 def login_other_role(character_index=0, character_name=None):

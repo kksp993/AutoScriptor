@@ -1,5 +1,3 @@
-import time
-
 from logzero import logger
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import NemuIpc
@@ -10,7 +8,7 @@ class BaseMumuControl:
     def screenshot(self):
         raise NotImplementedError
 
-    def locate(self, tgt_triples, confidence=0.9, screenshot=None)->Box|None:
+    def locate(self, tgt_triples, confidence=0.8, screenshot=None)->Box|None:
         tgt_sources, tgt_boxes, tgt_colors = zip(*tgt_triples)
         if screenshot is None: screenshot = self.screenshot()
         boxes = locate_on_screen(screenshot, tgt_sources, confidence, tgt_boxes, tgt_colors)
@@ -25,6 +23,10 @@ class BaseMumuControl:
     def key_event(self, key_code: int)->None:
         """AndroidKey"""
         self.mumu.adb.key_event(key_code)
+
+    def __getattr__(self, name):
+        from AutoScriptor.utils.constant import cfg
+        return getattr(Mumu().select(cfg["emulator"]["index"]), name)
     
 class NemuIpcControl(BaseMumuControl):
     def __init__(self, mumu: Mumu, serial: str = '127.0.0.1:16416'):
@@ -105,11 +107,8 @@ class MixControl(BaseMumuControl):
 
     
     def long_click(self, x, y, duration=1.0)->None:
-        logger.info(f"{self.mode} LongClick: {x}, {y} % {duration:0.3f}sec")
-        # if self.mode=="mumu":
+        logger.info(f"LongClick: {x}, {y} % {duration:0.3f}sec")
         self.mumu.adb.swipe(x, y, x, y, int(duration*1000))
-        # else:
-        #     self.nemu_control.long_click(x, y, duration)
 
 
 

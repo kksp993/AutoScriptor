@@ -1,7 +1,9 @@
 import traceback
+from ZmxyOL.nav.envs.decorators import LOC_ENV
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
+from logzero import logger
 
 def buy_item(item_name: str):
     if first(get_colors(T("购买", box=locate(T(item_name),timeout=10)+(0,240))))=="绿色":
@@ -24,14 +26,15 @@ def task():
     click(B(1200,30,30,30))
     sleep(1)
     click(B(1200,30,30,30))
-    click(ui["菜单-背包"].i)
-    sleep(1)
-    click(B(430,630,30,30))
+    click(B(1200,30,30,30))
+    click(B(1200,30,30,30))
+    ensure_in(["背包"])
+    from ZmxyOL.battle.utils import BAG,find_in_bag
+    find_in_bag(BAG.BAG,I("活跃券"))
     click(I("活跃券"), if_exist=True, delay=0.5, timeout=3)
     click(T("使用"), if_exist=True, delay=0.5, timeout=2)
-    click(B(1200,30,30,30))
-    click(B(1200,30,30,30))
-
+    sleep(3)
+    ensure_in(LOC_ENV)
 
 if __name__ == "__main__":
     try:

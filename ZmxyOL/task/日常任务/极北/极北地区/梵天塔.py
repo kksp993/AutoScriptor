@@ -2,6 +2,7 @@ import traceback
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
+from logzero import logger
 
 def battle():
     wait_for_disappear(I("加载中"))

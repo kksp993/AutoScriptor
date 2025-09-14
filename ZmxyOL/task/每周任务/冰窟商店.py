@@ -2,6 +2,7 @@ import traceback
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
+from logzero import logger
 
 def buy(item):
     tgt = T("购买",box=locate(T(item),timeout=10)+(-20,262,180,44),color="青色")

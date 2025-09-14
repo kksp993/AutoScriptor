@@ -18,7 +18,7 @@ def zudui_task():
     bg.add(
         name="组队进图",
         identifier=I("加载中"),
-        task=lambda:[
+        callback=lambda:[
             bg.set_signal("组队进图", True),
             bg.clear(),
         ]
@@ -34,6 +34,7 @@ def zudui_task():
             click((T("开始"),T("准备")), if_exist=True, timeout=1)
             sleep(1)
     h.set(True,1).heaven_battle(exit_loc=get_task_table("东天王殿")["exit_loc"])
+    wait_for_appear(T("我的队伍"))
     click(B(1050,50,30,30),delay=1.5)
     click(B(1200,30,30,30))
     wait_for_disappear(I("加载中"))
