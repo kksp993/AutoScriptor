@@ -143,8 +143,11 @@ def find_and_execute_tasks(
                 if cfg["app"]["restart_on_error"]:
                     mixctrl.app.close(cfg["app"]["app_to_start"])
                     sleep(1)
-                    mixctrl.app.launch(cfg["app"]["app_to_start"])
+                    while mixctrl.app.state(cfg["app"]["app_to_start"]) != "running":
+                        mixctrl.app.launch(cfg["app"]["app_to_start"])
+                        sleep(1)
                     sleep(5)
+                mm.set_region("登录")
 
     return executed_count, executed_count+failed_count
 
@@ -326,6 +329,9 @@ def run_cli_navigation():
             questionary.press_any_key_to_continue().ask()
 
         elif action == "--execute--":
+            while mixctrl.app.state(cfg["app"]["app_to_start"]) != "running":
+                mixctrl.app.launch(cfg["app"]["app_to_start"])
+                sleep(5)
             master_node_to_execute = get_node_by_path(cfg["tasks"], navigation_path)
             ui_node_counterpart = get_node_by_path(ui_tasks, navigation_path)
             
