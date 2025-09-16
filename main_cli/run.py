@@ -1,9 +1,13 @@
 import copy
 from datetime import timedelta
+import getpass
 import traceback
 import questionary
 import os
-from questionary import Separator
+from questionary import Separator, Choice
+import inspect
+import enum
+import importlib
 from typing import Dict, Any, List
 from datetime import datetime as _datetime, datetime
 from AutoScriptor import *
@@ -128,7 +132,26 @@ def find_and_execute_tasks(
 
             logger.info(f"▶️  正在执行: {path_str}")
             try:
-                master_node['fn'](**master_node.get('params', {}))
+                # 恢复枚举参数：优先使用 param_meta，否则根据注解回退
+                raw_params = master_node.get('params', {})
+                params = {}
+                param_meta = master_node.get('param_meta', {})
+                sig = inspect.signature(master_node['fn'])
+                for k, v in raw_params.items():
+                    if k in param_meta:
+                        module_name, class_name = param_meta[k].rsplit('.', 1)
+                        mod = importlib.import_module(module_name)
+                        EnumClass = getattr(mod, class_name)
+                        params[k] = EnumClass[v]
+                    else:
+                        # 注解为枚举时，尝试根据 name 恢复
+                        param = sig.parameters.get(k)
+                        ann = getattr(param, 'annotation', None)
+                        if isinstance(ann, type) and issubclass(ann, enum.Enum) and isinstance(v, str):
+                            params[k] = ann[v]
+                        else:
+                            params[k] = v
+                master_node['fn'](**params)
                 update_task_post_execution(master_node, ui_node, path_list)
                 executed_count += 1
                 logger.info(f"▶️  执行完毕: {path_str}")
@@ -241,12 +264,29 @@ def run_cli_navigation():
         current_node = get_node_by_path(ui_tasks, navigation_path)
         # 如果当前节点是叶子任务且有参数，进入参数编辑模式
         if is_leaf_node(current_node) and current_node.get('params'):
+            # 参数编辑，支持枚举类型
+            param_meta = current_node.get('param_meta', {})
             for param, val in current_node['params'].items():
-                answer = questionary.text(f"设置参数 \"{param}\" (当前: {val}):", default=str(val)).ask()
-                try:
-                    current_node['params'][param] = type(val)(answer)
-                except Exception:
-                    current_node['params'][param] = answer
+                if param in param_meta:
+                    # 枚举参数，提供可选项
+                    module_name, class_name = param_meta[param].rsplit('.', 1)
+                    mod = importlib.import_module(module_name)
+                    EnumClass = getattr(mod, class_name)
+                    choices = [Choice(title=e.value, value=e.name) for e in EnumClass]
+                    # 获取当前枚举的展示值
+                    current_value = EnumClass[val].value if val in EnumClass.__members__ else val
+                    selected = questionary.select(
+                        f"设置枚举参数 \"{param}\" (当前: {current_value}):",
+                        choices=choices,
+                        default=val
+                    ).ask()
+                    current_node['params'][param] = selected
+                else:
+                    answer = questionary.text(f"设置参数 \"{param}\" (当前: {val}):", default=str(val)).ask()
+                    try:
+                        current_node['params'][param] = type(val)(answer)
+                    except Exception:
+                        current_node['params'][param] = answer
             questionary.press_any_key_to_continue().ask()
             # 返回上一级菜单
             if navigation_path:
