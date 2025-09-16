@@ -121,9 +121,11 @@ def stable(boxes1: list[list[Box]], boxes2: list[list[Box]])->bool:
     if not boxes1 or not boxes2: return False
     assert len(boxes1) == len(boxes2)
     for i in range(len(boxes1)):
-        if not (boxes1[i] and boxes2[i]): continue
-        for j in range(len(boxes1[i])):
-            if not boxes1[i][j].sim_box(boxes2[i][j]): return False
+        list1, list2 = boxes1[i], boxes2[i]
+        if not list1 or not list2: continue
+        for b1, b2 in zip(list1, list2):
+            if not b1.sim_box(b2): return False
+        if len(list1) != len(list2): return False
     return True
 
 def switch_base(base: str):
