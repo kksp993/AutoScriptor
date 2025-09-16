@@ -15,6 +15,7 @@ from AutoScriptor.crypto.update_config import set_config, verify_config
 from ZmxyOL import *
 from ZmxyOL.nav.envs.decorators import LOC_ENV
 from logzero import logfile, logger
+from pypinyin import lazy_pinyin
 
 # 判断分支下是否存在未完成的任务
 def branch_uncompleted(branch: dict, now_ts: float) -> bool:
@@ -248,6 +249,41 @@ def format_display(key: str, node: dict, now_ts: float) -> str:
         suffix = " ❌未完成" if branch_uncompleted(node, now_ts) else " ✅已完成"
     return f"[{check}] {key}/{suffix}"
 
+def search_tasks(ui_tasks):
+    """根据拼音搜索任务并返回选中的任务路径列表"""
+    items = []
+    def recurse(node, path):
+        for k, v in node.items():
+            new_path = path + [k]
+            if is_leaf_node(v):
+                items.append((new_path, v))
+            elif isinstance(v, dict):
+                recurse(v, new_path)
+    recurse(ui_tasks, [])
+    item_maps = []
+    for path, node in items:
+        display = " -> ".join(path)
+        syllables = lazy_pinyin(display)
+        full_py = "".join(syllables)
+        initials = "".join(s[0] for s in syllables)
+        item_maps.append((path, display, full_py, initials))
+    search_str = questionary.text("请输入拼音搜索:").ask()
+    if not search_str:
+        return None
+    search_str = search_str.lower()
+    filtered = [
+        (path, disp)
+        for path, disp, full_py, initials in item_maps
+        if search_str in full_py.lower() or search_str in initials.lower()
+    ]
+    if not filtered:
+        logger.info("未找到匹配任务")
+        questionary.press_any_key_to_continue().ask()
+        return None
+    choices = [Choice(title=disp, value=path) for path, disp in filtered]
+    selected = questionary.select("请选择任务:", choices=choices, use_search_filter=False).ask()
+    return selected
+
 
 def run_cli_navigation():
     """运行CLI导航的主函数，实现了UI状态与主配置的正确分离。"""
@@ -336,6 +372,7 @@ def run_cli_navigation():
             choices.append(questionary.Choice(title="◀ 返回上一级【Q】", value="--back--"))
             choices.append(questionary.Choice(title="🏠 返回开始【H】", value="--home--"))
             choices.append(questionary.Choice(title="🔧 修改配置【E】", value="--edit--"))
+            choices.append(questionary.Choice(title="🔍 搜索任务【F】", value="--search--"))
             choices.append(questionary.Choice(title=f"💾 保存配置{unsaved_marker}【S】", value="--save--"))
             choices.append(questionary.Choice(title="🚀 开始执行【R】", value="--execute--"))
         else:
@@ -343,6 +380,7 @@ def run_cli_navigation():
             auth_status = "✅已验证" if cfg["game"].get("character_name", None) else "❌未验证"
             choices.append(questionary.Choice(title=f"👤 账号管理【A】{auth_status}", value="--Account--"))
             choices.append(questionary.Choice(title="🏷 标注目标【L】", value="--label--"))
+            choices.append(questionary.Choice(title="🔍 搜索任务【F】", value="--search--"))
             choices.append(questionary.Choice(title="🚀 开始执行【R】", value="--execute--"))
 
         action = questionary.select("请选择:", choices=choices, use_search_filter=True, use_jk_keys=False).ask()
@@ -356,11 +394,29 @@ def run_cli_navigation():
         elif action == "--edit--":
             edit_choices = [questionary.Choice(title=k, value=k, checked=(v['on'] if is_leaf_node(v) else is_branch_active(v))) for k, v in current_node.items()]
             if not edit_choices: continue
+            # 记录旧状态
+            old_status = { key: value['on'] for key, value in current_node.items() if is_leaf_node(value) }
             selected = questionary.checkbox("勾选要开启的任务/目录:", choices=edit_choices).ask()
             for key, value in current_node.items():
                 status = key in selected
                 if is_leaf_node(value): value['on'] = status
                 else: set_branch_status_recursively(value, status)
+            # 对新启用的日常/每周任务进行询问
+            for key, value in current_node.items():
+                if is_leaf_node(value) and not old_status.get(key, False) and value['on']:
+                    category = navigation_path[0] if navigation_path else ""
+                    if "日常任务" in category or "每周任务" in category:
+                        prompt = f"任务「{key}」{'今天' if '日常任务' in category else '本周'}是否已执行过?"
+                        if questionary.confirm(prompt, default=False).ask():
+                            master_node = get_node_by_path(cfg["tasks"], navigation_path + [key])
+                            update_task_post_execution(master_node, value, navigation_path + [key])
+                        else:
+                            # 用户选择未执行，则重置下次执行时间为0并保存配置
+                            master_node = get_node_by_path(cfg["tasks"], navigation_path + [key])
+                            master_node['next_exec_time'] = 0
+                            value['next_exec_time'] = 0
+                            logger.info(f"    - 状态更新: 任务未执行，下次执行时间重置为0。")
+                            cfg.save_config()
 
         elif action == "--save--":
             cfg["tasks"] = copy.deepcopy(ui_tasks)
@@ -411,6 +467,37 @@ def run_cli_navigation():
                 continue
         elif action == "--label--":
             edit_img()
+        elif action == "--search--":
+            selected_path = search_tasks(ui_tasks)
+            if selected_path:
+                master_node = get_node_by_path(cfg["tasks"], selected_path)
+                ui_node = get_node_by_path(ui_tasks, selected_path)
+                if ui_node.get("params"):
+                    navigation_path.clear()
+                    navigation_path.extend(selected_path)
+                else:
+                    # 记录旧状态并切换
+                    old_status = ui_node.get("on", False)
+                    ui_node["on"] = not old_status
+                    new_status = ui_node["on"]
+                    # 如果是日常或每周任务且刚启用，则询问是否已执行过
+                    if new_status and ("日常任务" in selected_path[0] or "每周任务" in selected_path[0]):
+                        prompt = f"任务「{selected_path[-1]}」{'今天' if '日常任务' in selected_path[0] else '本周'}是否已执行过?"
+                        if questionary.confirm(prompt, default=False).ask():
+                            master_node = get_node_by_path(cfg["tasks"], selected_path)
+                            update_task_post_execution(master_node, ui_node, selected_path)
+                        else:
+                            # 用户选择未执行，则重置下次执行时间为0并保存配置
+                            master = get_node_by_path(cfg["tasks"], selected_path)
+                            master['next_exec_time'] = 0
+                            ui_node['next_exec_time'] = 0
+                            logger.info("    - 状态更新: 任务未执行，下次执行时间重置为0。")
+                            cfg.save_config()
+                    logger.info(f"已设置任务 {' -> '.join(selected_path)} {'开启' if ui_node['on'] else '关闭'}")
+                    questionary.press_any_key_to_continue().ask()
+                    navigation_path.clear()
+                    navigation_path.extend(selected_path[:-1])
+                continue
         elif action == "--home--":
             navigation_path.clear()
 
