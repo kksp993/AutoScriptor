@@ -126,5 +126,5 @@ def task(self, task_name:str):
         h.set(True,3).battle_task(has_loading_after_battle=False, exit_loc=get_task_table(task_name)["exit_loc"])
     else: click(B(1200,30,30,30))
     sleep(2)
-    # 增加稳定性，防止战斗结束后，没有返回地图
-    ensure_in(*get_task_table(task_name)["location"])
+    # # 增加稳定性，防止战斗结束后，没有返回地图
+    # ensure_in(*get_task_table(task_name)["location"])

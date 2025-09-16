@@ -30,7 +30,7 @@ def task():
     click(B(1200,30,30,30))
     ensure_in(["背包"])
     from ZmxyOL.battle.utils import BAG,find_in_bag
-    find_in_bag(BAG.BAG,I("活跃券"))
+    find_in_bag(BAG.BAG,"活跃福利券")
     click(I("活跃券"), if_exist=True, delay=0.5, timeout=3)
     click(T("使用"), if_exist=True, delay=0.5, timeout=2)
     sleep(3)

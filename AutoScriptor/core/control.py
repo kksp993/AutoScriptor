@@ -108,7 +108,9 @@ class MixControl(BaseMumuControl):
     
     def long_click(self, x, y, duration=1.0)->None:
         logger.info(f"LongClick: {x}, {y} % {duration:0.3f}sec")
-        self.mumu.adb.swipe(x, y, x, y, int(duration*1000))
+        # mumu 长按不支持，连续长按会造成RuntimeError，所以使用nemu_control.long_click
+        # self.mumu.adb.swipe(x, y, x, y, int(duration*1000))
+        self.nemu_control.long_click(x, y, duration)
 
 
 
