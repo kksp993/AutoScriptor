@@ -3,6 +3,7 @@ import inspect
 import os
 import traceback
 from ZmxyOL import *
+import enum
 from AutoScriptor.utils.constant import cfg
 from logzero import logger
 
@@ -56,16 +57,26 @@ def register_task(func):
         # 为任务添加参数配置
         sig = inspect.signature(func)
         defaults = {}
+        param_meta = {}
         for name, param in sig.parameters.items():
-            if param.default is inspect._empty:
-                defaults[name] = None
+            default = param.default if param.default is not inspect._empty else None
+            # 枚举类型处理
+            if isinstance(default, enum.Enum):
+                # 存储枚举成员名称
+                defaults[name] = default.name
+                # 记录枚举路径用于 CLI 恢复和保存
+                enum_path = default.__class__.__module__ + '.' + default.__class__.__qualname__
+                param_meta[name] = enum_path
             else:
-                defaults[name] = param.default
+                defaults[name] = default
         task_cfg = current_level[last_key]
         existing_params = task_cfg.get('params', {})
         merged_params = defaults.copy()
         merged_params.update(existing_params)
         task_cfg['params'] = merged_params
+        # 如果有枚举参数，保存类型元数据
+        if param_meta:
+            task_cfg['param_meta'] = param_meta
         a = {k:v for k,v in current_level[last_key].items() if k!= 'fn'}
         print(f"✅ 【{'/'.join(keys)}】 => {a}")
     except Exception as e:
