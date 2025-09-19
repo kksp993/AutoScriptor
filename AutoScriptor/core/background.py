@@ -2,8 +2,8 @@ from collections.abc import Callable
 import threading
 from typing import Any
 from logzero import logger
-from AutoScriptor.core.api import ui_T
 from AutoScriptor.core.targets import Target
+import time
 DEFAULT_INTERVAL = 0.2
 
 class BackgroundMonitor(threading.Thread):
@@ -17,6 +17,7 @@ class BackgroundMonitor(threading.Thread):
         self._stop_event = threading.Event() # Use an Event for graceful stopping
         self.start()
     def run(self):
+        from AutoScriptor.core.api import ui_T
         while not self._stop_event.is_set():
             if self.callbacks: 
                 callbacks_copy = list(self.callbacks.items())
@@ -25,7 +26,7 @@ class BackgroundMonitor(threading.Thread):
                         logger.info(f"🎯 后台检测到: {name} 触发")
                         callback()
                         if once: self.remove(name)
-            self._stop_event.wait(self.interval)
+            time.sleep(self.interval)
 
     def add(self, name:str, identifier: Target|list[Target]|tuple[Target, ...], callback: Callable[[], None]|list[Callable[[], None]], once:bool=True):
         with self._lock:

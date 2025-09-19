@@ -1,0 +1,21 @@
+{
+    "app": {
+        "name": "ZmxyOL",
+        "app_to_start": "org.yjmobile.zmxy",
+        "restart_on_error": true,
+        "run_in_background": true,
+        "auto_start": true
+    },
+    "ocr": {
+        "use_gpu": false
+    },
+    "emulator": {
+        "index": 1,
+        "adb_addr": "YOUR_ADB_ADDR, e.g.127.0.0.1:16416",
+        "mumu_folder": "YOUR_MUMU_FOLDER, e.g.C:/Program Files/Netease/MuMu",
+        "emu_path": "YOUR_EMU_PATH, e.g.C:/Program Files/Netease/MuMu/nx_main/MuMuManager.exe",
+        "adb_path": "YOUR_ADB_PATH, e.g.C:/Program Files/Netease/MuMu/nx_main/adb.exe"
+    },
+    "encryption": {},
+    "tasks": {}
+}

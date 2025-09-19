@@ -1,4 +1,6 @@
 import traceback
+
+from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import RequestHumanTakeover
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
@@ -15,6 +17,7 @@ def destory_item():
 
 
 def make_more_for_destory(nums: int=1):
+    Material_not_sufficent=False
     click(B(890,50,30,30))
     ensure_in("法相")
     sleep(1)  
@@ -23,16 +26,19 @@ def make_more_for_destory(nums: int=1):
     click(B(706,566,40,40), repeat=nums)
     click(T("合成", box=Box(579,627,173,63)))
     sleep(0.5)
-    click(T("确定"))
+    if ui_F(T("确定"),timeout=2): Material_not_sufficent=True
+    else: click(T("确定"))
     sleep(5)
     click(B(0,0,0,0))
     sleep(0.5)
     click(B(1200,30,30,30))
     click(T("角色"))
     click(B(1200,30,30,30),repeat=2)
+    if Material_not_sufficent: raise RequestHumanTakeover("材料不足，无法炼化")
     ensure_in("炼器师")
     click(I('炼器炉'))
     sleep(0.5)
+    
 
 
 @register_task

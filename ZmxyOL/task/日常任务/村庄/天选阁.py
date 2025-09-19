@@ -1,4 +1,5 @@
 import traceback
+from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import RequestHumanTakeover
 from AutoScriptor.core.api import _locate_all
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
@@ -25,6 +26,13 @@ def task():
     click(T("天选阁"))
     wait_for_appear(T("回家", box=Box(18,607,87,109)))
     sleep(1)
+    if ui_T(T("云端模式")):
+        logger.critical("AutoScriptor暂不支持天选阁云端模式，请手动操作！")
+        click(T("回家", box=Box(18,607,87,109)))
+        wait_for_appear(T("天选阁"))
+        sleep(0.5)
+        click(B(1200,30,30,30))
+        raise RequestHumanTakeover("AutoScriptor暂不支持天选阁云端模式，请手动操作！")
     not_finish = True
     task_idx = -1
     while not_finish:

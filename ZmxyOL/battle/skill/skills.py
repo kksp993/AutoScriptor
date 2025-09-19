@@ -72,10 +72,14 @@ def battle_loop(
 
 
 @combo
-def way_to_exit(self: Hero, until:str="", exit_loc: float = 0):
-    """当看见出口时，点击左键，直到出去"""
+def way_to_exit(self: Hero, until: str = "", exit_loc: float = 0, timeout: float = 30):
+    """当看见出口时，点击左键，直到出去；超时后抛出异常"""
+    from time import time
+    start_time = time()
     self.move_right(125).move_left(exit_loc)
     while not until():
+        if time() - start_time > timeout:
+            raise RuntimeError(f"way_to_exit 超时: {timeout}秒, 条件 {until.__name__} 未满足")
         self.move_left(25, directly=True)
     return self
 
