@@ -7,6 +7,23 @@ from fuzzywuzzy import fuzz
 import threading
 import paddle
 import time
+OCR_VERSION = 'PP-OCRv4'
+# OCR_VERSION = 'PP-OCRv5'
+# OCR_VERSION = 'PP-OCRv5_server_rec'
+
+ocr_config = {
+    "use_gpu":cfg["ocr.use_gpu"],
+    "gpu_mem":4096,
+    "enable_mkldnn":True,
+    "use_angle_cls":False,
+    "lang":"ch",
+    "ocr_version":OCR_VERSION,
+    "show_log":False,
+    "det_db_thresh":0.15,
+    "det_db_box_thresh":0.2,
+    "drop_score":0.2,
+    "scales":[0.5,1.0,1.5],
+}
 
 class OCRManager:
     """全局OCR引擎管理器"""
@@ -37,13 +54,7 @@ class OCRManager:
                 logger.info("正在初始化 PaddleOCR 引擎，这可能需要一些时间...")
                 start_time = time.time()
                 self.ocr_engine = PaddleOCR(
-                    use_gpu=cfg["ocr.use_gpu"],
-                    gpu_mem=4096,
-                    enable_mkldnn=True,
-                    use_angle_cls=False,
-                    lang='ch',
-                    ocr_version='PP-OCRv4',
-                    show_log=False,
+                    **ocr_config,
                 )
                 logger.info(f"PaddleOCR 初始化参数 use_gpu={cfg['ocr.use_gpu']}, 当前设备={paddle.get_device()}")
                 elapsed_time = time.time() - start_time
@@ -86,13 +97,7 @@ def get_ocr_engine():
     if not hasattr(_thread_local, 'ocr_engine') or _thread_local.ocr_engine is ocr_manager.ocr_engine:
         # 复制与全局相同的初始化参数
         _thread_local.ocr_engine = PaddleOCR(
-            use_gpu=cfg["ocr.use_gpu"],
-            gpu_mem=8192,
-            enable_mkldnn=True,
-            use_angle_cls=False,
-            lang='ch',
-            ocr_version='PP-OCRv4',
-            show_log=False,
+            **ocr_config,
         )
     return _thread_local.ocr_engine
 

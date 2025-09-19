@@ -20,7 +20,7 @@ TASK_TABLE = {
     "混沌火焰山·噩梦":{"location":("天庭", 0),"target":B(1120,5,20,80),"idx":0, "exit_loc":643-EXIT_RADIUS},
     "混沌五指山·噩梦":{"location":("天庭", 0),"target":B(130,210,1,1),"idx":0, "exit_loc":625-EXIT_RADIUS},
     "混沌盘丝洞·噩梦":{"location":("天庭", 1),"target":B(549,589,212,37),"idx":0, "exit_loc":632-EXIT_RADIUS},
-    "混沌地狱官邸·噩梦":{"location":("地狱", 1),"target":B(369,566,225,44),"idx":0, "exit_loc":702-EXIT_RADIUS},
+    "混沌地狱官邸·噩梦":{"location":("地狱", 1),"target":B(369,566,225,44),"idx":0, "exit_loc":702-EXIT_RADIUS-40},
 
     "心狐星宫":{"location":("极北",-1),"target":B(540,170,30,30),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "灵狱"]},
     "壁宿星宫":{"location":("极北",-1),"target":B(950,330,30,30),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "灵狱"]},

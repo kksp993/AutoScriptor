@@ -1,3 +1,4 @@
+from logzero import logger
 from AutoScriptor import *
 from ZmxyOL.nav import *
 

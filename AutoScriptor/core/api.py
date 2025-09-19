@@ -34,7 +34,7 @@ print(f"adb_addr: {adb_addr}")
 print(f"app_to_start: {app_to_start}")
 print(f"mumu_manager_path: {mumu_manager_path}")
 mumu = Mumu().select(selected_emulator_index)
-mumu.power.start(app_to_start)
+mumu.power.start(app_to_start) if cfg["app"]["auto_start"] else None
 mixctrl = MixControl(mumu)
 logger.info("编排器初始化完成.")
 success = False
@@ -65,7 +65,7 @@ if not success:
     bg.stop()
     os.execv(sys.executable, [sys.executable] + sys.argv)
 mixctrl.window.hidden() if cfg["app"]["run_in_background"] else None
-cfg.load_config(getpass.getpass("请输入安全密码: "))
+# cfg.load_config(getpass.getpass("请输入安全密码: "))
 
 def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=10)->bool:
     tuple_tgt, list_tgt = tuple(t for t in target), [t for t in target]
@@ -108,7 +108,7 @@ def full(box_matrixes: list[list[Box]])->bool:
     return True
 
 def count(box_matrixes: list[list[Box]])->list[int]:
-    return [len(box_matrix) if box_matrix else 0 for box_matrix in box_matrixes]
+    return [0 if not box_matrix else len(box_matrix) if not isinstance(box_matrix, Box) else 1 for box_matrix in box_matrixes]
 
 def index(box_matrixes: list[list[Box]])-> int:
     if not box_matrixes: return -1
@@ -243,7 +243,7 @@ def swipe(
     ):
     start_box = locate(start_target, 3) if not isinstance(start_target, BoxTarget) else start_target.box
     end_box = locate(end_target, 3, assure_stable=False) if not isinstance(end_target, BoxTarget) else end_target.box
-    if start_box is None or end_box is None: return RuntimeError(f"Swipe {start_target} to {end_target} failed, for failed to locate target")
+    if start_box is None or end_box is None: raise RuntimeError(f"Swipe {start_target} to {end_target} failed, for failed to locate target")
     time.sleep(delay)
     mixctrl.swipe(*b2p(start_box), *b2p(end_box), duration_s)
     return True
@@ -261,6 +261,7 @@ def extract_info(target: BoxTarget, post_process: callable = None, ensure_not_em
     for _ in range(40):
         screenshot = mixctrl.screenshot()
         res = ocr_for_box(screenshot, target.box)
+        logger.debug(f"Extract info {target} raw_res: {res}")
         if post_process:
             try:
                 res = post_process(res)

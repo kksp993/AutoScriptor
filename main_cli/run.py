@@ -11,6 +11,7 @@ import importlib
 from typing import Dict, Any, List
 from datetime import datetime as _datetime, datetime
 from AutoScriptor import *
+from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import RequestHumanTakeover
 from AutoScriptor.crypto.update_config import set_config, verify_config
 from ZmxyOL import *
 from ZmxyOL.nav.envs.decorators import LOC_ENV
@@ -160,10 +161,15 @@ def find_and_execute_tasks(
                 logger.info(f"▶️  等待3秒")
                 sleep(3)
             except Exception as e:
+                if isinstance(e, KeyboardInterrupt): raise
                 failed_count += 1
                 logger.error(f"❌ 执行失败: {path_str}，错误: {e}")
                 dump_error_and_log(path_str, e)
                 traceback.print_exc()
+                if isinstance(e, RequestHumanTakeover):
+                    update_task_post_execution(master_node, ui_node, path_list)
+                    logger.info(f"需要人工操作完成，跳过")
+                    continue
                 if cfg["app"]["restart_on_error"]:
                     mixctrl.app.close(cfg["app"]["app_to_start"])
                     sleep(1)
@@ -430,15 +436,19 @@ def run_cli_navigation():
                 sleep(5)
             master_node_to_execute = get_node_by_path(cfg["tasks"], navigation_path)
             ui_node_counterpart = get_node_by_path(ui_tasks, navigation_path)
-            
-            total_executed, total_count = find_and_execute_tasks(master_node_to_execute, ui_node_counterpart, navigation_path)
-
-            if total_executed > 0:
-                cfg.save_config()
-                logger.info(f"\n✅ 执行完毕，{total_executed}/{total_count}个任务的状态变更已自动保存！")
-            else:
-                logger.info("\n🔵 没有需要执行的任务。")
-            questionary.press_any_key_to_continue().ask()
+            # 全局执行异常处理
+            try:
+                total_executed, total_count = find_and_execute_tasks(master_node_to_execute, ui_node_counterpart, navigation_path)
+                if total_executed > 0:
+                    cfg.save_config()
+                    logger.info(f"\n✅ 执行完毕，{total_executed}/{total_count}个任务的状态变更已自动保存！")
+                else:
+                    logger.info("\n🔵 没有需要执行的任务。")
+            except KeyboardInterrupt:
+                bg.clear(signals_clear=True)
+                logger.info("🔴 任务执行已中断，返回菜单")
+                questionary.press_any_key_to_continue().ask()
+                continue
 
         elif action == "--Account--":
             res = questionary.select(
