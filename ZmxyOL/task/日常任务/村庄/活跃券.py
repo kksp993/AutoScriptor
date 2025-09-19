@@ -32,6 +32,7 @@ def task():
     from ZmxyOL.battle.utils import BAG,find_in_bag
     find_in_bag(BAG.BAG,"活跃福利券")
     click(I("活跃券"), if_exist=True, delay=0.5, timeout=3)
+    sleep(1)
     click(T("使用"), if_exist=True, delay=0.5, timeout=2)
     sleep(3)
     ensure_in(LOC_ENV)
