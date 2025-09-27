@@ -12,7 +12,7 @@ def daily_qianghua_task():
         sleep(4)
     click(B(0,0),until=lambda:ui_T(T("云中子")))
     click(T("云中子"), offset=(0,60))
-    sleep(1)
+    click(T("进阶"),repeat=2)
     click(T(key="炼丹炉-进阶"))
     while ui_F(I("法宝-戮仙剑")):
         click(I("炼丹炉-进阶-右"))
