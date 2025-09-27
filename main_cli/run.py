@@ -438,12 +438,16 @@ def run_cli_navigation():
             ui_node_counterpart = get_node_by_path(ui_tasks, navigation_path)
             # 全局执行异常处理
             try:
-                total_executed, total_count = find_and_execute_tasks(master_node_to_execute, ui_node_counterpart, navigation_path)
-                if total_executed > 0:
-                    cfg.save_config()
-                    logger.info(f"\n✅ 执行完毕，{total_executed}/{total_count}个任务的状态变更已自动保存！")
-                else:
-                    logger.info("\n🔵 没有需要执行的任务。")
+                is_all_success = False
+                for _ in range(cfg["app"]["max_retry"] + 1):
+                    if is_all_success: break
+                    total_executed, total_count = find_and_execute_tasks(master_node_to_execute, ui_node_counterpart, navigation_path)
+                    if total_executed > 0:
+                        cfg.save_config()
+                        logger.info(f"\n✅ 执行完毕，{total_executed}/{total_count}个任务的状态变更已自动保存！")
+                    else:
+                        is_all_success = True
+                        logger.info("\n🔵 没有需要执行的任务。")
             except KeyboardInterrupt:
                 bg.clear(signals_clear=True)
                 logger.info("🔴 任务执行已中断，返回菜单")

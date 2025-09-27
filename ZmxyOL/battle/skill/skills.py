@@ -72,7 +72,7 @@ def battle_loop(
 
 
 @combo
-def way_to_exit(self: Hero, until: str = "", exit_loc: float = 0, timeout: float = 30):
+def way_to_exit(self: Hero, until: str = "", exit_loc: float = 0, timeout: float = 60):
     """当看见出口时，点击左键，直到出去；超时后抛出异常"""
     from time import time
     start_time = time()

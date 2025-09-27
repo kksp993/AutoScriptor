@@ -22,13 +22,15 @@ def task():
     click(T("取消"), if_exist=True, timeout=1)
     if ui_F(T("讨伐目标"), 3):
         click(B(1060,45,30,30))
+    elif ui_F(T("进入",color="绿色"), 3):
+        logger.info("当前妖兽任务已结束")
     else:
         click(T("进入",color="绿色"))
         sleep(1)
         wait_for_disappear(ui["加载中"].i)
         bg.add(
             name="妖兽-战斗",
-            identifier=(T("退出副本")),
+            identifier=(T("退出副本"),T("确定")),
             callback=lambda: [
                 logger.info("妖兽突发事件"),
                 sleep(0.03),
@@ -38,7 +40,8 @@ def task():
             ],
         )
         h.set(has_cd=False,speed_x=1).battle_loop(battle_weight=100000),
-        click(T("退出副本"), delay=2)
+        # click(T("退出副本"), delay=2)
+        click(T("确定"), delay=2)
         wait_for_appear(ui["导航-奇闻录"].i)
 
 
