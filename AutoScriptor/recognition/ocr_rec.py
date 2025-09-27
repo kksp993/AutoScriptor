@@ -19,10 +19,10 @@ ocr_config = {
     "lang":"ch",
     "ocr_version":OCR_VERSION,
     "show_log":False,
-    "det_db_thresh":0.15,
-    "det_db_box_thresh":0.2,
-    "drop_score":0.2,
-    "scales":[0.5,1.0,1.5],
+    # "det_db_thresh":0.15,
+    # "det_db_box_thresh":0.2,
+    # "drop_score":0.2,
+    # "scales":[0.5,1.0,1.5],
 }
 
 class OCRManager:

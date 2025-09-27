@@ -1,4 +1,6 @@
 import traceback
+
+from fsspec.spec import reopen
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import RequestHumanTakeover
 from AutoScriptor.core.api import _locate_all
 from ZmxyOL.task.task_register import register_task
@@ -23,7 +25,10 @@ def task():
         return
     ensure_in("村庄")
     click(T("挑战"))
-    click(T("天选阁"))
+    click(T("天选阁"),repeat=3)
+    if ui_T(T("没有报名"),timeout=2):
+        logger.critical("没有报名天选阁，请手动报名！")
+        return
     wait_for_appear(T("回家", box=Box(18,607,87,109)))
     sleep(1)
     if ui_T(T("云端模式")):

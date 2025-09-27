@@ -16,7 +16,7 @@ class Method(Enum):
 def task(method:Method=Method.YAOSHI):
     if method == Method.YAOSHI:
         ensure_in("极北村庄")
-        click(T("寻宝"))
+        click(I("导航-寻宝"))
         wait_for_appear(T("符印寻宝"))
         click(B(1043,39,54,56))
         click(T("确定"))

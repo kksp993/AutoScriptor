@@ -7,7 +7,7 @@ from logzero import logger
 @register_task
 def task():
     ensure_in("村庄")
-    click(T("战令",box=Box(16,30,924,400)))
+    click(I("导航-战令"))
     wait_for_appear(T("购买等级"))
     click(B(105,244,34,124))
     sleep(1)
