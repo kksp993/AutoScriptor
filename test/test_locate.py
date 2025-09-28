@@ -1,3 +1,4 @@
+from timeit import timeit
 from AutoScriptor import *
 from ZmxyOL.nav import *
 import traceback
@@ -12,7 +13,12 @@ if __name__ == "__main__":
     # print(locate(T("同意并登录",color="青色", box=Box(160,707,442,95))))
     # print(locate(T("仙盟",box=Box(16,30,924,400)), timeout=10, assure_stable=True))
     try:
-        print(locate(T("终劫")))
+        # print(timeit(lambda: print(locate(I("导航-寻宝"))), number=1))
+        # print(timeit(lambda: print(locate(I("小小木绝"))), number=1))
+        # print(timeit(lambda: print(locate(T("天魔禁忌",box=Box(732,342,77,27)))), number=1))
+        # print(timeit(lambda: print(locate(T("挑战",box=Box(920,475,300,200)))), number=1))
+        # print(timeit(lambda: print(locate(I("梵天塔-天魔挑战"))), number=1))
+        print(timeit(lambda: print(locate(T("前往新一层"))), number=1))
     except Exception as e:
         traceback.print_exc()
     finally:
