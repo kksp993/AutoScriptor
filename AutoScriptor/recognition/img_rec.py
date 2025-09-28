@@ -3,7 +3,7 @@ import numpy
 
 from AutoScriptor.utils.box import Box
 
-GRAYSCALE_DEFAULT = True
+GRAYSCALE_DEFAULT = False
 
 def _load_cv2(img, grayscale=None):
     """
@@ -78,48 +78,46 @@ def imgOnScreen(haystack_frame, needle_images, confidence=0.9):
     return deduplicated_rs
 
 
-def _locateAll_opencv(needleImage, haystackImage, limit=10000, region=None, step=1, confidence=0.9):
+# 新的基于金字塔的多尺度匹配实现
+def _locateAll_opencv(needleImage, haystackImage, limit=10000, region=None, step=2, confidence=0.9, min_scale=0.8, max_scale=1.2):
     """
-    TODO - rewrite this
-        faster but more memory-intensive than pure python
-        step 2 skips every other row and column = ~3x faster but prone to miss;
-            to compensate, the algorithm automatically reduces the confidence
-            threshold by 5% (which helps but will not avoid all misses).
-        limitations:
-          - OpenCV 3.x & python 3.x not tested
-          - RGBA images are treated as RBG (ignores alpha channel)
+    下采样模板与图像后，仅匹配三种 scale：min_scale,1.0,max_scale，加速模板匹配。
+    返回所有满足阈值的位置框。
     """
-    confidence = float(confidence)
-
-    needleImage = _load_cv2(needleImage, True)
-    needleHeight, needleWidth = needleImage.shape[:2]
-    haystackImage = _load_cv2(haystackImage, True)
-    cv2.imwrite("needleImage.png", needleImage)
-    cv2.imwrite("haystackImage.png", haystackImage)
+    # 加载灰度图并裁剪区域
+    needleGray = _load_cv2(needleImage, True)
+    haystackGray = _load_cv2(haystackImage, True)
     if region:
-        haystackImage = haystackImage[region[1]: region[1] + region[3], region[0]: region[0] + region[2]]
+        x0, y0, w0, h0 = region
+        haystackGray = haystackGray[y0:y0+h0, x0:x0+w0]
     else:
-        region = (0, 0)  # full image; these values used in the yield statement
-    if haystackImage.shape[0] < needleImage.shape[0] or haystackImage.shape[1] < needleImage.shape[1]:
-        # avoid semi-cryptic OpenCV error below if bad size
-        raise ValueError('needle dimension(s) exceed the haystack image or region dimensions')
-
-    if step == 2:
-        confidence *= 0.95
-        needleImage = needleImage[::step, ::step]
-        haystackImage = haystackImage[::step, ::step]
-    else:
-        step = 1
-
-    # get all matches at once, credit: https://stackoverflow.com/questions/7670112/finding-a-subimage-inside-a-numpy-image/9253805#9253805
-    result = cv2.matchTemplate(haystackImage, needleImage, cv2.TM_CCOEFF_NORMED)
-    match_indices = numpy.arange(result.size)[(result > confidence).flatten()]
-    matches = numpy.unravel_index(match_indices[:limit], result.shape)
-
-    if len(matches[0]) == 0: return
-
-    # use a generator for API consistency:
-    matchx = matches[1] * step + region[0]  # vectorized
-    matchy = matches[0] * step + region[1]
-    
-    return [Box(x, y, needleWidth, needleHeight) for x, y in zip(matchx, matchy)]
+        x0 = y0 = 0
+    # 下采样
+    ds = max(2, step)
+    hay_ds = haystackGray[::ds, ::ds]
+    tpl = needleGray
+    tpl_ds = tpl[::ds, ::ds]
+    tH, tW = tpl.shape[:2]
+    tH_ds, tW_ds = tpl_ds.shape[:2]
+    # 关键尺度
+    scales = [1.0]
+    if min_scale != 1.0:
+        scales.append(min_scale)
+    if max_scale != 1.0 and max_scale != min_scale:
+        scales.append(max_scale)
+    boxes = []
+    for scale in scales:
+        w_s = int(tW_ds * scale)
+        h_s = int(tH_ds * scale)
+        if w_s < 1 or h_s < 1 or w_s > hay_ds.shape[1] or h_s > hay_ds.shape[0]:
+            continue
+        tpl_s = cv2.resize(tpl_ds, (w_s, h_s), interpolation=cv2.INTER_AREA)
+        res = cv2.matchTemplate(hay_ds, tpl_s, cv2.TM_CCOEFF_NORMED)
+        ys, xs = numpy.where(res >= confidence)
+        for y, x in zip(ys, xs):
+            real_x = x * ds + x0
+            real_y = y * ds + y0
+            boxes.append(Box(real_x, real_y, tW, tH))
+            if len(boxes) >= limit:
+                return boxes
+    return boxes
