@@ -5,7 +5,7 @@ import traceback
 if __name__ == "__main__":
     try:
         from ZmxyOL.battle.character.hero import h
-        h.battle_loop()
+        h.battle_loop(battle_weight=99)
     except Exception as e:
         traceback.print_exc()
     finally:

@@ -24,10 +24,17 @@ def task():
         logger.info(f"今日{cfg['weekday']}为周一至周四，不进行天选阁任务")
         return
     ensure_in("村庄")
-    click(T("挑战"))
+    click(I("导航-挑战"))
     click(T("天选阁"),repeat=3)
     if ui_T(T("没有报名"),timeout=2):
-        logger.critical("没有报名天选阁，请手动报名！")
+        logger.critical("没有报名天选阁，请下周再来！")
+        return
+    if ui_T(T("报名"),timeout=2):
+        click(T("报名"))
+        click(T("回家", box=Box(18,607,87,109)))
+        wait_for_appear(T("天选阁"))
+        sleep(0.5)
+        click(B(60,680,30,30))
         return
     wait_for_appear(T("回家", box=Box(18,607,87,109)))
     sleep(1)

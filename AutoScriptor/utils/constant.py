@@ -70,6 +70,7 @@ class AutoConfig:
         if isinstance(data, dict):
             # 关键：先删除当前层的 'fn'，因为它不会有子节点
             data.pop('fn', None)
+            data.pop('order', None)
             # 然后，对自己所有的子节点（value）递归调用此函数
             for key, value in data.items():
                 self._clean_tasks_for_saving(value)

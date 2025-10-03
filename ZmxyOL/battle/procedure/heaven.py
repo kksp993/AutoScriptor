@@ -25,7 +25,7 @@ def battle_task(
     )
     bg.add(
         name="战斗失败",
-        identifier=(I("战斗-失败")),
+        identifier=(T("复活")),
         callback=lambda : [
             switch_base("mumu"),
             logger.info("战斗结束"),

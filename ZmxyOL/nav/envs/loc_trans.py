@@ -45,10 +45,13 @@ def way():
 
 @path(LOC_ENV, "炼器师")
 def way():
-    if ui_idx((T('莫邪'),T("欧冶子")),30)==0:
-        click(T('莫邪'),offset=(-230,100),resize=(80,120))
+    idx = ui_idx((I('莫邪'),I("副职业宗师")),timeout=2)
+    if idx == 0:
+        click(I('莫邪'),offset=(-230,0))
+    elif idx == 1:
+        click(I('副职业宗师'))
     else:
-        click(T('欧冶子'),offset=(-480,100),resize=(80,120))
+        click(B(600,300))
     click(T('炼器师'))
     mm.set_loc("炼器师")
 

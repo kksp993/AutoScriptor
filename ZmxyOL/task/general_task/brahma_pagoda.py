@@ -1,5 +1,7 @@
 from enum import Enum
 import traceback
+
+from numpy import arange
 from AutoScriptor.utils import box
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
@@ -30,13 +32,14 @@ def battle():
         identifier=(T("确认"),T("前往新一层")),
         callback=lambda: [bg.set_signal("try_exit", True),bg.clear()]
     )
-    cnt = 1
     bg.set_signal("try_exit", False)
     while not bg.signal("try_exit"):
-        h.prop()
-        if cnt % 2 == 0: h.skill(6)
-        else: h.skill(5,4)
-        cnt += 1
+        for cnt in arange(1,4):
+            h.prop()
+            if cnt % 2 == 0: h.skill(6)
+            else: h.skill(5,4)
+        h.zhenling()
+        h.battle_loop(battle_weight=99)
     click((T("确认"),T("前往新一层")))
     wait_for_disappear(I("加载中"))
 
@@ -68,22 +71,22 @@ def FTT_TianMo():
     wait_for_appear(T("入劫"))
 
 @register_task
-def fanTianTa(battle_times=1, difficulty=FFT_difficulty.past, preference=(FFT_preference.purple,FFT_preference.yellow)):
-    # ensure_in("极北",-1)
-    # click(B(0,120,90,100))
-    # sleep(3)
-    # click(T(difficulty.value),offset=(0,100))
-    # sleep(3)
-    # click(T("确认"), if_exist=True)
-    # sleep(5)
+def fanTianTa(battle_times=50, difficulty=FFT_difficulty.past, preference=(FFT_preference.purple,FFT_preference.yellow)):
+    ensure_in("极北",-1)
+    click(B(0,120,90,100))
+    sleep(3)
+    click(T(difficulty.value),offset=(0,100))
+    sleep(3)
+    click(T("确认"), if_exist=True)
+    sleep(5)
     for _ in range(battle_times):
         FTT_battle_one_round(preference)
         sleep(3)
         FTT_TianMo()
         sleep(3)
-    # click(B(30,30,30,30))
-    # sleep(1)
-    # click(B(30,30,30,30))
+    click(B(30,30,30,30))
+    sleep(1)
+    click(B(30,30,30,30))
 
 
 
