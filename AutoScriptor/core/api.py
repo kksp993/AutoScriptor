@@ -10,6 +10,7 @@ from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget
 from AutoScriptor.recognition.ocr_rec import ocr_for_box
 from AutoScriptor.recognition.rec import get_box_color
 from AutoScriptor.utils.box import Box, b2p
+from AutoScriptor.utils.logger import log_flush
 from logzero import logger
 from AutoScriptor.utils.constant import cfg
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
@@ -67,11 +68,10 @@ if not success:
 mixctrl.window.hidden() if cfg["app"]["run_in_background"] else None
 # cfg.load_config(getpass.getpass("请输入安全密码: "))
 
-def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=10)->bool:
-    tuple_tgt, list_tgt = tuple(t for t in target), [t for t in target]
-    res = locate(tuple_tgt, timeout, assure_stable=False)
-    if not res: raise Exception(f"{target} 没有找到:" + traceback.print_exc())
-    boxes = locate(list_tgt, 0, assure_stable=False)
+def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->bool:
+    target = [t for t in target]
+    boxes = locate(target, timeout, assure_stable=False)
+    if not first(boxes): return -1
     return index(boxes)
 
 def ui_T(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->bool:
@@ -138,6 +138,7 @@ def switch_base(base: str):
 
 
 def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=None)->list[list[Box]]:
+    # log_flush(f"locate {target}")
     def genertate_source(target):
         if isinstance(target, ImageTarget|TextTarget):
             return target.get_source(),target.ui.box,target.ui.color
@@ -147,6 +148,7 @@ def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=No
             raise ValueError(f"Unsupported target type: {type(target)}")
     tgt_triples = [genertate_source(tgt) for tgt in target]
     boxes = mixctrl.locate(tgt_triples, screenshot=screenshot)
+    # log_flush(f"locate {target} boxes: {boxes}")
     return boxes
 
 def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, assure_stable: bool = True)->Box|None|list[Box]:

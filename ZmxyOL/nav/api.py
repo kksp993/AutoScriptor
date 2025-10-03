@@ -90,24 +90,26 @@ def try_close_via_x():
         (T("确认"), T("确认")),
         (T("返回地图"), T("返回地图")),
         (T("返回大厅"), T("返回大厅")),
-        (T("我的队伍"), B(1050,50,30,30)),
+        (T("我的队伍"), B(1000,30,30,30)),
     ]
     
     # 等待消失目标列表
     wait_for_disappear_targets = [
         I("加载中"),
         I("极北-加载中"),
+        I("进入游戏中")
     ]
     
     click(B(0,0,))
     found = True
     while found:
         found = False
-        for target, click_target in close_targets:
-            if ui_T(target):
-                click(click_target, if_exist=True)
-                found = True
-                sleep(0.5)
+        tgts = tuple(target for target, _ in close_targets)
+        idx = ui_idx(tgts)
+        if idx > 0:
+            click(close_targets[idx][1], if_exist=True)
+            found = True
+            sleep(0.5)
         for target in wait_for_disappear_targets:
             while(ui_T(target)): 
                 time.sleep(0.5) 

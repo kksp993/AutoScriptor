@@ -1,0 +1,3 @@
+ice_cave_shop
+nether_ice_cave
+battle_of_glory
