@@ -73,7 +73,6 @@ key,text,left,top,width,height,img
 极北-寻宝,,356,128,104,116,jibei-xunbao@366#138#84#96.png
 极北-交易栏,,132,134,106,104,jibei-jiaoyilan@142#144#86#84.png
 极北-器灵,,590,130,88,116,jibei-qiling@600#140#68#96.png
-极北-极光天诏,,0,0,1280,720,jibei-jiguangtianzhao@697#140#103#88.png
 极北-神兵榜,,806,128,108,114,jibei-shenbingbang@816#138#88#94.png
 极北-神兵榜,,12,242,115,111,jibei-shenbingbang@22#252#95#91.png
 极北-万业灵根,,12,242,115,111,jibei-wanyelinggen@22#252#95#91.png
@@ -253,7 +252,6 @@ x-in,in,1055,168,55,67,x-in@1065#178#35#47.png
 蛇年灵能翅膀,蛇年灵能翅膀,0,0,1280,720,shenianlingnengchibang@0#0#1280#720.png
 冰窟-挑战失败,挑战失败,488,94,294,78,bingku-tiaozhanshibai@498#104#274#58.png
 法相界面,法相界面,0,0,1280,720,faxiangjiemian@0#0#1280#720.png
-极北-极光天诏,极光天诏,0,0,1280,720,jibei-jiguangtianzhao@0#0#1280#720.png
 幽冥冰窟背景,幽冥冰窟背景,558,162,194,324,youmingbingkubeijing@568#172#174#304.png
 A,A,0,0,1280,720,A@0#0#1280#720.png
 B,B,0,0,1280,720,B@0#0#1280#720.png
@@ -273,3 +271,8 @@ S,S,0,0,1280,720,S@0#0#1280#720.png
 小小木绝,小小木绝,0,0,1280,720,xiaoxiaomujue@0#0#1280#720.png
 活跃券,活跃券,0,0,1280,720,huoyuequan@0#0#1280#720.png
 梵天塔-天魔挑战,天魔挑战,1101,566,146,126,fantianta-tianmotiaozhan@1111#576#126#106.png
+进入游戏中,进入游戏中,561,160,156,155,jinruyouxizhong@571#170#136#135.png
+导航-极光天诏,极光天诏,0,0,1280,720,daohang-jiguangtianzhao@0#0#1280#720.png
+副职业宗师,副职业宗师,0,0,1280,720,fuzhiyezongshi@0#0#1280#720.png
+莫邪,莫邪,0,0,1280,720,moxie@0#0#1280#720.png
+导航-战令,战令,0,0,1280,720,daohang-zhanling@0#0#1280#720.png

@@ -43,7 +43,7 @@ def way():
     while ui_T(I("加载中"), 1):
         time.sleep(0.5)
     mm.set_region("极北村庄")
-    time.sleep(1)
+    sleep(4)
 
 "=======================  极寒深渊  ======================="
 @path("极北", "极寒深渊")

@@ -1,0 +1,861 @@
+<?xml version='1.0' encoding='utf8'?>
+<nuitka-compilation-report nuitka_version="2.7.16" nuitka_commercial_version="not installed" mode="module" completion="error exit message (1)" exit_message="Failed unexpectedly in Scons C backend compilation.">
+  <scons_error_reports>
+    <scons_error_report>
+      <command>"C:\Users\steve\AppData\Local\Nuitka\Nuitka\Cache\DOWNLO~1\gcc\x86_64\14.2.0posix-19.1.1-12.0.0-msvcrt-r2\mingw64\bin\ccache.exe" "C:\Users\steve\AppData\Local\Nuitka\Nuitka\Cache\DOWNLO~1\gcc\x86_64\14.2.0posix-19.1.1-12.0.0-msvcrt-r2\mingw64\bin\gcc.exe" -o "module.ZmxyOL.task.日常任务.o" -c -std=c11 -flto=16 -fuse-linker-plugin -fno-fat-lto-objects -fvisibility=hidden -fwrapv -pipe -Wno-unused-but-set-variable -fpartial-inlining -ftrack-macro-expansion=0 -Wno-deprecated-declarations -fno-var-tracking -Wno-misleading-indentation -fcompare-debug-second -O3 -shared -D_NUITKA_MODULE_MODE -D_WIN32_WINNT=0x0601 -D__NUITKA_NO_ASSERT__ -DMS_WIN64 -D_NUITKA_CONSTANTS_FROM_RESOURCE -D_NUITKA_FROZEN=0 -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\inline_copy\zlib -ID:\anaconda\envs\zmxy\include -I. -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\include -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\static_src -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\inline_copy\libbacktrace "module.ZmxyOL.task.日常任务.c"</command>
+      <stderr>
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: Cannot convert character sequence: Illegal byte sequence
+</stderr>
+    </scons_error_report>
+    <scons_error_report>
+      <command>"C:\Users\steve\AppData\Local\Nuitka\Nuitka\Cache\DOWNLO~1\gcc\x86_64\14.2.0posix-19.1.1-12.0.0-msvcrt-r2\mingw64\bin\ccache.exe" "C:\Users\steve\AppData\Local\Nuitka\Nuitka\Cache\DOWNLO~1\gcc\x86_64\14.2.0posix-19.1.1-12.0.0-msvcrt-r2\mingw64\bin\gcc.exe" -o "module.ZmxyOL.task.日常任务.天庭.o" -c -std=c11 -flto=16 -fuse-linker-plugin -fno-fat-lto-objects -fvisibility=hidden -fwrapv -pipe -Wno-unused-but-set-variable -fpartial-inlining -ftrack-macro-expansion=0 -Wno-deprecated-declarations -fno-var-tracking -Wno-misleading-indentation -fcompare-debug-second -O3 -shared -D_NUITKA_MODULE_MODE -D_WIN32_WINNT=0x0601 -D__NUITKA_NO_ASSERT__ -DMS_WIN64 -D_NUITKA_CONSTANTS_FROM_RESOURCE -D_NUITKA_FROZEN=0 -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\inline_copy\zlib -ID:\anaconda\envs\zmxy\include -I. -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\include -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\static_src -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\inline_copy\libbacktrace "module.ZmxyOL.task.日常任务.天庭.c"</command>
+      <stderr>
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: Cannot convert character sequence: Illegal byte sequence
+</stderr>
+    </scons_error_report>
+    <scons_error_report>
+      <command>"C:\Users\steve\AppData\Local\Nuitka\Nuitka\Cache\DOWNLO~1\gcc\x86_64\14.2.0posix-19.1.1-12.0.0-msvcrt-r2\mingw64\bin\ccache.exe" "C:\Users\steve\AppData\Local\Nuitka\Nuitka\Cache\DOWNLO~1\gcc\x86_64\14.2.0posix-19.1.1-12.0.0-msvcrt-r2\mingw64\bin\gcc.exe" -o "module.ZmxyOL.task.日常任务.天庭.地狱混沌.o" -c -std=c11 -flto=16 -fuse-linker-plugin -fno-fat-lto-objects -fvisibility=hidden -fwrapv -pipe -Wno-unused-but-set-variable -fpartial-inlining -ftrack-macro-expansion=0 -Wno-deprecated-declarations -fno-var-tracking -Wno-misleading-indentation -fcompare-debug-second -O3 -shared -D_NUITKA_MODULE_MODE -D_WIN32_WINNT=0x0601 -D__NUITKA_NO_ASSERT__ -DMS_WIN64 -D_NUITKA_CONSTANTS_FROM_RESOURCE -D_NUITKA_FROZEN=0 -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\inline_copy\zlib -ID:\anaconda\envs\zmxy\include -I. -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\include -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\static_src -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\inline_copy\libbacktrace "module.ZmxyOL.task.日常任务.天庭.地狱混沌.c"</command>
+      <stderr>
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: Cannot convert character sequence: Illegal byte sequence
+</stderr>
+    </scons_error_report>
+    <scons_error_report>
+      <command>"C:\Users\steve\AppData\Local\Nuitka\Nuitka\Cache\DOWNLO~1\gcc\x86_64\14.2.0posix-19.1.1-12.0.0-msvcrt-r2\mingw64\bin\ccache.exe" "C:\Users\steve\AppData\Local\Nuitka\Nuitka\Cache\DOWNLO~1\gcc\x86_64\14.2.0posix-19.1.1-12.0.0-msvcrt-r2\mingw64\bin\gcc.exe" -o "module.ZmxyOL.task.一般任务.登录.o" -c -std=c11 -flto=16 -fuse-linker-plugin -fno-fat-lto-objects -fvisibility=hidden -fwrapv -pipe -Wno-unused-but-set-variable -fpartial-inlining -ftrack-macro-expansion=0 -Wno-deprecated-declarations -fno-var-tracking -Wno-misleading-indentation -fcompare-debug-second -O3 -shared -D_NUITKA_MODULE_MODE -D_WIN32_WINNT=0x0601 -D__NUITKA_NO_ASSERT__ -DMS_WIN64 -D_NUITKA_CONSTANTS_FROM_RESOURCE -D_NUITKA_FROZEN=0 -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\inline_copy\zlib -ID:\anaconda\envs\zmxy\include -I. -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\include -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\static_src -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\inline_copy\libbacktrace "module.ZmxyOL.task.一般任务.登录.c"</command>
+      <stderr>
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: Cannot convert character sequence: Illegal byte sequence
+</stderr>
+    </scons_error_report>
+    <scons_error_report>
+      <command>"C:\Users\steve\AppData\Local\Nuitka\Nuitka\Cache\DOWNLO~1\gcc\x86_64\14.2.0posix-19.1.1-12.0.0-msvcrt-r2\mingw64\bin\ccache.exe" "C:\Users\steve\AppData\Local\Nuitka\Nuitka\Cache\DOWNLO~1\gcc\x86_64\14.2.0posix-19.1.1-12.0.0-msvcrt-r2\mingw64\bin\gcc.exe" -o "module.ZmxyOL.task.一般任务.返回开始.o" -c -std=c11 -flto=16 -fuse-linker-plugin -fno-fat-lto-objects -fvisibility=hidden -fwrapv -pipe -Wno-unused-but-set-variable -fpartial-inlining -ftrack-macro-expansion=0 -Wno-deprecated-declarations -fno-var-tracking -Wno-misleading-indentation -fcompare-debug-second -O3 -shared -D_NUITKA_MODULE_MODE -D_WIN32_WINNT=0x0601 -D__NUITKA_NO_ASSERT__ -DMS_WIN64 -D_NUITKA_CONSTANTS_FROM_RESOURCE -D_NUITKA_FROZEN=0 -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\inline_copy\zlib -ID:\anaconda\envs\zmxy\include -I. -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\include -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\static_src -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\inline_copy\libbacktrace "module.ZmxyOL.task.一般任务.返回开始.c"</command>
+      <stderr>
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: Cannot convert character sequence: Illegal byte sequence
+</stderr>
+    </scons_error_report>
+    <scons_error_report>
+      <command>"C:\Users\steve\AppData\Local\Nuitka\Nuitka\Cache\DOWNLO~1\gcc\x86_64\14.2.0posix-19.1.1-12.0.0-msvcrt-r2\mingw64\bin\ccache.exe" "C:\Users\steve\AppData\Local\Nuitka\Nuitka\Cache\DOWNLO~1\gcc\x86_64\14.2.0posix-19.1.1-12.0.0-msvcrt-r2\mingw64\bin\gcc.exe" -o "module.ZmxyOL.task.一般任务.o" -c -std=c11 -flto=16 -fuse-linker-plugin -fno-fat-lto-objects -fvisibility=hidden -fwrapv -pipe -Wno-unused-but-set-variable -fpartial-inlining -ftrack-macro-expansion=0 -Wno-deprecated-declarations -fno-var-tracking -Wno-misleading-indentation -fcompare-debug-second -O3 -shared -D_NUITKA_MODULE_MODE -D_WIN32_WINNT=0x0601 -D__NUITKA_NO_ASSERT__ -DMS_WIN64 -D_NUITKA_CONSTANTS_FROM_RESOURCE -D_NUITKA_FROZEN=0 -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\inline_copy\zlib -ID:\anaconda\envs\zmxy\include -I. -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\include -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\static_src -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\inline_copy\libbacktrace "module.ZmxyOL.task.一般任务.c"</command>
+      <stderr>
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: Cannot convert character sequence: Illegal byte sequence
+</stderr>
+    </scons_error_report>
+    <scons_error_report>
+      <command>"C:\Users\steve\AppData\Local\Nuitka\Nuitka\Cache\DOWNLO~1\gcc\x86_64\14.2.0posix-19.1.1-12.0.0-msvcrt-r2\mingw64\bin\ccache.exe" "C:\Users\steve\AppData\Local\Nuitka\Nuitka\Cache\DOWNLO~1\gcc\x86_64\14.2.0posix-19.1.1-12.0.0-msvcrt-r2\mingw64\bin\gcc.exe" -o "module.ZmxyOL.task.一般任务.梵天塔.o" -c -std=c11 -flto=16 -fuse-linker-plugin -fno-fat-lto-objects -fvisibility=hidden -fwrapv -pipe -Wno-unused-but-set-variable -fpartial-inlining -ftrack-macro-expansion=0 -Wno-deprecated-declarations -fno-var-tracking -Wno-misleading-indentation -fcompare-debug-second -O3 -shared -D_NUITKA_MODULE_MODE -D_WIN32_WINNT=0x0601 -D__NUITKA_NO_ASSERT__ -DMS_WIN64 -D_NUITKA_CONSTANTS_FROM_RESOURCE -D_NUITKA_FROZEN=0 -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\inline_copy\zlib -ID:\anaconda\envs\zmxy\include -I. -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\include -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\static_src -ID:\anaconda\envs\zmxy\Lib\site-packages\nuitka\build\inline_copy\libbacktrace "module.ZmxyOL.task.一般任务.梵天塔.c"</command>
+      <stderr>
+terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
+  what():  filesystem error: Cannot convert character sequence: Illegal byte sequence
+</stderr>
+    </scons_error_report>
+  </scons_error_reports>
+  <module name="ZmxyOL" kind="CompiledPythonPackage" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\__init__.py">
+    <optimization-time pass="1" time="0.00" micro_passes="3" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" />
+    <module_usages>
+      <module_usage name="os" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.battle" finding="absolute" line="1" />
+      <module_usage name="ZmxyOL.nav" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL.task" finding="absolute" line="3" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.battle" kind="CompiledPythonPackage" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\battle\__init__.py">
+    <optimization-time pass="1" time="0.01" micro_passes="3" />
+    <optimization-time pass="2" time="0.01" micro_passes="1" />
+    <module_usages>
+      <module_usage name="os" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.battle.character.hero" finding="relative" line="1" />
+      <module_usage name="ZmxyOL.battle.skill.skills" finding="relative" line="2" />
+      <module_usage name="ZmxyOL.battle.procedure.heaven" finding="relative" line="3" />
+      <module_usage name="ZmxyOL.battle.procedure.chaos" finding="relative" line="4" />
+      <module_usage name="ZmxyOL.battle.tasks" finding="relative" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.battle.character" kind="CompiledPythonNamespacePackage" usage="import path parent" reason="Module is package content of 'ZmxyOL' instructed by user to follow to." source_path="${cwd}\ZmxyOL\battle\character">
+    <optimization-time pass="1" time="0.00" micro_passes="4" max_branch_merge="1" merged_total="2" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" />
+    <module_usages>
+      <module_usage name="_frozen_importlib_external" finding="absolute" line="1" />
+      <module_usage name="os" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.battle.character.hero" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\battle\character\hero.py">
+    <optimization-time pass="1" time="0.02" micro_passes="5" max_branch_merge="52" merged_total="677" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="23" merged_total="92" />
+    <module_usages>
+      <module_usage name="functools" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="typing" finding="excluded" line="2" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="AutoScriptor" finding="absolute" line="3" />
+      <module_usage name="logzero" finding="absolute" line="4" />
+      <module_usage name="logzero.logger" finding="not-found" line="4" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.battle.procedure" kind="CompiledPythonNamespacePackage" usage="package" reason="Containing package of 'ZmxyOL.battle.procedure.heaven'." source_path="${cwd}\ZmxyOL\battle\procedure">
+    <optimization-time pass="1" time="0.00" micro_passes="4" max_branch_merge="1" merged_total="2" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" />
+    <module_usages>
+      <module_usage name="_frozen_importlib_external" finding="absolute" line="1" />
+      <module_usage name="os" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.battle.procedure.chaos" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\battle\procedure\chaos.py">
+    <optimization-time pass="1" time="0.03" micro_passes="5" max_branch_merge="55" merged_total="777" />
+    <optimization-time pass="2" time="0.01" micro_passes="1" max_branch_merge="55" merged_total="137" />
+    <module_usages>
+      <module_usage name="AutoScriptor" finding="absolute" line="1" />
+      <module_usage name="ZmxyOL.battle.character.hero" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL.nav.api" finding="absolute" line="6" />
+      <module_usage name="ZmxyOL.battle.tasks" finding="absolute" line="17" />
+      <module_usage name="ZmxyOL.nav" finding="absolute" line="18" />
+      <module_usage name="ZmxyOL.nav.ensure_in" finding="not-found" line="18" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.battle.procedure.heaven" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\battle\procedure\heaven.py">
+    <optimization-time pass="1" time="0.03" micro_passes="5" max_branch_merge="83" merged_total="945" />
+    <optimization-time pass="2" time="0.01" micro_passes="1" max_branch_merge="83" merged_total="162" />
+    <module_usages>
+      <module_usage name="AutoScriptor" finding="absolute" line="1" />
+      <module_usage name="ZmxyOL.battle.character.hero" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL.battle.tasks" finding="absolute" line="115" />
+      <module_usage name="ZmxyOL.nav.api" finding="absolute" line="116" />
+      <module_usage name="ZmxyOL.battle.character.hero" finding="absolute" line="117" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.battle.skill" kind="CompiledPythonNamespacePackage" usage="package" reason="Containing package of 'ZmxyOL.battle.skill.skills'." source_path="${cwd}\ZmxyOL\battle\skill">
+    <optimization-time pass="1" time="0.00" micro_passes="4" max_branch_merge="1" merged_total="2" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" />
+    <module_usages>
+      <module_usage name="_frozen_importlib_external" finding="absolute" line="1" />
+      <module_usage name="os" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.battle.skill.skills" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\battle\skill\skills.py">
+    <optimization-time pass="1" time="0.02" micro_passes="5" max_branch_merge="55" merged_total="558" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="29" merged_total="74" />
+    <module_usages>
+      <module_usage name="ZmxyOL.battle.character.hero" finding="absolute" line="1" />
+      <module_usage name="AutoScriptor" finding="absolute" line="2" />
+      <module_usage name="time" finding="absolute" line="77" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.battle.tasks" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\battle\tasks.py">
+    <optimization-time pass="1" time="0.02" micro_passes="5" max_branch_merge="12" merged_total="271" />
+    <optimization-time pass="2" time="0.01" micro_passes="1" max_branch_merge="12" merged_total="47" />
+    <module_usages>
+      <module_usage name="AutoScriptor" finding="absolute" line="1" />
+      <module_usage name="ZmxyOL" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL.battle.character.hero" finding="absolute" line="97" />
+      <module_usage name="ZmxyOL.battle.character.hero" finding="absolute" line="102" />
+      <module_usage name="ZmxyOL.battle.character.hero" finding="absolute" line="107" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.battle.utils" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\battle\utils.py">
+    <optimization-time pass="1" time="0.04" micro_passes="5" max_branch_merge="28" merged_total="859" />
+    <optimization-time pass="2" time="0.01" micro_passes="1" max_branch_merge="28" merged_total="159" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="AutoScriptor" finding="absolute" line="2" />
+      <module_usage name="AutoScriptor.control.MumuAdaptor.constant" finding="absolute" line="3" />
+      <module_usage name="ZmxyOL" finding="absolute" line="4" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.nav" kind="CompiledPythonPackage" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\nav\__init__.py">
+    <optimization-time pass="1" time="0.01" micro_passes="3" max_branch_merge="5" merged_total="21" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="5" merged_total="7" />
+    <module_usages>
+      <module_usage name="os" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.nav.map_manager" finding="relative" line="6" />
+      <module_usage name="ZmxyOL.nav.api" finding="relative" line="7" />
+      <module_usage name="ZmxyOL.nav.envs" finding="relative" line="8" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.nav.api" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\nav\api.py">
+    <optimization-time pass="1" time="0.06" micro_passes="7" max_branch_merge="57" merged_total="2000" />
+    <optimization-time pass="2" time="0.01" micro_passes="1" max_branch_merge="57" merged_total="283" />
+    <module_usages>
+      <module_usage name="time" finding="absolute" line="12" />
+      <module_usage name="AutoScriptor" finding="absolute" line="13" />
+      <module_usage name="ZmxyOL.nav.envs.decorators" finding="absolute" line="14" />
+      <module_usage name="ZmxyOL.nav.map_manager" finding="relative" line="15" />
+      <module_usage name="logzero" finding="absolute" line="16" />
+      <module_usage name="logzero.logger" finding="not-found" line="16" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.nav.envs" kind="CompiledPythonPackage" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\nav\envs\__init__.py">
+    <optimization-time pass="1" time="0.01" micro_passes="3" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" />
+    <module_usages>
+      <module_usage name="os" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.nav.envs.env_locs" finding="relative" line="1" />
+      <module_usage name="ZmxyOL.nav.envs.env_trans" finding="relative" line="2" />
+      <module_usage name="ZmxyOL.nav.envs.loc_trans" finding="relative" line="3" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.nav.envs.decorators" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\nav\envs\decorators.py">
+    <optimization-time pass="1" time="0.04" micro_passes="7" max_branch_merge="22" merged_total="688" />
+    <optimization-time pass="2" time="0.01" micro_passes="1" max_branch_merge="22" merged_total="97" />
+    <module_usages>
+      <module_usage name="functools" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="numpy" finding="absolute" line="2" />
+      <module_usage name="numpy.sign" finding="not-found" line="2" />
+      <module_usage name="AutoScriptor" finding="absolute" line="3" />
+      <module_usage name="ZmxyOL.nav.map_manager" finding="absolute" line="16" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.nav.envs.env_locs" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\nav\envs\env_locs.py">
+    <optimization-time pass="1" time="0.01" micro_passes="3" max_branch_merge="2" merged_total="6" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="2" merged_total="2" />
+    <module_usages>
+      <module_usage name="ZmxyOL.nav.map_manager" finding="absolute" line="1" />
+      <module_usage name="AutoScriptor" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL.nav.envs.decorators" finding="absolute" line="3" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.nav.envs.env_trans" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\nav\envs\env_trans.py">
+    <optimization-time pass="1" time="0.03" micro_passes="5" max_branch_merge="5" merged_total="90" />
+    <optimization-time pass="2" time="0.01" micro_passes="1" max_branch_merge="5" merged_total="18" />
+    <module_usages>
+      <module_usage name="AutoScriptor" finding="absolute" line="1" />
+      <module_usage name="ZmxyOL.nav.map_manager" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL.nav.envs.login" finding="relative" line="3" />
+      <module_usage name="time" finding="absolute" line="4" />
+      <module_usage name="ZmxyOL.nav.envs.decorators" finding="absolute" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.nav.envs.loc_trans" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\nav\envs\loc_trans.py">
+    <optimization-time pass="1" time="0.01" micro_passes="3" max_branch_merge="2" merged_total="6" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="2" merged_total="2" />
+    <module_usages>
+      <module_usage name="AutoScriptor" finding="absolute" line="1" />
+      <module_usage name="ZmxyOL.nav" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL.nav.mm" finding="not-found" line="2" />
+      <module_usage name="ZmxyOL.nav" finding="absolute" line="3" />
+      <module_usage name="ZmxyOL.nav.path" finding="not-found" line="3" />
+      <module_usage name="ZmxyOL.nav.envs.decorators" finding="absolute" line="4" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.nav.envs.login" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\nav\envs\login.py">
+    <optimization-time pass="1" time="0.02" micro_passes="4" max_branch_merge="197" merged_total="875" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="194" merged_total="218" />
+    <module_usages>
+      <module_usage name="AutoScriptor" finding="absolute" line="1" />
+      <module_usage name="time" finding="absolute" line="2" />
+      <module_usage name="getpass" finding="excluded" line="3" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="logzero" finding="absolute" line="4" />
+      <module_usage name="logzero.logger" finding="not-found" line="4" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.nav.map_manager" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\nav\map_manager.py">
+    <optimization-time pass="1" time="0.37" micro_passes="7" max_branch_merge="106" merged_total="4650" />
+    <optimization-time pass="2" time="0.02" micro_passes="1" max_branch_merge="34" merged_total="575" />
+    <module_usages>
+      <module_usage name="typing" finding="excluded" line="6" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="numpy" finding="absolute" line="7" />
+      <module_usage name="scipy.sparse.csgraph" finding="absolute" line="8" />
+      <module_usage name="scipy.sparse.csgraph.floyd_warshall" finding="not-found" line="8" />
+      <module_usage name="ZmxyOL.nav.api" finding="absolute" line="134" />
+      <module_usage name="ZmxyOL.nav.envs.decorators" finding="absolute" line="254" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task" kind="CompiledPythonPackage" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\__init__.py">
+    <optimization-time pass="1" time="0.12" micro_passes="7" max_branch_merge="27" merged_total="2171" />
+    <optimization-time pass="2" time="0.02" micro_passes="1" max_branch_merge="24" merged_total="303" />
+    <module_usages>
+      <module_usage name="os" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="pathlib" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="importlib" finding="excluded" line="2" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="4" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.task_register" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\task_register.py">
+    <optimization-time pass="1" time="0.07" micro_passes="5" max_branch_merge="63" merged_total="961" />
+    <optimization-time pass="2" time="0.01" micro_passes="1" max_branch_merge="55" merged_total="169" />
+    <module_usages>
+      <module_usage name="inspect" finding="excluded" line="2" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="os" finding="excluded" line="3" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="traceback" finding="excluded" line="4" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL" finding="absolute" line="5" />
+      <module_usage name="enum" finding="excluded" line="6" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="AutoScriptor.utils.constant" finding="absolute" line="7" />
+      <module_usage name="logzero" finding="absolute" line="8" />
+      <module_usage name="logzero.logger" finding="not-found" line="8" />
+      <module_usage name="ntpath" finding="excluded" line="40" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="AutoScriptor.core.background" finding="absolute" line="91" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.template" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\template.py">
+    <optimization-time pass="1" time="0.00" micro_passes="4" max_branch_merge="2" merged_total="8" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="2" merged_total="2" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.一般任务" kind="CompiledPythonNamespacePackage" usage="package" reason="Containing package of 'ZmxyOL.task.一般任务.返回开始'." source_path="${cwd}\ZmxyOL\task\一般任务">
+    <optimization-time pass="1" time="0.00" micro_passes="4" max_branch_merge="1" merged_total="2" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" />
+    <module_usages>
+      <module_usage name="_frozen_importlib_external" finding="absolute" line="1" />
+      <module_usage name="os" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.一般任务.梵天塔" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\一般任务\梵天塔.py">
+    <optimization-time pass="1" time="0.05" micro_passes="5" max_branch_merge="61" merged_total="1389" />
+    <optimization-time pass="2" time="0.01" micro_passes="1" max_branch_merge="61" merged_total="277" />
+    <module_usages>
+      <module_usage name="enum" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="traceback" finding="excluded" line="2" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="AutoScriptor.utils" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor.utils.box" finding="relative" line="3" />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="4" />
+      <module_usage name="ZmxyOL" finding="absolute" line="5" />
+      <module_usage name="AutoScriptor" finding="absolute" line="6" />
+      <module_usage name="logzero" finding="absolute" line="7" />
+      <module_usage name="logzero.logger" finding="not-found" line="7" />
+      <module_usage name="ZmxyOL.battle.character.hero" finding="absolute" line="20" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.一般任务.登录" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\一般任务\登录.py">
+    <optimization-time pass="1" time="0.01" micro_passes="4" max_branch_merge="6" merged_total="84" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="6" merged_total="21" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.一般任务.返回开始" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\一般任务\返回开始.py">
+    <optimization-time pass="1" time="0.01" micro_passes="4" max_branch_merge="6" merged_total="84" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="6" merged_total="21" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务" kind="CompiledPythonNamespacePackage" usage="package" reason="Containing package of 'ZmxyOL.task.日常任务.登录'." source_path="${cwd}\ZmxyOL\task\日常任务">
+    <optimization-time pass="1" time="0.00" micro_passes="4" max_branch_merge="1" merged_total="2" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" />
+    <module_usages>
+      <module_usage name="_frozen_importlib_external" finding="absolute" line="1" />
+      <module_usage name="os" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.天庭" kind="CompiledPythonNamespacePackage" usage="package" reason="Containing package of 'ZmxyOL.task.日常任务.天庭.组队任务'." source_path="${cwd}\ZmxyOL\task\日常任务\天庭">
+    <optimization-time pass="1" time="0.00" micro_passes="4" max_branch_merge="1" merged_total="2" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" />
+    <module_usages>
+      <module_usage name="_frozen_importlib_external" finding="absolute" line="1" />
+      <module_usage name="os" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.天庭.地狱混沌" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\天庭\地狱混沌.py">
+    <optimization-time pass="1" time="0.01" micro_passes="4" max_branch_merge="6" merged_total="84" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="6" merged_total="21" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="ZmxyOL.battle.character.hero" finding="absolute" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.天庭.天庭混沌" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\天庭\天庭混沌.py">
+    <optimization-time pass="1" time="0.01" micro_passes="4" max_branch_merge="6" merged_total="84" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="6" merged_total="21" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.天庭.组队任务" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\天庭\组队任务.py">
+    <optimization-time pass="1" time="0.02" micro_passes="5" max_branch_merge="91" merged_total="577" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="89" merged_total="115" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="2" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="3" />
+      <module_usage name="ZmxyOL" finding="absolute" line="4" />
+      <module_usage name="AutoScriptor" finding="absolute" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.村庄" kind="CompiledPythonNamespacePackage" usage="package" reason="Containing package of 'ZmxyOL.task.日常任务.村庄.竞技场'." source_path="${cwd}\ZmxyOL\task\日常任务\村庄">
+    <optimization-time pass="1" time="0.00" micro_passes="4" max_branch_merge="1" merged_total="2" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" />
+    <module_usages>
+      <module_usage name="_frozen_importlib_external" finding="absolute" line="1" />
+      <module_usage name="os" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.村庄.仙宝挖掘" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\村庄\仙宝挖掘.py">
+    <optimization-time pass="1" time="0.01" micro_passes="4" max_branch_merge="6" merged_total="92" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="6" merged_total="23" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.村庄.仙气消耗" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\村庄\仙气消耗.py">
+    <optimization-time pass="1" time="0.01" micro_passes="4" max_branch_merge="53" merged_total="316" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="53" merged_total="77" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.村庄.仙盟建设" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\村庄\仙盟建设.py">
+    <optimization-time pass="1" time="0.01" micro_passes="4" max_branch_merge="100" merged_total="506" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="98" merged_total="126" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.村庄.取经" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\村庄\取经.py">
+    <optimization-time pass="1" time="0.01" micro_passes="4" max_branch_merge="6" merged_total="100" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="6" merged_total="25" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.村庄.天选阁" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\村庄\天选阁.py">
+    <optimization-time pass="1" time="0.05" micro_passes="5" max_branch_merge="168" merged_total="1151" />
+    <optimization-time pass="2" time="0.01" micro_passes="1" max_branch_merge="168" merged_total="227" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="fsspec.spec" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor.control.NemuIpc.device.method.nemu_ipc" finding="absolute" line="4" />
+      <module_usage name="AutoScriptor.core.api" finding="absolute" line="5" />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="6" />
+      <module_usage name="ZmxyOL" finding="absolute" line="7" />
+      <module_usage name="AutoScriptor" finding="absolute" line="8" />
+      <module_usage name="logzero" finding="absolute" line="9" />
+      <module_usage name="logzero.logger" finding="not-found" line="9" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.村庄.妖兽" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\村庄\妖兽.py">
+    <optimization-time pass="1" time="0.01" micro_passes="4" max_branch_merge="6" merged_total="100" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="6" merged_total="25" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.村庄.宠物培养" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\村庄\宠物培养.py">
+    <optimization-time pass="1" time="0.01" micro_passes="4" max_branch_merge="6" merged_total="92" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="6" merged_total="23" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.村庄.强化装备" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\村庄\强化装备.py">
+    <optimization-time pass="1" time="0.01" micro_passes="4" max_branch_merge="6" merged_total="100" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="6" merged_total="25" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.村庄.战令领取" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\村庄\战令领取.py">
+    <optimization-time pass="1" time="0.01" micro_passes="4" max_branch_merge="6" merged_total="88" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="6" merged_total="22" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.村庄.活跃券" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\村庄\活跃券.py">
+    <optimization-time pass="1" time="0.02" micro_passes="5" max_branch_merge="68" merged_total="558" />
+    <optimization-time pass="2" time="0.01" micro_passes="1" max_branch_merge="68" merged_total="104" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.nav.envs.decorators" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="3" />
+      <module_usage name="ZmxyOL" finding="absolute" line="4" />
+      <module_usage name="AutoScriptor" finding="absolute" line="5" />
+      <module_usage name="logzero" finding="absolute" line="6" />
+      <module_usage name="logzero.logger" finding="not-found" line="6" />
+      <module_usage name="ZmxyOL.battle.utils" finding="absolute" line="32" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.村庄.竞技场" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\村庄\竞技场.py">
+    <optimization-time pass="1" time="0.01" micro_passes="4" max_branch_merge="6" merged_total="88" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="6" merged_total="22" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.极北" kind="CompiledPythonNamespacePackage" usage="package" reason="Containing package of 'ZmxyOL.task.日常任务.极北.极寒深渊'." source_path="${cwd}\ZmxyOL\task\日常任务\极北">
+    <optimization-time pass="1" time="0.00" micro_passes="4" max_branch_merge="1" merged_total="2" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" />
+    <module_usages>
+      <module_usage name="_frozen_importlib_external" finding="absolute" line="1" />
+      <module_usage name="os" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.极北.极北地区" kind="CompiledPythonNamespacePackage" usage="package" reason="Containing package of 'ZmxyOL.task.日常任务.极北.极北地区.混沌蛋'." source_path="${cwd}\ZmxyOL\task\日常任务\极北\极北地区">
+    <optimization-time pass="1" time="0.00" micro_passes="4" max_branch_merge="1" merged_total="2" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" />
+    <module_usages>
+      <module_usage name="_frozen_importlib_external" finding="absolute" line="1" />
+      <module_usage name="os" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.极北.极北地区.一键碾压" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\极北\极北地区\一键碾压.py">
+    <optimization-time pass="1" time="0.01" micro_passes="4" max_branch_merge="6" merged_total="92" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="6" merged_total="23" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.极北.极北地区.冰窟探险" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\极北\极北地区\冰窟探险.py">
+    <optimization-time pass="1" time="0.01" micro_passes="4" max_branch_merge="61" merged_total="364" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="61" merged_total="87" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.极北.极北地区.厄难副本" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\极北\极北地区\厄难副本.py">
+    <optimization-time pass="1" time="0.02" micro_passes="4" max_branch_merge="51" merged_total="344" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="51" merged_total="79" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="AutoScriptor.core.targets" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="3" />
+      <module_usage name="ZmxyOL" finding="absolute" line="4" />
+      <module_usage name="AutoScriptor" finding="absolute" line="5" />
+      <module_usage name="logzero" finding="absolute" line="6" />
+      <module_usage name="logzero.logger" finding="not-found" line="6" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.极北.极北地区.极北混沌" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\极北\极北地区\极北混沌.py">
+    <optimization-time pass="1" time="0.02" micro_passes="5" max_branch_merge="53" merged_total="478" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="53" merged_total="95" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.battle.tasks" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="3" />
+      <module_usage name="ZmxyOL" finding="absolute" line="4" />
+      <module_usage name="AutoScriptor" finding="absolute" line="5" />
+      <module_usage name="logzero" finding="absolute" line="6" />
+      <module_usage name="logzero.logger" finding="not-found" line="6" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.极北.极北地区.梵天塔" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\极北\极北地区\梵天塔.py">
+    <optimization-time pass="1" time="0.03" micro_passes="5" max_branch_merge="53" merged_total="847" />
+    <optimization-time pass="2" time="0.01" micro_passes="1" max_branch_merge="51" merged_total="169" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+      <module_usage name="ZmxyOL.battle.character.hero" finding="absolute" line="9" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.极北.极北地区.混沌蛋" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\极北\极北地区\混沌蛋.py">
+    <optimization-time pass="1" time="0.01" micro_passes="5" max_branch_merge="16" merged_total="255" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="16" merged_total="51" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.极北.极北村庄" kind="CompiledPythonNamespacePackage" usage="package" reason="Containing package of 'ZmxyOL.task.日常任务.极北.极北村庄.消费点券'." source_path="${cwd}\ZmxyOL\task\日常任务\极北\极北村庄">
+    <optimization-time pass="1" time="0.00" micro_passes="4" max_branch_merge="1" merged_total="2" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" />
+    <module_usages>
+      <module_usage name="_frozen_importlib_external" finding="absolute" line="1" />
+      <module_usage name="os" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.极北.极北村庄.仙宝炼化" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\极北\极北村庄\仙宝炼化.py">
+    <optimization-time pass="1" time="0.04" micro_passes="4" max_branch_merge="67" merged_total="556" />
+    <optimization-time pass="2" time="0.01" micro_passes="1" max_branch_merge="67" merged_total="132" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="AutoScriptor.control.NemuIpc.device.method.nemu_ipc" finding="absolute" line="3" />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="4" />
+      <module_usage name="ZmxyOL" finding="absolute" line="5" />
+      <module_usage name="AutoScriptor" finding="absolute" line="6" />
+      <module_usage name="logzero" finding="absolute" line="7" />
+      <module_usage name="logzero.logger" finding="not-found" line="7" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.极北.极北村庄.极光天诏" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\极北\极北村庄\极光天诏.py">
+    <optimization-time pass="1" time="0.01" micro_passes="4" max_branch_merge="6" merged_total="84" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="6" merged_total="21" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.极北.极北村庄.消费点券" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\极北\极北村庄\消费点券.py">
+    <optimization-time pass="1" time="0.02" micro_passes="4" max_branch_merge="66" merged_total="431" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="15" merged_total="57" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="enum" finding="excluded" line="2" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="3" />
+      <module_usage name="ZmxyOL" finding="absolute" line="4" />
+      <module_usage name="AutoScriptor" finding="absolute" line="5" />
+      <module_usage name="logzero" finding="absolute" line="6" />
+      <module_usage name="logzero.logger" finding="not-found" line="6" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.极北.极寒深渊" kind="CompiledPythonNamespacePackage" usage="package" reason="Containing package of 'ZmxyOL.task.日常任务.极北.极寒深渊.极渊副本'." source_path="${cwd}\ZmxyOL\task\日常任务\极北\极寒深渊">
+    <optimization-time pass="1" time="0.00" micro_passes="4" max_branch_merge="1" merged_total="2" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" />
+    <module_usages>
+      <module_usage name="_frozen_importlib_external" finding="absolute" line="1" />
+      <module_usage name="os" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.极北.极寒深渊.极渊副本" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\极北\极寒深渊\极渊副本.py">
+    <optimization-time pass="1" time="0.03" micro_passes="5" max_branch_merge="65" merged_total="762" />
+    <optimization-time pass="2" time="0.01" micro_passes="1" max_branch_merge="65" merged_total="144" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+      <module_usage name="ZmxyOL.battle.tasks" finding="absolute" line="9" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.登录" kind="CompiledPythonNamespacePackage" usage="package" reason="Containing package of 'ZmxyOL.task.日常任务.登录.登录其他角色'." source_path="${cwd}\ZmxyOL\task\日常任务\登录">
+    <optimization-time pass="1" time="0.00" micro_passes="4" max_branch_merge="1" merged_total="2" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" />
+    <module_usages>
+      <module_usage name="_frozen_importlib_external" finding="absolute" line="1" />
+      <module_usage name="os" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.日常任务.登录.登录其他角色" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\日常任务\登录\登录其他角色.py">
+    <optimization-time pass="1" time="0.01" micro_passes="4" max_branch_merge="6" merged_total="98" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="6" merged_total="21" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="ZmxyOL.nav.envs.login" finding="absolute" line="5" />
+      <module_usage name="logzero" finding="absolute" line="6" />
+      <module_usage name="logzero.logger" finding="not-found" line="6" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.每周任务" kind="CompiledPythonNamespacePackage" usage="package" reason="Containing package of 'ZmxyOL.task.每周任务.荣耀之战'." source_path="${cwd}\ZmxyOL\task\每周任务">
+    <optimization-time pass="1" time="0.00" micro_passes="4" max_branch_merge="1" merged_total="2" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" />
+    <module_usages>
+      <module_usage name="_frozen_importlib_external" finding="absolute" line="1" />
+      <module_usage name="os" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.每周任务.冰窟商店" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\每周任务\冰窟商店.py">
+    <optimization-time pass="1" time="0.01" micro_passes="4" max_branch_merge="23" merged_total="188" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="23" merged_total="47" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.每周任务.幽冥冰窟" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\每周任务\幽冥冰窟.py">
+    <optimization-time pass="1" time="0.03" micro_passes="5" max_branch_merge="69" merged_total="778" />
+    <optimization-time pass="2" time="0.01" micro_passes="1" max_branch_merge="69" merged_total="152" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+      <module_usage name="ZmxyOL.battle.utils" finding="absolute" line="55" />
+    </module_usages>
+  </module>
+  <module name="ZmxyOL.task.每周任务.荣耀之战" kind="CompiledPythonModule" usage="root_module" reason="Root module" source_path="${cwd}\ZmxyOL\task\每周任务\荣耀之战.py">
+    <optimization-time pass="1" time="0.03" micro_passes="5" max_branch_merge="42" merged_total="535" />
+    <optimization-time pass="2" time="0.00" micro_passes="1" max_branch_merge="42" merged_total="107" />
+    <module_usages>
+      <module_usage name="traceback" finding="excluded" line="1" exclusion_reason="Not following into stdlib unless standalone or requested to follow into stdlib." />
+      <module_usage name="ZmxyOL.task.task_register" finding="absolute" line="2" />
+      <module_usage name="ZmxyOL" finding="absolute" line="3" />
+      <module_usage name="AutoScriptor" finding="absolute" line="4" />
+      <module_usage name="logzero" finding="absolute" line="5" />
+      <module_usage name="logzero.logger" finding="not-found" line="5" />
+    </module_usages>
+  </module>
+  <performance>
+    <memory_usage name="after_launch" value="44810240" />
+    <memory_usage name="before_c_code_generation" value="55889920" />
+    <memory_usage name="before_running_scons" value="59547648" />
+  </performance>
+  <data_composer blob_size="59022" total="4105">
+    <module_data filename="__bytecode.const" blob_name=".bytecode" blob_size="3" input_size="0" />
+    <module_data filename="__constants.const" blob_name="" blob_size="794" input_size="2018" />
+    <module_data filename="module.ZmxyOL.battle.character.const" blob_name="ZmxyOL.battle.character" blob_size="301" input_size="511" />
+    <module_data filename="module.ZmxyOL.battle.character.hero.const" blob_name="ZmxyOL.battle.character.hero" blob_size="1446" input_size="2794" />
+    <module_data filename="module.ZmxyOL.battle.const" blob_name="ZmxyOL.battle" blob_size="396" input_size="775" />
+    <module_data filename="module.ZmxyOL.battle.procedure.chaos.const" blob_name="ZmxyOL.battle.procedure.chaos" blob_size="1467" input_size="2595" />
+    <module_data filename="module.ZmxyOL.battle.procedure.const" blob_name="ZmxyOL.battle.procedure" blob_size="301" input_size="511" />
+    <module_data filename="module.ZmxyOL.battle.procedure.heaven.const" blob_name="ZmxyOL.battle.procedure.heaven" blob_size="1916" input_size="3466" />
+    <module_data filename="module.ZmxyOL.battle.skill.const" blob_name="ZmxyOL.battle.skill" blob_size="281" input_size="491" />
+    <module_data filename="module.ZmxyOL.battle.skill.skills.const" blob_name="ZmxyOL.battle.skill.skills" blob_size="1043" input_size="1943" />
+    <module_data filename="module.ZmxyOL.battle.tasks.const" blob_name="ZmxyOL.battle.tasks" blob_size="1865" input_size="3467" />
+    <module_data filename="module.ZmxyOL.battle.utils.const" blob_name="ZmxyOL.battle.utils" blob_size="1193" input_size="2577" />
+    <module_data filename="module.ZmxyOL.const" blob_name="ZmxyOL" blob_size="614" input_size="1069" />
+    <module_data filename="module.ZmxyOL.nav.api.const" blob_name="ZmxyOL.nav.api" blob_size="1884" input_size="3108" />
+    <module_data filename="module.ZmxyOL.nav.const" blob_name="ZmxyOL.nav" blob_size="563" input_size="913" />
+    <module_data filename="module.ZmxyOL.nav.envs.const" blob_name="ZmxyOL.nav.envs" blob_size="380" input_size="707" />
+    <module_data filename="module.ZmxyOL.nav.envs.decorators.const" blob_name="ZmxyOL.nav.envs.decorators" blob_size="694" input_size="1314" />
+    <module_data filename="module.ZmxyOL.nav.envs.env_locs.const" blob_name="ZmxyOL.nav.envs.env_locs" blob_size="970" input_size="1880" />
+    <module_data filename="module.ZmxyOL.nav.envs.env_trans.const" blob_name="ZmxyOL.nav.envs.env_trans" blob_size="1305" input_size="2631" />
+    <module_data filename="module.ZmxyOL.nav.envs.loc_trans.const" blob_name="ZmxyOL.nav.envs.loc_trans" blob_size="833" input_size="1688" />
+    <module_data filename="module.ZmxyOL.nav.envs.login.const" blob_name="ZmxyOL.nav.envs.login" blob_size="1232" input_size="2332" />
+    <module_data filename="module.ZmxyOL.nav.map_manager.const" blob_name="ZmxyOL.nav.map_manager" blob_size="4251" input_size="6224" />
+    <module_data filename="module.ZmxyOL.task.const" blob_name="ZmxyOL.task" blob_size="1528" input_size="2729" />
+    <module_data filename="module.ZmxyOL.task.task_register.const" blob_name="ZmxyOL.task.task_register" blob_size="1267" input_size="2243" />
+    <module_data filename="module.ZmxyOL.task.template.const" blob_name="ZmxyOL.task.template" blob_size="286" input_size="570" />
+    <module_data filename="module.ZmxyOL.task.一般任务.const" blob_name="ZmxyOL.task.一般任务" blob_size="306" input_size="516" />
+    <module_data filename="module.ZmxyOL.task.一般任务.梵天塔.const" blob_name="ZmxyOL.task.一般任务.梵天塔" blob_size="1514" input_size="3091" />
+    <module_data filename="module.ZmxyOL.task.一般任务.登录.const" blob_name="ZmxyOL.task.一般任务.登录" blob_size="332" input_size="672" />
+    <module_data filename="module.ZmxyOL.task.一般任务.返回开始.const" blob_name="ZmxyOL.task.一般任务.返回开始" blob_size="344" input_size="684" />
+    <module_data filename="module.ZmxyOL.task.日常任务.const" blob_name="ZmxyOL.task.日常任务" blob_size="306" input_size="516" />
+    <module_data filename="module.ZmxyOL.task.日常任务.天庭.const" blob_name="ZmxyOL.task.日常任务.天庭" blob_size="407" input_size="644" />
+    <module_data filename="module.ZmxyOL.task.日常任务.天庭.地狱混沌.const" blob_name="ZmxyOL.task.日常任务.天庭.地狱混沌" blob_size="439" input_size="831" />
+    <module_data filename="module.ZmxyOL.task.日常任务.天庭.天庭混沌.const" blob_name="ZmxyOL.task.日常任务.天庭.天庭混沌" blob_size="451" input_size="844" />
+    <module_data filename="module.ZmxyOL.task.日常任务.天庭.组队任务.const" blob_name="ZmxyOL.task.日常任务.天庭.组队任务" blob_size="912" input_size="1872" />
+    <module_data filename="module.ZmxyOL.task.日常任务.村庄.const" blob_name="ZmxyOL.task.日常任务.村庄" blob_size="407" input_size="644" />
+    <module_data filename="module.ZmxyOL.task.日常任务.村庄.仙宝挖掘.const" blob_name="ZmxyOL.task.日常任务.村庄.仙宝挖掘" blob_size="603" input_size="1241" />
+    <module_data filename="module.ZmxyOL.task.日常任务.村庄.仙气消耗.const" blob_name="ZmxyOL.task.日常任务.村庄.仙气消耗" blob_size="695" input_size="1445" />
+    <module_data filename="module.ZmxyOL.task.日常任务.村庄.仙盟建设.const" blob_name="ZmxyOL.task.日常任务.村庄.仙盟建设" blob_size="804" input_size="1625" />
+    <module_data filename="module.ZmxyOL.task.日常任务.村庄.取经.const" blob_name="ZmxyOL.task.日常任务.村庄.取经" blob_size="633" input_size="1311" />
+    <module_data filename="module.ZmxyOL.task.日常任务.村庄.天选阁.const" blob_name="ZmxyOL.task.日常任务.村庄.天选阁" blob_size="1686" input_size="3202" />
+    <module_data filename="module.ZmxyOL.task.日常任务.村庄.妖兽.const" blob_name="ZmxyOL.task.日常任务.村庄.妖兽" blob_size="1054" input_size="2169" />
+    <module_data filename="module.ZmxyOL.task.日常任务.村庄.宠物培养.const" blob_name="ZmxyOL.task.日常任务.村庄.宠物培养" blob_size="753" input_size="1503" />
+    <module_data filename="module.ZmxyOL.task.日常任务.村庄.强化装备.const" blob_name="ZmxyOL.task.日常任务.村庄.强化装备" blob_size="903" input_size="1784" />
+    <module_data filename="module.ZmxyOL.task.日常任务.村庄.战令领取.const" blob_name="ZmxyOL.task.日常任务.村庄.战令领取" blob_size="536" input_size="1111" />
+    <module_data filename="module.ZmxyOL.task.日常任务.村庄.活跃券.const" blob_name="ZmxyOL.task.日常任务.村庄.活跃券" blob_size="1015" input_size="1950" />
+    <module_data filename="module.ZmxyOL.task.日常任务.村庄.竞技场.const" blob_name="ZmxyOL.task.日常任务.村庄.竞技场" blob_size="877" input_size="1777" />
+    <module_data filename="module.ZmxyOL.task.日常任务.极北.const" blob_name="ZmxyOL.task.日常任务.极北" blob_size="407" input_size="644" />
+    <module_data filename="module.ZmxyOL.task.日常任务.极北.极北地区.const" blob_name="ZmxyOL.task.日常任务.极北.极北地区" blob_size="564" input_size="828" />
+    <module_data filename="module.ZmxyOL.task.日常任务.极北.极北地区.一键碾压.const" blob_name="ZmxyOL.task.日常任务.极北.极北地区.一键碾压" blob_size="656" input_size="1284" />
+    <module_data filename="module.ZmxyOL.task.日常任务.极北.极北地区.冰窟探险.const" blob_name="ZmxyOL.task.日常任务.极北.极北地区.冰窟探险" blob_size="763" input_size="1539" />
+    <module_data filename="module.ZmxyOL.task.日常任务.极北.极北地区.厄难副本.const" blob_name="ZmxyOL.task.日常任务.极北.极北地区.厄难副本" blob_size="912" input_size="1803" />
+    <module_data filename="module.ZmxyOL.task.日常任务.极北.极北地区.极北混沌.const" blob_name="ZmxyOL.task.日常任务.极北.极北地区.极北混沌" blob_size="952" input_size="1768" />
+    <module_data filename="module.ZmxyOL.task.日常任务.极北.极北地区.梵天塔.const" blob_name="ZmxyOL.task.日常任务.极北.极北地区.梵天塔" blob_size="994" input_size="2099" />
+    <module_data filename="module.ZmxyOL.task.日常任务.极北.极北地区.混沌蛋.const" blob_name="ZmxyOL.task.日常任务.极北.极北地区.混沌蛋" blob_size="541" input_size="1125" />
+    <module_data filename="module.ZmxyOL.task.日常任务.极北.极北村庄.const" blob_name="ZmxyOL.task.日常任务.极北.极北村庄" blob_size="564" input_size="828" />
+    <module_data filename="module.ZmxyOL.task.日常任务.极北.极北村庄.仙宝炼化.const" blob_name="ZmxyOL.task.日常任务.极北.极北村庄.仙宝炼化" blob_size="1096" input_size="2177" />
+    <module_data filename="module.ZmxyOL.task.日常任务.极北.极北村庄.极光天诏.const" blob_name="ZmxyOL.task.日常任务.极北.极北村庄.极光天诏" blob_size="577" input_size="1124" />
+    <module_data filename="module.ZmxyOL.task.日常任务.极北.极北村庄.消费点券.const" blob_name="ZmxyOL.task.日常任务.极北.极北村庄.消费点券" blob_size="893" input_size="1746" />
+    <module_data filename="module.ZmxyOL.task.日常任务.极北.极寒深渊.const" blob_name="ZmxyOL.task.日常任务.极北.极寒深渊" blob_size="564" input_size="828" />
+    <module_data filename="module.ZmxyOL.task.日常任务.极北.极寒深渊.极渊副本.const" blob_name="ZmxyOL.task.日常任务.极北.极寒深渊.极渊副本" blob_size="1181" input_size="2049" />
+    <module_data filename="module.ZmxyOL.task.日常任务.登录.const" blob_name="ZmxyOL.task.日常任务.登录" blob_size="407" input_size="644" />
+    <module_data filename="module.ZmxyOL.task.日常任务.登录.登录其他角色.const" blob_name="ZmxyOL.task.日常任务.登录.登录其他角色" blob_size="488" input_size="910" />
+    <module_data filename="module.ZmxyOL.task.每周任务.const" blob_name="ZmxyOL.task.每周任务" blob_size="306" input_size="516" />
+    <module_data filename="module.ZmxyOL.task.每周任务.冰窟商店.const" blob_name="ZmxyOL.task.每周任务.冰窟商店" blob_size="842" input_size="1734" />
+    <module_data filename="module.ZmxyOL.task.每周任务.幽冥冰窟.const" blob_name="ZmxyOL.task.每周任务.幽冥冰窟" blob_size="1158" input_size="2461" />
+    <module_data filename="module.ZmxyOL.task.每周任务.荣耀之战.const" blob_name="ZmxyOL.task.每周任务.荣耀之战" blob_size="797" input_size="1746" />
+  </data_composer>
+  <command_line>
+    <option value="--module" />
+    <option value="--include-package=ZmxyOL" />
+    <option value="--follow-import-to=ZmxyOL" />
+    <option value="--output-dir=wheelhouse" />
+    <option value="ZmxyOL" />
+  </command_line>
+  <plugins>
+    <plugin name="anti-bloat" user_enabled="no" />
+    <plugin name="eventlet" user_enabled="no" />
+    <plugin name="gi" user_enabled="no" />
+    <plugin name="implicit-imports" user_enabled="no" />
+    <plugin name="options-nanny" user_enabled="no" />
+    <plugin name="pkg-resources" user_enabled="no" />
+    <plugin name="transformers" user_enabled="no" />
+  </plugins>
+  <distributions />
+  <python python_exe="${sys.prefix}\python.exe" python_flavor="Anaconda Python" python_version="3.10.15" os_name="Windows" os_release="11" arch_name="x86_64" filesystem_encoding="utf-8">
+    <search_path>
+      <path value="${cwd}" />
+      <path value="${sys.prefix}\DLLs" />
+      <path value="${sys.prefix}\lib" />
+      <path value="${sys.prefix}" />
+      <path value="${sys.prefix}\lib\site-packages" />
+      <path value="${sys.prefix}\lib\site-packages\setuptools\_vendor" />
+    </search_path>
+  </python>
+  <output run_filename="${cwd}\wheelhouse\ZmxyOL.cp310-win_amd64.pyd" />
+</nuitka-compilation-report>

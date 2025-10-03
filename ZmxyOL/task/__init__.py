@@ -1,13 +1,33 @@
 import pathlib
 import importlib
+import os  # 用于文件和目录操作
 
-from ZmxyOL.task.task_register import register_task
+from ZmxyOL.task.task_register import register_task, translate_path_part
+from AutoScriptor.utils.constant import cfg  # 引入全局配置实例
+
+# 递归获取最小注册顺序，用于分支排序
+def get_min_order(node):
+    if isinstance(node, dict):
+        if 'order' in node:
+            return node['order']
+        orders = [get_min_order(v) for v in node.values() if isinstance(v, dict)]
+        return min(orders) if orders else float('inf')
+    return float('inf')
+
+# 递归对任务树按注册顺序排序
+def sort_tasks(node):
+    for child in node.values():
+        if isinstance(child, dict):
+            sort_tasks(child)
+    sorted_items = sorted(node.items(), key=lambda item: get_min_order(item[1]))
+    node.clear()
+    node.update(sorted_items)
+
 # 您也可以从这里导出排序后的 menu，如果主程序需要的话
 __all__ = ["register_task"]
 
 PACKAGE_NAME = __name__
 PACKAGE_PATH = pathlib.Path(__file__).parent
-
 
 def get_custom_order_key(path: pathlib.Path):
     """
@@ -56,84 +76,89 @@ def get_custom_order_key(path: pathlib.Path):
     return tuple(order_key_list)
 
 
-# 1. 先一次性获取所有文件路径，并转换为列表
-all_py_files = list(PACKAGE_PATH.rglob("*.py"))
 
-# 2. 对文件路径列表进行排序。
-all_py_files.sort(key=get_custom_order_key)
+def gather_py_files():
+    """Collect all Python files under PACKAGE_PATH."""
+    return list(PACKAGE_PATH.rglob("*.py"))
 
-# 3. 打印排序后的结果，方便调试
-print("=== 排序后的文件列表 ===")
-for i, py_file in enumerate(all_py_files):
-    # 忽略 __init__.py 文件自身
-    if py_file.name == "__init__.py":
-        continue
-    relative_path = py_file.relative_to(PACKAGE_PATH)
-    # 为了方便调试，同时打印出生成的排序键
-    key = get_custom_order_key(py_file)
-    print(f"{i+1:2d}. {str(relative_path):<40} | Key: {key}")
-print("\n=== 开始导入模块 ===")
 
-# 4. 遍历这个排序好的列表来进行导入
-for py_file in all_py_files:
-    # 避免导入自己
-    if py_file.name == "__init__.py":
-        continue
-    
-    relative_path = py_file.relative_to(PACKAGE_PATH)
-    module_path_parts = list(relative_path.with_suffix("").parts)
-    relative_module_path = ".".join(module_path_parts)
-    absolute_module_path = f"{PACKAGE_NAME}.{relative_module_path}"
-    
-    try:
-        importlib.import_module(absolute_module_path)
-    except Exception as e:
-        print(f"Error importing {absolute_module_path}: {e}")
+def sort_py_files(py_files):
+    """Sort Python files using the custom order key."""
+    py_files.sort(key=get_custom_order_key)
+    return py_files
 
-# 此时，全局变量 menu 就已经是完全有序的了！
-print("\n=== 模块导入完成 ===")
 
-# 5. 将排序后的顺序写入对应目录的 _order.txt 文件
-print("\n=== 开始更新 _order.txt 文件 ===")
-for py_file in all_py_files:
-    if py_file.name == "__init__.py":
-        continue
-    
-    relative_path = py_file.relative_to(PACKAGE_PATH)
-    file_dir = py_file.parent
-    
-    # 为每个目录生成 _order.txt
-    current_dir = PACKAGE_PATH
-    for part in relative_path.parent.parts:
-        current_dir = current_dir / part
-        order_file = current_dir / "_order.txt"
-        
-        # 获取当前目录下的所有文件和子目录（排除 __init__.py、_order.txt 和 __pycache__）
-        dir_items = []
-        for item in current_dir.iterdir():
-            if item.name not in ["__init__.py", "_order.txt", "__pycache__"]:
-                # 如果是文件，去掉 .py 后缀；如果是目录，保持原名
-                item_name = item.stem if item.is_file() else item.name
-                dir_items.append(item_name)
-        
-        # 根据排序后的文件列表，为当前目录生成正确的顺序
-        ordered_items = []
-        for sorted_file in all_py_files:
-            if sorted_file.is_relative_to(current_dir) and sorted_file.name != "__init__.py":
-                item_name = sorted_file.stem if sorted_file.is_file() else sorted_file.name
-                if item_name in dir_items and item_name not in ordered_items:
-                    ordered_items.append(item_name)
-        
-        # 将剩余未排序的项目添加到末尾
-        for item in dir_items:
-            if item not in ordered_items:
-                ordered_items.append(item)
-        
-        # 写入 _order.txt 文件
+def print_sorted_files(py_files):
+    print("=== 排序后的文件列表 ===")
+    for i, py_file in enumerate(py_files):
+        if py_file.name == "__init__.py":
+            continue
+        relative_path = py_file.relative_to(PACKAGE_PATH)
+        key = get_custom_order_key(py_file)
+        print(f"{i+1:2d}. {str(relative_path):<40} | Key: {key}")
+
+
+def import_modules(py_files):
+    print("\n=== 开始导入模块 ===")
+    for py_file in py_files:
+        if py_file.name == "__init__.py":
+            continue
+        relative_path = py_file.relative_to(PACKAGE_PATH)
+        module_path_parts = list(relative_path.with_suffix("").parts)
+        relative_module_path = ".".join(module_path_parts)
+        absolute_module_path = f"{PACKAGE_NAME}.{relative_module_path}"
         try:
-            with open(order_file, 'w', encoding='utf-8') as f:
-                for item in ordered_items:
-                    f.write(f"{item}\n")
+            importlib.import_module(absolute_module_path)
         except Exception as e:
-            print(f"❌ 更新失败 {order_file}: {e}")
+            print(f"Error importing {absolute_module_path}: {e}")
+    print("\n=== 模块导入完成 ===")
+
+
+def update_order_files(py_files):
+    print("\n=== 开始更新 _order.txt 文件 ===")
+    keys=[get_custom_order_key(py_file) for py_file in py_files]
+    order_dict={}
+    def update_order_dict(order_dict,key):
+        for i in range(len(key)-1):
+            key_path="/".join([key[j][1] for j in range(i)])
+            if key_path not in order_dict:
+                order_dict[key_path]=[key[i+1][1]]
+            elif key[i+1][1] not in order_dict[key_path]:
+                order_dict[key_path].append(key[i+1][1])
+        return order_dict
+    for key in keys:
+        order_dict=update_order_dict(order_dict,key)
+    # 为每个目录写入或更新 _order.txt 文件
+    for key_path, names in order_dict.items():
+        # 构造目标目录路径
+        parts = key_path.split("/") if key_path else []
+        dir_path = PACKAGE_PATH.joinpath(*parts)
+        os.makedirs(dir_path, exist_ok=True)
+        order_file = dir_path / '_order.txt'
+        with open(order_file, 'w', encoding='utf-8') as f:
+            for name in names:
+                f.write(f"{name}\n")
+        print(f"已更新: {order_file}")
+    return order_dict
+
+
+def print_k(area, i=0):
+    for k in area:
+        print('----' * i, k, sep='')
+        if isinstance(area[k], dict):
+            print_k(area[k], i+1)
+
+def main():
+    from AutoScriptor.core.background import bg
+    # 收集并排序 Python 模块
+    all_py_files = gather_py_files()
+    sorted_files = sort_py_files(all_py_files)
+    import_modules(sorted_files)
+    sort_tasks(cfg['tasks'])
+    # 打印任务配置树
+    print_k(cfg['tasks'])
+    
+main()
+
+
 

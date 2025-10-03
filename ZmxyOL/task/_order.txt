@@ -1,4 +1,3 @@
-日常任务
-每周任务
-一般任务
-活动任务
+daily_task
+weekly_task
+general_task

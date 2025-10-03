@@ -144,13 +144,23 @@ def find_and_execute_tasks(
                         module_name, class_name = param_meta[k].rsplit('.', 1)
                         mod = importlib.import_module(module_name)
                         EnumClass = getattr(mod, class_name)
-                        params[k] = EnumClass[v]
+                        # 支持枚举列表
+                        if isinstance(v, list):
+                            params[k] = [EnumClass[item] for item in v]
+                        else:
+                            params[k] = EnumClass[v]
                     else:
                         # 注解为枚举时，尝试根据 name 恢复
                         param = sig.parameters.get(k)
                         ann = getattr(param, 'annotation', None)
-                        if isinstance(ann, type) and issubclass(ann, enum.Enum) and isinstance(v, str):
-                            params[k] = ann[v]
+                        if isinstance(ann, type) and issubclass(ann, enum.Enum):
+                            # 支持单值或列表
+                            if isinstance(v, list):
+                                params[k] = [ann[item] for item in v]
+                            elif isinstance(v, str):
+                                params[k] = ann[v]
+                            else:
+                                params[k] = v
                         else:
                             params[k] = v
                 master_node['fn'](**params)
@@ -260,10 +270,13 @@ def search_tasks(ui_tasks):
     items = []
     def recurse(node, path):
         for k, v in node.items():
+            # 只处理 dict 类型的节点
+            if not isinstance(v, dict):
+                continue
             new_path = path + [k]
             if is_leaf_node(v):
                 items.append((new_path, v))
-            elif isinstance(v, dict):
+            else:
                 recurse(v, new_path)
     recurse(ui_tasks, [])
     item_maps = []
@@ -301,34 +314,62 @@ def run_cli_navigation():
 
     navigation_path = []
     while True:
-        os.system('cls' if os.name == 'nt' else 'clear')
+        # os.system('cls' if os.name == 'nt' else 'clear')
         
         current_node = get_node_by_path(ui_tasks, navigation_path)
         # 如果当前节点是叶子任务且有参数，进入参数编辑模式
         if is_leaf_node(current_node) and current_node.get('params'):
-            # 参数编辑，支持枚举类型
+            # 参数编辑，支持枚举、多选枚举及列表类型
             param_meta = current_node.get('param_meta', {})
             for param, val in current_node['params'].items():
                 if param in param_meta:
-                    # 枚举参数，提供可选项
+                    # 枚举参数处理
                     module_name, class_name = param_meta[param].rsplit('.', 1)
                     mod = importlib.import_module(module_name)
                     EnumClass = getattr(mod, class_name)
-                    choices = [Choice(title=e.value, value=e.name) for e in EnumClass]
-                    # 获取当前枚举的展示值
-                    current_value = EnumClass[val].value if val in EnumClass.__members__ else val
-                    selected = questionary.select(
-                        f"设置枚举参数 \"{param}\" (当前: {current_value}):",
-                        choices=choices,
-                        default=val
+
+                    if isinstance(val, list):
+                        # 多选枚举
+                        current_values = [EnumClass[v].value for v in val if v in EnumClass.__members__]
+                        choices = [
+                            Choice(title=e.value, value=e.name, checked=(e.name in val))
+                            for e in EnumClass
+                        ]
+                        selected = questionary.checkbox(
+                            f"设置多选枚举参数 \"{param}\" (当前: {current_values}):",
+                            choices=choices
+                        ).ask()
+                        if selected is not None:
+                            current_node['params'][param] = selected
+                    else:
+                        # 单选枚举
+                        choices = [Choice(title=e.value, value=e.name) for e in EnumClass]
+                        current_value = EnumClass[val].value if val in EnumClass.__members__ else val
+                        selected = questionary.select(
+                            f"设置枚举参数 \"{param}\" (当前: {current_value}):",
+                            choices=choices,
+                            default=val
+                        ).ask()
+                        if selected is not None:
+                            current_node['params'][param] = selected
+
+                elif isinstance(val, list):
+                    # 列表参数（非枚举）
+                    default_val = ", ".join(map(str, val))
+                    answer = questionary.text(
+                        f"设置列表参数 \"{param}\" (当前: {val}), 请用逗号分隔:",
+                        default=default_val
                     ).ask()
-                    current_node['params'][param] = selected
+                    if answer is not None:
+                        current_node['params'][param] = [item.strip() for item in answer.split(',') if item.strip()]
                 else:
+                    # 其他基本类型参数
                     answer = questionary.text(f"设置参数 \"{param}\" (当前: {val}):", default=str(val)).ask()
-                    try:
-                        current_node['params'][param] = type(val)(answer)
-                    except Exception:
-                        current_node['params'][param] = answer
+                    if answer is not None:
+                        try:
+                            current_node['params'][param] = type(val)(answer)
+                        except Exception:
+                            current_node['params'][param] = answer
             questionary.press_any_key_to_continue().ask()
             # 返回上一级菜单
             if navigation_path:

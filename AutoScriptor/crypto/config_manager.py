@@ -37,6 +37,8 @@ class ConfigManager:
 
     def _save_config(self):
         """保存配置文件"""
+        from AutoScriptor.utils.constant import cfg
+        cfg["encryption"] = self.config["encryption"]
         with open(self.config_path, 'w', encoding='utf-8') as f:
             json.dump(self.config, f, ensure_ascii=False, indent=4)
 
