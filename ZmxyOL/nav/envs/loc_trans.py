@@ -51,7 +51,7 @@ def way():
     elif idx == 1:
         click(I('副职业宗师'))
     else:
-        click(B(600,300))
+        click(B(640,250))
     click(T('炼器师'))
     mm.set_loc("炼器师")
 

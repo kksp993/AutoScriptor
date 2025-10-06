@@ -23,7 +23,10 @@ def task_way_to_diff(self:Hero, task: str, expect_difficulty: str)->int:
         click(B(174,242,931,96))
     # 进入混沌本，获取剩余次数
     click(T("混沌", box=Box(1008,263,73,52)), if_exist=True)
-    remains = extract_info(B(610,292,120,24), lambda x: int(x.strip()[-2]))
+    if expect_difficulty == "灵狱":
+        remains = extract_info(B(825,259,219,26), lambda x: int(x.strip()[-1]))
+    else:
+        remains = extract_info(B(610,292,120,24), lambda x: int(x.strip()[-2]))
     # 获取难度
     difficulty = extract_info(
         B(222,368,66,56),

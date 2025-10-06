@@ -149,14 +149,11 @@ def print_k(area, i=0):
             print_k(area[k], i+1)
 
 def main():
-    from AutoScriptor.core.background import bg
     # 收集并排序 Python 模块
     all_py_files = gather_py_files()
     sorted_files = sort_py_files(all_py_files)
     import_modules(sorted_files)
     sort_tasks(cfg['tasks'])
-    # 打印任务配置树
-    print_k(cfg['tasks'])
     
 main()
 

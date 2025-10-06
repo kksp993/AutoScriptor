@@ -11,21 +11,48 @@
 
 import time
 from AutoScriptor import *
+from AutoScriptor.core.api import ui_idx
 from ZmxyOL.nav.envs.decorators import LOC_ENV
 from .map_manager import mm
 from logzero import logger
+from typing import Any, Callable
 
+def _flatten_identifiers(idfs: list[Any]) -> tuple[list[Any], list[list[Any]]]:
+    """将混合单个或序列的 identifier 展平，并记录分组"""
+    groups: list[list[Any]] = []
+    flat: list[Any] = []
+    for idf in idfs:
+        items = list(idf) if isinstance(idf, (list, tuple)) else [idf]
+        groups.append(items)
+        flat.extend(items)
+    return flat, groups
 
-def check_loc_exists(loc_name: str) -> bool:
-    """检查loc中是否存在目标标示物"""
-    loc = mm.locs.get(loc_name)
-    print(loc, loc.identifier)
-    return ui_T(loc.identifier)
+def _restore_flat_idx(flat_idx: int, groups: list[list[Any]]) -> int:
+    """将展平索引映射回原始列表索引"""
+    cum = 0
+    for idx, group in enumerate(groups):
+        if flat_idx < cum + len(group):
+            return idx
+        cum += len(group)
+    return -1
 
-def check_env_exists(env_name: str) -> bool:
-    """检查环境是否为当前环境"""
-    env = mm.envs.get(env_name)
-    return ui_T(env.identifier)
+def _check_idx(get_identifier: Callable[[str], Any], names: list[str]) -> int:
+    """通用索引查找：展平 identifiers，定位，再还原原始索引"""
+    idfs = [get_identifier(name) for name in names]
+    flat, groups = _flatten_identifiers(idfs)
+    flat_idx = ui_idx(flat)
+    if flat_idx < 0: return -1
+    res = _restore_flat_idx(flat_idx, groups)
+    return res
+
+def check_loc_idx(loc_list: list[str]) -> int:
+    """检查多个位置：扁平化 identifier 并映射原始位置索引"""
+    return _check_idx(lambda name: mm.locs.get(name).identifier, loc_list)
+
+def check_env_idx(env_list: list[str]) -> int:
+    """检查多个环境：扁平化 identifier 并映射原始环境索引"""
+    return _check_idx(lambda name: mm.envs.get(name).identifier, env_list)
+
 
 def locate_region(cnt = 0) -> tuple[str, str]:
     """
@@ -33,23 +60,23 @@ def locate_region(cnt = 0) -> tuple[str, str]:
     """
     cur_env, cur_loc = mm.get_region()
     logger.info("# 1.1 检查当前ctx中的loc")
-    if cur_loc and check_loc_exists(cur_loc):
+    if cur_loc and check_loc_idx([cur_loc]) >= 0:
         return mm.set_region(cur_env, cur_loc)
     
     logger.info("# 1.2 检查当前ctx中的env")
-    if cur_env and check_env_exists(cur_env):
+    if cur_env and check_env_idx([cur_env]) >= 0:
         return mm.set_region(cur_env)
     
     logger.info("# 1.3 检查所有env")
-    for env_name in mm.envs:
-        if check_env_exists(env_name):
-            return mm.set_region(env_name)
+    idx = check_env_idx(mm.envs.keys())
+    if idx >= 0:
+        return mm.set_region(list(mm.envs.keys())[idx])
     
     logger.info("# 1.4 检查所有loc")
-    for loc_name in mm.locs:
-        if check_loc_exists(loc_name):
-            loc = mm.locs[loc_name]
-            return mm.set_region(loc.envs[0].name, loc_name)
+    idx = check_loc_idx(mm.locs.keys())
+    if idx >= 0:
+        loc = mm.locs[list(mm.locs.keys())[idx]]
+        return mm.set_region(loc.envs[0].name, loc.name)
     if cnt % 2 == 0:
         try_close_via_x()
     if cnt > 10:

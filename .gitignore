@@ -29,3 +29,4 @@
 /examples/
 /logs/
 /config.json
+/config_*.json

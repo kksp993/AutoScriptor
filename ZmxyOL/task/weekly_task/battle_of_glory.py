@@ -23,8 +23,10 @@ def task():
             callback=lambda: [
                 bg.set_signal("try_exit", True),
                 bg.clear(),
+                sleep(1),
                 click(T("确定"))
-            ]
+            ],
+            once=True
         )
         h.set(True,1).battle_loop(battle_weight=100)
         click(B(1090,25,30,30))
