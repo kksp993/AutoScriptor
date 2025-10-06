@@ -21,11 +21,14 @@ def battle():
     wait_for_disappear(I("加载中"))
     from ZmxyOL.battle.character.hero import h
     sleep(0.5)
-    h.skill(4, 0.95)
-    h.zhenling()
+    h.zhenwu()
     h.huashen()
+    h.skill(4, 0.95)
     h.prop()
-    h.sleep(0.5)
+    h.zhenling()
+    h.zhenling()
+    h.zhenling()
+    h.sleep(1.5)
     h.skill(6)
     bg.add(
         name="FTT_battle",
@@ -34,7 +37,7 @@ def battle():
     )
     bg.set_signal("try_exit", False)
     while not bg.signal("try_exit"):
-        for cnt in arange(1,4):
+        for cnt in range(5):
             h.prop()
             if cnt % 2 == 0: h.skill(6)
             else: h.skill(5,4)
@@ -43,8 +46,9 @@ def battle():
     click((T("确认"),T("前往新一层")))
     wait_for_disappear(I("加载中"))
 
-def FTT_battle_one_round(preference:list[FFT_preference]):
-    if first(get_colors(B(94,623,2,3)))!="灰色": return logger.info("可以挑战天魔，跳过轮回轮次")
+def FTT_battle_one_round(preference:list[FFT_preference], conquer_TianMo:bool):
+    if first(get_colors(B(94,623,2,3)))!="灰色" and conquer_TianMo: 
+        return logger.info("可以挑战天魔，跳过轮回轮次")
     final = False
     preference_list = [T(p.value) for p in preference]
     preference_list.append(T("终劫"))
@@ -71,7 +75,12 @@ def FTT_TianMo():
     wait_for_appear(T("入劫"))
 
 @register_task
-def fanTianTa(battle_times=50, difficulty=FFT_difficulty.past, preference=(FFT_preference.purple,FFT_preference.yellow)):
+def fanTianTa(
+    battle_times=50, 
+    difficulty=FFT_difficulty.past, 
+    preference=(FFT_preference.purple,FFT_preference.yellow),
+    conquer_TianMo=False
+):
     ensure_in("极北",-1)
     click(B(0,120,90,100))
     sleep(3)
@@ -80,9 +89,9 @@ def fanTianTa(battle_times=50, difficulty=FFT_difficulty.past, preference=(FFT_p
     click(T("确认"), if_exist=True)
     sleep(5)
     for _ in range(battle_times):
-        FTT_battle_one_round(preference)
+        FTT_battle_one_round(preference, conquer_TianMo)
         sleep(3)
-        FTT_TianMo()
+        if conquer_TianMo: FTT_TianMo()
         sleep(3)
     click(B(30,30,30,30))
     sleep(1)
@@ -92,7 +101,12 @@ def fanTianTa(battle_times=50, difficulty=FFT_difficulty.past, preference=(FFT_p
 
 if __name__ == "__main__":
     try:
-        fanTianTa()
+        fanTianTa(
+            battle_times=50, 
+            difficulty=FFT_difficulty.now, 
+            preference=(FFT_preference.yellow,),
+            conquer_TianMo=False
+        )
     except Exception as e:
         traceback.print_exc()
     finally:
