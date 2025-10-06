@@ -15,6 +15,7 @@ def task():
     logger.info(f"找到与灵气相同的混沌关卡: {same_linggen_chaos}")
     cur_task = same_linggen_chaos if same_linggen_chaos else JHSY_CHAOS_TABLE[0]
     remains = h.task_way_to_diff(task=cur_task, expect_difficulty="灵狱")
+    logger.info(f"剩余次数: {remains}")
     if remains > 0:
         logger.info(f"开始挑战: {cur_task}")
         bonus_x = extract_info(B(290,570,100,30), lambda x: 1 if x.strip() == "普通" else int(x.strip()[-1]))
@@ -30,6 +31,7 @@ def task():
     for name in JHSY_CHAOS_TABLE:
         if name == cur_task: continue
         remains = h.task_way_to_diff(task=name, expect_difficulty="噩梦")
+        logger.info(f"剩余次数: {remains}")
         if remains > 0:
             logger.info(f"开始挑战: {name}")
             bonus_x = extract_info(B(290,570,100,30), lambda x: 1 if x.strip() == "普通" else int(x.strip()[-1]))

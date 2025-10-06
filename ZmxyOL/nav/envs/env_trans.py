@@ -5,7 +5,6 @@ import time
 from ZmxyOL.nav.envs.decorators import *
 
 
-
 "=======================    天庭    ======================="
 @path("仙盟", "天庭")
 def way():
@@ -141,3 +140,22 @@ def way():
 
 for env_name in mm.envs.keys():
     LOC_INDEX_TRAV(env_name, swipe_up_down)
+
+"=======================    荒古万界    ======================="
+@path(HAS_SHIJIEDITU, "荒古万界")
+def way():
+    click(I("导航-世界地图"))
+    click(T("荒古万界"),offset=(180,90))
+    wait_for_appear(T("万界穿梭"))
+    mm.set_region("荒古万界")
+    time.sleep(1)
+
+def way(env_name: str):
+    from ZmxyOL.nav.api import ensure_in
+    click(B(30,30,30,30))
+    wait_for_appear(T("荒古万界"))
+    click(B(1200,30,30,30))
+    ensure_in(env_name)
+
+for env_name in HAS_SHIJIEDITU: 
+    path("荒古万界", env_name)(partial(way, env_name=env_name))
