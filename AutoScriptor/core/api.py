@@ -271,7 +271,7 @@ def extract_info(target: BoxTarget, post_process: callable = None, ensure_not_em
                 logger.error(f"Extract info {target} failed, raw_res: {res}, for {e}")
                 continue
         if ensure_not_empty and isinstance(res, str) and len(res) == 0: continue
-        if res: break
+        if res is not None: break
     return res
 
 def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), resize: tuple = (-1, -1))->list[str|None]:

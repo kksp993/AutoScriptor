@@ -9,7 +9,8 @@ def battle_task(
     has_loading_after_battle:bool=True, 
     exit_loc:float=0, 
     crash_suddenly:bool=False, 
-    bonus_x:int=0
+    bonus_x:int=0,
+    cancel_on_failed:bool=True
 ):
     bg.clear_signals()
     wait_for_disappear((I("加载中"), I("极北-加载中")))
@@ -23,19 +24,22 @@ def battle_task(
             bg.clear()
         ]
     )
+
+    def failed_callback():
+        bg.clear()
+        bg.set_signal("try_exit", True)
+        bg.set_signal("bonus_x", 0)
+        bg.set_signal("failed", True)
     bg.add(
         name="战斗失败",
-        identifier=(T("复活")),
+        identifier=(T("198点券")),
         callback=lambda : [
             switch_base("mumu"),
             logger.info("战斗结束"),
             bg.set_signal("Failed", True),
             switch_base("mumu"),
-            click(T("取消"),delay=4,repeat=3),
-            bg.clear(),
-            bg.set_signal("try_exit", True),
-            bg.set_signal("bonus_x", 0),
-            bg.set_signal("failed", True)
+            click(T("取消" if cancel_on_failed else "确定"),delay=4,repeat=3),
+            failed_callback() if cancel_on_failed else None,
         ]
     )
     sleep(0.5)
