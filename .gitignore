@@ -30,3 +30,4 @@
 /logs/
 /config.json
 /config_*.json
+/wheelhouse/

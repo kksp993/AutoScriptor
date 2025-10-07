@@ -16,11 +16,11 @@ def task():
             JIBEI_CHAOS.append(name)
     logger.info(f"今日极北混沌关卡: {JIBEI_CHAOS}")
     if not JIBEI_CHAOS: return
-    same_linggen_chaos = h.chaos_select(task_list=JIBEI_CHAOS, Weather=Weather)
+    same_linggen_chaos = h.chaos_select(task_list=JIBEI_CHAOS, Weather=Weather, task_type="极北")
     logger.info(f"找到与灵气相同的混沌关卡: {same_linggen_chaos}")
     # TODO: 可以按照优先级排序
     cur_task = same_linggen_chaos if same_linggen_chaos else JIBEI_CHAOS[0]
-    remains = h.task_way_to_diff(task=cur_task, expect_difficulty="灵狱")
+    remains = h.task_way_to_diff(task=cur_task, expect_difficulty="灵狱", task_type="极北")
     if remains > 0:
         click(T("开始挑战"))
         h.set(has_cd=True,speed_x=3).battle_task(crash_suddenly=True)

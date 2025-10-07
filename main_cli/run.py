@@ -353,6 +353,14 @@ def run_cli_navigation():
                         if selected is not None:
                             current_node['params'][param] = selected
 
+                elif isinstance(val, bool):
+                    # 布尔参数处理
+                    answer = questionary.confirm(
+                        f"设置布尔参数 \"{param}\" (当前: {val}):",
+                        default=val
+                    ).ask()
+                    if answer is not None:
+                        current_node['params'][param] = answer
                 elif isinstance(val, list):
                     # 列表参数（非枚举）
                     default_val = ", ".join(map(str, val))
