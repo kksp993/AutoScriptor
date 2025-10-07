@@ -12,7 +12,7 @@ def check_linggen(self:Hero):
     return store_as
 
 @combo
-def task_way_to_diff(self:Hero, task: str, expect_difficulty: str)->int:
+def task_way_to_diff(self:Hero, task: str, expect_difficulty: str, task_type: str)->int:
     # 进入关卡
     from ZmxyOL.battle.tasks import get_task_table
     from ZmxyOL.nav import ensure_in
@@ -23,8 +23,8 @@ def task_way_to_diff(self:Hero, task: str, expect_difficulty: str)->int:
         click(B(174,242,931,96))
     # 进入混沌本，获取剩余次数
     click(T("混沌", box=Box(1008,263,73,52)), if_exist=True)
-    if expect_difficulty == "灵狱":
-        remains = extract_info(B(825,259,219,26), lambda x: int(x.strip()[-1]))
+    if expect_difficulty == "灵狱" and task_type == "极寒深渊":
+        remains = extract_info(B(922,249,186,43), lambda x: int(x.strip()[-1]))
     else:
         remains = extract_info(B(610,292,120,24), lambda x: int(x.strip()[-2]))
     # 获取难度
@@ -39,14 +39,15 @@ def task_way_to_diff(self:Hero, task: str, expect_difficulty: str)->int:
     repeat = (expect_index - cur_index) % len(get_task_table(task)["diff"])
     click(B(230,380,80,50), repeat=repeat)
     sleep(1)
+    print(f"remaining: {remains}")
     return remains
 
 @combo
-def chaos_select(self:Hero, task_list:list[str], Weather:str)->str|None:
+def chaos_select(self:Hero, task_list:list[str], Weather:str, task_type: str)->str|None:
     same_linggen_chaos = None
     for name in task_list:
         if not same_linggen_chaos:
-            remains = self.task_way_to_diff(task=name, expect_difficulty="灵狱")
+            remains = self.task_way_to_diff(task=name, expect_difficulty="灵狱", task_type=task_type)
             if remains == 0: return
             cur_linggen = extract_info(B(260,440,80,50), lambda x: x.strip()[0])
             logger.info(f"{name} -> {cur_linggen}")

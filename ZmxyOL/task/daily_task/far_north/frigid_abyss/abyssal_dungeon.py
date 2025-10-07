@@ -5,16 +5,16 @@ from AutoScriptor import *
 from logzero import logger
 
 @register_task
-def task():
+def task(cancel_on_failed:bool=True):
     from ZmxyOL.battle.tasks import JHSY_CHAOS_TABLE, get_task_table
     logger.info("====极寒深渊====")
     ensure_in("极寒深渊")
     Weather = h.check_linggen()
     logger.info(f"当前灵气: {Weather}")
-    same_linggen_chaos = h.chaos_select(task_list=JHSY_CHAOS_TABLE, Weather=Weather)
+    same_linggen_chaos = h.chaos_select(task_list=JHSY_CHAOS_TABLE, Weather=Weather, task_type="极寒深渊")
     logger.info(f"找到与灵气相同的混沌关卡: {same_linggen_chaos}")
     cur_task = same_linggen_chaos if same_linggen_chaos else JHSY_CHAOS_TABLE[0]
-    remains = h.task_way_to_diff(task=cur_task, expect_difficulty="灵狱")
+    remains = h.task_way_to_diff(task=cur_task, expect_difficulty="灵狱", task_type="极寒深渊")
     logger.info(f"剩余次数: {remains}")
     if remains > 0:
         logger.info(f"开始挑战: {cur_task}")
@@ -22,7 +22,7 @@ def task():
         repeat = (3 - bonus_x) % 3
         click(B(430,570,30,30), repeat=repeat)
         click(T("开始挑战"))
-        h.set(has_cd=True,speed_x=3).battle_task(crash_suddenly=True, bonus_x=3)
+        h.set(has_cd=True,speed_x=3).battle_task(crash_suddenly=True, bonus_x=3, cancel_on_failed=cancel_on_failed)
     else:
         click(B(1200,30,30,30))
         wait_for_appear(T("回家", box=Box(18,607,87,109)))
@@ -30,7 +30,7 @@ def task():
     logger.info("====极寒深渊-噩梦====")
     for name in JHSY_CHAOS_TABLE:
         if name == cur_task: continue
-        remains = h.task_way_to_diff(task=name, expect_difficulty="噩梦")
+        remains = h.task_way_to_diff(task=name, expect_difficulty="噩梦", task_type="极寒深渊")
         logger.info(f"剩余次数: {remains}")
         if remains > 0:
             logger.info(f"开始挑战: {name}")
