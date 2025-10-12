@@ -102,9 +102,8 @@ class ConfigManager:
 
     def decrypt_config(self, security_key: str) -> dict:
         """解密配置数据"""
-        if "encryption" not in self.config or not self.config["encryption"].get("encrypted_data"):
+        if not security_key or "encryption" not in self.config or not self.config["encryption"].get("encrypted_data"):
             return {}
-            
         try:
             # 获取加密相关信息
             salt = base64.b64decode(self.config["encryption"]["salt"])

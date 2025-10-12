@@ -73,7 +73,7 @@ def battle_task(
 @combo
 def heaven_draw_card_exit(self:Hero):
     """抽牌后直到返回地图/队伍界面"""
-    click(T("抽牌",box=Box(514,513,253,97)),delay=3,repeat=4)
+    click(T("抽牌",box=Box(514,513,253,97)),until=lambda:ui_F(T("抽牌",box=Box(514,513,253,97))))
     sleep(3)
     click(B(Box(182,232,904,102)),repeat=3)
     sleep(1)

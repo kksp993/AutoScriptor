@@ -1,3 +1,4 @@
 daily_task
 weekly_task
-general_task
+event_task
+normal_task

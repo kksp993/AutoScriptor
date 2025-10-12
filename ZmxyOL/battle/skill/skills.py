@@ -5,12 +5,12 @@ from AutoScriptor import *
 def travel(self: Hero):
     if self.has_cd:
         self.sleep(0.03)
-        self.jump(2).move_right(125)
+        self.jump(2).move_right(125, directly=True)
         self.skill(1).sleep(0.08)
         self.skill(4, 1)
     else:
-        self.sleep(0.15)
-        self.jump(2).move_right(125)
+        self.sleep(1)
+        self.jump(2).move_right(125, directly=True)
         self.skill(1).sleep(0.3)
         self.skill(4, 1)
     return self

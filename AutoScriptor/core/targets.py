@@ -74,6 +74,12 @@ class ImageTarget(Target):
             f"{'@['+str(self.ui.box)+']' if self.ui.box!=Box(0,0,1280,720) else ''}" \
             f"{'#' + self.ui.color if self.ui.color else ''}"
 
+    def set_box(self, box:Box):
+        return ImageTarget(self.ui.set_box(box))
+
+    def set_color(self, color:str):
+        return ImageTarget(self.ui.set_color(color))
+
 
 class TextTarget(Target):
     def __init__(self, ui: Union[str, UiEntry], is_regex: bool = False):
@@ -90,6 +96,12 @@ class TextTarget(Target):
         if isinstance(self.ui, UiEntry):
             return self.ui.text
         return self.ui
+
+    def set_box(self, box:Box):
+        return TextTarget(self.ui.set_box(box))
+
+    def set_color(self, color:str):
+        return TextTarget(self.ui.set_color(color))
 
 class BoxTarget(Target):
     def __init__(self, box: Box):

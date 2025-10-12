@@ -59,6 +59,13 @@ class OCRManager:
                 logger.info(f"PaddleOCR 初始化参数 use_gpu={cfg['ocr.use_gpu']}, 当前设备={paddle.get_device()}")
                 elapsed_time = time.time() - start_time
                 logger.info(f"PaddleOCR 引擎初始化完成，耗时 {elapsed_time:.2f} 秒")
+                # 预热一次，避免首次调用开销影响后续性能
+                try:
+                    import numpy as np
+                    warm = (np.zeros((64, 64, 3), dtype='uint8'))
+                    _ = self.ocr_engine.ocr(warm, cls=False)
+                except Exception:
+                    pass
             except Exception as e:
                 raise RuntimeError(f"PaddleOCR 引擎初始化失败: {e}")
         self._init_thread = threading.Thread(target=init_ocr, daemon=True)
@@ -85,21 +92,13 @@ class OCRManager:
 
 ocr_manager = OCRManager()
 
-# 引入线程局部存储
-_thread_local = threading.local()
-
 def get_ocr_engine():
-    """获取OCR引擎实例（不阻塞），为每个线程创建独立实例"""
-    # 确保全局引擎已初始化完成
+    """获取全局 OCR 引擎实例（阻塞等待初始化完成一次）。
+    说明：为避免在 WebUI 多线程环境下重复实例化造成的性能与内存开销，这里统一复用全局引擎。
+    """
     if not ocr_manager.wait_for_initialization():
         raise RuntimeError("OCR引擎未初始化完成")
-    # 如果该线程无本地实例或仍指向全局实例，则创建新的 PaddleOCR 实例
-    if not hasattr(_thread_local, 'ocr_engine') or _thread_local.ocr_engine is ocr_manager.ocr_engine:
-        # 复制与全局相同的初始化参数
-        _thread_local.ocr_engine = PaddleOCR(
-            **ocr_config,
-        )
-    return _thread_local.ocr_engine
+    return ocr_manager.ocr_engine
 
 
 # ===== 主OCR方法（推荐） =====
@@ -137,10 +136,26 @@ def ocr(frame,
             preferred_box = Box(0, 0, img.shape[1], img.shape[0])
         img_roi = img[preferred_box.top: preferred_box.top + preferred_box.height,
                       preferred_box.left: preferred_box.left + preferred_box.width]
-        # 降采样
-        if stride > 1:
-            img_for_ocr = img_roi[::stride, ::stride]
-        else:
+        # 降采样/缩放：对较大 ROI 做一次性等比例下采样，减少 OCR 计算量
+        img_for_ocr = img_roi
+        try:
+            h, w = img_roi.shape[:2]
+            # 目标最长边不超过 1280，再结合 stride 做网格采样
+            max_side = 1280
+            scale = 1.0
+            if max(h, w) > max_side:
+                scale = max_side / float(max(h, w))
+            if stride > 1:
+                # 将 stride 折合进缩放比例，避免双重采样失真
+                scale = scale * (1.0 / stride)
+            if scale < 1.0:
+                import cv2
+                new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
+                img_for_ocr = cv2.resize(img_roi, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            elif stride > 1:
+                img_for_ocr = img_roi[::stride, ::stride]
+        except Exception:
+            # 回退到原图
             img_for_ocr = img_roi
         result = engine.ocr(img_for_ocr, cls=False)
         found_boxes = [[] for _ in range(len(target_strings))]
@@ -162,9 +177,12 @@ def ocr(frame,
                         s_width = s_right - s_left
                         s_height = s_bottom - s_top
                         s_left, s_top, s_width, s_height = int(s_left), int(s_top), int(s_width), int(s_height)
-                        final_left = preferred_box.left + s_left * stride
-                        final_top = preferred_box.top + s_top * stride
-                        final_bounding_box = Box(final_left, final_top, s_width * stride, s_height * stride)
+                        # 根据缩放/stride 还原到原 ROI 坐标
+                        scale_x = float(img_roi.shape[1]) / float(img_for_ocr.shape[1])
+                        scale_y = float(img_roi.shape[0]) / float(img_for_ocr.shape[0])
+                        final_left = preferred_box.left + int(s_left * scale_x)
+                        final_top = preferred_box.top + int(s_top * scale_y)
+                        final_bounding_box = Box(final_left, final_top, int(s_width * scale_x), int(s_height * scale_y))
                         found_boxes[target_strings.index(target_string)].append(final_bounding_box)
         elif result is None:
             logger.warning("OCR engine returned None. This might indicate an issue with the input image or engine.")
@@ -176,8 +194,21 @@ def ocr(frame,
 
 def ocr_for_box(haystack_frame, box):
     roi = haystack_frame[box.top:box.top + box.height, box.left:box.left + box.width]
+    # 对较大 ROI 做一次下采样以提升速度
+    try:
+        import cv2
+        h, w = roi.shape[:2]
+        max_side = 1280
+        if max(h, w) > max_side:
+            scale = max_side / float(max(h, w))
+            new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
+            roi_resized = cv2.resize(roi, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        else:
+            roi_resized = roi
+    except Exception:
+        roi_resized = roi
     engine = get_ocr_engine()
-    result = engine.ocr(roi, cls = False)
+    result = engine.ocr(roi_resized, cls = False)
     recognized_text = ""
     if result and result[0]:
         for line_info in result[0]:

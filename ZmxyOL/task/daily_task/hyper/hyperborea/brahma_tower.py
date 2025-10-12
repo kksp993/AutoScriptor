@@ -17,7 +17,10 @@ def battle():
     bg.add(
         name="FTT_battle",
         identifier=T("确认"),
-        callback=lambda: [bg.set_signal("try_exit", True),bg.clear()]
+        callback=lambda: [
+            bg.set_signal("try_exit", True),
+            bg.clear(),
+        ]
     )
     cnt = 1
     bg.set_signal("try_exit", False)

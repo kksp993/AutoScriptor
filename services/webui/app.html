@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AutoScriptor</title>
+  <!-- 引入 Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- 引入 Font Awesome（图标库） -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css"
+    rel="stylesheet"
+  />
+  <!-- 引入 Vue 3 -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <!-- 引入 Element Plus -->
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+  <script src="https://unpkg.com/element-plus/dist/index.full.js"></script>
+  <!-- 引入 ansi_up 用于将 ANSI 颜色转为 HTML -->
+  <script src="https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.min.js"></script>
+
+  <!-- Tailwind 自定义配置 -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#22c55e', // 主色调（参考草图绿色）
+            secondary: '#64748b',
+            dark: '#1e293b',
+            light: '#f8fafc',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- 自定义工具类 -->
+  <style type="text/tailwindcss">
+    @layer utilities {
+      .content-auto {
+        content-visibility: auto;
+      }
+      .task-tree-item {
+        @apply py-2 px-3 hover:bg-primary/10 transition-colors cursor-pointer;
+      }
+      .nav-btn {
+        @apply px-6 py-3 rounded-lg bg-primary/10 hover:bg-primary/20 text-dark font-medium transition-all duration-300;
+      }
+      .modal-bg {
+        @apply fixed inset-0 bg-dark/50 flex items-center justify-center z-50;
+      }
+      .modal-card {
+        @apply bg-white rounded-xl p-6 shadow-xl w-full max-w-md;
+      }
+      .log-container {
+        @apply bg-dark/5 rounded-lg p-4 overflow-auto text-sm;
+      }
+      .log-line {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        white-space: pre-wrap;
+      }
+      .log-info {
+        @apply text-blue-600;
+      }
+      .log-debug {
+        @apply text-purple-600;
+      }
+    }
+  </style>
+  <style>
+.el-button--primary {
+  background-color: #22c55e !important;
+  border-color: #22c55e !important;
+}
+.el-button--primary:hover {
+  background-color: #16a34a !important;
+  border-color: #16a34a !important;
+}
+/* 任务树折叠/展开过渡动画 */
+.expand-enter-active, .expand-leave-active {
+  transition: all 0.3s ease;
+}
+.expand-enter-from, .expand-leave-to {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+}
+.expand-enter-to, .expand-leave-from {
+  max-height: 1000px;
+  opacity: 1;
+}
+</style>
+  <script type="text/javascript">
+    window.configData = JSON.parse('{{ config | tojson | safe }}');
+  </script>
+  {% raw %}
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <div id="app" class="container mx-auto px-4 py-6">
+    <!-- 顶部标题 + 导航栏 -->
+    <div class="flex flex-col items-center mb-8" style="margin-bottom: -5px;">
+      <h1 class="text-4xl font-bold text-primary mb-2">AutoScriptor</h1>
+      <div class="flex space-x-4 mt-4">
+        <button class="nav-btn" @click="activeTab = 'daily'">每日任务</button>
+        <button class="nav-btn" @click="activeTab = 'weekly'">每周任务</button>
+        <button class="nav-btn" @click="activeTab = 'general'">一般任务</button>
+            <button class="nav-btn" @click="activeTab = 'event'">活动任务</button>
+        <button class="nav-btn" @click="activeTab = 'settings'">模拟器设置</button>
+      </div>
+    </div>
+
+    <!-- 主内容区 -->
+    <div class="container mx-auto px-4 py-6">
+      <template v-if="activeTab==='settings'">
+        <div class="container settings mx-auto px-4 py-6">
+          <el-form :model="filteredConfig" label-width="120px">
+            <div v-for="(section, secKey) in filteredConfig" :key="secKey" class="mb-6">
+              <template v-if="secKey !== 'game'">
+              <el-card shadow="hover">
+                <template #header>
+                  <div class="text-lg font-semibold">{{ sectionLabels[secKey] }}</div>
+                </template>
+                <el-row :gutter="20">
+                  <el-col :span="12" v-for="(value, key) in section" :key="key">
+                    <el-form-item :label="keyLabels[key] || key">
+                      <template v-if="typeof value === 'boolean'">
+                        <el-switch v-model="filteredConfig[secKey][key]"></el-switch>
+                      </template>
+                      <template v-else-if="typeof value === 'number'">
+                        <el-input-number v-model="filteredConfig[secKey][key]" :min="0"></el-input-number>
+                      </template>
+                      <template v-else>
+                        <el-input v-model="filteredConfig[secKey][key]"></el-input>
+                      </template>
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+              </el-card>
+              </template>
+            </div>
+        </div>
+            <!-- 保存按钮 -->
+            <div class="flex justify-center mt-6">
+              <el-button type="primary" size="large" class="w-2/5" @click="saveSettings" style="margin-top: -25px;">
+                <span style="font-size: 20px;">保存设置</span>
+              </el-button>
+            </div>
+        </el-form>
+      </template>
+      <template v-else>
+        <div class="flex flex-col lg:flex-row gap-6">
+          <!-- 左侧：任务树 -->
+          <div class="lg:w-1/3 bg-white rounded-xl shadow-md p-4 h-[600px] overflow-hidden">
+            <div class="flex justify-between items-center mb-4">
+              <h2 class="text-xl font-semibold text-dark">任务列表</h2>
+              <button class="text-primary hover:text-primary/80" @click="refreshConfig">
+                <i class="fa fa-refresh"></i>
+              </button>
+            </div>
+            <div class="h-[540px] overflow-y-auto pr-2">
+              <!-- 递归任务树组件 -->
+              <task-tree
+                :tree-data="currentTasks"
+                @edit-task="openEditModal"
+                @expanded-change="setActiveGroup"
+              ></task-tree>
+            </div>
+          </div>
+
+          <!-- 右侧：日志 + 控制按钮 -->
+          <div class="lg:w-2/3 bg-white rounded-xl shadow-md p-4">
+            <div class="flex flex-col gap-4">
+              <!-- 控制按钮组 -->
+              <div class="flex flex-wrap gap-2">
+                <button @click="startRun" class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
+                  <i class="fa fa-play mr-1"></i>开始运行
+                </button>
+                <button class="px-4 py-2 bg-secondary/20 text-dark rounded-lg hover:bg-secondary/30 transition-colors" @click="stopRun">
+                  <i class="fa fa-stop mr-1"></i>终止执行
+                </button>
+                <button class="px-4 py-2 bg-secondary/20 text-dark rounded-lg hover:bg-secondary/30 transition-colors" @click="verifyAccount">
+                  <i class="fa fa-check mr-1"></i>账号验证
+                </button>
+                <button class="px-4 py-2 bg-secondary/20 text-dark rounded-lg hover:bg-secondary/30 transition-colors" @click="openAddAccountDialog">
+                  <i class="fa fa-plus mr-1"></i>添加账号
+                </button>
+                <button class="px-4 py-2 bg-secondary/20 text-dark rounded-lg hover:bg-secondary/30 transition-colors" @click="saveTasks">
+                  <i class="fa fa-save mr-1"></i>保存任务
+                </button>
+                <button class="px-4 py-2 bg-secondary/20 text-dark rounded-lg hover:bg-secondary/30 transition-colors" @click="clearLogs">
+                  <i class="fa fa-eraser mr-1"></i>一键清除
+                </button>
+                <span v-if="characterName" class="px-2 py-1 bg-secondary/10 text-secondary rounded text-sm self-center">角色ID：{{ characterName }}</span>
+              </div>
+
+              <!-- 日志区域 -->
+              <div class="h-[500px]">
+                <h2 class="text-xl font-semibold text-dark mb-2">运行日志</h2>
+                <div class="log-container h-[450px]" id="logContainer">
+                  <div v-for="(log, index) in logs" :key="index" class="log-line" v-html="log.html"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- 编辑任务模态框（Element Plus 对话框） -->
+    <teleport to="body">
+      <el-dialog v-model="editModalVisible" :title="'编辑任务: ' + editTaskPath" width="600px" destroy-on-close>
+        <el-form :model="editTaskData" label-width="100px">
+          <el-form-item label="启用状态">
+            <el-switch v-model="editTaskData.on"></el-switch>
+          </el-form-item>
+
+          <template v-for="(val, key) in editTaskData.params" :key="key">
+            <el-form-item :label="key" v-if="paramEnumOptions[key] && !Array.isArray(val)">
+              <el-select v-model="editTaskData.params[key]" placeholder="请选择">
+                <el-option v-for="o in paramEnumOptions[key]" :key="o" :label="o" :value="o" />
+              </el-select>
+            </el-form-item>
+            <el-form-item :label="key" v-else-if="paramEnumOptions[key] && Array.isArray(val)">
+              <el-select v-model="editTaskData.params[key]" multiple placeholder="请选择">
+                <el-option v-for="o in paramEnumOptions[key]" :key="o" :label="o" :value="o" />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item :label="key" v-else-if="typeof val === 'boolean'">
+              <el-switch v-model="editTaskData.params[key]"></el-switch>
+            </el-form-item>
+            <el-form-item :label="key" v-else-if="typeof val === 'number'">
+              <el-input-number v-model="editTaskData.params[key]" :min="0" />
+            </el-form-item>
+            <el-form-item :label="key" v-else-if="typeof val === 'string'">
+              <el-input v-model="editTaskData.params[key]" />
+            </el-form-item>
+
+            <el-form-item :label="key" v-else-if="Array.isArray(val)">
+              <div class="w-full space-y-2">
+                <div v-for="(item, idx) in editTaskData.params[key]" :key="idx" class="flex items-center gap-2">
+                  <el-input-number v-if="typeof item === 'number'" v-model="editTaskData.params[key][idx]"></el-input-number>
+                  <el-switch v-else-if="typeof item === 'boolean'" v-model="editTaskData.params[key][idx]"></el-switch>
+                  <el-input v-else v-model="editTaskData.params[key][idx]"></el-input>
+                  <el-button type="danger" size="small" @click="removeListItem(key, idx)">删除</el-button>
+                </div>
+                <el-button size="small" @click="addListItem(key)">新增一项</el-button>
+              </div>
+            </el-form-item>
+          </template>
+        </el-form>
+        <template #footer>
+          <span class="dialog-footer">
+            <el-button @click="editModalVisible = false">取 消</el-button>
+            <el-button type="primary" @click="saveTask">保 存</el-button>
+          </span>
+        </template>
+      </el-dialog>
+    </teleport>
+      <!-- 新增账号对话框 -->
+      <teleport to="body">
+        <el-dialog v-model="addDialogVisible" title="添加账号" width="500px">
+          <el-form :model="addForm" label-width="90px">
+            <el-form-item label="账号">
+              <el-input v-model="addForm.account" placeholder="请输入账号"></el-input>
+            </el-form-item>
+            <el-form-item label="密码">
+              <el-input v-model="addForm.password" type="password" placeholder="请输入密码"></el-input>
+            </el-form-item>
+            <el-form-item label="角色名">
+              <el-input v-model="addForm.character_name" placeholder="请输入角色名/ID"></el-input>
+            </el-form-item>
+            <el-form-item label="安全密码">
+              <el-input v-model="addForm.security_key" type="password" placeholder="用于加密保存"></el-input>
+            </el-form-item>
+          </el-form>
+          <template #footer>
+            <span class="dialog-footer">
+              <el-button @click="addDialogVisible = false">取 消</el-button>
+              <el-button type="primary" @click="submitAddAccount">确 定</el-button>
+            </span>
+          </template>
+        </el-dialog>
+      </teleport>
+  </div>
+
+  <script>
+    const { createApp, ref, reactive, computed } = Vue;
+
+    // ========== 递归任务树组件 ==========
+    const TaskTree = {
+      name: "TaskTree",
+      data() {
+        return {
+          expanded: {},
+          // 各状态对应的 Tailwind 类
+          statusClasses: {
+            disabled: 'bg-gray-200 text-gray-600',
+            pending: 'bg-yellow-200 text-yellow-600',
+            completed: 'bg-green-200 text-green-600',
+            error: 'bg-red-200 text-red-600'
+          },
+          // 各状态对应的显示文本
+          statusLabels: {
+            disabled: '未启用',
+            pending: '待完成',
+            completed: '已完成',
+            error: '错误'
+          },
+          // 参数徽章颜色映射
+          paramClasses: {
+            default: 'bg-gray-200 text-gray-700',
+            // 可根据不同 key 定制，如:
+            battle_times: 'bg-blue-200 text-blue-700',
+            difficulty: 'bg-purple-200 text-purple-700'
+          }
+        };
+      },
+      props: {
+        treeData: {
+          type: Object,
+          required: true,
+        },
+        basePath: {
+          type: String,
+          default: ''
+        }
+      },
+      emits: ["edit-task", "expanded-change"],
+      template: `
+        <div class="space-y-2">
+          <template v-for="key in objectKeys(treeData)" :key="key">
+            <!-- 任务项（有 on 属性） -->
+            <div v-if="isTask(treeData[key])" class="task-tree-item bg-white px-2 py-1 rounded mb-1">
+              <div class="flex justify-between items-center">
+                <div class="flex items-center space-x-2">
+                  <span class="font-medium text-base cursor-pointer" @click.stop="$emit('edit-task', key, treeData[key], childBasePath(key), treeData)">{{ key }}</span>
+                  <template v-for="(v, k) in treeData[key].params">
+                    <el-tag
+                      size="small"
+                      :type="paramTagType(k)"
+                      class="cursor-pointer"
+                      :title="k"
+                      @click.stop="$emit('edit-task', key, treeData[key], childBasePath(key), treeData)"
+                    >
+                      {{ v }}
+                    </el-tag>
+                  </template>
+                </div>
+                <span
+                  :class="['text-xs px-2 py-1 rounded-full cursor-pointer', statusClasses[getTaskStatus(treeData[key])]]"
+                  @click.stop="toggleTask(treeData[key])">
+                  {{ statusLabels[getTaskStatus(treeData[key])] }}
+                </span>
+              </div>
+            </div>
+            <!-- 分组项（可折叠，递归渲染子节点） -->
+            <div v-else class="pl-4">
+              <div class="flex items-center font-medium py-1">
+                <button class="mr-2" @click.stop="toggleExpand(key)">
+                  <i :class="expanded[key] ? 'fa fa-chevron-down' : 'fa fa-chevron-right'"></i>
+                </button>
+                <span>{{ key }}</span>
+                <!-- 状态统计徽章：红色（错误）优先，再黄色（待完成），计数0不显示 -->
+                <span v-if="countStatus(treeData[key]).error > 0"
+                      class="ml-2 text-xs px-2 py-0.5 rounded-full"
+                      :class="statusClasses['error']">
+                  {{ countStatus(treeData[key]).error }}
+                </span>
+                <span v-if="countStatus(treeData[key]).pending > 0"
+                      class="ml-2 text-xs px-2 py-0.5 rounded-full"
+                      :class="statusClasses['pending']">
+                  {{ countStatus(treeData[key]).pending }}
+                </span>
+              </div>
+              <transition name="expand">
+                <task-tree
+                  v-if="expanded[key]"
+                  :tree-data="treeData[key]"
+                  :base-path="childBasePath(key)"
+                  @edit-task="(childKey, item, path, parent) => $emit('edit-task', childKey, item, path, parent)"
+                  @expanded-change="$emit('expanded-change', $event)"
+                >
+                </task-tree>
+              </transition>
+            </div>
+          </template>
+        </div>
+      `,
+      methods: {
+        // Tag 类型映射（Element Plus）
+        paramTagType(key) {
+          const map = {
+            battle_times: 'success',
+            difficulty: 'warning'
+          };
+          return map[key] || '';
+        },
+        // 判断是否为「任务项」（含 on 属性）
+        isTask(item) {
+          return item.hasOwnProperty("on");
+        },
+        // 显式按插入顺序返回对象键，确保渲染顺序与配置一致
+        objectKeys(obj) {
+          return Object.keys(obj || {});
+        },
+        // 触发编辑事件
+        emitEdit(key, item) {
+          this.$emit("edit-task", key, item);
+        },
+        // 折叠/展开分组（单开）
+        toggleExpand(key) {
+          const willOpen = !this.expanded[key];
+          // 关闭所有
+          Object.keys(this.expanded).forEach(k => this.expanded[k] = false);
+          // 如果是打开则设置
+          if (willOpen) this.expanded[key] = true;
+          // 向上传递当前激活路径
+          const path = this.childBasePath(key);
+          this.$emit('expanded-change', willOpen ? path : this.basePath);
+        },
+        // 切换任务启用状态
+        toggleTask(item) {
+          item.on = !item.on;
+          if (item.on) {
+            // 启用任务后，立即可执行
+            item.next_exec_time = 0;
+          }
+        },
+        // 计算任务当前状态
+        getTaskStatus(item) {
+          if (!item.on) return 'disabled';
+          if (item.error) return 'error'; // 后续错误状态
+          const now = Date.now() / 1000;
+          return item.next_exec_time < now ? 'pending' : 'completed';
+        },
+        // 统计子节点中各状态数量
+        countStatus(section) {
+          const counts = { disabled: 0, pending: 0, completed: 0, error: 0 };
+          Object.values(section).forEach(item => {
+            if (this.isTask(item)) {
+              const st = this.getTaskStatus(item);
+              counts[st]++;
+            } else {
+              const sub = this.countStatus(item);
+              Object.keys(counts).forEach(k => counts[k] += sub[k]);
+            }
+          });
+          return counts;
+        },
+        // 获取参数徽章的样式
+        paramClass(key) {
+          return this.paramClasses[key] || this.paramClasses.default;
+        },
+        // 计算子组件的基础路径
+        childBasePath(key) {
+          return this.basePath ? `${this.basePath}/${key}` : `${key}`;
+        }
+      },
+    };
+
+
+    // ========== Vue 应用实例 ==========
+    const app = createApp({
+      components: {
+        TaskTree,
+      },
+      setup() {
+        // 响应式数据
+        const configData = reactive(window.configData); // 整体配置数据
+        const activeTab = ref("daily"); // 活跃的标签页（每日/每周/一般/活动/设置）
+        // 筛选不在设置页展示的 section
+        const filteredConfig = computed(() => {
+          const clone = { ...configData };
+          delete clone.tasks;
+          delete clone.encryption;
+          return clone;
+        });
+        // 游戏客户端下拉选项
+        const clientOptions = {
+          ios: 'ios服',
+          official: '4399服',
+          union: '联运服'
+        };
+        // 默认选中值（示例取 configData 应用字段）
+        const selectedClient = ref(clientOptions.official);
+        const logs = ref([]);
+        const characterName = ref((window.configData.game && window.configData.game.character_name) || '');
+        const addDialogVisible = ref(false);
+        const addForm = reactive({ account: '', password: '', character_name: '', security_key: '' });
+        const editModalVisible = ref(false); // 编辑模态框显隐
+        const editTaskData = ref({}); // 待编辑的任务数据
+        const editTaskPath = ref(""); // 待编辑任务的路径（用于标题）
+        const editTaskParent = ref(null); // 待编辑任务的父级对象
+        const editTaskKey = ref(""); // 待编辑任务的键名
+        const activeGroupPath = ref("");
+        const paramEnumOptions = reactive({}); // { paramKey: [optionName] }
+        const activeTabLabel = computed(() => {
+          if (activeTab.value === 'daily') return '每日任务';
+          if (activeTab.value === 'weekly') return '每周任务';
+          if (activeTab.value === 'general') return '一般任务';
+          if (activeTab.value === 'event') return '活动任务';
+          return '';
+        });
+        function setActiveGroup(path) {
+          activeGroupPath.value = path;
+        }
+
+        // 在 setup() 中添加翻译映射
+        const sectionLabels = {
+          app: '应用设置',
+          ocr: 'OCR 设置',
+          emulator: '模拟器设置'
+        };
+        const keyLabels = {
+          name: '应用名称',
+          app_to_start: '启动包名',
+          restart_on_error: '出错重启',
+          run_in_background: '后台运行',
+          auto_start: '自动启动',
+          max_retry: '最大重试',
+          use_gpu: '使用 GPU',
+          index: '模拟器索引',
+          adb_addr: 'ADB 地址',
+          mumu_folder: 'MuMu 安装目录',
+          emu_path: '模拟器路径',
+          adb_path: 'ADB 路径'
+        };
+
+        // 计算属性：根据活跃标签，筛选当前显示的任务组
+        const currentTasks = computed(() => {
+          if (activeTab.value === "daily") return configData.tasks["每日任务"];
+          if (activeTab.value === "weekly") return configData.tasks["每周任务"];
+          if (activeTab.value === "general") return configData.tasks["一般任务"];
+          if (activeTab.value === "event") return (configData.tasks["活动任务"] || configData.tasks["event_task"]) || {};
+          return {};
+        });
+
+        // 打开编辑模态框
+        function openEditModal(key, data, path = key, parent = currentTasks.value) {
+          editTaskData.value = JSON.parse(JSON.stringify(data)); // 深拷贝
+          editTaskPath.value = path;
+          editTaskParent.value = parent;
+          editTaskKey.value = key;
+          // 预取枚举选项
+          Object.keys(paramEnumOptions).forEach(k => delete paramEnumOptions[k]);
+          const meta = (data && data.param_meta) || {};
+          const paths = Object.values(meta || {});
+          if (paths.length) {
+            fetch('/enum-options', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paths }) })
+              .then(r => r.json())
+              .then(map => {
+                Object.entries(meta).forEach(([paramKey, enumPath]) => {
+                  paramEnumOptions[paramKey] = map[enumPath] || [];
+                });
+                editModalVisible.value = true;
+              })
+              .catch(() => { editModalVisible.value = true; });
+          } else {
+            editModalVisible.value = true;
+          }
+        }
+
+        // 切换「启用/禁用」时的临时更新
+        function updateTaskStatus(e) {
+          editTaskData.value.on = e.target.checked;
+        }
+
+        // 保存任务（模拟提交到后端）
+        function saveTask() {
+          if (!(editTaskParent.value && editTaskKey.value)) return;
+          // 覆盖本地数据
+          editTaskParent.value[editTaskKey.value] = {
+            ...editTaskParent.value[editTaskKey.value],
+            ...editTaskData.value,
+          };
+          // 若启用该任务，则将下次执行时间重置为 0，确保可立即运行
+          if (editTaskParent.value[editTaskKey.value].on) {
+            editTaskParent.value[editTaskKey.value].next_exec_time = 0;
+          }
+          // 持久化到后端（仅提交 tasks）
+          fetch('/tasks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tasks: configData.tasks })
+          })
+            .then(res => res.json().then(data => ({ ok: res.ok, data })))
+            .then(({ ok, data }) => {
+              if (ok && data) {
+                Object.keys(configData).forEach(k => delete configData[k]);
+                Object.assign(configData, data);
+                ElementPlus.ElMessage.success('任务已保存');
+              } else {
+                ElementPlus.ElMessage.error('保存失败');
+              }
+            })
+            .catch(e => ElementPlus.ElMessage.error('保存失败: ' + e))
+            .finally(() => { editModalVisible.value = false; });
+        }
+
+        function addListItem(key) {
+          if (!Array.isArray(editTaskData.value.params[key])) {
+            editTaskData.value.params[key] = [];
+          }
+          editTaskData.value.params[key].push('');
+        }
+        function removeListItem(key, idx) {
+          if (!Array.isArray(editTaskData.value.params[key])) return;
+          editTaskData.value.params[key].splice(idx, 1);
+        }
+
+        // 拉取后端最新配置并更新界面
+        async function refreshConfig() {
+          try {
+            const res = await fetch('/refresh');
+            const data = await res.json();
+            if (data && !data.error) {
+              // 用后端下发的完整（清洗后）配置覆盖本地
+              Object.keys(configData).forEach(k => delete configData[k]);
+              Object.assign(configData, data);
+              // 刷新后保持当前 tab 与展开组不变，依赖响应式自动重渲染
+              Vue.nextTick(() => {
+                // 刷新日志区域滚动到底部
+                const lc = document.getElementById('logContainer');
+                if (lc) lc.scrollTop = lc.scrollHeight;
+              });
+            } else {
+              console.error('Refresh error:', data && data.error);
+            }
+          } catch (e) {
+            console.error('Refresh failed:', e);
+          }
+        }
+
+        // 模拟日志动态刷新（定时生成）
+        function refreshLogs() {
+          // 采用 SSE
+          const evtSource = new EventSource('/logs');
+          const ansi_up = new AnsiUp();
+          // 批量缓冲渲染，减少重排
+          let buffer = [];
+          let scheduled = false;
+          const flush = () => {
+            if (buffer.length) {
+              // 限长，避免内存与DOM过大
+              const maxLines = 2000;
+              logs.value.push(...buffer);
+              buffer = [];
+              if (logs.value.length > maxLines) {
+                logs.value.splice(0, logs.value.length - maxLines);
+              }
+              // 自动滚动到底部 - 使用 nextTick 确保DOM更新完成
+              Vue.nextTick(() => {
+                const lc = document.getElementById("logContainer");
+                if (lc) {
+                  lc.scrollTop = lc.scrollHeight;
+                  // 额外检查是否真的滚动到了底部，避免某些情况下滚动失败
+                  setTimeout(() => {
+                    if (lc.scrollTop + lc.clientHeight < lc.scrollHeight - 10) {
+                      lc.scrollTop = lc.scrollHeight;
+                    }
+                  }, 10);
+                }
+              });
+            }
+            scheduled = false;
+          };
+          evtSource.onmessage = function(e) {
+            // 自动刷新任务列表：监听“执行成功”或“执行失败”关键字，避免 unicode emoji 匹配问题
+            if (/执行成功|执行失败|END/.test(e.data)) {
+              refreshConfig();
+            }
+            buffer.push({ html: ansi_up.ansi_to_html(e.data) });
+            if (!scheduled) {
+              scheduled = true;
+              // 使用 requestAnimationFrame/微任务合并渲染
+              requestAnimationFrame(flush);
+            }
+          };
+          // 忽略 ping 心跳事件
+          evtSource.addEventListener('ping', () => {});
+        }
+
+        // 滚动到底部辅助函数
+        function scrollToBottom() {
+          Vue.nextTick(() => {
+            const lc = document.getElementById("logContainer");
+            if (lc) {
+              lc.scrollTop = lc.scrollHeight;
+            }
+          });
+        }
+
+        // 初始化：加载数据 + 启动日志刷新
+        function init() {
+          console.log("配置数据已加载");
+          refreshLogs();
+          // 页面加载完成后滚动到底部
+          setTimeout(scrollToBottom, 100);
+        }
+
+        return {
+          configData,
+          activeTab,
+          filteredConfig,
+          sectionLabels,
+          keyLabels,
+          clientOptions,
+          selectedClient,
+          logs,
+          characterName,
+          currentTasks,
+          activeGroupPath,
+          setActiveGroup,
+          editModalVisible,
+          editTaskData,
+          editTaskPath,
+          openEditModal,
+          paramEnumOptions,
+          updateTaskStatus,
+          saveTask,
+          addListItem,
+          removeListItem,
+          refreshConfig,
+          init,
+          // 账号验证
+          verifyAccount: async () => {
+            try {
+              const { value } = await ElementPlus.ElMessageBox.prompt('请输入安全密码', '账号验证', { inputType: 'password', confirmButtonText: '验证', cancelButtonText: '取消' });
+              const res = await fetch('/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ security_key: value }) });
+              const data = await res.json();
+              if (data) {
+                characterName.value = data.character_name || '';
+                if (!configData.game) configData.game = {};
+                configData.game.character_name = characterName.value;
+              }
+            } catch (e) {}
+          },
+          // 添加账号
+          addDialogVisible,
+          addForm,
+          openAddAccountDialog: () => { addDialogVisible.value = true; },
+          submitAddAccount: async () => {
+            const payload = { account: addForm.account, password: addForm.password, character_name: addForm.character_name, security_key: addForm.security_key };
+            const res = await fetch('/account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const data = await res.json();
+            characterName.value = data.character_name || '';
+            if (!configData.game) configData.game = {};
+            configData.game.character_name = characterName.value;
+            addDialogVisible.value = false;
+          },
+          // 清空日志（前端）
+          clearLogs: () => {
+            // 仅清空响应式数据，保留 SSE 连接，后续日志继续追加
+            logs.value.length = 0;
+            const lc = document.getElementById('logContainer');
+            if (lc) lc.scrollTop = 0;
+          },
+          saveSettings: () => {
+            fetch('/config', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(configData)
+            }).then(() => alert('保存成功'));
+          },
+          saveTasks: async () => {
+            try {
+              // 仅提交 tasks，避免覆盖 app/ocr/emulator 等（这些走 /config）
+              const res = await fetch('/tasks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tasks: configData.tasks })
+              });
+              const data = await res.json();
+              if (res.ok && data) {
+                // 用后端返回的清洗后配置刷新（包含最新任务结构）
+                Object.keys(configData).forEach(k => delete configData[k]);
+                Object.assign(configData, data);
+                ElementPlus.ElMessage.success('任务已保存');
+              } else {
+                ElementPlus.ElMessage.error('保存失败: ' + (data && data.error || '未知错误'));
+              }
+            } catch (e) {
+              ElementPlus.ElMessage.error('保存失败: ' + e);
+            }
+          },
+          // 终止执行
+          stopRun: () => {
+            fetch('/stop', { method: 'POST' })
+              .then(r => r.json())
+              .then(d => console.debug('Stop response:', d))
+              .catch(e => console.error('Stop error:', e));
+          },
+         
+          startRun: () => {
+            const now = Date.now() / 1000;
+            const tasks = [];
+            const basePrefix = (activeTabLabel.value ? activeTabLabel.value + '/' : '') + (activeGroupPath.value ? activeGroupPath.value + '/' : '');
+            function traverse(data, path = '') {
+              for (const [key, item] of Object.entries(data)) {
+                if (item.hasOwnProperty('on')) {
+                  if (item.on && item.next_exec_time < now) {
+                    tasks.push(basePrefix + path + key);
+                  }
+                } else {
+                  traverse(item, path + key + '/');
+                }
+              }
+            }
+            // 只遍历当前展开目录
+            let subtree = currentTasks.value;
+            if (activeGroupPath.value) {
+              for (const k of activeGroupPath.value.split('/')) {
+                if (!k) continue;
+                subtree = (subtree && typeof subtree === 'object') ? subtree[k] : undefined;
+              }
+              if (!subtree || typeof subtree !== 'object') {
+                subtree = {};
+              }
+            }
+            traverse(subtree);
+            console.debug('Sending tasks:', tasks);
+            fetch('/run', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(tasks)
+            })
+            .then(response => response.json())
+            .then(data => console.debug('Server response:', data));
+          },
+        };
+      },
+      mounted() {
+        this.init(); // 组件挂载后初始化
+      },
+    });
+    app.use(ElementPlus).mount("#app");
+  </script>
+{% endraw %}
+</body>
+</html>

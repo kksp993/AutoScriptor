@@ -11,14 +11,13 @@ from AutoScriptor.recognition.ocr_rec import ocr_for_box
 from AutoScriptor.recognition.rec import get_box_color
 from AutoScriptor.utils.box import Box, b2p
 from AutoScriptor.utils.logger import log_flush
-from logzero import logger
+from logzero import logger,logfile
 from AutoScriptor.utils.constant import cfg
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
 from AutoScriptor.utils.edit_img import launch_editor
 # 初始化编排器
 logger.info("编排器初始化开始...")
 # 初始化 logzero 全量日志文件（UTF-8 编码）
-from logzero import logfile
 import os
 from datetime import datetime
 log_dir = os.path.join(os.getcwd(), 'logs', 'log')
@@ -151,7 +150,7 @@ def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=No
     # log_flush(f"locate {target} boxes: {boxes}")
     return boxes
 
-def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, assure_stable: bool = True)->Box|None|list[Box]:
+def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, assure_stable: bool = True, is_simplify: bool = True)->Box|None|list[Box]:
     """
     在屏幕上查找文本或图片目标，返回第一个匹配的 Box 或 False
     支持多目标等待：列表需全满足，元组任一满足
@@ -169,8 +168,8 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
             first_attempt = False
             boxes = _locate_all(target)
             if assure_stable and not stable(boxes, _locate_all(target)): continue
-            if first(boxes): return first(boxes)  # 确保返回单个Box或None
-        return None
+            if first(boxes): return first(boxes) if is_simplify else boxes  # 确保返回单个Box或None
+        return None if is_simplify else boxes
     
     # 列表需全满足
     if isinstance(target, list):
@@ -179,8 +178,8 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
             first_attempt = False
             boxes = _locate_all(target)
             if assure_stable and not stable(boxes, _locate_all(target)): continue
-            if full(boxes): return simple(boxes)
-        return simple(boxes)
+            if full(boxes): return simple(boxes) if is_simplify else boxes
+        return boxes if not is_simplify else simple(boxes)
     
     # 单个Target对象，转换为元组处理
     if isinstance(target, Target):
