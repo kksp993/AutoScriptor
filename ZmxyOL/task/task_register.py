@@ -6,59 +6,12 @@ from ZmxyOL import *
 import enum
 from AutoScriptor.utils.constant import cfg
 from logzero import logger
+from ZmxyOL.task.translations import normalize_to_cn
 
 # 在模块顶端添加全局计数器
 registration_counter = 0
 
-TRANSLATION_MAP = {
-    # Directories:
-    '一般任务': 'general_task',
-    '日常任务': 'daily_task',
-    '每周任务': 'weekly_task',
-    '天庭': 'heavenly_court',
-    '村庄': 'village',
-    '极北': 'far_north',
-    '极北地区': 'far_north_area',
-    '极北村庄': 'far_north_village',
-    '极寒深渊': 'frigid_abyss',
-    '登录': 'login',  # Can be dir or file
-
-    # Files:
-    '梵天塔': 'brahma_pagoda',
-    '返回开始': 'return_to_start',
-    '地狱混沌': 'hell_chaos',
-    '天庭混沌': 'heavenly_court_chaos',
-    '组队任务': 'team_task',
-    '仙宝挖掘': 'celestial_treasure_digging',
-    '仙气消耗': 'celestial_qi_consumption',
-    '仙盟建设': 'celestial_alliance_construction',
-    '取经': 'scripture_seeking',
-    '天选阁': 'pavilion_of_the_chosen',
-    '妖兽': 'demon_beast',
-    '宠物培养': 'pet_cultivation',
-    '强化装备': 'equipment_enhancement',
-    '战令领取': 'battle_pass_claim',
-    '活跃券': 'activity_voucher',
-    '竞技场': 'arena',
-    '一键碾压': 'one_click_crush',
-    '冰窟探险': 'ice_cave_exploration',
-    '厄难副本': 'calamity_dungeon',
-    '极北混沌': 'far_north_chaos',
-    '混沌蛋': 'chaos_egg',
-    '仙宝炼化': 'celestial_treasure_refining',
-    '极光天诏': 'aurora_edict',
-    '消费点券': 'coupon_spending',
-    '极渊副本': 'abyssal_dungeon',
-    '登录其他角色': 'login_other_characters',
-    '冰窟商店': 'ice_cave_shop',
-    '幽冥冰窟': 'nether_ice_cave',
-    '荣耀之战': 'battle_of_glory',
-}
-
-TRANSLATION_MAP_REVERSE = {v: k for k, v in TRANSLATION_MAP.items()}
-
-def translate_path_part(part):
-    return TRANSLATION_MAP.get(part, None) or TRANSLATION_MAP_REVERSE.get(part, None)
+ 
 
 
 def register_task(func):
@@ -97,11 +50,8 @@ def register_task(func):
         task_name, _ = os.path.splitext(filename)
         keys[-1] = task_name
 
-        # Store original keys for display before translating
-        original_keys_for_display = keys[:]
-
-        # New step: Translate keys from Chinese to English
-        keys = [translate_path_part(key) for key in keys]
+        # 将路径片段统一归一为中文键（兼容英文目录/文件名）
+        keys = [normalize_to_cn(key) for key in keys]
 
         # 6. Traverse the 'menu' dictionary, creating nested dictionaries if they don't exist.
         current_level = cfg["tasks"]

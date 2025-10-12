@@ -19,10 +19,11 @@ def task_way_to_diff(self:Hero, task: str, expect_difficulty: str, task_type: st
     ensure_in(*get_task_table(task)["location"])
     click(get_task_table(task)["target"], until=lambda: extract_info(B(648,6,132,78), lambda x: len(x.strip())==2))
     # 开始挑战
-    if ui_F("开始挑战"):
-        click(B(174,242,931,96))
+    sleep(1)
     # 进入混沌本，获取剩余次数
+    if ui_F(T("开始挑战")): click(B(174,242,931,96))
     click(T("混沌", box=Box(1008,263,73,52)), if_exist=True)
+    sleep(1)
     if expect_difficulty == "灵狱" and task_type == "极寒深渊":
         remains = extract_info(B(922,249,186,43), lambda x: int(x.strip()[-1]))
     else:

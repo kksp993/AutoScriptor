@@ -77,7 +77,7 @@ def task():
                 logger.info("战斗结束"),
                 bg.set_signal("try_exit", True),
                 bg.set_signal("failed", True),
-                click(T("确定"),repeat=2),
+                click(T("确定"),until=lambda:ui_F(T("确定"))),
                 h.heaven_draw_card_exit(),
                 bg.clear(),
             ]

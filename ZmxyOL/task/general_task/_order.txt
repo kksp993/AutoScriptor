@@ -1,3 +1,0 @@
-brahma_pagoda
-login
-return_to_start

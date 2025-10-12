@@ -19,7 +19,7 @@ if __name__ == "__main__":
         # print(timeit(lambda: print(locate(T("挑战",box=Box(920,475,300,200)))), number=1))
         # print(timeit(lambda: print(locate(I("梵天塔-天魔挑战"))), number=1))
         # print(timeit(lambda: print(locate(T("前往新一层"))), number=1))
-        print(timeit(lambda: print(locate(T("198"), timeout=2)), number=10))
+        print(timeit(lambda: print(locate(T("混沌", box=Box(1008,263,73,52)))), number=10))
         # close_targets = [
         #     (I("极北之地-取消"), I("极北之地-取消")),
         #     (I("x"), I("x")),

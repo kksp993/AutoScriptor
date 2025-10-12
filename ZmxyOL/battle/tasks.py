@@ -1,10 +1,11 @@
 from AutoScriptor import *
-from ZmxyOL import *
+from ZmxyOL.battle.character.hero import combo
+from ZmxyOL.nav.api import ensure_in, try_close_via_x
 EXIT_RADIUS=0  # 退出范围 for safety
 
 TASK_TABLE = {
     "龙宫":{"location":("天庭",4),"target":T("龙宫"),"idx":0, "exit_loc":300-EXIT_RADIUS},
-    "九重天":{"location":("天庭",0),"target":T("九重天"),"idx":0, "exit_loc":626-EXIT_RADIUS},
+    "九重天":{"location":("天庭",0),"target":T("九重天"),"idx":0, "exit_loc":626-20-EXIT_RADIUS},
     "南天王殿·精英":{"location":("天庭",0),"target":T("南天王殿"),"idx":0, "exit_loc":416-EXIT_RADIUS},
     "南天王殿·终":{"location":("天庭",0),"target":T("南天王殿"),"idx":1, "exit_loc":416-EXIT_RADIUS},
     "西天王殿·精英":{"location":("天庭",0),"target":T("西天王殿"),"idx":0, "exit_loc":416-EXIT_RADIUS},
@@ -108,6 +109,24 @@ def challenge_task_daily():
     h.battle_tasks(TASK_TABLE_LIST)
 
 
+@combo
+def battle_tasks(self:"Hero", task_table:list[str], speed_x:int=1):#type: ignore
+    if isinstance(task_table, str): task_table = [task_table]
+    for v in get_task_table(task_table).values():
+        ensure_in(*v["location"])
+        click(v["target"])
+        wait_for_appear(v["target"].set_box(Box(136,0,988,84)))
+        click(B(253,271+100*v["idx"],104,37),delay=1)
+        click(T("开始挑战"))
+        if ui_T(T("确定",box=Box(658,495,142,82)),1):
+            click(T("确定",box=Box(658,495,142,82)), if_exist=True)
+            try_close_via_x()
+            click(I("回家"))
+        else:
+            wait_for_disappear(I("加载中"))
+            self.set(has_cd=False, speed_x=speed_x).heaven_battle(exit_loc=v["exit_loc"])
+
+        
 
 
 
