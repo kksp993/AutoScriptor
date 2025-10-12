@@ -1,0 +1,4 @@
+battle
+brahma_tower
+login
+back_to_login

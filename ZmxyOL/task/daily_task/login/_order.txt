@@ -1,1 +1,1 @@
-login_other_characters
+login_other_character

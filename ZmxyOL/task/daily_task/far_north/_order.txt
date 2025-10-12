@@ -1,3 +1,0 @@
-far_north_area
-far_north_village
-frigid_abyss

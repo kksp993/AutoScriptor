@@ -1,4 +1,4 @@
 village
-heavenly_court
-far_north
+heaven
+hyper
 login
