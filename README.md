@@ -26,6 +26,8 @@ AutoScriptor 是一个基于 Python 和 Vue 的自动化脚本与任务管理器
 
 ## 使用说明与配置指南
 
+如需完整的入门到进阶与 API 参考，请查阅: [AutoScriptor/core/API.md](AutoScriptor/core/API.md)
+
 0. 请确保使用 Windows 系统，并优先选择 Mumu 模拟器或 Mumu 12 版本（暂不支持其他模拟器）。
 
 1. 建议将模拟器设置为平板 1280x720 分辨率，同时适当提高内存和 CPU 分配，以获得更好的运行性能。
