@@ -203,12 +203,19 @@ def save_tasks():
         tasks = payload.get('tasks', payload)
         if not isinstance(tasks, dict):
             return jsonify({"error": "invalid tasks payload"}), 400
-        # 覆盖内存中的 tasks，并持久化到 config.json
-        cfg._config.setdefault('tasks', {})
-        cfg._config['tasks'] = tasks
-        cfg.save_config()
-        # 重载任务注册，恢复运行期字段（fn/order 等）
-        TASK_MANAGER.reload_tasks()
+        # 原子化更新：在锁内写入磁盘并重载，避免并发读取到无 fn 的中间状态
+        try:
+            TASK_MANAGER._cfg_lock.acquire()
+            cfg._config.setdefault('tasks', {})
+            cfg._config['tasks'] = tasks
+            cfg.save_config()
+            # 重载任务注册，恢复运行期字段（fn/order 等）
+            TASK_MANAGER.reload_tasks()
+        finally:
+            try:
+                TASK_MANAGER._cfg_lock.release()
+            except Exception:
+                pass
         # 同步排序映射
         read_config()
         return jsonify(make_public_config()), 200
