@@ -300,6 +300,54 @@ def verify_account():
     cfg._config['game']['character_name'] = cfg["game"].get("character_name", "")
     return jsonify({"character_name": cfg["game"].get("character_name", "")})
 
+@app.route('/ocr-status', methods=['GET'])
+def ocr_status():
+    try:
+        import paddle
+        try:
+            from AutoScriptor.recognition.ocr_rec import ocr_manager
+        except Exception:
+            ocr_manager = None
+        compiled_with_cuda = False
+        gpu_count = 0
+        current_device = "unknown"
+        try:
+            compiled_with_cuda = paddle.device.is_compiled_with_cuda()
+        except Exception:
+            pass
+        try:
+            gpu_count = paddle.device.cuda.device_count()
+        except Exception:
+            pass
+        try:
+            current_device = paddle.get_device()
+        except Exception:
+            pass
+        cfg_use_gpu = False
+        try:
+            # 兼容两种访问方式
+            cfg_use_gpu = bool(cfg["ocr"].get("use_gpu", cfg.get("ocr.use_gpu", False)))
+        except Exception:
+            try:
+                cfg_use_gpu = bool(cfg.get("ocr.use_gpu", False))
+            except Exception:
+                cfg_use_gpu = False
+        engine_ready = False
+        try:
+            engine_ready = ocr_manager.is_ready() if ocr_manager else False
+        except Exception:
+            engine_ready = False
+        return jsonify({
+            "cfg_use_gpu": cfg_use_gpu,
+            "compiled_with_cuda": compiled_with_cuda,
+            "gpu_count": gpu_count,
+            "current_device": current_device,
+            "engine_ready": engine_ready
+        }), 200
+    except Exception as e:
+        logger.error("ocr_status error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/account', methods=['POST'])
 def add_account():
     data = request.get_json(silent=True) or {}

@@ -226,7 +226,6 @@ class TaskManager:
 
             # logger.info("[TASK] END %s", cfg["game"]["character_name"])
             logger.info("✅ 任务重新加载完成")
-            print("cfg[\"tasks\"]", cfg["tasks"])
 
         except Exception as e:
             logger.error(f"❌ 任务重新加载失败: {e}")
