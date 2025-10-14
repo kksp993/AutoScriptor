@@ -188,7 +188,7 @@ def update_order_files(py_files):
         if not dir_path.exists() or not dir_path.is_dir():
             return
         order_file = dir_path / '_order.txt'
-
+        if "__pycache__" in dir_parts_eng: return
         key = "/".join(dir_parts_eng)
         override = fixed_orders.get(key)
         if override:

@@ -78,3 +78,13 @@ AutoScriptor 是一个基于 Python 和 Vue 的自动化脚本与任务管理器
    - 建议先手动进入每个场景以跳过首次过场动画，确保脚本执行更流畅。
 
 8. 当前内置任务数量有限，欢迎有兴趣的开发者参与适配与功能拓展！
+
+
+## QA
+1. 如果出现无法安装av包，尝试以下命令安装：
+```
+conda activate zmxy
+conda install -n zmxy -c conda-forge "av=10.*" ffmpeg
+python -m pip install -U pip setuptools wheel
+python -m pip install -r requirements.txt
+```
