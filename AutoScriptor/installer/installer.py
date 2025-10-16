@@ -1,0 +1,288 @@
+import sys
+import os
+import subprocess
+from pathlib import Path
+import json
+
+try:
+    import winreg  # type: ignore
+except Exception:
+    winreg = None  # 非 Windows 环境兼容
+
+
+def find_project_root(start: Path) -> Path:
+    """Locate project root by looking for requirements.txt at or above start."""
+    cur = start.resolve()
+    for p in [cur, *cur.parents]:
+        if (p / "requirements.txt").exists() and (p / "services").exists():
+            return p
+    # Fallback: two levels up from this file (AutoScriptor/installer → repo root)
+    return start.resolve().parents[2]
+
+
+def get_venv_python(project_root: Path) -> Path:
+    return project_root / ".venv" / "Scripts" / "python.exe"
+
+
+def ensure_venv(project_root: Path) -> Path:
+    """Create .venv if missing. Returns venv python path."""
+    venv_python = get_venv_python(project_root)
+    if venv_python.exists():
+        return venv_python
+    # Create venv using the current interpreter
+    subprocess.check_call([sys.executable, "-m", "venv", str(project_root / ".venv")])
+    return venv_python
+
+
+def reinstall_pip_and_install(project_root: Path, extra_index: str | None = None) -> None:
+    venv_python = get_venv_python(project_root)
+    # Upgrade pip first (use python -m pip to avoid self-modify issues)
+    subprocess.check_call([str(venv_python), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"]) 
+    # 标准在线安装；不再优先 wheelhouse
+    req = project_root / "requirements.txt"
+    args = [str(venv_python), "-m", "pip", "install", "-r", str(req)]
+    if extra_index:
+        args += ["-i", extra_index]
+    subprocess.check_call(args)
+
+
+def _read_registry_mu_mu_paths() -> list[Path]:
+    paths: list[Path] = []
+    if winreg is None:
+        return paths
+    uninstall_roots = [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+    ]
+    keywords = ["MuMu", "MuMu Player", "网易 MuMu"]
+    for root, sub in uninstall_roots:
+        try:
+            with winreg.OpenKey(root, sub) as h:  # type: ignore[attr-defined]
+                for i in range(0, 4096):
+                    try:
+                        name = winreg.EnumKey(h, i)
+                        with winreg.OpenKey(h, name) as appkey:
+                            display_name = ""
+                            install_loc = ""
+                            try:
+                                display_name, _ = winreg.QueryValueEx(appkey, "DisplayName")
+                            except Exception:
+                                pass
+                            try:
+                                install_loc, _ = winreg.QueryValueEx(appkey, "InstallLocation")
+                            except Exception:
+                                pass
+                            text = f"{display_name} {install_loc}".lower()
+                            if any(k.lower() in text for k in keywords):
+                                if install_loc and os.path.isdir(install_loc):
+                                    paths.append(Path(install_loc))
+                    except OSError:
+                        break
+        except Exception:
+            continue
+    return paths
+
+
+def _search_common_mu_mu_paths() -> list[Path]:
+    candidates = []
+    pf = os.environ.get("ProgramFiles", r"C:\\Program Files")
+    pf86 = os.environ.get("ProgramFiles(x86)", r"C:\\Program Files (x86)")
+    common_names = [
+        "Netease\\MuMu",
+        "Netease\\MuMu Player 12",
+        "MuMu",
+        "MuMu Player 12",
+    ]
+    for base in {pf, pf86}:
+        for name in common_names:
+            path = Path(base) / name
+            if path.exists():
+                candidates.append(path)
+    return candidates
+
+
+def _derive_paths_from_mumu_folder(folder: Path) -> dict:
+    # 兼容老版（nx_main）与 12 版（shell）
+    nx_main = folder / "nx_main"
+    shell = folder / "shell"
+    emu_path = None
+    adb_path = None
+    if nx_main.exists():
+        ep = nx_main / "MuMuManager.exe"
+        ap = nx_main / "adb.exe"
+        if ep.exists():
+            emu_path = ep
+        if ap.exists():
+            adb_path = ap
+    if (emu_path is None or adb_path is None) and shell.exists():
+        ep = shell / "MuMuPlayer.exe"
+        ap = shell / "adb.exe"
+        if emu_path is None and ep.exists():
+            emu_path = ep
+        if adb_path is None and ap.exists():
+            adb_path = ap
+    return {
+        "mumu_folder": str(folder),
+        "emu_path": str(emu_path) if emu_path else "",
+        "adb_path": str(adb_path) if adb_path else "",
+    }
+
+
+def _adb_detect_serial(adb_path: str) -> str | None:
+    try:
+        # 启动 ADB 服务并读取设备
+        subprocess.run([adb_path, "start-server"], capture_output=True, text=True, timeout=5)
+        out = subprocess.run([adb_path, "devices"], capture_output=True, text=True, timeout=5)
+        lines = (out.stdout or "").splitlines()
+        # 过滤 header 行
+        pairs = [ln.split("\t")[0] for ln in lines if "\tdevice" in ln]
+        for serial in pairs:
+            if serial.startswith("127.0.0.1:"):
+                return serial
+        return pairs[0] if pairs else None
+    except Exception:
+        return None
+
+
+def ensure_config_with_mumu(project_root: Path) -> None:
+    """确保存在 config.json，并尽量自动填写 MuMu 相关字段。"""
+    cfg_tmpl = project_root / "config template.json"
+    cfg_path = project_root / "config.json"
+    if not cfg_path.exists():
+        if cfg_tmpl.exists():
+            cfg_path.write_text(cfg_tmpl.read_text(encoding="utf-8"), encoding="utf-8")
+        else:
+            # 最小结构
+            cfg_path.write_text(json.dumps({
+                "app": {"name": "ZmxyOL", "app_to_start": "org.yjmobile.zmxy", "restart_on_error": True, "run_in_background": True, "auto_start": True},
+                "ocr": {"use_gpu": False},
+                "emulator": {"index": 1, "adb_addr": "127.0.0.1:16416", "mumu_folder": "", "emu_path": "", "adb_path": ""},
+                "encryption": {},
+                "tasks": {}
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    try:
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+
+    emulator = data.setdefault("emulator", {})
+
+    # 若缺省或占位符，则尝试自动探测
+    need_detect = False
+    for key in ("mumu_folder", "emu_path", "adb_path"):
+        val = str(emulator.get(key, ""))
+        if not val or val.startswith("YOUR_"):
+            need_detect = True
+            break
+
+    if need_detect:
+        candidates = []
+        candidates.extend(_read_registry_mu_mu_paths())
+        candidates.extend(_search_common_mu_mu_paths())
+        chosen = None
+        # 排除 Global 版
+        for c in candidates:
+            if "global" in str(c).lower():
+                continue
+            chosen = c
+            break
+        if chosen is not None:
+            paths = _derive_paths_from_mumu_folder(chosen)
+            for k, v in paths.items():
+                if v and (not emulator.get(k) or str(emulator.get(k, "")).startswith("YOUR_")):
+                    emulator[k] = v
+
+    # 自动检测 adb 设备地址
+    adb_addr = str(emulator.get("adb_addr", ""))
+    if (not adb_addr or adb_addr.startswith("YOUR_") or adb_addr.endswith(":0")) and emulator.get("adb_path"):
+        serial = _adb_detect_serial(emulator["adb_path"]) or ""
+        if serial:
+            emulator["adb_addr"] = serial
+        else:
+            # Fallback 常见端口（README 示例）
+            emulator.setdefault("adb_addr", "127.0.0.1:16416")
+
+    # 默认 index
+    emulator.setdefault("index", 1)
+
+    # 回写
+    try:
+        cfg_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def relaunch_in_venv_if_needed(project_root: Path, argv: list[str]) -> None:
+    """If not running inside the target .venv, relaunch inside it."""
+    venv_python = get_venv_python(project_root)
+    # Heuristic: compare current executable path to venv path
+    if Path(sys.executable).resolve() != venv_python.resolve():
+        if not venv_python.exists():
+            ensure_venv(project_root)
+        # Relaunch inside venv
+        os.execv(str(venv_python), [str(venv_python), *argv])
+
+
+def run_target(project_root: Path, target: str) -> int:
+    venv_python = get_venv_python(project_root)
+    if target == "webui":
+        entry = project_root / "services" / "webui" / "server.py"
+    elif target == "cli":
+        entry = project_root / "services" / "main_cli" / "run.py"
+    elif target == "install-only":
+        return 0
+    else:
+        print(f"未知目标: {target}，可选: webui | cli | install-only")
+        return 2
+    return subprocess.call([str(venv_python), str(entry)])
+
+
+def main() -> int:
+    # Resolve project root from this file location
+    this_file = Path(__file__).resolve()
+    project_root = find_project_root(this_file.parent)
+
+    # First phase: if not already in the target .venv, relaunch into it
+    # (This also creates venv when missing.)
+    relaunch_in_venv_if_needed(project_root, sys.argv)
+
+    # Inside venv now
+    # Optional pip index from environment variable AUTOSCRIPTOR_PIP_INDEX
+    extra_index = os.environ.get("AUTOSCRIPTOR_PIP_INDEX", None)
+
+    # Ensure venv present (no-op if already)
+    ensure_venv(project_root)
+
+    # Install dependencies
+    reinstall_pip_and_install(project_root, extra_index=extra_index)
+
+    # 根据 README 约定自动配置 MuMu（仅 Windows 有效，忽略失败）
+    try:
+        ensure_config_with_mumu(project_root)
+    except Exception:
+        pass
+
+    # Decide run target
+    target = "webui"
+    if len(sys.argv) > 1:
+        tgt = sys.argv[1].strip().lower()
+        if tgt in {"webui", "cli", "install-only"}:
+            target = tgt
+
+    return run_target(project_root, target)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except subprocess.CalledProcessError as e:
+        print(f"安装/运行失败，退出码: {e.returncode}")
+        sys.exit(e.returncode or 1)
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except Exception as e:
+        print(f"未预期错误: {e}")
+        sys.exit(1)
+
+

@@ -11,6 +11,7 @@ def daily_qianghua_task():
         click(B(40,40,60,60))
         sleep(4)
     click(B(0,0),until=lambda:ui_T(T("云中子")))
+    sleep(2)
     click(T("云中子"), offset=(0,60))
     sleep(2)
     click(T("进阶"),repeat=2)

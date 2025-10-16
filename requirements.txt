@@ -32,3 +32,5 @@ astor>=0.8.1
 # jaxlib == 0.4.27
 flask
 dpath
+Flask-SocketIO
+eventlet

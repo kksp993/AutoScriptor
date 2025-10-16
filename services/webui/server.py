@@ -5,6 +5,7 @@ from AutoScriptor import *
 from services.core.task_manager import TaskManager
 from ZmxyOL import *
 from flask import Flask, render_template, jsonify, send_from_directory, request, stream_with_context
+from flask_socketio import SocketIO, emit
 import importlib
 import json, os
 import logging
@@ -16,6 +17,7 @@ from threading import Thread
 import ctypes
 
 app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='')
+socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins='*')
 
 # 高性能日志通道：使用内存队列减少磁盘 IO 与轮询延迟
 console_handlers_for_setup = [h for h in logger.handlers if hasattr(h, 'stream')]
@@ -118,41 +120,30 @@ def get_log_prefix(msg):
     prefix = ch.format(record).rstrip()
     return prefix + " " + msg
 
-# SSE 实时日志流（基于内存队列，低延迟）
-def generate_logs():
-    # 初始注释和重试提示，帮助中间层立即刷新
-    yield ": stream-start\n\n"
-    yield "retry: 1000\n\n"
-    last_heartbeat = time.time()
+def _ws_log_emitter():
+    """
+    后台任务：从日志队列批量取出并通过 WebSocket 推送。
+    采用 socketio.start_background_task 启动，不阻塞主线程，每1秒查询一次，避免线程与 greenlet 混用带来的 greenlet.error。
+    """
     while True:
         try:
-            # 最多 500ms 等待一条新日志，随后批量排空以降低事件数
-            line = log_queue.get(timeout=0.5)
-            yield f"data: {line}\n\n"
-            # 快速排空缓冲，尽量一次性把当前批量都刷给前端
+            # 等待最多1s取出日志
+            line = log_queue.get(timeout=1.0)
+            batch = [line]
+            # 快速排空缓冲，合并为一次消息
             while True:
                 try:
-                    more = log_queue.get_nowait()
-                    yield f"data: {more}\n\n"
+                    batch.append(log_queue.get_nowait())
                 except Empty:
                     break
-            continue
+            socketio.emit('log_message', { 'data': "\n".join(batch) })
         except Empty:
-            pass
-        # 心跳，保持连接活性
-        now = time.time()
-        if now - last_heartbeat >= 3.0:
-            yield "event: ping\ndata: keepalive\n\n"
-            last_heartbeat = now
+            # 未有日志时，每1秒检查一次
+            socketio.sleep(1.0)
 
-@app.route('/logs')
-def logs():
-    resp = app.response_class(stream_with_context(generate_logs()), mimetype='text/event-stream')
-    # 禁用缓冲，确保低延迟传输
-    resp.headers['Cache-Control'] = 'no-cache'
-    resp.headers['X-Accel-Buffering'] = 'no'
-    resp.headers['Connection'] = 'keep-alive'
-    return resp
+@socketio.on('connect')
+def _on_connect():
+    emit('log_message', { 'data': '... Connection established ...' })
 
 # 服务 favicon
 @app.route('/favicon.ico')
@@ -376,11 +367,16 @@ def add_account():
 if __name__ == '__main__':
     try:
         read_config()
-        # 多线程，确保 SSE 与其它请求并行处理
-        app.run(debug=False, use_reloader=False, threaded=True)
+        # 启动日志推送后台任务
+        socketio.start_background_task(target=_ws_log_emitter)
+        # 使用 Socket.IO 服务器以支持 WebSocket
+        socketio.run(app, debug=False, use_reloader=False)
     except Exception as e:
         logger.error("Error: %s", e)
         traceback.print_exc()
         logger.info("程序已退出")
     finally:
-        bg.stop()
+        try:
+            bg.stop()
+        except Exception:
+            pass
