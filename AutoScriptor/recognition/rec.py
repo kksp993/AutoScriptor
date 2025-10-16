@@ -30,7 +30,7 @@ def locate_on_screen(haystack_frame, targets, confidence=0.8, pf_boxes=None, col
     # 1. 分离img和text,并记录位置，方便后续组装list[Box]
     img_targets, text_targets, box_targets = [], [], []
     img_pf_boxes, text_pf_boxes = [], []
-    img_colors, text_colors = [], []
+    img_colors, text_colors, box_colors = [], [], []
     idfs = []
     for i, target in enumerate(targets):
         if isinstance(target, str):
@@ -40,6 +40,7 @@ def locate_on_screen(haystack_frame, targets, confidence=0.8, pf_boxes=None, col
             idfs.append("t"+str(len(text_targets)-1))
         elif isinstance(target, Box):
             box_targets.append(target)
+            box_colors.append(colors[i] if colors is not None else None)
             idfs.append("b"+str(len(box_targets)-1))
         else:
             img_targets.append(target)
@@ -49,7 +50,15 @@ def locate_on_screen(haystack_frame, targets, confidence=0.8, pf_boxes=None, col
     if img_targets and text_targets or box_targets:
         img_boxes = locate_on_screen(haystack_frame, img_targets, confidence, img_pf_boxes, img_colors) if img_targets else []
         text_boxes = locate_on_screen(haystack_frame, text_targets, confidence, text_pf_boxes, text_colors) if text_targets else []
-        box_boxes = [[box_targets[i]] for i in range(len(box_targets))]
+        # 对 Box 目标进行颜色过滤（如果指定了 color），不触发 OCR/图像匹配
+        box_boxes = []
+        for j, b in enumerate(box_targets):
+            col = box_colors[j]
+            if col:
+                detected_color = get_box_color(haystack_frame, b)
+                box_boxes.append([b] if detected_color == col else None)
+            else:
+                box_boxes.append([b])
         boxes = [img_boxes[int(idfs[i][1:])] if idfs[i][0]=="i" else text_boxes[int(idfs[i][1:])] if idfs[i][0]=="t" else box_boxes[int(idfs[i][1:])] for i in range(len(targets))]
         return boxes
     

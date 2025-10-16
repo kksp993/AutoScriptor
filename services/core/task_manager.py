@@ -8,7 +8,7 @@ import traceback
 import dpath
 import enum
 from typing import List
-from threading import Event
+from threading import Event, RLock
 from AutoScriptor import *
 from AutoScriptor.utils.constant import AutoConfig,cfg
 from ZmxyOL import *
@@ -54,6 +54,8 @@ class TaskManager:
     def __init__(self):
         # 运行期取消信号：/stop 会触发，execute_tasks 在任务边界检查
         self._cancel_event: Event = Event()
+        # 配置与任务注册的并发保护：避免重载过程中出现临时缺失 'fn'
+        self._cfg_lock: RLock = RLock()
 
     def request_cancel(self) -> None:
         self._cancel_event.set()
@@ -61,12 +63,16 @@ class TaskManager:
     def _reset_cancel(self) -> None:
         self._cancel_event.clear()
 
-    def _solve_task_params(self, task_data: dict) -> dict:
+    def _solve_task_params(self, task_data: dict, real_fn=None) -> dict:
         # 恢复枚举参数：优先使用 param_meta，否则根据注解回退
         raw_params = task_data.get('params', {})
         params = {}
         param_meta = task_data.get('param_meta', {})
-        sig = inspect.signature(task_data['fn'])
+        # 优先使用传入的函数引用，避免 task_data 中临时缺失 'fn'
+        target_fn = real_fn if real_fn is not None else task_data.get('fn')
+        if target_fn is None:
+            raise KeyError('fn')
+        sig = inspect.signature(target_fn)
         for k, v in raw_params.items():
             if k in param_meta:
                 module_name, class_name = param_meta[k].rsplit('.', 1)
@@ -136,14 +142,23 @@ class TaskManager:
             if self._cancel_event.is_set():
                 logger.info("⏹ 检测到终止请求，停止后续任务执行")
                 break
-            task_data = dpath.get(cfg["tasks"], task)
-            logger.info(f"▶️  正在执行: {task}")
-            logger.debug(f"task: {task_data}")
-            kwargs = self._solve_task_params(task_data)
+            # 在锁内读取并解析，避免重载过程导致 'fn' 丢失
+            with self._cfg_lock:
+                task_data = dpath.get(cfg["tasks"], task)
+                logger.info(f"▶️  正在执行: {task}")
+                logger.debug(f"task: {task_data}")
+                # 先在锁内准备参数与函数引用（快照）
+                fn = task_data.get("fn")
+                if fn is None:
+                    raise KeyError("fn")
+                kwargs = self._solve_task_params(task_data, real_fn=fn)
             try:
-                task_data["fn"](**kwargs)
+                # 释放锁后执行具体任务，避免长时间阻塞其它请求
+                fn(**kwargs)
                 logger.info(f"▶️  执行成功: {task}")
-                self._update_task_post_execution(task)
+                # 执行完毕后再加锁更新配置
+                with self._cfg_lock:
+                    self._update_task_post_execution(task)
             except Exception as e:
                 logger.error(f"Error executing task: {task} {e}")
                 if isinstance(e, KeyboardInterrupt): raise
@@ -152,7 +167,8 @@ class TaskManager:
                 # dump_error_and_log(task, e)
                 traceback.print_exc()
                 if isinstance(e, RequestHumanTakeover):
-                    self._update_task_post_execution(task)
+                    with self._cfg_lock:
+                        self._update_task_post_execution(task)
                     logger.info(f"需要人工操作完成，跳过")
                     continue
                 if cfg["app"]["restart_on_error"]:
@@ -176,6 +192,8 @@ class TaskManager:
         4. 恢复 game 信息，得到最新的 cfg
         """
         try:
+            # 整个重载过程加锁，确保对外部读者的原子性
+            self._cfg_lock.acquire()
             # 1. 保存当前解密的内容（如账号密码）
             saved_game_config = cfg._config.get('game', {}).copy()
             # 2. 清空现有任务注册
@@ -208,11 +226,15 @@ class TaskManager:
 
             # logger.info("[TASK] END %s", cfg["game"]["character_name"])
             logger.info("✅ 任务重新加载完成")
-            print("cfg[\"tasks\"]", cfg["tasks"])
 
         except Exception as e:
             logger.error(f"❌ 任务重新加载失败: {e}")
             raise
+        finally:
+            try:
+                self._cfg_lock.release()
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     try:

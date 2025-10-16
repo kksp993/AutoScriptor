@@ -99,9 +99,9 @@ def register_task(func):
         if param_meta:
             task_cfg['param_meta'] = param_meta
         a = {k:v for k,v in current_level[last_key].items() if k!= 'fn'}
-        print(f"✅ 【{'/'.join(keys)}】 => {a}")
+        # print(f"✅ 【{'/'.join(keys)}】 => {a}")
     except Exception as e:
-        print(f"An error occurred during registration for {func.__name__}: {e}，{traceback.format_exc()}")
+        logger.error(f"An error occurred during registration for {func.__name__}: {e}，{traceback.format_exc()}")
 
     # The decorator must return the original function
     return func

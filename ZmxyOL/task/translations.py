@@ -50,6 +50,8 @@ TRANSLATION_MAP = {
     '幽冥冰窟': 'youming_bingku',
     '荣耀之战': 'rongyao_battle',
     '五光十色': 'wuguangshise',
+    '五行四季': 'wuxingsiji',
+    '昆仑山': 'kunlunshan',
     '自动战斗': 'battle',
 
 }
