@@ -1,5 +1,8 @@
 from ZmxyOL.battle.character.hero import Hero, combo
 from AutoScriptor import *
+from threading import RLock
+
+_way_to_exit_lock = RLock()
 
 @combo
 def travel(self: Hero):
@@ -9,7 +12,7 @@ def travel(self: Hero):
         self.skill(1).sleep(0.08)
         self.skill(4, 1)
     else:
-        self.sleep(1)
+        self.sleep(0.15)
         self.jump(2).move_right(125, directly=True)
         self.skill(1).sleep(0.3)
         self.skill(4, 1)
@@ -75,13 +78,17 @@ def battle_loop(
 def way_to_exit(self: Hero, until: str = "", exit_loc: float = 0, timeout: float = 60):
     """当看见出口时，点击左键，直到出去；超时后抛出异常"""
     from time import time
-    start_time = time()
-    self.move_right(125).move_left(exit_loc)
-    while not until():
-        if time() - start_time > timeout:
-            raise RuntimeError(f"way_to_exit 超时: {timeout}秒, 条件 {until.__name__} 未满足")
-        self.move_left(25, directly=True)
-    return self
+    with _way_to_exit_lock:
+        start_time = time()
+        # switch_base("mumu")
+        self.move_right(125).move_left(exit_loc)
+        while not until():
+            if time() - start_time > timeout:
+                raise RuntimeError(f"way_to_exit 超时: {timeout}秒, 条件 {until.__name__} 未满足")
+            self.sleep(0.5)
+            self.move_left(25, directly=True)
+        # switch_base("nemu")
+        return self
 
 
 @combo
