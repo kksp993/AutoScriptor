@@ -644,6 +644,14 @@
           const ansi_up = new AnsiUp();
           let buffer = [];
           let scheduled = false;
+          let refreshScheduled = null;
+          const scheduleRefresh = () => {
+            if (refreshScheduled) return;
+            refreshScheduled = setTimeout(() => {
+              refreshScheduled = null;
+              refreshConfig();
+            }, 1000);
+          };
           const flush = () => {
             if (buffer.length) {
               const maxLines = 2000;
@@ -671,8 +679,8 @@
             const data = (msg && msg.data) || '';
             const lines = String(data).split('\n');
             for (const line of lines) {
-              if (/执行成功|执行失败|END/.test(line)) {
-                refreshConfig();
+              if (/(所有任务执行完成|任务执行已被中断)/.test(line)) {
+                scheduleRefresh();
               }
               buffer.push({ html: ansi_up.ansi_to_html(line) });
             }
@@ -680,12 +688,10 @@
               scheduled = true;
               requestAnimationFrame(() => {
                 flush();
-                // 若刚刚检测到「执行成功/失败/END」，在更新完任务后再强制滚动到最底
-                refreshConfig().then(() => {
-                  Vue.nextTick(() => {
-                    const lc = document.getElementById("logContainer");
-                    if (lc) lc.scrollTop = lc.scrollHeight;
-                  });
+                // 刷新由 scheduleRefresh 控制，这里仅确保滚动
+                Vue.nextTick(() => {
+                  const lc = document.getElementById("logContainer");
+                  if (lc) lc.scrollTop = lc.scrollHeight;
                 });
               });
             }

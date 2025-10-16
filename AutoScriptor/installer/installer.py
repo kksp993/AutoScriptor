@@ -227,15 +227,16 @@ def relaunch_in_venv_if_needed(project_root: Path, argv: list[str]) -> None:
 def run_target(project_root: Path, target: str) -> int:
     venv_python = get_venv_python(project_root)
     if target == "webui":
-        entry = project_root / "services" / "webui" / "server.py"
+        module = "services.webui.server"
     elif target == "cli":
-        entry = project_root / "services" / "main_cli" / "run.py"
+        module = "services.main_cli.run"
     elif target == "install-only":
         return 0
     else:
         print(f"未知目标: {target}，可选: webui | cli | install-only")
         return 2
-    return subprocess.call([str(venv_python), str(entry)])
+    # 使用模块方式并将 cwd 设为项目根，确保包可被正确导入
+    return subprocess.call([str(venv_python), "-m", module], cwd=str(project_root))
 
 
 def main() -> int:
