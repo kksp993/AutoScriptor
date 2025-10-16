@@ -5,10 +5,12 @@ from AutoScriptor import *
 from services.core.task_manager import TaskManager
 from ZmxyOL import *
 from flask import Flask, render_template, jsonify, send_from_directory, request, stream_with_context
+from flask_socketio import SocketIO, emit
 import importlib
 import json, os
 import logging
 import time
+from services.core.banner import _print_banner
 from logzero import  logger, setup_logger
 import dpath
 from queue import Queue, Empty
@@ -16,6 +18,7 @@ from threading import Thread
 import ctypes
 
 app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='')
+socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins='*')
 
 # 高性能日志通道：使用内存队列减少磁盘 IO 与轮询延迟
 console_handlers_for_setup = [h for h in logger.handlers if hasattr(h, 'stream')]
@@ -118,41 +121,30 @@ def get_log_prefix(msg):
     prefix = ch.format(record).rstrip()
     return prefix + " " + msg
 
-# SSE 实时日志流（基于内存队列，低延迟）
-def generate_logs():
-    # 初始注释和重试提示，帮助中间层立即刷新
-    yield ": stream-start\n\n"
-    yield "retry: 1000\n\n"
-    last_heartbeat = time.time()
+def _ws_log_emitter():
+    """
+    后台任务：从日志队列批量取出并通过 WebSocket 推送。
+    采用 socketio.start_background_task 启动，不阻塞主线程，每1秒查询一次，避免线程与 greenlet 混用带来的 greenlet.error。
+    """
     while True:
         try:
-            # 最多 500ms 等待一条新日志，随后批量排空以降低事件数
-            line = log_queue.get(timeout=0.5)
-            yield f"data: {line}\n\n"
-            # 快速排空缓冲，尽量一次性把当前批量都刷给前端
+            # 等待最多1s取出日志
+            line = log_queue.get(timeout=1.0)
+            batch = [line]
+            # 快速排空缓冲，合并为一次消息
             while True:
                 try:
-                    more = log_queue.get_nowait()
-                    yield f"data: {more}\n\n"
+                    batch.append(log_queue.get_nowait())
                 except Empty:
                     break
-            continue
+            socketio.emit('log_message', { 'data': "\n".join(batch) })
         except Empty:
-            pass
-        # 心跳，保持连接活性
-        now = time.time()
-        if now - last_heartbeat >= 3.0:
-            yield "event: ping\ndata: keepalive\n\n"
-            last_heartbeat = now
+            # 未有日志时，每1秒检查一次
+            socketio.sleep(1.0)
 
-@app.route('/logs')
-def logs():
-    resp = app.response_class(stream_with_context(generate_logs()), mimetype='text/event-stream')
-    # 禁用缓冲，确保低延迟传输
-    resp.headers['Cache-Control'] = 'no-cache'
-    resp.headers['X-Accel-Buffering'] = 'no'
-    resp.headers['Connection'] = 'keep-alive'
-    return resp
+@socketio.on('connect')
+def _on_connect():
+    emit('log_message', { 'data': '... Connection established ...' })
 
 # 服务 favicon
 @app.route('/favicon.ico')
@@ -203,12 +195,19 @@ def save_tasks():
         tasks = payload.get('tasks', payload)
         if not isinstance(tasks, dict):
             return jsonify({"error": "invalid tasks payload"}), 400
-        # 覆盖内存中的 tasks，并持久化到 config.json
-        cfg._config.setdefault('tasks', {})
-        cfg._config['tasks'] = tasks
-        cfg.save_config()
-        # 重载任务注册，恢复运行期字段（fn/order 等）
-        TASK_MANAGER.reload_tasks()
+        # 原子化更新：在锁内写入磁盘并重载，避免并发读取到无 fn 的中间状态
+        try:
+            TASK_MANAGER._cfg_lock.acquire()
+            cfg._config.setdefault('tasks', {})
+            cfg._config['tasks'] = tasks
+            cfg.save_config()
+            # 重载任务注册，恢复运行期字段（fn/order 等）
+            TASK_MANAGER.reload_tasks()
+        finally:
+            try:
+                TASK_MANAGER._cfg_lock.release()
+            except Exception:
+                pass
         # 同步排序映射
         read_config()
         return jsonify(make_public_config()), 200
@@ -293,6 +292,54 @@ def verify_account():
     cfg._config['game']['character_name'] = cfg["game"].get("character_name", "")
     return jsonify({"character_name": cfg["game"].get("character_name", "")})
 
+@app.route('/ocr-status', methods=['GET'])
+def ocr_status():
+    try:
+        import paddle
+        try:
+            from AutoScriptor.recognition.ocr_rec import ocr_manager
+        except Exception:
+            ocr_manager = None
+        compiled_with_cuda = False
+        gpu_count = 0
+        current_device = "unknown"
+        try:
+            compiled_with_cuda = paddle.device.is_compiled_with_cuda()
+        except Exception:
+            pass
+        try:
+            gpu_count = paddle.device.cuda.device_count()
+        except Exception:
+            pass
+        try:
+            current_device = paddle.get_device()
+        except Exception:
+            pass
+        cfg_use_gpu = False
+        try:
+            # 兼容两种访问方式
+            cfg_use_gpu = bool(cfg["ocr"].get("use_gpu", cfg.get("ocr.use_gpu", False)))
+        except Exception:
+            try:
+                cfg_use_gpu = bool(cfg.get("ocr.use_gpu", False))
+            except Exception:
+                cfg_use_gpu = False
+        engine_ready = False
+        try:
+            engine_ready = ocr_manager.is_ready() if ocr_manager else False
+        except Exception:
+            engine_ready = False
+        return jsonify({
+            "cfg_use_gpu": cfg_use_gpu,
+            "compiled_with_cuda": compiled_with_cuda,
+            "gpu_count": gpu_count,
+            "current_device": current_device,
+            "engine_ready": engine_ready
+        }), 200
+    except Exception as e:
+        logger.error("ocr_status error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/account', methods=['POST'])
 def add_account():
     data = request.get_json(silent=True) or {}
@@ -318,14 +365,34 @@ def add_account():
         logger.error("add_account error: %s", e)
     return jsonify({"character_name": character_name})
 
+def run_webui():
+    read_config()
+    # 启动日志推送后台任务
+    socketio.start_background_task(target=_ws_log_emitter)
+    _print_banner()
+    socketio.run(app, host='127.0.0.1', port=5000, debug=False, use_reloader=False)
+
+def shutdown_webui():
+    try:
+        # 在 Socket.IO 的 eventlet 上下文中触发停止，避免跨线程/绿线程停止失效
+        socketio.start_background_task(target=socketio.stop)
+    except Exception:
+        pass
+    try:
+        bg.stop()
+    except Exception:
+        pass
+
 if __name__ == '__main__':
     try:
-        read_config()
-        # 多线程，确保 SSE 与其它请求并行处理
-        app.run(debug=False, use_reloader=False, threaded=True)
+        run_webui()
     except Exception as e:
         logger.error("Error: %s", e)
         traceback.print_exc()
         logger.info("程序已退出")
     finally:
-        bg.stop()
+        try:
+            bg.stop()
+            shutdown_webui()
+        except Exception:
+            pass

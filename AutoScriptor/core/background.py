@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from nt import remove
 import threading
 from typing import Any
 from logzero import logger
@@ -22,6 +23,7 @@ class BackgroundMonitor(threading.Thread):
             if self.callbacks: 
                 callbacks_copy = list(self.callbacks.items())
                 for name, (idf, callback, once) in callbacks_copy:
+                    
                     if ui_T(idf):
                         logger.info(f"🎯 后台检测到: {name} 触发")
                         callback()
@@ -41,7 +43,8 @@ class BackgroundMonitor(threading.Thread):
             self.callbacks[name] = (identifier, callback, once)
 
 
-    def remove(self, name:str):
+    def remove(self, name:str|list[str]):
+        if isinstance(name, list): return [self.remove(n) for n in name]
         with self._lock:
             self.callbacks.pop(name, None)
 
