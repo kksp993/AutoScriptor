@@ -23,8 +23,18 @@ AutoScriptor 是一个基于 Python 和 Vue 的自动化脚本与任务管理器
 本项目参考并借鉴了以下优秀的开源项目，特此致谢：
 - [StarRailCopilot](https://github.com/LmeSzinc/StarRailCopilot)
 - [mumu-python-api](https://github.com/u-wlkjyy/mumu-python-api)
+- [ZenlessZoneZero-OneDragon](https://github.com/OneDragon-Anything/ZenlessZoneZero-OneDragon)
+
+## 免责声明
+📌 本项目仅供学习交流，开发者团队保留最终解释权
+⚖️ 使用本工具产生的一切风险需自行承担
+🚫 本项目未授权任何个人、商家、自媒体账号等进行售卖
+🚫 若您遇到商家使用本软件进行代练并收费，产生的任何问题及后果与本软件无关
+🚫 开发者团队不会为您提供任何"售后"服务
 
 ## 使用说明与配置指南
+
+如需完整的入门到进阶与 API 参考，请查阅: [AutoScriptor/core/API.md](AutoScriptor/core/API.md)
 
 0. 请确保使用 Windows 系统，并优先选择 Mumu 模拟器或 Mumu 12 版本（暂不支持其他模拟器）。
 
@@ -76,3 +86,13 @@ AutoScriptor 是一个基于 Python 和 Vue 的自动化脚本与任务管理器
    - 建议先手动进入每个场景以跳过首次过场动画，确保脚本执行更流畅。
 
 8. 当前内置任务数量有限，欢迎有兴趣的开发者参与适配与功能拓展！
+
+
+## QA
+1. 如果出现无法安装av包，尝试以下命令安装：
+```
+conda activate zmxy
+conda install -n zmxy -c conda-forge "av=10.*" ffmpeg
+python -m pip install -U pip setuptools wheel
+python -m pip install -r requirements.txt
+```

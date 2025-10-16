@@ -106,7 +106,6 @@ def print_sorted_files(py_files):
 
 
 def import_modules(py_files):
-    print("\n=== 开始导入模块 ===")
     for py_file in py_files:
         if py_file.name == "__init__.py":
             continue
@@ -118,7 +117,6 @@ def import_modules(py_files):
             importlib.import_module(absolute_module_path)
         except Exception as e:
             print(f"Error importing {absolute_module_path}: {e}")
-    print("\n=== 模块导入完成 ===")
 
 
 def normalize_cfg_tasks_to_cn():
@@ -177,8 +175,6 @@ def update_order_files(py_files):
     - 子项按已加载并排序后的 cfg['tasks'] 的注册顺序排序；若无记录则置后。
     - 根目录与 daily_task/hyper 可覆盖顺序，但仅包含已存在的子项。
     """
-    print("\n=== 开始更新 _order.txt 文件（基于文件系统与已加载顺序） ===")
-
     fixed_orders = {
         "": ["daily_task", "weekly_task", "event_task", "normal_task"],
     }
@@ -188,7 +184,7 @@ def update_order_files(py_files):
         if not dir_path.exists() or not dir_path.is_dir():
             return
         order_file = dir_path / '_order.txt'
-
+        if "__pycache__" in dir_parts_eng: return
         key = "/".join(dir_parts_eng)
         override = fixed_orders.get(key)
         if override:
@@ -202,7 +198,6 @@ def update_order_files(py_files):
         with open(order_file, 'w', encoding='utf-8') as f:
             for name in child_names_eng:
                 f.write(f"{name}\n")
-        print(f"已更新: {order_file}")
 
     def list_children(dir_parts_eng):
         dir_path = PACKAGE_PATH.joinpath(*dir_parts_eng) if dir_parts_eng else PACKAGE_PATH
