@@ -10,6 +10,7 @@ import importlib
 import json, os
 import logging
 import time
+from services.core.banner import _print_banner
 from logzero import  logger, setup_logger
 import dpath
 from queue import Queue, Empty
@@ -364,13 +365,27 @@ def add_account():
         logger.error("add_account error: %s", e)
     return jsonify({"character_name": character_name})
 
+def run_webui():
+    read_config()
+    # 启动日志推送后台任务
+    socketio.start_background_task(target=_ws_log_emitter)
+    _print_banner()
+    socketio.run(app, host='127.0.0.1', port=5000, debug=False, use_reloader=False)
+
+def shutdown_webui():
+    try:
+        # 在 Socket.IO 的 eventlet 上下文中触发停止，避免跨线程/绿线程停止失效
+        socketio.start_background_task(target=socketio.stop)
+    except Exception:
+        pass
+    try:
+        bg.stop()
+    except Exception:
+        pass
+
 if __name__ == '__main__':
     try:
-        read_config()
-        # 启动日志推送后台任务
-        socketio.start_background_task(target=_ws_log_emitter)
-        # 使用 Socket.IO 服务器以支持 WebSocket
-        socketio.run(app, debug=False, use_reloader=False)
+        run_webui()
     except Exception as e:
         logger.error("Error: %s", e)
         traceback.print_exc()
@@ -378,5 +393,6 @@ if __name__ == '__main__':
     finally:
         try:
             bg.stop()
+            shutdown_webui()
         except Exception:
             pass
