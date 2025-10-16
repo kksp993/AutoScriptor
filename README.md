@@ -23,6 +23,14 @@ AutoScriptor 是一个基于 Python 和 Vue 的自动化脚本与任务管理器
 本项目参考并借鉴了以下优秀的开源项目，特此致谢：
 - [StarRailCopilot](https://github.com/LmeSzinc/StarRailCopilot)
 - [mumu-python-api](https://github.com/u-wlkjyy/mumu-python-api)
+- [ZenlessZoneZero-OneDragon](https://github.com/OneDragon-Anything/ZenlessZoneZero-OneDragon)
+
+## 免责声明
+📌 本项目仅供学习交流，开发者团队保留最终解释权
+⚖️ 使用本工具产生的一切风险需自行承担
+🚫 本项目未授权任何个人、商家、自媒体账号等进行售卖
+🚫 若您遇到商家使用本软件进行代练并收费，产生的任何问题及后果与本软件无关
+🚫 开发者团队不会为您提供任何"售后"服务
 
 ## 使用说明与配置指南
 
