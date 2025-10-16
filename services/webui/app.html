@@ -13,6 +13,8 @@
   />
   <!-- 引入 Vue 3 -->
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <!-- 引入 Socket.IO 客户端 -->
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <!-- 引入 Element Plus -->
   <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
   <script src="https://unpkg.com/element-plus/dist/index.full.js"></script>
@@ -636,53 +638,61 @@
           }
         }
 
-        // 模拟日志动态刷新（定时生成）
-        function refreshLogs() {
-          // 采用 SSE
-          const evtSource = new EventSource('/logs');
+        // 使用 WebSocket 接收日志
+        function setupWebSocket() {
+          const socket = io();
           const ansi_up = new AnsiUp();
-          // 批量缓冲渲染，减少重排
           let buffer = [];
           let scheduled = false;
           const flush = () => {
             if (buffer.length) {
-              // 限长，避免内存与DOM过大
               const maxLines = 2000;
               logs.value.push(...buffer);
               buffer = [];
               if (logs.value.length > maxLines) {
                 logs.value.splice(0, logs.value.length - maxLines);
               }
-              // 自动滚动到底部 - 使用 nextTick 确保DOM更新完成
               Vue.nextTick(() => {
                 const lc = document.getElementById("logContainer");
                 if (lc) {
-                  lc.scrollTop = lc.scrollHeight;
-                  // 额外检查是否真的滚动到了底部，避免某些情况下滚动失败
-                  setTimeout(() => {
-                    if (lc.scrollTop + lc.clientHeight < lc.scrollHeight - 10) {
-                      lc.scrollTop = lc.scrollHeight;
-                    }
-                  }, 10);
+                  const isScrolledToBottom = lc.scrollHeight - lc.clientHeight <= lc.scrollTop + 1;
+                  if (isScrolledToBottom) {
+                    lc.scrollTop = lc.scrollHeight;
+                  }
                 }
               });
             }
             scheduled = false;
           };
-          evtSource.onmessage = function(e) {
-            // 自动刷新任务列表：监听“执行成功”或“执行失败”关键字，避免 unicode emoji 匹配问题
-            if (/执行成功|执行失败|END/.test(e.data)) {
-              refreshConfig();
+          socket.on('connect', () => {
+            console.debug('WebSocket connected');
+          });
+          socket.on('log_message', (msg) => {
+            const data = (msg && msg.data) || '';
+            const lines = String(data).split('\n');
+            for (const line of lines) {
+              if (/执行成功|执行失败|END/.test(line)) {
+                refreshConfig();
+              }
+              buffer.push({ html: ansi_up.ansi_to_html(line) });
             }
-            buffer.push({ html: ansi_up.ansi_to_html(e.data) });
             if (!scheduled) {
               scheduled = true;
-              // 使用 requestAnimationFrame/微任务合并渲染
-              requestAnimationFrame(flush);
+              requestAnimationFrame(() => {
+                flush();
+                // 若刚刚检测到「执行成功/失败/END」，在更新完任务后再强制滚动到最底
+                refreshConfig().then(() => {
+                  Vue.nextTick(() => {
+                    const lc = document.getElementById("logContainer");
+                    if (lc) lc.scrollTop = lc.scrollHeight;
+                  });
+                });
+              });
             }
-          };
-          // 忽略 ping 心跳事件
-          evtSource.addEventListener('ping', () => {});
+          });
+          socket.on('disconnect', () => {
+            console.debug('WebSocket disconnected');
+          });
         }
 
         // 滚动到底部辅助函数
@@ -695,10 +705,10 @@
           });
         }
 
-        // 初始化：加载数据 + 启动日志刷新
+        // 初始化：加载数据 + 启动日志接收
         function init() {
           console.log("配置数据已加载");
-          refreshLogs();
+          setupWebSocket();
           // 页面加载完成后滚动到底部
           setTimeout(scrollToBottom, 100);
         }

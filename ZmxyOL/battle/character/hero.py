@@ -11,7 +11,7 @@ WUSHUANG_SPEED_3X = 0.00815
 def move_with_long_click(self, direction: str, distance: int = 0, directly: bool = False):
     click(B("战斗-攻击")) if not directly else None
     click(B("战斗-无双")) if not directly else None
-    sleep(0.5)
+    sleep(0.5) if not directly else None
     c = WUSHUANG_SPEED_1X if self.speed_x == 1 else WUSHUANG_SPEED_3X
     click(B(f"战斗-{direction}"), c*distance/10)
 

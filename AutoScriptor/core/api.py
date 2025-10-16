@@ -142,7 +142,8 @@ def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=No
         if isinstance(target, ImageTarget|TextTarget):
             return target.get_source(),target.ui.box,target.ui.color
         elif isinstance(target, BoxTarget):
-            return target.box,target.box,None
+            # 支持 BoxTarget 带 color 时的颜色筛选
+            return target.box, target.box, target.color
         else:
             raise ValueError(f"Unsupported target type: {type(target)}")
     tgt_triples = [genertate_source(tgt) for tgt in target]

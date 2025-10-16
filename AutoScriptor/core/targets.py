@@ -104,21 +104,27 @@ class TextTarget(Target):
         return TextTarget(self.ui.set_color(color))
 
 class BoxTarget(Target):
-    def __init__(self, box: Box):
-        # 支持统一访问：boxtarget.ui.box
+    def __init__(self, box: Box, color: str = None):
+        # 支持统一访问：boxtarget.ui.box，并记录颜色
         self.box = box
+        self.color = color
         self.ui = self
 
     def __repr__(self):
         return f"B({self.box})"
 
-def B(x,y=None,w=0,h=0):
+def B(x, y=None, w=0, h=0, color=None):
     from AutoScriptor.utils.ui_map import ui
-    if isinstance(x,Box):
-        return BoxTarget(x)
-    if isinstance(x,str):
-        return ui[x].b
-    return ui_point(Box(x,y,w,h)).b
+    # 支持通过 color 关键字指定颜色筛选
+    if isinstance(x, Box):
+        return BoxTarget(x, color)
+    if isinstance(x, str):
+        entry = ui[x]
+        if color is not None:
+            entry = entry.set_color(color)
+        return entry.b
+    box = Box(x, y, w, h)
+    return BoxTarget(box, color)
 
 def I(key,*,box=Box(0,0,1280,720),color=None):
     from AutoScriptor.utils.ui_map import ui
