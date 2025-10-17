@@ -1,10 +1,11 @@
 {
     "app": {
-        "name": "ZmxyOL",
         "app_to_start": "org.yjmobile.zmxy",
+        "auto_start": true,
+        "max_retry": 3,
+        "name": "ZmxyOL",
         "restart_on_error": true,
-        "run_in_background": true,
-        "auto_start": true
+        "run_in_background": false
     },
     "ocr": {
         "use_gpu": false
