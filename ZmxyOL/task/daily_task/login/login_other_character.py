@@ -6,7 +6,7 @@ from ZmxyOL.nav.envs.login import login
 from logzero import logger
 
 @register_task
-def login_other_role(character_index=0, character_name=None):
+def login_other_role(character_index=0, character_name="请输入文本"):
     ensure_in("登录")
     login(character_index=character_index, character_name=character_name)
     ensure_in("登录")
