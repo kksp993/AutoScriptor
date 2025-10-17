@@ -5,21 +5,34 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>AutoScriptor</title>
   <!-- 引入 Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/vendor/tailwind.css"></script>
   <!-- 引入 Font Awesome（图标库） -->
   <link
-    href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css"
+    href="/vendor/font-awesome.min.css"
     rel="stylesheet"
   />
   <!-- 引入 Vue 3（生产版） -->
-  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="/vendor/vue.global.prod.js"></script>
   <!-- 引入 Socket.IO 客户端 -->
-  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="/vendor/socket.io.min.js"></script>
   <!-- 引入 Element Plus -->
-  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
-  <script src="https://unpkg.com/element-plus/dist/index.full.js"></script>
+  <link rel="stylesheet" href="/vendor/element-plus.css" />
+  <script src="/vendor/element-plus.full.js"></script>
   <!-- 引入 ansi_up 用于将 ANSI 颜色转为 HTML -->
-  <script src="https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.min.js"></script>
+  <script src="/vendor/ansi_up.min.js"></script>
+  <!-- 当外链不可用时，提供本地简易回退（不渲染颜色，仅做 HTML 转义） -->
+  <script>
+    (function(){
+      if (typeof window.AnsiUp === 'undefined') {
+        console.warn('AnsiUp CDN unavailable, using simple fallback');
+        class SimpleAnsiUp { ansi_to_html(s) { return String(s)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;'); } }
+        window.AnsiUp = SimpleAnsiUp;
+      }
+    })();
+  </script>
 
   <!-- Tailwind 自定义配置 -->
   <script>
@@ -97,6 +110,7 @@
 }
 </style>
   <script type="text/javascript">
+    // 使用 JSON.parse 包裹字符串，兼容包含反斜杠的 Windows 路径
     window.configData = JSON.parse('{{ config | tojson | safe }}');
   </script>
   {% raw %}
@@ -717,6 +731,8 @@
         function init() {
           console.log("配置数据已加载");
           setupWebSocket();
+          // 页面加载后自动刷新配置（相当于点击刷新按钮）
+          refreshConfig();
           // 页面加载完成后滚动到底部
           setTimeout(scrollToBottom, 100);
         }
