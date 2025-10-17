@@ -8,7 +8,7 @@ from ZmxyOL.nav.envs.decorators import *
 def way():
     click(I("导航-菜单"))
     click(I("菜单-个人资料"),delay=0.5)
-    click(T("法相"))
+    click(T("法相", box=Box(0,0,210,140)))
     mm.set_loc("法相")
 
 @path("法相", LOC_ENV)
