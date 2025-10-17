@@ -3,8 +3,15 @@ import os
 import subprocess
 from pathlib import Path
 import json
-import questionary
+try:
+    import questionary  # type: ignore
+except Exception:
+    questionary = None  # type: ignore
 from typing import Any
+try:
+    import questionary  # type: ignore
+except Exception:
+    questionary = None  # type: ignore
 
 # 运行环境下既支持包内相对导入，也尽量兼容以脚本方式直接运行
 try:
@@ -12,8 +19,8 @@ try:
     from .env_config import EnvConfig  # type: ignore
 except Exception:
     try:
-        from AutoScriptor.installer.git_service import GitService  # type: ignore
-        from AutoScriptor.installer.env_config import EnvConfig  # type: ignore
+        from services.installer.git_service import GitService  # type: ignore
+        from services.installer.env_config import EnvConfig  # type: ignore
     except Exception:
         GitService = None  # type: ignore
         EnvConfig = None  # type: ignore
@@ -26,6 +33,18 @@ except Exception:
 COMMON_MUMU_PORTS =[
     16384,16416,16448,16480,16512,16544,16576,16608
 ]
+
+
+def _prompt_text(message: str, default: str | None = None) -> str | None:
+    """Prompt helper tolerant to missing questionary or non-interactive sessions."""
+    try:
+        if questionary is not None:
+            ans = questionary.text(message, default=(default or "")).ask()  # type: ignore[attr-defined]
+            if isinstance(ans, str) and ans.strip():
+                return ans
+    except Exception:
+        pass
+    return default
 
 
 def find_project_root(start: Path) -> Path:
@@ -54,6 +73,10 @@ def ensure_venv(project_root: Path) -> Path:
 
 def reinstall_pip_and_install(project_root: Path, extra_index: str | None = None) -> None:
     venv_python = get_venv_python(project_root)
+    # 若已安装依赖的标记文件存在，则跳过重复安装以缩短启动时间
+    stamp = project_root / ".venv" / ".deps_installed.stamp"
+    if stamp.exists():
+        return
     # Upgrade pip first (use python -m pip to avoid self-modify issues)
     subprocess.check_call([str(venv_python), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"]) 
     # 标准在线安装；不再优先 wheelhouse
@@ -62,6 +85,10 @@ def reinstall_pip_and_install(project_root: Path, extra_index: str | None = None
     if extra_index:
         args += ["-i", extra_index]
     subprocess.check_call(args)
+    try:
+        stamp.write_text("ok", encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _read_registry_mu_mu_paths() -> list[Path]:
@@ -199,7 +226,7 @@ def ensure_config_with_mumu(project_root: Path) -> None:
         else:
             # 最小结构
             cfg_path.write_text(json.dumps({
-                "app": {"name": "ZmxyOL", "app_to_start": "org.yjmobile.zmxy", "restart_on_error": True, "run_in_background": True, "auto_start": True},
+                "app": {"name": "ZmxyOL","max_retry": 3,"app_to_start": "org.yjmobile.zmxy", "restart_on_error": True, "run_in_background": True, "auto_start": True},
                 "emulator": {"index": 1, "adb_addr": "127.0.0.1:16416", "max_retry": 3,"mumu_folder": "", "emu_path": "", "adb_path": ""},
                 "encryption": {},
                 "ocr": {"use_gpu": False},
@@ -245,12 +272,16 @@ def ensure_config_with_mumu(project_root: Path) -> None:
         if serial:
             emulator["adb_addr"] = serial
         else:
-            index = questionary.text("Please enter the Mumu index:").ask()
+            index_text = _prompt_text("Please enter the Mumu port (e.g. 0):", default="0")
+            try:
+                index = int(index_text) if index_text else 0
+            except Exception:
+                index = 0
             if index in COMMON_MUMU_PORTS:
-                emulator["index"] = int(index)
-                emulator["adb_addr"] = f"127.0.0.1:{index}"
+                emulator["index"] = index
+                emulator["adb_addr"] = f"127.0.0.1:{COMMON_MUMU_PORTS[index]}"
             else:
-                emulator["index"] = 0
+                emulator["index"] = 16384
                 emulator["adb_addr"] = "127.0.0.1:16384"
 
     # 回写
@@ -295,20 +326,29 @@ def main() -> int:
     # (This also creates venv when missing.)
     relaunch_in_venv_if_needed(project_root, sys.argv)
 
+    # 解析命令行参数
+    no_git_update = False
+    try:
+        for a in sys.argv[1:]:
+            if a.strip().lower() in {"--no-git-update", "--no_git_update", "--no-git", "-l"}:
+                no_git_update = True
+    except Exception:
+        no_git_update = False
+
     # 安全更新：将本地 deploy 分支同步到 origin/main，并在运行结束后恢复原始分支与工作区状态
     git_state: dict[str, Any] = {}
     git_helper = None
     try:
-        if GitService is not None and EnvConfig is not None:
+        if (not no_git_update) and GitService is not None and EnvConfig is not None:
             git_helper = GitService(EnvConfig(), None, None)
             # 若系统没有 git，则跳过安全更新（不影响后续运行）
             try:
                 has_git = bool(git_helper.get_os_git() or git_helper.get_git_version())
             except Exception:
                 has_git = False
-            if has_git:
+            if has_git and (not no_git_update):
                 DEFAULT_UPSTREAM_REF = "origin/main"
-                DEFAULT_UPSTREAM_REF = "origin/feat/launch-kksp993"
+                DEFAULT_UPSTREAM_REF = "origin/feat/launcher"
                 upstream_ref = os.environ.get("AUTOSCRIPTOR_UPSTREAM_REF", DEFAULT_UPSTREAM_REF).strip() or DEFAULT_UPSTREAM_REF
                 git_state = git_helper.begin_deploy_update(project_root, upstream_ref=upstream_ref) or {}
     except Exception:

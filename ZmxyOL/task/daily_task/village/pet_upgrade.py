@@ -8,7 +8,7 @@ from logzero import logger
 def upgrade_pet():
     ensure_in(["村庄","仙盟","极北村庄"])
     logger.info("====喂养宠物====")
-    click(T("菜单"))
+    click(I("导航-菜单"))
     sleep(1)
     click(I("菜单-宠物"))
     flag = False

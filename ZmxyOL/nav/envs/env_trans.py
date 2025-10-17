@@ -29,7 +29,7 @@ def way():
 "=======================    登录    ======================="
 @path(HAS_SHEZHI, "登录")
 def way():
-    click(T("菜单"))
+    click(I("导航-菜单"))
     click(I("菜单-设置"))
     click(T("开始界面"))
     click(T("确定",color="绿色"))
@@ -41,8 +41,8 @@ def way():
     # 等待加载中消失
     while ui_T(I("加载中"), 1):
         time.sleep(0.5)
+    wait_for_appear(I("极北村庄背景"))
     mm.set_region("极北村庄")
-    sleep(4)
 
 "=======================  极寒深渊  ======================="
 @path("极北", "极寒深渊")
@@ -94,7 +94,7 @@ def way():
 
 @path("仙盟", "村庄")
 def way():
-    click(T("菜单"), delay=0.5)
+    click(I("导航-菜单"), delay=0.5)
     time.sleep(2)
     click(I("菜单-设置"), delay=0.5)
     click(T("村庄",box=Box(964,542,94,120)), delay=1)
