@@ -11,8 +11,8 @@
     href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css"
     rel="stylesheet"
   />
-  <!-- 引入 Vue 3 -->
-  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <!-- 引入 Vue 3（生产版） -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
   <!-- 引入 Socket.IO 客户端 -->
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <!-- 引入 Element Plus -->
@@ -473,7 +473,8 @@
       },
       setup() {
         // 响应式数据
-        const configData = reactive(window.configData); // 整体配置数据
+        const configData = reactive(window.configData || {}); // 整体配置数据
+        if (!configData.tasks) configData.tasks = {};
         const activeTab = ref("daily"); // 活跃的标签页（每日/每周/一般/活动/设置）
         // 筛选不在设置页展示的 section
         const filteredConfig = computed(() => {
@@ -491,7 +492,7 @@
         // 默认选中值（示例取 configData 应用字段）
         const selectedClient = ref(clientOptions.official);
         const logs = ref([]);
-        const characterName = ref((window.configData.game && window.configData.game.character_name) || '');
+        const characterName = ref(((window.configData && window.configData.game) ? window.configData.game.character_name : '') || '');
         const addDialogVisible = ref(false);
         const addForm = reactive({ account: '', password: '', character_name: '', security_key: '' });
         const editModalVisible = ref(false); // 编辑模态框显隐
@@ -535,10 +536,11 @@
 
         // 计算属性：根据活跃标签，筛选当前显示的任务组
         const currentTasks = computed(() => {
-          if (activeTab.value === "daily") return configData.tasks["每日任务"];
-          if (activeTab.value === "weekly") return configData.tasks["每周任务"];
-          if (activeTab.value === "general") return configData.tasks["一般任务"];
-          if (activeTab.value === "event") return (configData.tasks["活动任务"] || configData.tasks["event_task"]) || {};
+          const tasks = configData.tasks || {};
+          if (activeTab.value === "daily") return tasks["每日任务"] || {};
+          if (activeTab.value === "weekly") return tasks["每周任务"] || {};
+          if (activeTab.value === "general") return tasks["一般任务"] || {};
+          if (activeTab.value === "event") return (tasks["活动任务"] || tasks["event_task"]) || {};
           return {};
         });
 

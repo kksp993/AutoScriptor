@@ -1,6 +1,8 @@
 from copy import deepcopy
 import inspect
 import traceback
+
+from numpy import char
 from AutoScriptor import *
 from services.core.task_manager import TaskManager
 from ZmxyOL import *
@@ -9,9 +11,8 @@ from flask_socketio import SocketIO, emit
 import importlib
 import json, os
 import logging
-import time
 from services.core.banner import _print_banner
-from logzero import  logger, setup_logger
+from logzero import logger
 import dpath
 from queue import Queue, Empty
 from threading import Thread
@@ -351,16 +352,11 @@ def add_account():
     logger.info("[ADD_ACCOUNT] account=%s, password=%s, character_name=%s, security_key=%s", account, password, character_name, security_key)
     # 将敏感数据按现有逻辑写入加密字段，保持 cfg 前后一致
     try:
-        from AutoScriptor.crypto.config_manager import ConfigManager
-        cfg_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'config.json'))
-        cm = ConfigManager(cfg_path)
-        cm.update_game_config(account, password, character_name, security_key)
+        from AutoScriptor.crypto.update_config import config_manager
+        config_manager.update_game_config(account, password, character_name, security_key)
         # 立即尝试用提供的 key 解密，回显角色名
-        decrypted = cm.decrypt_config(security_key) or {}
-        character_name = decrypted.get('character_name', character_name)
-        # 同步到运行态 cfg（仅内存）
-        cfg._config.setdefault('game', {})
-        cfg._config['game']['character_name'] = character_name
+        TASK_MANAGER.reload_tasks(security_key)
+        character_name = cfg["game"].get("character_name", "")
     except Exception as e:
         logger.error("add_account error: %s", e)
     return jsonify({"character_name": character_name})
@@ -370,7 +366,7 @@ def run_webui():
     # 启动日志推送后台任务
     socketio.start_background_task(target=_ws_log_emitter)
     _print_banner()
-    socketio.run(app, host='127.0.0.1', port=5000, debug=False, use_reloader=False)
+    socketio.run(app, host='127.0.0.1', port=5000, debug=True, use_reloader=False)
 
 def shutdown_webui():
     try:

@@ -3,11 +3,29 @@ import os
 import subprocess
 from pathlib import Path
 import json
+import questionary
+from typing import Any
+
+# 运行环境下既支持包内相对导入，也尽量兼容以脚本方式直接运行
+try:
+    from .git_service import GitService  # type: ignore
+    from .env_config import EnvConfig  # type: ignore
+except Exception:
+    try:
+        from AutoScriptor.installer.git_service import GitService  # type: ignore
+        from AutoScriptor.installer.env_config import EnvConfig  # type: ignore
+    except Exception:
+        GitService = None  # type: ignore
+        EnvConfig = None  # type: ignore
 
 try:
     import winreg  # type: ignore
 except Exception:
     winreg = None  # 非 Windows 环境兼容
+
+COMMON_MUMU_PORTS =[
+    16384,16416,16448,16480,16512,16544,16576,16608
+]
 
 
 def find_project_root(start: Path) -> Path:
@@ -84,20 +102,47 @@ def _read_registry_mu_mu_paths() -> list[Path]:
 
 
 def _search_common_mu_mu_paths() -> list[Path]:
-    candidates = []
+    candidates: list[Path] = []
+    seen: set[str] = set()
+
     pf = os.environ.get("ProgramFiles", r"C:\\Program Files")
     pf86 = os.environ.get("ProgramFiles(x86)", r"C:\\Program Files (x86)")
+
+    # 预置常见的安装目录名称（相对路径）
     common_names = [
         "Netease\\MuMu",
         "Netease\\MuMu Player 12",
         "MuMu",
         "MuMu Player 12",
     ]
-    for base in {pf, pf86}:
+
+    # 构建所有需要检查的基目录：
+    # - 当前环境变量中的 Program Files 目录（通常是 C 盘）
+    # - 所有存在的盘符根目录，以及对应盘符下的 Program Files 与 Program Files (x86)
+    base_dirs: list[Path] = [Path(pf), Path(pf86)]
+
+    for code in range(ord('A'), ord('Z') + 1):
+        root = f"{chr(code)}:\\"
+        if os.path.exists(root):
+            root_path = Path(root)
+            base_dirs.append(root_path)
+            base_dirs.append(root_path / "Program Files")
+            base_dirs.append(root_path / "Program Files (x86)")
+
+    # 遍历基目录与常见相对路径组合，收集合规存在的候选路径
+    for base_dir in base_dirs:
         for name in common_names:
-            path = Path(base) / name
-            if path.exists():
-                candidates.append(path)
+            path = base_dir / name
+            try:
+                if path.exists():
+                    norm_key = os.path.normcase(os.path.normpath(str(path)))
+                    if norm_key not in seen:
+                        candidates.append(path)
+                        seen.add(norm_key)
+            except Exception:
+                # 某些路径在个别环境下可能触发异常，忽略继续
+                continue
+
     return candidates
 
 
@@ -155,9 +200,9 @@ def ensure_config_with_mumu(project_root: Path) -> None:
             # 最小结构
             cfg_path.write_text(json.dumps({
                 "app": {"name": "ZmxyOL", "app_to_start": "org.yjmobile.zmxy", "restart_on_error": True, "run_in_background": True, "auto_start": True},
-                "ocr": {"use_gpu": False},
-                "emulator": {"index": 1, "adb_addr": "127.0.0.1:16416", "mumu_folder": "", "emu_path": "", "adb_path": ""},
+                "emulator": {"index": 1, "adb_addr": "127.0.0.1:16416", "max_retry": 3,"mumu_folder": "", "emu_path": "", "adb_path": ""},
                 "encryption": {},
+                "ocr": {"use_gpu": False},
                 "tasks": {}
             }, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -200,11 +245,13 @@ def ensure_config_with_mumu(project_root: Path) -> None:
         if serial:
             emulator["adb_addr"] = serial
         else:
-            # Fallback 常见端口（README 示例）
-            emulator.setdefault("adb_addr", "127.0.0.1:16416")
-
-    # 默认 index
-    emulator.setdefault("index", 1)
+            index = questionary.text("Please enter the Mumu index:").ask()
+            if index in COMMON_MUMU_PORTS:
+                emulator["index"] = int(index)
+                emulator["adb_addr"] = f"127.0.0.1:{index}"
+            else:
+                emulator["index"] = 0
+                emulator["adb_addr"] = "127.0.0.1:16384"
 
     # 回写
     try:
@@ -248,6 +295,26 @@ def main() -> int:
     # (This also creates venv when missing.)
     relaunch_in_venv_if_needed(project_root, sys.argv)
 
+    # 安全更新：将本地 deploy 分支同步到 origin/main，并在运行结束后恢复原始分支与工作区状态
+    git_state: dict[str, Any] = {}
+    git_helper = None
+    try:
+        if GitService is not None and EnvConfig is not None:
+            git_helper = GitService(EnvConfig(), None, None)
+            # 若系统没有 git，则跳过安全更新（不影响后续运行）
+            try:
+                has_git = bool(git_helper.get_os_git() or git_helper.get_git_version())
+            except Exception:
+                has_git = False
+            if has_git:
+                DEFAULT_UPSTREAM_REF = "origin/main"
+                DEFAULT_UPSTREAM_REF = "origin/feat/launch-kksp993"
+                upstream_ref = os.environ.get("AUTOSCRIPTOR_UPSTREAM_REF", DEFAULT_UPSTREAM_REF).strip() or DEFAULT_UPSTREAM_REF
+                git_state = git_helper.begin_deploy_update(project_root, upstream_ref=upstream_ref) or {}
+    except Exception:
+        # 更新失败不影响主流程
+        git_state = {}
+
     # Inside venv now
     # Optional pip index from environment variable AUTOSCRIPTOR_PIP_INDEX
     extra_index = os.environ.get("AUTOSCRIPTOR_PIP_INDEX", None)
@@ -271,7 +338,17 @@ def main() -> int:
         if tgt in {"webui", "cli", "install-only"}:
             target = tgt
 
-    return run_target(project_root, target)
+    try:
+        return run_target(project_root, target)
+    finally:
+        # 尝试恢复原始分支/提交与工作区状态
+        try:
+            from services.webui.server import shutdown_webui
+            shutdown_webui()
+            if git_helper and git_state:
+                git_helper.end_deploy_update(project_root, git_state)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

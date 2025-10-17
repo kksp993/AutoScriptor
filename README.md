@@ -26,27 +26,37 @@ AutoScriptor 是一个基于 Python 和 Vue 的自动化脚本与任务管理器
 - [ZenlessZoneZero-OneDragon](https://github.com/OneDragon-Anything/ZenlessZoneZero-OneDragon)
 
 ## 免责声明
-📌 本项目仅供学习交流，开发者团队保留最终解释权
-⚖️ 使用本工具产生的一切风险需自行承担
-🚫 本项目未授权任何个人、商家、自媒体账号等进行售卖
-🚫 若您遇到商家使用本软件进行代练并收费，产生的任何问题及后果与本软件无关
-🚫 开发者团队不会为您提供任何"售后"服务
+- 📌 本项目仅供学习交流，开发者团队保留最终解释权
+- ⚖️ 使用本工具产生的一切风险需自行承担
+- 🚫 本项目未授权任何个人、商家、自媒体账号等进行售卖
+- 🚫 若您遇到商家使用本软件进行代练并收费，产生的任何问题及后果与本软件无关
+- 🚫 开发者团队不会为您提供任何"售后"服务
 
 ## 使用说明与配置指南
 
 如需完整的入门到进阶与 API 参考，请查阅: [AutoScriptor/core/API.md](AutoScriptor/core/API.md)
 
+### 环境配置
+
 0. 请确保使用 Windows 系统，并优先选择 Mumu 模拟器或 Mumu 12 版本（暂不支持其他模拟器）。
 
 1. 建议将模拟器设置为平板 1280x720 分辨率，同时适当提高内存和 CPU 分配，以获得更好的运行性能。
 
-2. 安装 Anaconda 或 Miniconda，并创建独立虚拟环境：
+### Python安装
+
+#### 自动配置
+
+- 运行 launcher.ps1
+
+#### 手动配置
+
+1. 安装 Anaconda 或 Miniconda，并创建独立虚拟环境：
 
    ```
    conda create -n zmxy python==3.10.15
    ```
 
-3. 配置国内源以提升 Python 和 Conda 的下载速度，以及相关依赖项：
+2. 配置国内源以提升 Python 和 Conda 的下载速度，以及相关依赖项：
 
    ```text
    pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
@@ -57,7 +67,12 @@ AutoScriptor 是一个基于 Python 和 Vue 的自动化脚本与任务管理器
    conda config --set show_channel_urls yes
    ```
 
-4. 配置 `config.json` 文件
+   ```bash
+   conda activate zmxy
+   python -m pip install -r requirements.txt
+   ```
+
+3. 配置 `config.json` 文件
 
    - 首先复制 `config template.json` 为 `config.json`。
    - 根据你的模拟器实际情况调整如下字段：
@@ -71,6 +86,7 @@ AutoScriptor 是一个基于 Python 和 Vue 的自动化脚本与任务管理器
        "mumu_folder": "C:/Program Files/Netease/MuMu"
    },
    ```
+### 游戏内容配置
 
 5. 按需修改技能键位设定
 
