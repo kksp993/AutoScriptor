@@ -19,6 +19,7 @@ import dpath
 from queue import Queue, Empty
 from threading import Thread
 import ctypes
+import webbrowser
 
 app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='')
 socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins='*')
@@ -410,6 +411,7 @@ def run_webui():
     # 启动日志推送后台任务
     socketio.start_background_task(target=_ws_log_emitter)
     _print_banner()
+    webbrowser.open("http://127.0.0.1:5000")
     socketio.run(app, host='127.0.0.1', port=5000, debug=True, use_reloader=False)
 
 def shutdown_webui():
