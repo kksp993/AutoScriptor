@@ -15,6 +15,7 @@ from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import RequestHumanTake
 from AutoScriptor.crypto.update_config import set_config, verify_config
 from ZmxyOL import *
 from ZmxyOL.nav.envs.decorators import LOC_ENV
+from ZmxyOL.nav.api import ensure_in
 from logzero import logfile, logger
 from pypinyin import lazy_pinyin
 

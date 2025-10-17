@@ -25,7 +25,7 @@ def kls_yxd_callback():
         h.battle()
     [h.move_right(5, directly=True) for _ in range(2)]
     h.move_left(1280)
-    h.way_to_exit(until=lambda: ui_T(I("加载中")), exit_loc=0)
+    h.way_to_exit(until=lambda: ui_T((I("加载中"), T("还有"))), exit_loc=0)
     wait_for_disappear(I("加载中"))
     bg.add(
         name="昆仑山-玉虚殿-战斗结束",
@@ -66,7 +66,7 @@ def kunlunshan_battle(num: int = 5):
             ],
         )
         h.set(has_cd=False, speed_x=3).battle_loop()
-        h.way_to_exit(until=lambda: ui_T(I("加载中")), exit_loc=0)
+        h.way_to_exit(until=lambda: ui_T((I("加载中"), T("还有"))), exit_loc=0)
         bg.remove(["昆仑山-突发事件", "昆仑山-玉虚殿", "昆仑山-战斗结束"])
     back_to_map()
 
