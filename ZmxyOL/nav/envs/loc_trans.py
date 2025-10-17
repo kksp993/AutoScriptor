@@ -6,7 +6,7 @@ from ZmxyOL.nav.envs.decorators import *
 
 @path(LOC_ENV, "法相")
 def way():
-    click(T("菜单"))
+    click(I("导航-菜单"))
     click(I("菜单-个人资料"),delay=0.5)
     click(T("法相"))
     mm.set_loc("法相")
@@ -64,7 +64,7 @@ def way():
 
 @path(LOC_ENV, "背包")
 def way():
-    click(T("菜单"))
+    click(I("导航-菜单"))
     click(I("菜单-背包"),delay=0.5)
     wait_for_appear(I("背包背景"))
     mm.set_loc("背包")

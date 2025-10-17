@@ -10,7 +10,7 @@ import enum
 from typing import List
 from threading import Event, RLock
 from AutoScriptor import *
-from AutoScriptor.utils.constant import AutoConfig,cfg
+from AutoScriptor.utils.constant import cfg
 from ZmxyOL import *
 from logzero import logger
 import sys
