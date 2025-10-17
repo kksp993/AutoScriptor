@@ -232,6 +232,7 @@ class TaskManager:
             raise
         finally:
             try:
+                bg.clear(signals_clear=True)
                 self._cfg_lock.release()
             except Exception:
                 pass

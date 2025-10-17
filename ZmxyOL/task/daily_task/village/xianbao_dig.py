@@ -10,6 +10,7 @@ def daily_fxiang_task():
     sleep(2)
     click(T("法宝"))
     click(T("获取仙宝"))
+    sleep(1)
     click(T("遗迹"))
     wait_for_appear(T("混沌遗迹"))
     click(B(300,250,250,350))
