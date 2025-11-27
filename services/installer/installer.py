@@ -3,6 +3,16 @@ import os
 import subprocess
 from pathlib import Path
 import json
+
+_THIS_FILE = Path(__file__).resolve()
+_PROJECT_ROOT = _THIS_FILE.parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+# Deferred import - run_target will be imported when needed
+def _import_run_target():
+    from entry import run_target
+    return run_target
 try:
     import questionary  # type: ignore
 except Exception:
@@ -77,6 +87,19 @@ def reinstall_pip_and_install(project_root: Path, extra_index: str | None = None
     stamp = project_root / ".venv" / ".deps_installed.stamp"
     if stamp.exists():
         return
+
+    # Check if pip is available, if not install it using portable get-pip.py
+    pip_available = False
+    try:
+        subprocess.check_call([str(venv_python), "-c", "import pip"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        pip_available = True
+    except subprocess.CalledProcessError:
+        # Pip not available, install using get-pip.py
+        get_pip_script = project_root / "services" / "installer" / "get-pip.py"
+        if get_pip_script.exists():
+            print("Installing pip using portable get-pip.py...")
+            subprocess.check_call([str(venv_python), str(get_pip_script)])
+
     # Upgrade pip first (use python -m pip to avoid self-modify issues)
     subprocess.check_call([str(venv_python), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"]) 
     # 标准在线安装；不再优先 wheelhouse
@@ -302,21 +325,6 @@ def relaunch_in_venv_if_needed(project_root: Path, argv: list[str]) -> None:
         os.execv(str(venv_python), [str(venv_python), *argv])
 
 
-def run_target(project_root: Path, target: str) -> int:
-    venv_python = get_venv_python(project_root)
-    if target == "webui":
-        module = "services.webui.server"
-    elif target == "cli":
-        module = "services.main_cli.run"
-    elif target == "install-only":
-        return 0
-    else:
-        print(f"未知目标: {target}，可选: webui | cli | install-only")
-        return 2
-    # 使用模块方式并将 cwd 设为项目根，确保包可被正确导入
-    return subprocess.call([str(venv_python), "-m", module], cwd=str(project_root))
-
-
 def main() -> int:
     # Resolve project root from this file location
     this_file = Path(__file__).resolve()
@@ -379,7 +387,8 @@ def main() -> int:
             target = tgt
 
     try:
-        return run_target(project_root, target)
+        run_target_func = _import_run_target()
+        return run_target_func(get_venv_python(project_root), project_root, target)
     finally:
         # 尝试恢复原始分支/提交与工作区状态
         try:

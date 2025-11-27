@@ -30,7 +30,7 @@ def _render_center_line(content: str, inner_width: int, color_prefix: str = "", 
     suffix = RESET if prefix else ""
     return f"║{' ' * left}{prefix}{raw}{suffix}{' ' * right}║"
 
-def _print_banner():
+def _print_banner(banner_only: bool = False):
     """打印商业化风格的启动横幅，自动适配终端宽度。"""
     try:
         cols = shutil.get_terminal_size(fallback=(100, 24)).columns
@@ -55,6 +55,7 @@ $$/   $$/  $$$$$$/     $$$$/   $$$$$$/   $$$$$$/   $$$$$$$/ $$/       $$/ $$$$$$
                                                                           $$ |                                          
                                                                           $$/                  
     """)
+    if banner_only: return
     print()
     print(f"{MAGENTA}{top}{RESET}")
     print(_render_center_line("AutoScriptor", inner, WHITE, True))

@@ -1,5 +1,7 @@
 import traceback
 
+from numpy import isin
+
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import RequestHumanTakeover
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
@@ -45,6 +47,7 @@ def make_more_for_destory(nums: int=1):
 def lianqishi_destory():
     ensure_in("炼器师")
     remains = extract_info(B(1000,430,130,42), lambda x: int(x.split("/")[1][:-1])-int(x.split("/")[0]))
+    remains = 0 if not isinstance(remains, int) else remains
     click(I('炼器炉'))
     wait_for_appear(T("选择仙器法宝"))
     while remains > 0:
