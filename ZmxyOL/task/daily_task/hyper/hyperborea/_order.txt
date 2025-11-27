@@ -1,6 +1,6 @@
-chaos_egg
 bingku_explore
-quick_clear
+brahma_tower
+chaos_egg
 enan_task
 hyper_chaos
-brahma_tower
+quick_clear

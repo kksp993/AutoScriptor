@@ -8,7 +8,7 @@ from ZmxyOL.nav.envs.decorators import *
 def way():
     click(I("导航-菜单"))
     click(I("菜单-个人资料"),delay=0.5)
-    click(T("法相", box=Box(0,0,210,140)))
+    click(T("法相", box=Box(0,0,500,140)))
     mm.set_loc("法相")
 
 @path("法相", LOC_ENV)
@@ -68,3 +68,25 @@ def way():
     click(I("菜单-背包"),delay=0.5)
     wait_for_appear(I("背包背景"))
     mm.set_loc("背包")
+
+
+
+def travel_to_dst_loc(target_env: str):
+    click(T("万界穿梭"))
+    click(T(target_env[:2]))
+    click(T("确定"))
+    wait_for_appear(T(target_env))
+
+available_dst_locs = ["外域区域", "边缘区域"]
+
+
+for dst_loc in available_dst_locs:
+    for src_loc in available_dst_locs:
+        if src_loc == dst_loc: continue
+        def way(dst_loc: str):
+            if ui_T(T(dst_loc)): return mm.set_loc(dst_loc)
+            travel_to_dst_loc(dst_loc)
+            mm.set_loc(dst_loc)
+        path(src_loc, dst_loc)(partial(way, dst_loc=dst_loc))
+    path(LOC_ENV, dst_loc)(partial(way, dst_loc=dst_loc))
+    path(dst_loc, LOC_ENV)(lambda: mm.set_loc(mm.get_region()[0]))

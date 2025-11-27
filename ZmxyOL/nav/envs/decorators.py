@@ -12,6 +12,11 @@ def swipe_up_down(from_idx:int, to_idx:int):
     for _ in range(abs(from_idx-to_idx)):
         swipe(B(10,350-sign(from_idx-to_idx)*250,0,0), B(10,350+sign(from_idx-to_idx)*250,0,0))
 
+def swipe_left_right(from_idx:int, to_idx:int):
+    for _ in range(abs(from_idx-to_idx)):
+        swipe(B(650-sign(from_idx-to_idx)*350,500,0,0), B(650+sign(from_idx-to_idx)*350,500,0,0), duration_s=2)
+
+
 def LOC_INDEX_TRAV(env:str, fn:callable):
     from ZmxyOL.nav.map_manager import mm, path
     loc_arr = [(loc_name,int(loc_name.split("#")[1])) for loc_name in mm.locs.keys() if loc_name.startswith(env+"#")]

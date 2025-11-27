@@ -82,13 +82,20 @@ VENDOR_SOURCES = {
     'element-plus.full.js': 'https://unpkg.com/element-plus/dist/index.full.js',
     'ansi_up.min.js': 'https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.min.js',
     'font-awesome.min.css': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css',
+    # 添加 fontawesome 字体资源
+    'fonts/fontawesome-webfont.woff2': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/fonts/fontawesome-webfont.woff2',
+    'fonts/fontawesome-webfont.woff': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/fonts/fontawesome-webfont.woff',
+    'fonts/fontawesome-webfont.ttf': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/fonts/fontawesome-webfont.ttf',
 }
 
 def _ensure_vendor_files():
     try:
         os.makedirs(VENDOR_DIR, exist_ok=True)
+        fonts_dir = os.path.join(VENDOR_DIR, 'fonts')
+        os.makedirs(fonts_dir, exist_ok=True)
         for name, url in VENDOR_SOURCES.items():
             path = os.path.join(VENDOR_DIR, name)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
             if os.path.exists(path) and os.path.getsize(path) > 1024:
                 continue
             try:
@@ -199,6 +206,11 @@ def favicon():
 def vendor_static(filename: str):
     return send_from_directory(VENDOR_DIR, filename)
 
+# 添加字体静态资源
+@app.route('/fonts/<path:filename>')
+def fonts_static(filename):
+    return send_from_directory(os.path.join(VENDOR_DIR, 'fonts'), filename)
+
 # 枚举可选项查询：输入枚举类路径列表，返回每个路径的成员名列表
 @app.route('/enum-options', methods=['POST'])
 def enum_options():
@@ -276,6 +288,21 @@ def refresh_config():
         logger.error("refresh error: %s", e)
         return jsonify({"error": str(e)}), 500
 
+# 添加：设置线程为高优先级
+def _set_thread_high_priority(thread_obj):
+    try:
+        THREAD_SET_INFORMATION = 0x0020
+        THREAD_QUERY_INFORMATION = 0x0040
+        # 使用 native_id 获取操作系统线程 ID
+        tid = getattr(thread_obj, 'native_id', None) or thread_obj.ident
+        handle = ctypes.windll.kernel32.OpenThread(THREAD_SET_INFORMATION | THREAD_QUERY_INFORMATION, False, tid)
+        if handle:
+            # THREAD_PRIORITY_HIGHEST = 2
+            ctypes.windll.kernel32.SetThreadPriority(handle, 2)
+            ctypes.windll.kernel32.CloseHandle(handle)
+    except Exception as e:
+        logger.warning("set thread priority failed: %s", e)
+
 @app.route('/run', methods=['POST'])
 def run_tasks():
     global ORDER_MAP, RUN_THREAD
@@ -297,6 +324,8 @@ def run_tasks():
             logger.error("background run error: %s", e)
     RUN_THREAD = Thread(target=_run, args=(sorted_tasks,), daemon=True)
     RUN_THREAD.start()
+    # 启动后设置高优先级
+    _set_thread_high_priority(RUN_THREAD)
     return jsonify({'status': 'ok', 'tasks': sorted_tasks}), 200
 
 @app.route('/stop', methods=['POST'])

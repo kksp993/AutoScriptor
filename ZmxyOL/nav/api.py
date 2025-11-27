@@ -54,7 +54,7 @@ def check_env_idx(env_list: list[str]) -> int:
     return _check_idx(lambda name: mm.envs.get(name).identifier, env_list)
 
 
-def locate_region(cnt = 0) -> tuple[str, str]:
+def locate_region(cnt = 0, check_only = False) -> tuple[str, str]:
     """
         按优先级检查当前位置
     """
@@ -74,6 +74,8 @@ def locate_region(cnt = 0) -> tuple[str, str]:
     
     logger.info("# 1.4 检查所有loc")
     idx = check_loc_idx(mm.locs.keys())
+
+    if check_only: return "当前位置未知, 请自行判断下一步并尝试再次调用，请先根据当前的图像一步步关闭窗口，直至没有返回或关闭，再调用本工具"
     if idx >= 0:
         loc = mm.locs[list(mm.locs.keys())[idx]]
         return mm.set_region(loc.envs[0].name, loc.name)
@@ -110,14 +112,14 @@ def try_close_via_x():
     # 关闭目标列表
     close_targets = [
         (I("极北之地-取消"), I("极北之地-取消")),
+        (T("我的队伍",box=Box(434,15,439,119)), B(1060,30,30,30)),
         (I("x"), I("x")),
         (I("x-in"), B(1061,178,39,47)),
         (I("菜单-宠物"), B(10,10)),
-        (T("回家",box=Box(18,607,87,109)), T("回家",box=Box(18,607,87,109))),
+        # (T("回家",box=Box(18,607,87,109)), T("回家",box=Box(18,607,87,109))),
         (T("确认"), T("确认")),
         (T("返回地图"), T("返回地图")),
         (T("返回大厅"), T("返回大厅")),
-        (T("我的队伍",box=Box(434,15,439,119)), B(1060,30,30,30)),
     ]
     
     # 等待消失目标列表

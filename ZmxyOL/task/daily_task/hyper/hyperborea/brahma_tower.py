@@ -16,7 +16,7 @@ def battle():
     h.skill(6)
     bg.add(
         name="FTT_battle",
-        identifier=T("确认"),
+        identifier=(T("确认"),T("入劫")),
         callback=lambda: [
             bg.set_signal("try_exit", True),
             bg.clear(),
@@ -44,7 +44,7 @@ def FTT_battle_one_round():
             click(T("确定"))
             sleep(2)
         click(T("烦恼"))
-        click(T("入劫"))
+        click(T("入劫"),until=lambda: ui_T(I("加载中")))
         battle()
         wait_for_appear(T("入劫"))
 

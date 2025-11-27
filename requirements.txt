@@ -3,13 +3,14 @@
 --prefer-binary
 adbutils==1.2.15
 numpy==1.24.4
-pandas>=2.0.0
+pandas
 opencv-python
 questionary==2.1.0
 pure-python-adb==0.3.0.dev0
 prompt_toolkit<3.0.0
 pillow>=10.0.0
 loguru>=0.7.0
+logzero>=1.7.0
 typing-extensions>=4.0.0
 pypinyin>=0.54.0
 cryptography
@@ -33,3 +34,5 @@ flask
 dpath
 Flask-SocketIO
 eventlet
+agno
+openai

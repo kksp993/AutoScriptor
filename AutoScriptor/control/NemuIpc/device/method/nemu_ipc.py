@@ -239,9 +239,10 @@ def retry(func):
         for _ in range(RETRY_TRIES):
             # Extend timeout on retries
             if func.__name__ == 'screenshot':
-                timeout = retry_sleep(_)
-                if timeout > 0:
-                    kwargs['timeout'] = timeout
+                retry_delay = retry_sleep(_)
+                if retry_delay > 0:
+                    # For screenshot, use incremental timeout starting from base timeout
+                    kwargs['timeout'] = 2.0 + retry_delay
             try:
                 if callable(init):
                     time.sleep(retry_sleep(_))
@@ -434,7 +435,7 @@ class NemuIpcImpl:
         return pixels_pointer
 
     @retry
-    def screenshot(self, timeout=0.5):
+    def screenshot(self, timeout=2.0):
         """
         Args:
             timeout: Timout in seconds to call nemu_ipc

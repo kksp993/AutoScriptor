@@ -1,23 +1,20 @@
 import copy
 from datetime import timedelta
-import getpass
 import traceback
 import questionary
 import os
 from questionary import Separator, Choice
-import inspect
-import enum
 import importlib
 from typing import Dict, Any, List
 from datetime import datetime as _datetime, datetime
-from AutoScriptor import *
-from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import RequestHumanTakeover
-from AutoScriptor.crypto.update_config import set_config, verify_config
 from ZmxyOL import *
+from AutoScriptor import *
+from AutoScriptor.crypto.update_config import set_config, verify_config
 from ZmxyOL.nav.envs.decorators import LOC_ENV
 from ZmxyOL.nav.api import ensure_in
 from logzero import logfile, logger
 from pypinyin import lazy_pinyin
+from services.core.task_manager import TaskManager
 
 # 判断分支下是否存在未完成的任务
 def branch_uncompleted(branch: dict, now_ts: float) -> bool:
@@ -52,6 +49,7 @@ def dump_error_and_log(path_str: str, exc: Exception):
 
 task_menu = cfg["tasks"]
 ui_tasks = copy.deepcopy(cfg["tasks"])
+task_manager = TaskManager()
 
 def is_leaf_node(node: Dict[str, Any]) -> bool:
     """判断一个节点是否为叶子节点（即一个具体的任务）。"""
@@ -108,6 +106,7 @@ def find_and_execute_tasks(
     """
     executed_count = 0
     failed_count = 0
+    total_count = len(ui_branch.keys())
     from datetime import datetime
     now = datetime.now()
 
@@ -134,63 +133,28 @@ def find_and_execute_tasks(
                 continue
 
             logger.info(f"▶️  正在执行: {path_str}")
-            try:
-                # 恢复枚举参数：优先使用 param_meta，否则根据注解回退
-                raw_params = master_node.get('params', {})
-                params = {}
-                param_meta = master_node.get('param_meta', {})
-                sig = inspect.signature(master_node['fn'])
-                for k, v in raw_params.items():
-                    if k in param_meta:
-                        module_name, class_name = param_meta[k].rsplit('.', 1)
-                        mod = importlib.import_module(module_name)
-                        EnumClass = getattr(mod, class_name)
-                        # 支持枚举列表
-                        if isinstance(v, list):
-                            params[k] = [EnumClass[item] for item in v]
-                        else:
-                            params[k] = EnumClass[v]
-                    else:
-                        # 注解为枚举时，尝试根据 name 恢复
-                        param = sig.parameters.get(k)
-                        ann = getattr(param, 'annotation', None)
-                        if isinstance(ann, type) and issubclass(ann, enum.Enum):
-                            # 支持单值或列表
-                            if isinstance(v, list):
-                                params[k] = [ann[item] for item in v]
-                            elif isinstance(v, str):
-                                params[k] = ann[v]
-                            else:
-                                params[k] = v
-                        else:
-                            params[k] = v
-                master_node['fn'](**params)
-                update_task_post_execution(master_node, ui_node, path_list)
-                executed_count += 1
-                logger.info(f"▶️  执行完毕: {path_str}")
-                ensure_in(LOC_ENV)
-                logger.info(f"▶️  等待3秒")
-                sleep(3)
-            except Exception as e:
-                if isinstance(e, KeyboardInterrupt): raise
-                failed_count += 1
-                logger.error(f"❌ 执行失败: {path_str}，错误: {e}")
-                dump_error_and_log(path_str, e)
-                traceback.print_exc()
-                if isinstance(e, RequestHumanTakeover):
-                    update_task_post_execution(master_node, ui_node, path_list)
-                    logger.info(f"需要人工操作完成，跳过")
-                    continue
-                if cfg["app"]["restart_on_error"]:
-                    mixctrl.app.close(cfg["app"]["app_to_start"])
-                    sleep(1)
-                    while mixctrl.app.state(cfg["app"]["app_to_start"]) != "running":
-                        mixctrl.app.launch(cfg["app"]["app_to_start"])
-                        sleep(1)
-                    sleep(5)
-                mm.set_region("登录")
+            # 复用 TaskManager 的参数解析与执行后更新逻辑
+            task_key = "/".join(path_list)
+            prev_ts = master_node.get('next_exec_time', 0)
+            prev_on = master_node.get('on', False)
 
-    return executed_count, executed_count+failed_count
+            success_count, failed_count = task_manager.execute_tasks([task_key])
+
+            # 执行后，同步 UI 节点，并判断是否视为成功
+            refreshed_master = get_node_by_path(cfg["tasks"], path_list)
+            new_ts = refreshed_master.get('next_exec_time', prev_ts)
+            new_on = refreshed_master.get('on', prev_on)
+            ui_node['next_exec_time'] = new_ts
+            if 'on' in ui_node:
+                ui_node['on'] = new_on
+
+            executed_count += success_count
+            failed_count += failed_count
+            logger.info(f"▶️  [{executed_count}/{total_count}] 执行完毕: {path_str}，等待3秒")
+            ensure_in(LOC_ENV)
+            sleep(3)
+                
+    return executed_count, total_count
 
 def update_task_post_execution(
     master_task_node: Dict[str, Any], 
@@ -203,8 +167,7 @@ def update_task_post_execution(
     """
     now = datetime.now()
     category = task_path[0] if task_path else "一般任务"
-
-    if "日常任务" in category:
+    if "每日任务" in category:
         # 如果当前时间在早上5点之后，则从明天开始计算；否则从今天开始计算
         if now.hour >= 5:
             next_date = (now + timedelta(days=1)).date()
@@ -217,7 +180,7 @@ def update_task_post_execution(
         
         master_task_node['next_exec_time'] = new_timestamp
         ui_task_node['next_exec_time'] = new_timestamp
-        logger.info(f"    - 状态更新: 日常任务, 下次执行时间设置为 {next_exec_dt.strftime('%Y-%m-%d %H:%M')}")
+        logger.info(f"    - 状态更新: 每日任务, 下次执行时间设置为 {next_exec_dt.strftime('%Y-%m-%d %H:%M')}")
 
     elif "每周任务" in category:
         # 如果当前时间在早上5点之后，则从下周一开始计算；否则从本周一开始计算
@@ -315,8 +278,9 @@ def run_cli_navigation():
 
     navigation_path = []
     while True:
-        # os.system('cls' if os.name == 'nt' else 'clear')
-        
+        os.system('cls' if os.name == 'nt' else 'clear')
+        from services.core.banner import _print_banner
+        _print_banner(banner_only=True)
         current_node = get_node_by_path(ui_tasks, navigation_path)
         # 如果当前节点是叶子任务且有参数，进入参数编辑模式
         if is_leaf_node(current_node) and current_node.get('params'):
@@ -438,6 +402,7 @@ def run_cli_navigation():
             choices.append(questionary.Choice(title="🏷 标注目标【L】", value="--label--"))
             choices.append(questionary.Choice(title="🔍 搜索任务【F】", value="--search--"))
             choices.append(questionary.Choice(title="🚀 开始执行【R】", value="--execute--"))
+            choices.append(questionary.Choice(title="🔄 重新加载【T】", value="--reload--"))
 
         action = questionary.select("请选择:", choices=choices, use_search_filter=True, use_jk_keys=False).ask()
         if action is None: action = "--exit--"
@@ -562,6 +527,12 @@ def run_cli_navigation():
                     navigation_path.clear()
                     navigation_path.extend(selected_path[:-1])
                 continue
+        elif action == "--reload--":
+            task_manager.reload_tasks()
+            logger.info("任务已重新加载！")
+            questionary.press_any_key_to_continue().ask()
+            continue
+
         elif action == "--home--":
             navigation_path.clear()
 
@@ -584,5 +555,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         traceback.print_exc()
         logger.info("\n程序已退出")
+    except Exception as e:
+        bg.stop()
     finally:
         bg.stop()

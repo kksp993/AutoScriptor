@@ -138,8 +138,6 @@ def way():
     mm.set_region("仙盟")
     sleep(1)
 
-for env_name in mm.envs.keys():
-    LOC_INDEX_TRAV(env_name, swipe_up_down)
 
 "=======================    荒古万界    ======================="
 @path(HAS_SHIJIEDITU, "荒古万界")
@@ -159,3 +157,11 @@ def way(env_name: str):
 
 for env_name in HAS_SHIJIEDITU: 
     path("荒古万界", env_name)(partial(way, env_name=env_name))
+
+
+LR_ENVS = ["极寒深渊"]
+
+"=======================    导航    ======================="
+for env_name in mm.envs.keys():
+    if env_name in LR_ENVS: LOC_INDEX_TRAV(env_name, swipe_left_right)
+    else: LOC_INDEX_TRAV(env_name, swipe_up_down)
