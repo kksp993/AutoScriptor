@@ -1,17 +1,21 @@
 from calendar import c
+import time
 from AutoScriptor import *
 from ZmxyOL.nav import *
 import traceback
 
-def way():
-    click(I("导航-世界地图"))
-    click(T("荒古万界"),offset=(180,90))
-    wait_for_appear(T("万界穿梭"))
 
-def way_exit():
-    click(B(30,30,30,30))
-    wait_for_appear(T("荒古万界"))
-    click(B(1200,30,30,30))
+def bonus_callback():
+    click(B(1015,85))
+    bg.set_signal("exit_bonus", False)
+    t = time.time()
+    while time.time() - t < 47: click(I("地鼠"), if_exist=True)
+
+def battle_callback():
+    from ZmxyOL.battle.character.hero import h
+    h.set(True,3)
+    h.battle_loop(battle_weight=2)
+
 
 tasks=[
     B(50,83),
@@ -36,26 +40,20 @@ hg_tasks=[
 
 if __name__ == "__main__":
     try:
-        # boxes_arr = []
-        # count_arr = []
-        # for task in tasks:
-        #     click(task)
-        #     sleep(0.3)
-        #     boxes = locate([I(key=hg_tasks[i]) for i in range(len(hg_tasks))], is_simplify=False)
-        #     print(boxes)
-        #     boxes_arr.append(boxes)
-        #     count_arr.append(count(boxes_arr[-1]))
-        #     click(B(0,0))
-        #     sleep(0.3)  
-        #     print(boxes_arr[-1], count_arr[-1], sum(count_arr[-1]))
-        # bonus_arr = [arr[2] for arr in count_arr]
-        # print(bonus_arr)
-        # index = bonus_arr.index(max(bonus_arr))
-        # click(tasks[index])
-        # sleep(0.3)
-        # click(B(960,510,90,90))
-        # click(T("确定"))
-        # wait_for_disappear(I("加载中"))
+        ensure_in("外域区域")
+        click(T("信标定位"))
+        wait_for_appear(T("定位完成"))
+        click(B(630,360))
+        wait_for_appear(T("总灵根值"))
+        click(B(960,510,90,90))
+        if tgt:=locate(T("本次登录不再提醒"), timeout=1): 
+            click(B(560,415))
+            sleep(0.5)
+            click(T("确定"))
+        if ui_T(I("加载中"), timeout=0.5):
+            wait_for_disappear(I("加载中"))
+        
+        bg.set_signal("task_done", False)
         def callback():
             bg.set_signal("Pause_battle", True)
             click(T("继续挑战"))
@@ -64,21 +62,31 @@ if __name__ == "__main__":
                 click(T("取消"),if_exist=True)
                 sleep(0.5)
                 click(T("确定",color="蓝色"))
+                bg.set_signal("task_done", True)
                 bg.clear()
             else:
-                click(T("确定"))
-                wait_for_disappear(I("加载中")),
-                bg.set_signal("Pause_battle", False),
+                click(T("确定"),if_exist=True)
+                if ui_T(I("加载中"), timeout=0.5):
+                    wait_for_disappear(I("加载中"))
+                bg.set_signal("try_exit", True)
 
-
-        from ZmxyOL.battle.character.hero import h
         bg.add(
             name="try_pause",
             identifier=T("继续挑战"),
             callback=callback,
+            once=False
         )
-        h.set(True,3)
-        h.battle_loop(battle_weight=2)
+
+        while not bg.signal("task_done"):
+            if ui_T(T("土行孙"),1): bonus_callback()
+            else: battle_callback()
+
+
+
+    except InterruptedError:
+        bg.remove("try_pause")
+        bg.clear()
+        exit(0)
     except Exception as e:
         traceback.print_exc()
     finally:

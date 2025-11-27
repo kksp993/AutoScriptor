@@ -43,7 +43,7 @@ for i, interval in enumerate(intervals, 1):
     click_result = {}
     def _click_test():
         try:
-            mixctrl.click(0, 0)
+            mixctrl.click(2000, 0)
             click_result['ok'] = True
         except Exception as e:
             click_result['error'] = e

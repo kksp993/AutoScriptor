@@ -53,6 +53,8 @@ TRANSLATION_MAP = {
     '五行四季': 'wuxingsiji',
     '昆仑山': 'kunlunshan',
     '自动战斗': 'battle',
+    '荒古万界': 'hgwj',
+    '每日任务': 'daily_task',
 
 }
 

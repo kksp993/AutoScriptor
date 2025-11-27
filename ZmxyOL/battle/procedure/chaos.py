@@ -28,6 +28,7 @@ def task_way_to_diff(self:Hero, task: str, expect_difficulty: str, task_type: st
         remains = extract_info(B(922,249,186,43), lambda x: int(x.strip()[-1]))
     else:
         remains = extract_info(B(610,292,120,24), lambda x: int(x.strip()[-2]))
+    if not isinstance(remains, int): remains = 0
     # 获取难度
     difficulty = extract_info(
         B(222,368,66,56),

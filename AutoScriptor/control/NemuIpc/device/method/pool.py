@@ -193,7 +193,11 @@ class WorkerThread:
         # logger.info('deliver job')
         with job.put_lock:
             job.result = result
-            del job.worker
+            try:
+                del job.worker
+            except AttributeError:
+                # Job was already killed, worker already deleted
+                pass
             job.notify_get.release()
 
     def _work(self) -> None:
