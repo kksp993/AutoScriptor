@@ -20,7 +20,7 @@ def way():
 
 @path(HAS_SHIJIEDITU, "天庭")
 def way():
-    click(I("导航-世界地图"))
+    click(I("导航-世界地图"), until=lambda: ui_T(I("世界地图-极北")))
     click(I("世界地图-天庭"))
     click(T("确定"))
     wait_for_appear(T("神兽森林"))
@@ -56,7 +56,7 @@ def way():
 "=======================    地狱    ======================="
 @path(HAS_SHIJIEDITU, "地狱")
 def way():
-    click(I("导航-世界地图"))
+    click(I("导航-世界地图"), until=lambda: ui_T(I("世界地图-极北")))
     click(I("世界地图-炼狱"))
     click(T("确定"))
     wait_for_appear(I("地狱鬼城"))
@@ -66,7 +66,7 @@ def way():
 "=======================    极北    ======================="
 @path(HAS_SHIJIEDITU, "极北")
 def way():
-    click(I("导航-世界地图"))
+    click(I("导航-世界地图"), until=lambda: ui_T(I("世界地图-极北")))
     click(I("世界地图-极北"))
     click(T("确定"))
     wait_for_appear(I("极北背景"))
@@ -113,7 +113,7 @@ def way():
 
 @path(["极北村庄","极北","极寒深渊"], "村庄")
 def way():
-    click(I("导航-世界地图"))
+    click(I("导航-世界地图"), until=lambda: ui_T(I("世界地图-极北")))
     click(T("村庄"))
     click(T("确定"))
     # 等待加载中消失
@@ -142,7 +142,7 @@ def way():
 "=======================    荒古万界    ======================="
 @path(HAS_SHIJIEDITU, "荒古万界")
 def way():
-    click(I("导航-世界地图"))
+    click(I("导航-世界地图"), until=lambda: ui_T(I("世界地图-极北")))
     click(T("荒古万界"),offset=(180,90))
     wait_for_appear(T("万界穿梭"))
     mm.set_region("荒古万界")
@@ -158,8 +158,22 @@ def way(env_name: str):
 for env_name in HAS_SHIJIEDITU: 
     path("荒古万界", env_name)(partial(way, env_name=env_name))
 
+"=======================    联盟    ======================="
+@path("仙盟", "联盟")
+def way():
+    click(I("仙盟-联盟"))
+    wait_for_appear(T("魔渊之界"))
+    mm.set_region("联盟")
 
-LR_ENVS = ["极寒深渊"]
+@path("联盟", "村庄")
+def way():
+    click(T("返回村庄"))
+    wait_for_disappear(I("加载中"))
+    time.sleep(1)
+    mm.set_region("村庄")
+
+
+LR_ENVS = ["极寒深渊", "联盟"]
 
 "=======================    导航    ======================="
 for env_name in mm.envs.keys():

@@ -67,7 +67,7 @@ if not success:
 mixctrl.window.hidden() if cfg["app"]["run_in_background"] else None
 # cfg.load_config(getpass.getpass("请输入安全密码: "))
 
-def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->bool:
+def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->int:
     target = [t for t in target]
     boxes = locate(target, timeout, assure_stable=False)
     if not first(boxes): return -1
@@ -165,17 +165,18 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
     # 元组任一满足
     if isinstance(target, tuple):
         logger.info(f"Locate: {target}")
-        while first_attempt or time.time() - t < timeout:
+        while first_attempt or (delta := time.time() - t) < timeout:
             first_attempt = False
             boxes = _locate_all(target)
             if assure_stable and not stable(boxes, _locate_all(target)): continue
             if first(boxes): return first(boxes) if is_simplify else boxes  # 确保返回单个Box或None
+            # if delta > 5 and cfg["llm"]["use_agent"]:
         return None if is_simplify else boxes
     
     # 列表需全满足
     if isinstance(target, list):
         logger.info(f"Locate: {target}")
-        while first_attempt or time.time() - t < timeout:
+        while first_attempt or (delta := time.time() - t) < timeout:
             first_attempt = False
             boxes = _locate_all(target)
             if assure_stable and not stable(boxes, _locate_all(target)): continue
@@ -186,8 +187,8 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
     if isinstance(target, Target):
         return locate((target,), timeout, assure_stable=assure_stable)
     
-def wait_for_appear(target: Target|tuple[Target, ...], timeout: float=30)->bool:
-    return locate(target, timeout, assure_stable=False) is not None
+def wait_for_appear(target: Target|tuple[Target, ...], timeout: float=30)->Target|None:
+    return locate(target, timeout, assure_stable=False)
 
 def wait_for_disappear(target: Target|tuple[Target, ...], timeout: float=30)->bool:
     wait_for_appear(target, timeout=5)
@@ -242,12 +243,14 @@ def swipe(
         *,
         duration_s: int=1, 
         delay: float = 0,
+        ensure_stable_after_swipe: bool = True,
     ):
     start_box = locate(start_target, 3) if not isinstance(start_target, BoxTarget) else start_target.box
     end_box = locate(end_target, 3, assure_stable=False) if not isinstance(end_target, BoxTarget) else end_target.box
     if start_box is None or end_box is None: raise RuntimeError(f"Swipe {start_target} to {end_target} failed, for failed to locate target")
     time.sleep(delay)
     mixctrl.swipe(*b2p(start_box), *b2p(end_box), duration_s)
+    if ensure_stable_after_swipe: time.sleep(duration_s)
     return True
 
 def input(text: str, target_field: Target|tuple[Target, ...] = None):
