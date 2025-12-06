@@ -18,6 +18,7 @@ class FFT_preference(Enum):
 
 
 def battle():
+    bg.set_signal("short_cut", False)
     wait_for_disappear(I("加载中"))
     from ZmxyOL.battle.character.hero import h
     sleep(0.5)
@@ -35,6 +36,13 @@ def battle():
         identifier=(T("确认"),T("前往新一层")),
         callback=lambda: [bg.set_signal("try_exit", True),bg.clear()]
     )
+    bg.add(
+        name="FFT_short_cut",
+        identifier=T("入劫"),
+        callback=lambda: [
+            bg.set_signal("try_exit", True),bg.clear(),bg.set_signal("short_cut", True)
+        ]
+    )
     bg.set_signal("try_exit", False)
     while not bg.signal("try_exit"):
         for cnt in range(5):
@@ -43,8 +51,9 @@ def battle():
             else: h.skill(5,4)
         h.zhenling()
         h.battle_loop(battle_weight=99)
-    click((T("确认"),T("前往新一层")))
-    wait_for_disappear(I("加载中"))
+    if not bg.signal("short_cut"):
+        click((T("确认"),T("前往新一层")))
+        wait_for_disappear(I("加载中"))
 
 def FTT_battle_one_round(preference:list[FFT_preference], conquer_TianMo:bool):
     if first(get_colors(B(94,623,2,3)))!="灰色" and conquer_TianMo: 
@@ -84,10 +93,14 @@ def fanTianTa(
     ensure_in("极北",-1)
     click(B(0,120,90,100))
     sleep(3)
+    for diff in ["现在", "过去"]:
+        click(T(diff),offset=(0,100))
+        sleep(3)
+        click(T("确认"), if_exist=True)
+        sleep(3)
+        click(B(30,30,30,30))
     click(T(difficulty.value),offset=(0,100))
     sleep(3)
-    click(T("确认"), if_exist=True)
-    sleep(5)
     for _ in range(battle_times):
         FTT_battle_one_round(preference, conquer_TianMo)
         sleep(3)

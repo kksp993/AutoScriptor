@@ -1,7 +1,7 @@
 from ZmxyOL.battle import *
 from ZmxyOL.nav import *
 from ZmxyOL.task import *
-from ZmxyOL.nav.envs.decorators import LOC_ENV
+from AutoScriptor.utils.logger import log_flush
 
 __all__ = [
     "h","combo",
@@ -10,5 +10,5 @@ __all__ = [
     # task
     'register_task',"get_task_table",
     # loc env
-    "LOC_ENV"   
+    "LOC_ENV"  
 ]

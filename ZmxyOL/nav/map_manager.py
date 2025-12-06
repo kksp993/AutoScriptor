@@ -6,6 +6,7 @@
 from typing import Dict, Optional, Callable, Any, List
 import numpy as np
 from scipy.sparse.csgraph import floyd_warshall
+from logzero import logger
 
 
 
@@ -233,6 +234,7 @@ class MapManager:
         """设置当前位置"""
         self.cur_env = env
         self.cur_loc = loc if loc else env
+        logger.debug(f"当前环境: {env}, 当前位置: {loc}")
         return self.get_region()
     
     def set_loc(self, loc:str):

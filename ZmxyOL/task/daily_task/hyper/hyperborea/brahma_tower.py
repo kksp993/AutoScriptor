@@ -16,7 +16,7 @@ def battle():
     h.skill(6)
     bg.add(
         name="FTT_battle",
-        identifier=T("确认"),
+        identifier=(T("确认"),T("入劫")),
         callback=lambda: [
             bg.set_signal("try_exit", True),
             bg.clear(),
@@ -44,7 +44,7 @@ def FTT_battle_one_round():
             click(T("确定"))
             sleep(2)
         click(T("烦恼"))
-        click(T("入劫"))
+        click(T("入劫"),until=lambda: ui_T(I("加载中")))
         battle()
         wait_for_appear(T("入劫"))
 
@@ -53,11 +53,16 @@ def FTT_battle_one_round():
 def fanTianTa(battle_times=1):
     ensure_in("极北",-1)
     click(B(0,120,90,100))
-    sleep(3)
+    for diff in ["现在", "过去"]:
+        click(T(diff),offset=(0,100))
+        sleep(3)
+        click(T("确认"), if_exist=True)
+        sleep(1)
+        click(B(30,30,30,30))
     click(T("现在"),offset=(0,100))
     sleep(3)
     click(T("确认"), if_exist=True)
-    sleep(5)
+    sleep(1)
     for _ in range(battle_times):
         FTT_battle_one_round()
         sleep(3)

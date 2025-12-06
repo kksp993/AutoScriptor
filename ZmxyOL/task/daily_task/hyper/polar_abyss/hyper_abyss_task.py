@@ -38,7 +38,13 @@ def task(cancel_on_failed:bool=True):
             repeat = (3 - bonus_x) % 3
             click(B(430,570,30,30), repeat=repeat) 
             click(T("开始挑战"))
-            h.set(has_cd=True,speed_x=3).battle_task(bonus_x=3, has_loading_after_battle=True, exit_loc=get_task_table(name)["exit_loc"])
+            h.set(has_cd=True,speed_x=3).battle_task(
+                bonus_x=3, 
+                has_loading_after_battle=True, 
+                exit_loc=get_task_table(name)["exit_loc"], 
+                # crash_suddenly=get_task_table(name)["crash_suddenly"],
+                cancel_on_failed=cancel_on_failed
+            )
         else:
             click(B(1200,30,30,30))
             wait_for_appear(T("回家", box=Box(18,607,87,109)))
