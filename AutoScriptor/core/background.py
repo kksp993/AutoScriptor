@@ -1,98 +1,110 @@
-from collections.abc import Callable
-from nt import remove
-import threading
-from typing import Any
+from threading import Thread, RLock, Event
+import time
+from typing import Any, Callable
 from logzero import logger
 from AutoScriptor.core.targets import Target
-import time
+
 DEFAULT_INTERVAL = 0.2
 
-class BackgroundMonitor(threading.Thread):
+class BackgroundMonitor(Thread):
     def __init__(self):
-        super().__init__()
-        self.running = True
-        self.callbacks = {} # identifier -> callback
-        self.signals={}
-        self.interval = DEFAULT_INTERVAL
-        self._lock = threading.RLock()
-        self._stop_event = threading.Event() # Use an Event for graceful stopping
+        super().__init__(daemon=True)
+        self._callbacks = {}  # name -> {idf, cb, once, throttle, last}
+        self._signals = {}
+        self._interval = DEFAULT_INTERVAL
+        self._lock = RLock()
+        self._stop_event = Event()
         self.start()
+
     def run(self):
         from AutoScriptor.core.api import ui_T
         while not self._stop_event.is_set():
-            if self.callbacks: 
-                callbacks_copy = list(self.callbacks.items())
-                for name, (idf, callback, once) in callbacks_copy:
-                    
-                    if ui_T(idf):
-                        logger.info(f"🎯 后台检测到: {name} 触发")
-                        callback()
-                        if once: self.remove(name)
-            time.sleep(self.interval)
+            for name, info in list(self._callbacks.items()):
+                idf = info['idf']
+                if not ui_T(idf):
+                    continue
+                now = time.time()
+                if now - info.get('last', 0) < info.get('throttle', 0):
+                    continue
+                info['last'] = now
+                try:
+                    info['cb']()
+                except Exception:
+                    logger.exception('bg cb error %s', name)
+                if info.get('once', True):
+                    self.remove(name)
+            time.sleep(self._interval)
 
-    def add(self, name:str, identifier: Target|list[Target]|tuple[Target, ...], callback: Callable[[], None]|list[Callable[[], None]], once:bool=True):
+    def add(self, name: str, identifier, callback: Callable[[], None], once: bool = True, throttle: float = 0):
+        if isinstance(identifier, Target):
+            identifier = (identifier,)
         with self._lock:
-            logger.info(f"✅ 添加监控事件: {name}")
-            self.set_interval(DEFAULT_INTERVAL)
-            
-            if isinstance(identifier, Target):
-                identifier = (identifier,)
-            elif isinstance(identifier, list):
-                identifier = tuple(identifier)
+            self._callbacks[name] = {'idf': identifier, 'cb': callback, 'once': once, 'throttle': throttle, 'last': 0}
+        logger.info('✅ 添加监控事件: %s', name)
 
-            self.callbacks[name] = (identifier, callback, once)
-
-
-    def remove(self, name:str|list[str]):
-        if isinstance(name, list): return [self.remove(n) for n in name]
+    def remove(self, name: str):
         with self._lock:
-            self.callbacks.pop(name, None)
+            self._callbacks.pop(name, None)
 
-    def clear(self, signals_clear:bool=False):
+    def clear(self, clear_signals: bool = False):
         with self._lock:
-            self.callbacks.clear()
-            if signals_clear: self.clear_signals()
+            self._callbacks.clear()
+            if clear_signals:
+                self._signals.clear()
 
     def clear_signals(self):
         with self._lock:
-            self.signals.clear()
-
+            self._signals.clear()
+            
     def get_idfs(self):
         with self._lock:
-            return set(self.callbacks.keys())
+            return set(self._callbacks.keys())
 
-    def set_interval(self, interval:int):
+    def set_interval(self, interval: float):
         with self._lock:
-            self.interval = interval
-            logger.info(f"🔄 后台检测间隔设置为 {interval} 秒")
+            self._interval = interval
 
     def stop(self):
-        logger.info("❌ 正在停止后台监控...")
-        self._stop_event.set() # Signal the thread to stop
-        self.join() # Wait for the thread to finish cleanly
-        logger.info("✅ 后台监控已停止")
+        self._stop_event.set()
+        self.join()
 
-    def signal(self, sig: str, value: Any=None):
-        if sig not in self.signals.keys():
-            self.signals[sig] = value
-        return self.signals[sig]
-        
-    def set_signal(self, sig: str, value: Any):
-        self.signals[sig] = value
-        return self.signals[sig]
+    def signal(self, key: str, default: Any = None):
+        return self._signals.get(key, default)
 
-bg = BackgroundMonitor()
+    def set_signal(self, key: str, value: Any):
+        self._signals[key] = value
+        return value
 
-def monitor(idf_callback_pairs:list[tuple[str, Callable[[], None]]]):
-    def decorator(fn):
-        def wrapper(*args, **kwargs):
-            global bg
-            for idf, callback in idf_callback_pairs:
-                bg.add(idf, callback)
-            res = fn(*args, **kwargs)
-            for idf, callback in idf_callback_pairs:
+
+# lazy proxy
+_bg = None
+_bg_lock = RLock()
+
+def _ensure_bg():
+    global _bg
+    with _bg_lock:
+        if _bg is None or not _bg.is_alive():
+            _bg = BackgroundMonitor()
+        return _bg
+
+
+class BackgroundProxy:
+    def __getattr__(self, name):
+        return getattr(_ensure_bg(), name)
+
+
+bg = BackgroundProxy()
+
+
+def monitor(pairs):
+    def deco(fn):
+        def wrapper(*a, **k):
+            for idf, cb in pairs:
+                bg.add(idf, cb)
+            r = fn(*a, **k)
+            for idf, _ in pairs:
                 bg.remove(idf)
-            return res
+            return r
         return wrapper
-    return decorator
+    return deco
  

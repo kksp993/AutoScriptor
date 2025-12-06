@@ -10,6 +10,8 @@ from flask import Flask, render_template, jsonify, send_from_directory, request,
 from flask_socketio import SocketIO, emit
 import importlib
 import json, os
+import urllib.request
+import shutil
 import logging
 from services.core.banner import _print_banner
 from logzero import logger
@@ -17,6 +19,7 @@ import dpath
 from queue import Queue, Empty
 from threading import Thread
 import ctypes
+import webbrowser
 
 app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='')
 socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins='*')
@@ -69,6 +72,47 @@ ORDER_MAP={}
 TASK_MANAGER = TaskManager()
 RUN_THREAD = None
 
+# 本地静态依赖目录与远端备选地址
+VENDOR_DIR = os.path.join(os.path.dirname(__file__), 'vendor')
+VENDOR_SOURCES = {
+    'tailwind.css': 'https://cdn.tailwindcss.com',
+    'vue.global.prod.js': 'https://unpkg.com/vue@3/dist/vue.global.prod.js',
+    'socket.io.min.js': 'https://cdn.socket.io/4.7.2/socket.io.min.js',
+    'element-plus.css': 'https://unpkg.com/element-plus/dist/index.css',
+    'element-plus.full.js': 'https://unpkg.com/element-plus/dist/index.full.js',
+    'ansi_up.min.js': 'https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.min.js',
+    'font-awesome.min.css': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css',
+    # 添加 fontawesome 字体资源
+    'fonts/fontawesome-webfont.woff2': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/fonts/fontawesome-webfont.woff2',
+    'fonts/fontawesome-webfont.woff': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/fonts/fontawesome-webfont.woff',
+    'fonts/fontawesome-webfont.ttf': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/fonts/fontawesome-webfont.ttf',
+}
+
+def _ensure_vendor_files():
+    try:
+        os.makedirs(VENDOR_DIR, exist_ok=True)
+        fonts_dir = os.path.join(VENDOR_DIR, 'fonts')
+        os.makedirs(fonts_dir, exist_ok=True)
+        for name, url in VENDOR_SOURCES.items():
+            path = os.path.join(VENDOR_DIR, name)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if os.path.exists(path) and os.path.getsize(path) > 1024:
+                continue
+            try:
+                logger.info("downloading vendor: %s", url)
+                with urllib.request.urlopen(url, timeout=10) as resp, open(path, 'wb') as f:
+                    shutil.copyfileobj(resp, f)
+            except Exception as e:
+                # 下载失败不阻塞启动，前端仍有降级逻辑
+                try:
+                    if os.path.exists(path) and os.path.getsize(path) <= 1024:
+                        os.remove(path)
+                except Exception:
+                    pass
+                logger.warning("download vendor failed: %s -> %s (%s)", url, path, e)
+    except Exception as e:
+        logger.warning("ensure vendor dir failed: %s", e)
+
 def read_config():
     global CONFIG,ORDER_MAP
     ordered_paths = get_ordered_paths(CONFIG['tasks'])
@@ -101,6 +145,7 @@ def make_public_config():
 @app.route('/')
 def index():
     # 将 AutoConfig 实例转换为原生 dict 供模板序列化
+    _ensure_vendor_files()
     return render_template('app.html', config=make_public_config())
 
 def get_log_prefix(msg):
@@ -150,7 +195,21 @@ def _on_connect():
 # 服务 favicon
 @app.route('/favicon.ico')
 def favicon():
-    return send_from_directory(app.static_folder, 'favicon.ico', mimetype='image/vnd.microsoft.icon')
+    # 提供本地 favicon（若文件不存在则返回 404）
+    try:
+        return send_from_directory(app.static_folder, 'favicon.ico', mimetype='image/vnd.microsoft.icon')
+    except Exception:
+        return ("", 404)
+
+# 提供本地 vendor 静态资源
+@app.route('/vendor/<path:filename>')
+def vendor_static(filename: str):
+    return send_from_directory(VENDOR_DIR, filename)
+
+# 添加字体静态资源
+@app.route('/fonts/<path:filename>')
+def fonts_static(filename):
+    return send_from_directory(os.path.join(VENDOR_DIR, 'fonts'), filename)
 
 # 枚举可选项查询：输入枚举类路径列表，返回每个路径的成员名列表
 @app.route('/enum-options', methods=['POST'])
@@ -229,6 +288,21 @@ def refresh_config():
         logger.error("refresh error: %s", e)
         return jsonify({"error": str(e)}), 500
 
+# 添加：设置线程为高优先级
+def _set_thread_high_priority(thread_obj):
+    try:
+        THREAD_SET_INFORMATION = 0x0020
+        THREAD_QUERY_INFORMATION = 0x0040
+        # 使用 native_id 获取操作系统线程 ID
+        tid = getattr(thread_obj, 'native_id', None) or thread_obj.ident
+        handle = ctypes.windll.kernel32.OpenThread(THREAD_SET_INFORMATION | THREAD_QUERY_INFORMATION, False, tid)
+        if handle:
+            # THREAD_PRIORITY_HIGHEST = 2
+            ctypes.windll.kernel32.SetThreadPriority(handle, 2)
+            ctypes.windll.kernel32.CloseHandle(handle)
+    except Exception as e:
+        logger.warning("set thread priority failed: %s", e)
+
 @app.route('/run', methods=['POST'])
 def run_tasks():
     global ORDER_MAP, RUN_THREAD
@@ -242,7 +316,7 @@ def run_tasks():
             logger.info("========== 所有任务执行完成 ==========")
         except KeyboardInterrupt:
             try:
-                bg.clear(signals_clear=True)
+                bg.clear(clear_signals=True)
             except Exception:
                 pass
             logger.info("========== 任务执行已被中断 ==========")
@@ -250,6 +324,8 @@ def run_tasks():
             logger.error("background run error: %s", e)
     RUN_THREAD = Thread(target=_run, args=(sorted_tasks,), daemon=True)
     RUN_THREAD.start()
+    # 启动后设置高优先级
+    _set_thread_high_priority(RUN_THREAD)
     return jsonify({'status': 'ok', 'tasks': sorted_tasks}), 200
 
 @app.route('/stop', methods=['POST'])
@@ -348,8 +424,6 @@ def add_account():
     password = data.get('password', '')
     character_name = data.get('character_name', '')
     security_key = data.get('security_key', '')
-    # 按需求：仅打印
-    logger.info("[ADD_ACCOUNT] account=%s, password=%s, character_name=%s, security_key=%s", account, password, character_name, security_key)
     # 将敏感数据按现有逻辑写入加密字段，保持 cfg 前后一致
     try:
         from AutoScriptor.crypto.update_config import config_manager
@@ -366,16 +440,17 @@ def run_webui():
     # 启动日志推送后台任务
     socketio.start_background_task(target=_ws_log_emitter)
     _print_banner()
+    webbrowser.open("http://127.0.0.1:5000")
     socketio.run(app, host='127.0.0.1', port=5000, debug=True, use_reloader=False)
 
 def shutdown_webui():
     try:
-        # 在 Socket.IO 的 eventlet 上下文中触发停止，避免跨线程/绿线程停止失效
-        socketio.start_background_task(target=socketio.stop)
+        bg.stop()
     except Exception:
         pass
     try:
-        bg.stop()
+        # 在 Socket.IO 的 eventlet 上下文中触发停止，避免跨线程/绿线程停止失效
+        socketio.start_background_task(target=socketio.stop)
     except Exception:
         pass
 
