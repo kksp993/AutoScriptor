@@ -137,6 +137,10 @@ class Box(collections.namedtuple('Box', 'left top width height')):
         else:
             raise ValueError("other must be a tuple of length 2 or 4")
 
+    def margin(self, margin: int=20) -> 'Box':
+        "扩大box的区域，用于ocr识别"
+        return Box(self.left - margin, self.top - margin, self.width + margin * 2, self.height + margin * 2)
+
 def dp(r: Box) -> Tuple[Union[int, None], Union[int, None]]:
     center_x, center_y = r.center()
     offset_x = random.randint(-r.width // 6, r.width // 6)

@@ -93,10 +93,14 @@ def fanTianTa(
     ensure_in("极北",-1)
     click(B(0,120,90,100))
     sleep(3)
+    for diff in ["现在", "过去"]:
+        click(T(diff),offset=(0,100))
+        sleep(3)
+        click(T("确认"), if_exist=True)
+        sleep(3)
+        click(B(30,30,30,30))
     click(T(difficulty.value),offset=(0,100))
     sleep(3)
-    click(T("确认"), if_exist=True)
-    sleep(5)
     for _ in range(battle_times):
         FTT_battle_one_round(preference, conquer_TianMo)
         sleep(3)

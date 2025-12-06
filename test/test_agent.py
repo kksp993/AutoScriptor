@@ -12,7 +12,6 @@ from logzero import logger
 from AutoScriptor import bg, mixctrl, click
 from AutoScriptor.core.targets import BoxTarget
 from AutoScriptor.utils.box import Box
-from AutoScriptor.core.vlm_api import make_click_target
 from AutoScriptor.vlm.frontend import VLMAgent
 from AutoScriptor.vlm.utils import parse_qwen_vl_coordinates
 
@@ -50,13 +49,13 @@ if __name__ == "__main__":
         res = ""
         history = []
         while "__END_OF_TASK__" not in res:
-            res = run_agent("帮我去荒古万界，穿梭到外域", history)
+            res = run_agent("点击腾蛇飞升", history)
             history.append(f"Action Output: {res}")
             if res in history[:-2]:
                 logger.warning("检测到死循环，强制停止")
                 break
             # 简单防止死循环
-            if len(history) > 20:
+            if len(history) > 1:
                 logger.warning("任务步数过多，强制停止")
                 break
          # 尝试解析并执行点击（如果有）

@@ -54,8 +54,13 @@ TRANSLATION_MAP = {
     '昆仑山': 'kunlunshan',
     '自动战斗': 'battle',
     '荒古万界': 'hgwj',
-    '每日任务': 'daily_task',
-
+    '荒古巨兽': 'hgjs',
+    '本命空间': 'bmkj',
+    '腾蛇飞升': 'tengshefeisheng',
+    '活动': 'huodong',
+    '联盟悬赏': 'lianmengxuanshang',
+    '混沌炼狱塔': 'hundunlianyaota',
+    '联盟任务': 'lianmengrenwu',
 }
 
 

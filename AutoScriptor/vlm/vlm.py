@@ -4,19 +4,14 @@ VLM 调用模块（Agno 封装）
 
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, Optional
 
-from agno import agent
-import requests
 from agno.agent import Agent
 from agno.models.vllm import VLLM
-from logzero import logger
 
 from AutoScriptor.vlm.config import VLM_CONFIG
-from AutoScriptor.vlm.templates import SYSTEM_PROMPT, build_messages
+from AutoScriptor.vlm.templates import SYSTEM_PROMPT
 from AutoScriptor.vlm.tools import load_toolkits
-from AutoScriptor.vlm.utils import encode_image_to_base64
 
 
 def _resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -28,44 +23,6 @@ def _resolve_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any
 
 def _normalize_base_url(api_url: str) -> str:
     return api_url.rsplit("/chat/completions", 1)[0] if api_url.endswith("/chat/completions") else api_url
-
-
-def call_vllm_chat_completion(
-    question: str,
-    screenshot: Optional[str] = None,
-    tools: Optional[list] = None,
-    **overrides: Any,
-) -> Dict[str, Any]:
-    """调用 vLLM 进行多模态推理"""
-
-    cfg = _resolve_config(overrides)
-    image_path = screenshot or cfg.get("default_image")
-    base64_image = encode_image_to_base64(image_path)
-
-    payload = {
-        "model": cfg["model_name"],
-        "messages": build_messages(question, base64_image),
-        "max_tokens": cfg["max_tokens"],
-        "temperature": cfg["temperature"],
-    }
-
-    headers = {"Content-Type": "application/json"}
-    response = requests.post(
-        cfg["api_url"],
-        headers=headers,
-        json=payload,
-        timeout=cfg.get("timeout", 60),
-    )
-    response.raise_for_status()
-    return response.json()
-
-
-def extract_vllm_text(result: Dict[str, Any]) -> str:
-    """提取模型文本输出"""
-    choices = result.get("choices") or []
-    if not choices:
-        return ""
-    return choices[0].get("message", {}).get("content", "")
 
 
 class VLMAgent:
@@ -86,24 +43,44 @@ class VLMAgent:
                 temperature=self.config["temperature"],
             ),
             instructions=[
-                "优先使用工具（如 click, ensure_in）来执行操作，而不是仅输出文本建议。",
                 SYSTEM_PROMPT,
-                "如果工具返回包含__Screenshot_Required__的字符串，**必须**输出__Screenshot_Required__，并启动第二轮对话。",
             ],
             tools=agent_tools,
             markdown=True,
             add_history_to_context=False,
-            debug_mode=True, # 开启调试以观察 Tool Call
+            debug_mode=False, # 开启调试以观察 Tool Call
+        )
+        self._agent_no_tools = Agent(
+            model=VLLM(
+                id=self.config["model_name"],
+                base_url=_normalize_base_url(self.config["api_url"]),
+                temperature=self.config["temperature"],
+            ),
+            instructions=[
+                """
+输入：
+- `I(...)` 图片目标（ImageTarget），可设置信心阈值或颜色过滤
+- `T(...)` 文本目标（TextTarget），可选正则匹配
+- `B(...)` 区域目标（BoxTarget），直接使用坐标盒
+                """,
+                """
+输出：
+如果不存在目标，请**必须**返回None。
+返回坐标 {'x': <x>, 'y': <y>}。不要解释或其他文字。<x>和<y>是归一化坐标，范围0-1000。
+                """,
+            ],
+            markdown=True,
+            add_history_to_context=False,
+            debug_mode=False, # 开启调试以观察 Tool Call
         )
 
-    def run(self, prompt: str, screenshot: Optional[str] = None, thinking_mode: bool = False) -> str:
+    def run(self, prompt: str, screenshot: Optional[str] = None, thinking_mode: bool = False, use_tools: bool = True) -> str:
         """使用 Agno Agent 进行推理，支持工具调用"""
         image_path = screenshot or self.config.get("default_image")
         from agno.media import Image
         # 注意：根据 Agent.run 签名，这里应该传 images 列表，而不是 image 参数
-        if thinking_mode:
+        if thinking_mode and use_tools:
             response_stream = self._agent.run(prompt, images=[Image(filepath=image_path)], stream=True)
-        
             chunks = []
             for chunk in response_stream:
                 if isinstance(chunk, str):
@@ -113,7 +90,8 @@ class VLMAgent:
                     print(chunk.content, end="", flush=True)
                     chunks.append(chunk.content)
         else:
-            response = self._agent.run(prompt, images=[Image(filepath=image_path)])
+            agent = self._agent if use_tools else self._agent_no_tools
+            response = agent.run(prompt, images=[Image(filepath=image_path)])
             return response.content
         return "".join([str(c) for c in chunks])
 

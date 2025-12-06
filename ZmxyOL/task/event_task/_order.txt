@@ -1,2 +1,6 @@
 wuguangshise
 wuxingsiji
+tengshefeisheng
+huodong
+hd_details
+hd_registry

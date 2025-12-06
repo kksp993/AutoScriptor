@@ -7,6 +7,7 @@ import enum
 from AutoScriptor.utils.constant import cfg
 from logzero import logger
 from ZmxyOL.task.translations import normalize_to_cn
+from ZmxyOL.nav.api import locate_region
 
 # 在模块顶端添加全局计数器
 registration_counter = 0
@@ -36,6 +37,7 @@ def register_task(func):
                     setattr(module, 'LOC_ENV', LOC_ENV)
                     setattr(module, 'h', h)
                     setattr(module, 'get_task_table', get_task_table)
+                    setattr(module, 'locate_region', locate_region)
                 except Exception:
                     pass
         # 1. Get the full path of the file where the function is defined
@@ -125,7 +127,7 @@ def register_task(func):
 def task_wrapper(func):
     def wrapper(*args, **kwargs):
         from AutoScriptor.core.background import bg
-        bg.clear(signals_clear=True)
+        bg.clear(clear_signals=True)
 
         # 在任务执行前注入必要的导航符号到函数的全局命名空间
         func_globals = func.__globals__
@@ -139,6 +141,7 @@ def task_wrapper(func):
                 func_globals['LOC_ENV'] = LOC_ENV
                 func_globals['h'] = h
                 func_globals['get_task_table'] = get_task_table
+                func_globals['locate_region'] = locate_region
             except Exception:
                 pass
 
