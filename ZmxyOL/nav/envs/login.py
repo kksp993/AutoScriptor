@@ -48,6 +48,9 @@ def login(account: str=None, password: str=None, character_name: str=None, chara
                 raise ValueError("请先配合完成安全密码验证")
             click(T(cfg["game"].get("character_name", None)),delay=1)
     click(T("进入游戏",color="橙色"))
+    if ui_T(T("确定")):# 账号有效性验证失败
+        click(T("确定"))
+        return login(account, password, character_name, character_index)
     locate(I("活动公告页面"), 30)
     click(B(1240, 5, 40, 60))
     time.sleep(0.5)

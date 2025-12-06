@@ -8,6 +8,7 @@ from logzero import logger
 def task():
     ensure_in("村庄")
     click(I("导航-挑战"))
+    wait_for_appear(T("天选阁"))
     while ui_F(T("荣耀之战")):
         swipe(B(1000, 300), B(700, 300), duration_s=0.5)
     click(T("荣耀之战"))

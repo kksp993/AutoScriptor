@@ -61,6 +61,8 @@ def battle_loop(
     self.sleep(delay)
     op_count = 0
     switch_base("nemu")
+    bg.set_signal("try_exit", False)
+    bg.set_signal("Pause_battle", False)
     while not bg.signal("try_exit", False):
         if not bg.signal("Pause_battle", False):
             if op_count == battle_weight:

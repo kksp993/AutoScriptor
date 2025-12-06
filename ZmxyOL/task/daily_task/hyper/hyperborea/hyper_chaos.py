@@ -1,5 +1,5 @@
 import traceback
-from ZmxyOL.battle.tasks import JIBEI_CHAOS_TABLE
+from ZmxyOL.battle.tasks import JIBEI_CHAOS_TABLE, get_task_table
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *

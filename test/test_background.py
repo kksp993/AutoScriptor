@@ -8,7 +8,7 @@ if __name__ == "__main__":
     # print(get_colors(T("进入游戏")))
     # print(locate((T("极光天诏"),T("背景")),10))
     # print(locate(I("极北-关卡奖励")))
-    # print(locate((T(key="战斗-离开关卡"), I(key="倍战"), I(key="返回地图"))))
+    print(locate((T(key="战斗-离开关卡"), I(key="倍战"), I(key="返回地图"))))
     bg.add(
         name="战斗结束",
         identifier=(T(key="战斗-离开关卡"), I(key="倍战"), I(key="返回地图")),

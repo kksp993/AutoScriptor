@@ -4,7 +4,8 @@ import traceback
 
 if __name__ == "__main__":
     try:
-        swipe(I("法宝-戮仙剑"),I("炼丹炉-进阶-添加装备"),duration_s=2)
+        # swipe(I("法宝-戮仙剑"),I("炼丹炉-进阶-添加装备"),duration_s=2)
+        swipe(B(1000,500,10,10), B(300,500,10,10), duration_s=2)
     except Exception as e:
         traceback.print_exc()
     finally:

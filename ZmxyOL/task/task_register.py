@@ -7,6 +7,7 @@ import enum
 from AutoScriptor.utils.constant import cfg
 from logzero import logger
 from ZmxyOL.task.translations import normalize_to_cn
+from ZmxyOL.nav.api import locate_region
 
 # 在模块顶端添加全局计数器
 registration_counter = 0
@@ -23,6 +24,22 @@ def register_task(func):
     registration_counter += 1
     reg_order = registration_counter  # 当前注册顺序
     try:
+        module = inspect.getmodule(func)
+        if module is not None:
+            # 注入导航相关的符号
+            if not hasattr(module, 'ensure_in'):
+                try:
+                    from ZmxyOL.nav import ensure_in as _ensure_in
+                    from ZmxyOL.nav.envs.decorators import LOC_ENV
+                    from ZmxyOL.battle.character.hero import h
+                    from ZmxyOL.battle.tasks import get_task_table
+                    setattr(module, 'ensure_in', _ensure_in)
+                    setattr(module, 'LOC_ENV', LOC_ENV)
+                    setattr(module, 'h', h)
+                    setattr(module, 'get_task_table', get_task_table)
+                    setattr(module, 'locate_region', locate_region)
+                except Exception:
+                    pass
         # 1. Get the full path of the file where the function is defined
         #    e.g., 'C:\\Users\\...\\task\\日常任务\\天庭\\宠物培养.py'
         filepath = inspect.getfile(func)
@@ -110,6 +127,23 @@ def register_task(func):
 def task_wrapper(func):
     def wrapper(*args, **kwargs):
         from AutoScriptor.core.background import bg
-        bg.clear(signals_clear=True)
+        bg.clear(clear_signals=True)
+
+        # 在任务执行前注入必要的导航符号到函数的全局命名空间
+        func_globals = func.__globals__
+        if 'ensure_in' not in func_globals:
+            try:
+                from ZmxyOL.nav import ensure_in
+                from ZmxyOL.nav.envs.decorators import LOC_ENV
+                from ZmxyOL.battle.character.hero import h
+                from ZmxyOL.battle.tasks import get_task_table
+                func_globals['ensure_in'] = ensure_in
+                func_globals['LOC_ENV'] = LOC_ENV
+                func_globals['h'] = h
+                func_globals['get_task_table'] = get_task_table
+                func_globals['locate_region'] = locate_region
+            except Exception:
+                pass
+
         return func(*args, **kwargs)
     return wrapper

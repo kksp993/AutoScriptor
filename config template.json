@@ -17,6 +17,10 @@
         "emu_path": "YOUR_EMU_PATH, e.g.C:/Program Files/Netease/MuMu/nx_main/MuMuManager.exe",
         "adb_path": "YOUR_ADB_PATH, e.g.C:/Program Files/Netease/MuMu/nx_main/adb.exe"
     },
+    "llm":{
+        "use_agent":false,  
+        "url":"YOUR_LLM_URL # Not Available Yet. Stay Tuned."
+    },
     "encryption": {},
     "tasks": {}
 }

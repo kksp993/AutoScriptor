@@ -2,11 +2,11 @@ import traceback
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
-from ZmxyOL.battle.character.hero import h
 
 
 @register_task
 def daily_hell_chaos_task():
+    from ZmxyOL.battle.character.hero import h
     h.task(task_name="混沌地狱官邸·噩梦")
 
 

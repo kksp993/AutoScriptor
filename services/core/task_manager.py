@@ -7,11 +7,11 @@ from math import e
 import traceback
 import dpath
 import enum
-from typing import List
+from typing import List, Tuple
 from threading import Event, RLock
-from AutoScriptor import *
-from AutoScriptor.utils.constant import AutoConfig,cfg
 from ZmxyOL import *
+from AutoScriptor import *
+from AutoScriptor.utils.constant import cfg
 from logzero import logger
 import sys
 
@@ -134,53 +134,74 @@ class TaskManager:
     def execute_tasks(
         self,
         tasks: List[str]
-    ) -> None:
+    ) -> Tuple[int, int]:
         # 每次开始执行前复位取消标记
         self._reset_cancel()
         failed_count = 0
+        success_count = 0
         for task in tasks:
             if self._cancel_event.is_set():
                 logger.info("⏹ 检测到终止请求，停止后续任务执行")
                 break
-            # 在锁内读取并解析，避免重载过程导致 'fn' 丢失
-            with self._cfg_lock:
-                task_data = dpath.get(cfg["tasks"], task)
-                logger.info(f"▶️  正在执行: {task}")
-                logger.debug(f"task: {task_data}")
-                # 先在锁内准备参数与函数引用（快照）
-                fn = task_data.get("fn")
-                if fn is None:
-                    raise KeyError("fn")
-                kwargs = self._solve_task_params(task_data, real_fn=fn)
-            try:
-                # 释放锁后执行具体任务，避免长时间阻塞其它请求
-                fn(**kwargs)
-                logger.info(f"▶️  执行成功: {task}")
-                # 执行完毕后再加锁更新配置
+
+            max_retry = cfg["app"].get("max_retry", 0)
+            retry_count = 0
+            
+            while True:
+                # 在锁内读取并解析，避免重载过程导致 'fn' 丢失
                 with self._cfg_lock:
-                    self._update_task_post_execution(task)
-            except Exception as e:
-                logger.error(f"Error executing task: {task} {e}")
-                if isinstance(e, KeyboardInterrupt): raise
-                failed_count += 1
-                logger.error(f"❌ 执行失败: {task}，错误: {e}")
-                # dump_error_and_log(task, e)
-                traceback.print_exc()
-                if isinstance(e, RequestHumanTakeover):
+                    task_data = dpath.get(cfg["tasks"], task)
+                    logger.info(f"▶️  正在执行: {task}")
+                    logger.debug(f"task: {task_data}")
+                    # 先在锁内准备参数与函数引用（快照）
+                    fn = task_data.get("fn")
+                    if fn is None:
+                        raise KeyError("fn")
+                    kwargs = self._solve_task_params(task_data, real_fn=fn)
+                try:
+                    # 释放锁后执行具体任务，避免长时间阻塞其它请求
+                    fn(**kwargs)
+                    logger.info(f"▶️  执行成功: {task}")
+                    # 执行完毕后再加锁更新配置
                     with self._cfg_lock:
                         self._update_task_post_execution(task)
-                    logger.info(f"需要人工操作完成，跳过")
-                    continue
-                if cfg["app"]["restart_on_error"]:
-                    mixctrl.app.close(cfg["app"]["app_to_start"])
-                    sleep(1)
-                    while mixctrl.app.state(cfg["app"]["app_to_start"]) != "running":
-                        mixctrl.app.launch(cfg["app"]["app_to_start"])
+                    success_count += 1
+                    break
+                except Exception as e:
+                    logger.error(f"Error executing task: {task} {e}")
+                    if isinstance(e, KeyboardInterrupt): raise
+                    
+                    logger.error(f"❌ 执行失败: {task}，错误: {e}")
+                    # dump_error_and_log(task, e)
+                    traceback.print_exc()
+                    
+                    if isinstance(e, RequestHumanTakeover):
+                        failed_count += 1
+                        with self._cfg_lock:
+                            self._update_task_post_execution(task)
+                        logger.info(f"需要人工操作完成，跳过")
+                        break
+                        
+                    if cfg["app"]["restart_on_error"]:
+                        mixctrl.app.close(cfg["app"]["app_to_start"])
                         sleep(1)
-                    sleep(5)
-                mm.set_region("登录")
-            finally:
-                logger.info(f"Task [END] {task}")
+                        while mixctrl.app.state(cfg["app"]["app_to_start"]) != "running":
+                            mixctrl.app.launch(cfg["app"]["app_to_start"])
+                            sleep(1)
+                        sleep(5)
+                    
+                    mm.set_region("登录")
+
+                    if cfg["app"]["restart_on_error"] and retry_count < max_retry:
+                        retry_count += 1
+                        logger.info(f"🔄 任务失败，正在重试 ({retry_count}/{max_retry})")
+                        continue
+
+                    failed_count += 1
+                    break
+                finally:
+                    logger.info(f"Task [END] {task}")
+        return success_count, failed_count
 
     def reload_tasks(self, security_key: str=None) -> None:
         """
@@ -199,26 +220,19 @@ class TaskManager:
             # 2. 清空现有任务注册
             cfg.load_config(security_key) 
             # 3. 强制重新加载注册逻辑与任务包
-            # 3.1 先移除所有 ZmxyOL.task.* 子模块，确保后续 import 触发重新执行
-            to_delete = [m for m in list(sys.modules.keys()) if m.startswith('ZmxyOL.task.')]
+            # 3.1 先移除所有 ZmxyOL.* 子模块，确保后续 import 触发重新执行
+            to_delete = [m for m in list(sys.modules.keys()) if m.startswith('ZmxyOL.')]
             for name in to_delete:
                 try:
                     del sys.modules[name]
                 except Exception:
                     pass
-            # 3.2 重新加载注册器（重置 registration_counter 等全局状态）
+            # 3.2 重新加载整个 ZmxyOL 包，确保导入顺序正确
             try:
-                import ZmxyOL.task.task_register as task_register
-                importlib.reload(task_register)
+                import ZmxyOL
+                importlib.reload(ZmxyOL)
             except Exception:
-                # 如果未曾导入过，直接导入
-                import ZmxyOL.task.task_register as task_register  # noqa: F401
-            # 3.3 重新加载 ZmxyOL.task（其 __init__.py 的 main() 会扫描并注册任务、排序）
-            try:
-                import ZmxyOL.task as task_pkg
-                importlib.reload(task_pkg)
-            except Exception:
-                import ZmxyOL.task as task_pkg  # noqa: F401
+                import ZmxyOL
 
             # 4. 恢复保存的解密内容
             if not security_key:
@@ -232,6 +246,7 @@ class TaskManager:
             raise
         finally:
             try:
+                bg.clear(clear_signals=True)
                 self._cfg_lock.release()
             except Exception:
                 pass

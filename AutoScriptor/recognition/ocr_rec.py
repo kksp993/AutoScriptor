@@ -109,7 +109,8 @@ def ocr(frame,
         confidence=0.8,
         preferred_box=None,
         stride=1,
-        fuzzy_threshold=100
+        fuzzy_threshold=100,
+        scale=0.5
 )->list[list[Box]]:
     """
     标准OCR识别方法，直接用PaddleOCR标准API。
@@ -118,6 +119,7 @@ def ocr(frame,
         target_strings: 目标字符串列表
         preferred_box: Box对象，指定ROI
         stride: 降采样步长
+        scale: 缩放因子，用于调整图像大小，加快识别速度
         fuzzy_threshold: 匹配阈值
     返回：
         List[List[Box]]，所有匹配到的区域
@@ -137,6 +139,9 @@ def ocr(frame,
             preferred_box = Box(0, 0, img.shape[1], img.shape[0])
         img_roi = img[preferred_box.top: preferred_box.top + preferred_box.height,
                       preferred_box.left: preferred_box.left + preferred_box.width]
+        # apply scaling for speed/accuracy tradeoff
+        if scale != 1.0:
+            img_roi = cv2.resize(img_roi, (int(img_roi.shape[1] * scale), int(img_roi.shape[0] * scale)), interpolation=cv2.INTER_LINEAR)
         # 降采样
         if stride >= 1:
             img_for_ocr = img_roi[::stride, ::stride]
@@ -162,12 +167,20 @@ def ocr(frame,
                         s_width = s_right - s_left
                         s_height = s_bottom - s_top
                         s_left, s_top, s_width, s_height = int(s_left), int(s_top), int(s_width), int(s_height)
-                        final_left = preferred_box.left + s_left * stride
-                        final_top = preferred_box.top + s_top * stride
-                        final_bounding_box = Box(final_left, final_top, s_width * stride, s_height * stride)
+                        # adjust coordinates to original scale
+                        factor = stride / scale
+                        final_left = preferred_box.left + int(s_left * factor)
+                        final_top = preferred_box.top + int(s_top * factor)
+                        final_bounding_box = Box(final_left, final_top, int(s_width * factor), int(s_height * factor))
                         found_boxes[target_strings.index(target_string)].append(final_bounding_box)
         elif result is None:
             logger.warning("OCR engine returned None. This might indicate an issue with the input image or engine.")
+        if scale != 1.0:
+            from AutoScriptor.core.api import first
+            # fallback to full scale for missing targets
+            if first(found_boxes) is None:
+                fallback_boxes = ocr(frame, target_strings, confidence, preferred_box, stride, fuzzy_threshold, scale=1.0)
+                found_boxes = fallback_boxes
         return found_boxes
     except Exception as e:
         logger.error(f"Exception during OCR processing for '{target_string}': {e}", exc_info=True)
