@@ -316,7 +316,7 @@ def run_tasks():
             logger.info("========== 所有任务执行完成 ==========")
         except KeyboardInterrupt:
             try:
-                bg.clear(signals_clear=True)
+                bg.clear(clear_signals=True)
             except Exception:
                 pass
             logger.info("========== 任务执行已被中断 ==========")
