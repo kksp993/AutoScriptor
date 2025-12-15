@@ -40,8 +40,7 @@ def task():
             ],
         )
         h.set(has_cd=False,speed_x=1).battle_loop(battle_weight=100000),
-        # click(T("退出副本"), delay=2)
-        click(T("确定"), delay=2)
+        click((T("退出副本"),T("确定")), delay=2)
         wait_for_appear(ui["导航-奇闻录"].i)
 
 

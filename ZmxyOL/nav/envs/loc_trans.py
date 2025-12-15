@@ -1,3 +1,5 @@
+from re import U
+import time
 from AutoScriptor import *
 from ZmxyOL.nav import mm
 from ZmxyOL.nav import path
@@ -7,8 +9,9 @@ from ZmxyOL.nav.envs.decorators import *
 @path(LOC_ENV, "法相")
 def way():
     click(I("导航-菜单"))
-    click(I("菜单-个人资料"),delay=0.5)
-    click(T("法相", box=Box(0,0,500,140)))
+    click(I("菜单-个人资料"),delay=0.5); sleep(1)
+    if get_colors(B(31,639,194,63))[0] != "蓝色": 
+        click(T("法相", box=Box(0,0,500,140)),until=lambda: ui_T(T("属性")))
     mm.set_loc("法相")
 
 @path("法相", LOC_ENV)
@@ -45,15 +48,19 @@ def way():
 
 @path(LOC_ENV, "炼器师")
 def way():
-    idx = ui_idx((I('莫邪'),I("副职业宗师")),timeout=2)
+    idx = ui_idx((T('莫邪'),T("副职业宗师"),T('仙器培养')),timeout=2)
     if idx == 0:
-        click(I('莫邪'),offset=(-230,0))
+        click(T('莫邪'),offset=(-230,80),resize=(0,0))
     elif idx == 1:
-        click(I('副职业宗师'))
+        click(T("副职业宗师"))
+    elif idx == 2:
+        click(T('仙器培养'),offset=(-525,80),resize=(0,0))
     else:
-        click(B(640,250))
-    click(T('炼器师'))
-    mm.set_loc("炼器师")
+        from ZmxyOL.nav.api import ensure_in
+        ensure_in("极北")
+        ensure_in("炼器师")
+    click(T('炼器师'),until=lambda:ui_T(I('炼器炉')))
+    
 
 @path("背包", LOC_ENV)
 def way():
@@ -64,12 +71,25 @@ def way():
 
 @path(LOC_ENV, "背包")
 def way():
-    click(I("导航-菜单"))
+    click(I("导航-菜单")); sleep(1)
+    if ui_F(I("菜单-背包")): click(I("导航-菜单")); sleep(1)
     click(I("菜单-背包"),delay=0.5)
     wait_for_appear(I("背包背景"))
     mm.set_loc("背包")
 
+"=======================    荒古万界    ======================="
+@path(LOC_ENV, "荒古万界")
+def way():
+    click(T("古万界"),offset=(180,0))
+    wait_for_appear(T("万界穿梭"))
+    mm.set_loc("荒古万界")
+    time.sleep(1)
 
+@path("荒古万界", LOC_ENV)
+def way():
+    click(B(30,30,30,30))
+    wait_for_appear(I("洪荒遗境背景"))
+    mm.set_loc(mm.get_region()[0])
 
 def travel_to_dst_loc(target_env: str):
     click(T("万界穿梭"))
@@ -88,5 +108,5 @@ for dst_loc in available_dst_locs:
             travel_to_dst_loc(dst_loc)
             mm.set_loc(dst_loc)
         path(src_loc, dst_loc)(partial(way, dst_loc=dst_loc))
-    path(LOC_ENV, dst_loc)(partial(way, dst_loc=dst_loc))
-    path(dst_loc, LOC_ENV)(lambda: mm.set_loc(mm.get_region()[0]))
+    path("荒古万界", dst_loc)(partial(way, dst_loc=dst_loc))
+    path(dst_loc, "荒古万界")(lambda: mm.set_loc(mm.get_region()[0]))
