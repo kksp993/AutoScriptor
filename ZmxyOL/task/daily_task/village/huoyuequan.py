@@ -20,7 +20,7 @@ def task():
     buy_item("至尊成长礼包")
     switch_base("nemu")
     for i in range(3):
-        swipe(B(600,450,10,10), B(600,100,10,10), duration_s=1)
+        swipe(B(600,450,10,10), B(600,100,10,10), duration_s=1, ensure_stable_after_swipe=False)
     sleep(1)
     buy_item("活跃福利券")
     click(B(1200,30,30,30))

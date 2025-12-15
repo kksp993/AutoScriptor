@@ -77,6 +77,7 @@ def locate_region(cnt = 0, check_only = False) -> tuple[str, str]:
 
     if check_only: return "当前位置未知, 请自行判断下一步并尝试再次调用，请先根据当前的图像一步步关闭窗口，直至没有返回或关闭，再调用本工具"
     if idx >= 0:
+        print(list(mm.locs.keys())[idx])
         loc = mm.locs[list(mm.locs.keys())[idx]]
         return mm.set_region(loc.envs[0].name, loc.name)
     if cnt % 2 == 0:

@@ -3,6 +3,7 @@ import traceback
 from numpy import isin
 
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import RequestHumanTakeover
+from AutoScriptor.utils import box
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
@@ -62,7 +63,9 @@ def lianqishi_destory():
 if __name__ == "__main__":
     try:
         # lianqishi_destory()
-        locate(I("A"))
+        for i in range(5):
+            ensure_in("法相")
+            ensure_in("炼器师")
     except Exception as e:
         traceback.print_exc()
     finally:

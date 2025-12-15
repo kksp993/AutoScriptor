@@ -215,9 +215,9 @@ def click(
     ):
     if until:
         t = time.time()
-        click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize)
+        click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize,assure_stable=assure_stable)
         while not until():
-            click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize)
+            click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize,assure_stable=assure_stable)
             if time.time() - t > timeout:
                 raise RuntimeError(f"Click {target} until {until.__name__} failed, for until function not satisfied in {timeout} seconds")
         return True
@@ -307,6 +307,7 @@ def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), re
                 colors[i].append(get_box_color(screenshot, boxes[i][j]))
         else:
             colors[i].append(None)
+    logger.debug(f"get_colors {targets} colors: {colors}")
     return colors
 
 def sleep(seconds: float):
