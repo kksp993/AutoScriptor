@@ -4,7 +4,9 @@ import traceback
 
 if __name__ == "__main__":
     try:
-        ensure_in("极寒深渊", idx=1)
+        for i in range(10):
+            ensure_in("联盟")
+            ensure_in("村庄")
 
     except Exception as e:
         traceback.print_exc()

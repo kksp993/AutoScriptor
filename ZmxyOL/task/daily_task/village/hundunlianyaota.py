@@ -9,7 +9,7 @@ from logzero import logger
 def hundunlianyaota():
     ensure_in("联盟")
     click(T("魔渊之界"))
-    click(I("混沌炼狱塔"))
+    click((I("混沌炼狱塔"),T("确定")))
     shop_tmp = wait_for_appear(T("妖魄商铺",box=Box(20,230,120,50)))
     click(B(160,600));sleep(1)
     click(B(0,0));sleep(1)
@@ -25,12 +25,12 @@ def hundunlianyaota():
         target_available = [color_targets[i] for i in range(len(flatten_items)) if "红色" in colors[i]]
         print("target_available:",target_available)
         for tgt in target_available:
-            click(tgt)
-            confirm_btn=wait_for_appear(T("取消"))
-            swipe(B(490,430),B(770,430))
+            click(tgt, delay=1)
+            confirm_btn=wait_for_appear(T("确定"))
+            swipe(B(515,440),B(800,440))
             click(B(*confirm_btn))
-            wait_for_appear(T("妖魄商铺"))
-        swipe(B(660,480),B(660,210))
+            wait_for_disappear(T("购买成功"))
+        swipe(B(660,480),B(660,205))
     click(B(1080,40,30,30))
     wait_for_disappear(T("拥有",box=yy_tmp.margin()))
     click(B(30,30,30,30))
