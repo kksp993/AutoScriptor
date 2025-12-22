@@ -21,7 +21,7 @@ def eunan_fuBen():
     else:
         click(B(385,605,30,30), repeat=bonus_minus)
         click(T("开始挑战"))
-        h.set(True,3).battle_task(has_loading_after_battle=False, exit_loc=0.5, bonus_x=bonus_x)
+        h.set(True,3).battle_task(has_loading_after_battle=False, exit_loc=300, bonus_x=bonus_x)
 
 
 if __name__ == "__main__":

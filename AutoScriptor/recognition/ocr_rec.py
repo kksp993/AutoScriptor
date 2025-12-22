@@ -125,6 +125,7 @@ def ocr(frame,
         List[List[Box]]，所有匹配到的区域
         外层列表长度与target_strings相同，内层列表长度与target_strings中每个字符串匹配到的区域数量相同
     """
+    target_string = None
     engine = get_ocr_engine()
     if engine is None:  
         logger.error("OCR engine is not initialized. Cannot perform OCR.")

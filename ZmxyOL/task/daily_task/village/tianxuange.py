@@ -72,7 +72,7 @@ def task():
             continue
         bg.add(
             name="天选战斗结束",
-            identifier=(T("胜利"),T("确定")),
+            identifier=(T("胜利"),T("确定"),T("联赛排行"),T("回家")),
             callback=lambda : [
                 logger.info("战斗结束"),
                 bg.set_signal("try_exit", True),
