@@ -151,7 +151,6 @@ def find_and_execute_tasks(
             executed_count += success_count
             failed_count += failed_count
             logger.info(f"▶️  [{executed_count}/{total_count}] 执行完毕: {path_str}，等待3秒")
-            ensure_in(LOC_ENV)
             sleep(3)
                 
     return executed_count, total_count
