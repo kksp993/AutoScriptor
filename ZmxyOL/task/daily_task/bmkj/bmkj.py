@@ -14,7 +14,7 @@ def task(clear_all=False, lianbao=False):
         click(I("导航-按钮收缩"))
         sleep(4)
     click(B(640,440,10,10))
-    click(T("本命空间"))
+    click(T("本命空间"), offset=(0,-20))
     wait_for_appear(T("升级"))
     click(T("空间任务"))
     click(B(860,250,60,60),repeat=3)

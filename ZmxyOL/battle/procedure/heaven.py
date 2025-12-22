@@ -32,7 +32,7 @@ def battle_task(
         bg.set_signal("failed", True)
     bg.add(
         name="战斗失败",
-        identifier=(T("198点券")),
+        identifier=((T("198点券"),T("159点券"),T("复活"),T("取消"))),
         callback=lambda : [
             switch_base("mumu"),
             logger.info("战斗结束"),

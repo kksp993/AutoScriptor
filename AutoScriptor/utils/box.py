@@ -8,7 +8,9 @@ from logzero import logger
 class Box(collections.namedtuple('Box', 'left top width height')):
     __slots__ = ()
 
-    def __new__(cls, left, top, width, height):
+    def __new__(cls, left=0, top=0, width=-1, height=-1):
+        width = width if width >= 0 else (1280-width) 
+        height = height if height >= 0 else (720-height)
         return super(Box, cls).__new__(cls, int(left), int(top), int(width), int(height))
 
     def center(self):

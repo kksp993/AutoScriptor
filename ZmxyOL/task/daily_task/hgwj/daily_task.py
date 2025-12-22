@@ -1,6 +1,7 @@
 import traceback
 
 from logzero import logger
+from ZmxyOL.nav.api import locate_region
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
@@ -8,12 +9,28 @@ from ZmxyOL.battle.character.hero import h
 
 def bonus_callback():
     click(B(1015,85))
-    while bg.signal("try_exit"): click(I("地鼠", color="蓝色"), if_exist=True)
+    while bg.signal("try_exit"): click(I("地鼠", color="蓝色"), if_exist=True, save_screenshot=False)
 
-def battle_callback():
+def battle_callback(cancel_on_failed:bool=True):
     from ZmxyOL.battle.character.hero import h
-    h.set(True,3)
-    h.battle_loop(battle_weight=2)
+    def failed_callback():
+        bg.clear()
+        bg.set_signal("try_exit", True)
+        bg.set_signal("bonus_x", 0)
+        bg.set_signal("failed", True)
+    bg.add(
+        name="战斗失败",
+        identifier=((T("198点券"),T("159点券"),T("复活"),T("取消"))),
+        callback=lambda : [
+            switch_base("mumu"),
+            logger.info("战斗结束"),
+            bg.set_signal("Failed", True),
+            switch_base("mumu"),
+            click(T("取消" if cancel_on_failed else "确定"),delay=4,repeat=3),
+            failed_callback() if cancel_on_failed else None,
+        ]
+    )
+    h.set(True,3).battle_loop()
 
 
 # tasks=[
@@ -39,7 +56,7 @@ def battle_callback():
 @register_task
 def task():
     ensure_in("外域区域")
-    click(T("信标定位"))
+    click(T("信标定位",box=Box(1040,600,110,-1)))
     wait_for_appear(T("定位完成"))
     click(B(630,360))
     wait_for_appear(T("总灵根值"))
@@ -76,7 +93,7 @@ def task():
 
     bg.add(
         name="try_pause",
-        identifier=T("继续挑战"),
+        identifier=(T("继续挑战"),I("荒古-通关成功")),
         callback=callback,
         once=False
     )
@@ -85,7 +102,9 @@ def task():
         if bg.signal("Pause_battle"): sleep(1);continue
         if ui_T(T("土行孙"),1): bonus_callback()
         else: battle_callback()
-
+    click(B(30,30,30,30),until=lambda: ui_T((T("荒古万界"),I("导航-菜单"),T("世界地图"))))
+    click(B(1200,30,30,30))
+    locate_region()
 
 
 

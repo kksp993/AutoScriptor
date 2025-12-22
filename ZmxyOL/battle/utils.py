@@ -51,8 +51,9 @@ def find_in_bag(bag_class: BAG, item: str):
     input(item)
     sleep(2)
     # while ui_T(T(item,box=Box(0,0,640,200))):
-    key_event(AndroidKey.KEYCODE_ENTER)
-        # sleep(0.5)
+    while ui_T(T(item,box=Box(0,0,640,200)), timeout=1):
+        key_event(AndroidKey.KEYCODE_ENTER)
+        sleep(1)
 
 
 def wear_item(item_dict: dict):
