@@ -11,7 +11,7 @@ def way():
     click(I("导航-菜单"))
     click(I("菜单-个人资料"),delay=0.5); sleep(1)
     if get_colors(B(31,639,194,63))[0] != "蓝色": 
-        click(T("法相", box=Box(0,0,500,140)),until=lambda: ui_T(T("属性")))
+        click(T("法相", box=Box(0,0,500,140)), delay=1, until=lambda: ui_T(T("属性")))
     mm.set_loc("法相")
 
 @path("法相", LOC_ENV)

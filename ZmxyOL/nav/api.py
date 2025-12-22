@@ -68,7 +68,7 @@ def locate_region(cnt = 0, check_only = False) -> tuple[str, str]:
         return mm.set_region(cur_env)
     
     logger.info("# 1.3 检查所有env")
-    idx = check_env_idx(mm.envs.keys())
+    idx = check_env_idx(list(mm.envs.keys()))
     if idx >= 0:
         return mm.set_region(list(mm.envs.keys())[idx])
     

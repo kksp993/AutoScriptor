@@ -65,6 +65,7 @@ def way():
     while ui_T(I("加载中"), 1):
         time.sleep(0.5)
     wait_for_appear(I("极北村庄背景"))
+    sleep(2)
     mm.set_region("极北村庄")
 
 "=======================  极寒深渊  ======================="
@@ -150,10 +151,10 @@ def way():
 "=======================    仙盟    ======================="
 @path(["村庄", "极北村庄"], "仙盟")
 def way():
-    while ui_F(T("仙盟",box=Box(16,30,924,400)), 3):
+    while ui_F(T("仙盟",box=Box(16,30,130,400)), 3):
         click(I("导航-按钮收缩"))
         sleep(4)
-    click(T("仙盟",box=Box(16,30,924,400)))
+    click(T("仙盟",box=Box(16,30,130,400)))
     sleep(1)
     click(I("仙盟-驻地"))
     sleep(1)
@@ -188,7 +189,9 @@ def way():
 
 @path("联盟", "村庄")
 def way():
-    click(T("返回村庄"),until=lambda: ui_T(I("加载中")))
+    click(T("返回村庄", box=Box(1130,600,150,120)), assure_stable=True, until=lambda: ui_T((I("加载中"))))
+    # from ZmxyOL.nav.api import ensure_in
+    # ensure_in("村庄") # 有概率联盟会bug传到仙盟
     wait_for_disappear(I("加载中"))
     time.sleep(3)
     mm.set_region("村庄")

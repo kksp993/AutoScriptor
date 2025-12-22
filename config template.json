@@ -5,7 +5,8 @@
         "max_retry": 3,
         "name": "ZmxyOL",
         "restart_on_error": true,
-        "run_in_background": false
+        "run_in_background": false,
+        "debug_mode": true
     },
     "ocr": {
         "use_gpu": false
