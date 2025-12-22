@@ -1,3 +1,5 @@
+hundunlianyaota
+lianmengxuanshang
 alliance_build
 equip_upgrade
 huoyuequan
@@ -9,5 +11,3 @@ xianbao_dig
 xianqi_consume
 yaoshou
 zhanling
-hundunlianyaota
-lianmengxuanshang

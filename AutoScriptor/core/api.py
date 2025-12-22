@@ -4,6 +4,7 @@ import threading
 import time
 import traceback
 import getpass
+import cv2
 from AutoScriptor.core.control import MixControl
 from AutoScriptor.core.targets import Target, B,I,T
 from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget
@@ -28,6 +29,11 @@ logfile(os.path.join(log_dir, f"[{timestamp}].log"), encoding='utf-8')
 selected_emulator_index = cfg["emulator"]["index"]
 adb_addr = cfg["emulator"]["adb_addr"]
 app_to_start = cfg["app"]["app_to_start"]
+
+# 点击截图目录（基于文件路径）
+CLICK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'logs', 'click_screenshots')
+CLICK_DIR = os.path.abspath(CLICK_DIR)  # 转换为绝对路径
+os.makedirs(CLICK_DIR, exist_ok=True)
 mumu_manager_path = cfg["emulator"]["emu_path"]
 print(f"selected_emulator_index: {selected_emulator_index}")
 print(f"adb_addr: {adb_addr}")
@@ -211,30 +217,47 @@ def click(
         offset:tuple=(0,0), 
         resize:tuple=(-1,-1),
         until: callable = None,
-        assure_stable: bool = True
+        assure_stable: bool = True,
+        save_screenshot: bool = True
     ):
     if until:
         t = time.time()
-        click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize)
+        click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize,assure_stable=assure_stable)
         while not until():
-            click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize)
+            click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize,assure_stable=assure_stable)
             if time.time() - t > timeout:
                 raise RuntimeError(f"Click {target} until {until.__name__} failed, for until function not satisfied in {timeout} seconds")
         return True
     if isinstance(target, list): target = tuple(target)
     if isinstance(target, BoxTarget): box = target.box
-    else: 
+    else:
         box = locate(target, timeout if not if_exist else max(2, timeout) if timeout != 30 else 2, assure_stable)    # 至少2s
     if if_exist and first(box) is None: return False
     if first(box) is None: raise RuntimeError(f"Click {target} failed, for failed to locate target in {timeout} seconds")
     time.sleep(delay)
     for i in range(repeat):
+        pt=b2p(box, offset, resize)
         if long_click_duration_s:
-            mixctrl.long_click(*b2p(box, offset, resize), duration=long_click_duration_s)
+            mixctrl.long_click(*pt, duration=long_click_duration_s)
         else:
-            mixctrl.click(*b2p(box, offset, resize))
+            mixctrl.click(*pt)
         time.sleep(interval)
-    return True
+    if not isinstance(target, BoxTarget) and save_screenshot and cfg["app"]["debug_mode"]:
+        try:
+            img = mixctrl.screenshot().copy()
+            cx, cy = pt
+            # Box类没有right/bottom属性，需要计算
+            right = box.left + box.width
+            bottom = box.top + box.height
+            cv2.rectangle(img, (box.left, box.top), (right, bottom), (0,0,255), 3)
+            cv2.circle(img, (cx, cy), 5, (0,0,255), -1)
+            ts = datetime.now().strftime('%y%m%d_%H%M%S_%f')
+            cv2.imwrite(os.path.join(CLICK_DIR, f'c_{ts}.png'), img)
+            # 只保留5张最新截图
+            files = sorted([f for f in os.listdir(CLICK_DIR) if f.startswith('c_')], key=lambda x: os.path.getmtime(os.path.join(CLICK_DIR, x)), reverse=True)
+            for f in files[5:]: os.remove(os.path.join(CLICK_DIR, f))
+        except: pass
+    return True  
 
 
 def swipe(
@@ -307,6 +330,7 @@ def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), re
                 colors[i].append(get_box_color(screenshot, boxes[i][j]))
         else:
             colors[i].append(None)
+    logger.debug(f"get_colors {targets} colors: {colors}")
     return colors
 
 def sleep(seconds: float):

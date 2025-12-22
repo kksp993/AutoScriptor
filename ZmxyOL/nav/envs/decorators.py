@@ -3,9 +3,19 @@ from numpy import sign
 from AutoScriptor import *
 
 
-HAS_SHIJIEDITU = ["村庄", "极北", "极北村庄", "地狱"]
+HAS_SHIJIEDITU = ["村庄", "天庭", "极北", "极北村庄", "地狱", "洪荒遗境"]
+SHIJIEDITU_CANTO_DICT = {
+    "天庭": I("世界地图-天庭"),
+    "极北": I("世界地图-极北"),
+    "地狱": T("炼狱"),
+    "极北村庄": T("极北村庄"),
+    "村庄": T("村庄",box=Box(0,500,160,220)),
+    "洪荒遗境": T("洪荒遗境"),
+}
+SHIJIEDITU_CANTO=list(SHIJIEDITU_CANTO_DICT.keys())
 HAS_SHEZHI = ["村庄", "极北村庄"]
 LOC_ENV = "__LOC_ENV__"
+
 
 
 def swipe_up_down(from_idx:int, to_idx:int):
