@@ -4,6 +4,7 @@ import enum
 import importlib
 import inspect
 from math import e
+import os
 import traceback
 import dpath
 import enum
@@ -14,6 +15,8 @@ from AutoScriptor import *
 from AutoScriptor.utils.constant import cfg
 from logzero import logger
 import sys
+from ZmxyOL.nav import ensure_in
+from ZmxyOL.nav.envs.decorators import LOC_ENV
 
 class next_date_enum(enum.Enum):
     past = "past"
@@ -62,6 +65,28 @@ class TaskManager:
 
     def _reset_cancel(self) -> None:
         self._cancel_event.clear()
+
+    def _archive_error(self, task: str, exc: Exception) -> None:
+        """归档错误日志和截图"""
+        try:
+            from datetime import datetime
+            import cv2
+            ts = datetime.now().strftime('%y%m%d_%H%M%S')
+            safe = task.replace('/', '_')
+            err_dir = os.path.join(os.getcwd(), 'logs', 'errors')
+            os.makedirs(err_dir, exist_ok=True)
+            err_file = os.path.join(err_dir, f"[{ts}][{safe}].log")
+            with open(err_file, 'w', encoding='utf-8') as ef:
+                ef.write(f"[{ts}] {task} 执行错误: {exc}\n")
+                ef.write(traceback.format_exc())
+            # 保存错误截图
+            try:
+                img = mixctrl.screenshot()
+                if img is not None:
+                    cv2.imwrite(os.path.join(err_dir, f"[{ts}][{safe}].png"), img)
+            except: pass
+        except Exception as e:
+            logger.error(f"归档错误失败: {e}")
 
     def _solve_task_params(self, task_data: dict, real_fn=None) -> dict:
         # 恢复枚举参数：优先使用 param_meta，否则根据注解回退
@@ -162,6 +187,7 @@ class TaskManager:
                     # 释放锁后执行具体任务，避免长时间阻塞其它请求
                     fn(**kwargs)
                     logger.info(f"▶️  执行成功: {task}")
+                    ensure_in(LOC_ENV)
                     # 执行完毕后再加锁更新配置
                     with self._cfg_lock:
                         self._update_task_post_execution(task)
@@ -170,9 +196,10 @@ class TaskManager:
                 except Exception as e:
                     logger.error(f"Error executing task: {task} {e}")
                     if isinstance(e, KeyboardInterrupt): raise
-                    
+
                     logger.error(f"❌ 执行失败: {task}，错误: {e}")
-                    # dump_error_and_log(task, e)
+                    # 保存错误截图和日志
+                    self._archive_error(task, e)
                     traceback.print_exc()
                     
                     if isinstance(e, RequestHumanTakeover):

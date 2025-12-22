@@ -47,6 +47,7 @@ def login(account: str=None, password: str=None, character_name: str=None, chara
             if not cfg["game"].get("character_name", None):
                 raise ValueError("请先配合完成安全密码验证")
             click(T(cfg["game"].get("character_name", None)),delay=1)
+    click(B(630,530,10,10)) # 弹窗关闭
     click(T("进入游戏",color="橙色"))
     if ui_T(T("确定")):# 账号有效性验证失败
         click(T("确定"))
@@ -54,7 +55,8 @@ def login(account: str=None, password: str=None, character_name: str=None, chara
     locate(I("活动公告页面"), 30)
     click(B(1240, 5, 40, 60))
     time.sleep(0.5)
-    swipe(B(630, 10, 10, 10), B(640, 650, 10, 10), duration_s=1)
+    swipe(B(640, 650, 10, 10),B(200, 10, 10, 10) , duration_s=1) # 悬浮窗位置改了
+    swipe(B(200, 10, 10, 10), B(640, 650, 10, 10), duration_s=2) # 悬浮窗位置改了
     if ui_T(T("隐藏悬浮球"), 5):
         click(B(740, 555, 10, 10))
     if ui_T(T("精彩活动")):

@@ -36,6 +36,7 @@ TASK_TABLE = {
     "虎王星宫":{"location":("极寒深渊",0),"target":B(760,310,30,30),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
     "獐王星宫":{"location":("极寒深渊",0),"target":B(620,580,30,30),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
     "犴神星宫":{"location":("极寒深渊",1),"target":B(970,610,30,30),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":True},
+    "兔神星宫":{"location":("极寒深渊",0),"target":B(480,100,30,30),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
 }
 
 TASK_TABLE_LIST = [
@@ -85,7 +86,8 @@ JHSY_CHAOS_TABLE=[
     "狼王星宫",
     "虎王星宫",
     "獐王星宫",
-    "犴神星宫"
+    "犴神星宫",
+    # "兔神星宫"    #打不过，能打过的自己解开注释
 ]
 
 
