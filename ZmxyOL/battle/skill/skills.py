@@ -52,15 +52,19 @@ def battle(self: Hero):
 def battle_loop(
     self: Hero,
     battle_weight:int=1,
-    delay:float=0
+    delay:float=0,
+    max_duration:int=500
 ):
     """
         try_exit 为 True 时，退出循环
         Pause_battle 为 True 时，暂停战斗
+        max_duration 为战斗最大持续时间，超过则抛出异常
     """
     self.sleep(delay)
     op_count = 0
     switch_base("nemu")
+    from time import time
+    start_time = time()
     bg.set_signal("try_exit", False)
     bg.set_signal("Pause_battle", False)
     while not bg.signal("try_exit", False):
@@ -73,6 +77,8 @@ def battle_loop(
                 op_count += 1
         else:
            self.sleep(1)
+        if time() - start_time > max_duration:
+            raise RuntimeError(f"battle_loop 超时: {max_duration}秒, 战斗持续时间超过 {max_duration}秒")
     return self
 
 

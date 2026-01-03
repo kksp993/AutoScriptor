@@ -65,11 +65,12 @@ def task():
         logger.info(f"准备开始第{task_idx}关")
         swipe(B(800,300,),B(200,300)) if task_idx>3 else None
         sleep(2)
-        click(T(f"第{task_idx}关"))
+        click(T(f"第{task_idx}关"), offset=(120, 120), resize=(80, 80))
         if task_idx==5 and ui_F(I("加载中"),2):
             if not reset_task(): break
             not_finish = False
             continue
+        wait_for_appear(I("加载中"))
         bg.add(
             name="天选战斗结束",
             identifier=(T("胜利"),T("确定"),T("联赛排行"),T("回家")),
@@ -80,7 +81,8 @@ def task():
                 click(T("确定"),until=lambda:ui_F(T("确定"))),
                 h.heaven_draw_card_exit(),
                 bg.clear(),
-            ]
+            ],
+            once=True
         )
         h.set(True,3).battle_task(crash_suddenly=True)
         if ui_T(T("恭喜本次通关，请重置或等待"),timeout=3):

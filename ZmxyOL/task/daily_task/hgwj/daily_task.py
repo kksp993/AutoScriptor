@@ -20,16 +20,17 @@ def battle_callback(cancel_on_failed:bool=True):
         bg.set_signal("failed", True)
     bg.add(
         name="战斗失败",
-        identifier=((T("198点券"),T("159点券"),T("复活"),T("取消"))),
+        identifier=((T("198点券"),T("159点券"),T("复活"))),
         callback=lambda : [
             switch_base("mumu"),
             logger.info("战斗结束"),
-            bg.set_signal("Failed", True),
+            bg.set_signal("failed", True),
             switch_base("mumu"),
             click(T("取消" if cancel_on_failed else "确定"),delay=4,repeat=3),
             failed_callback() if cancel_on_failed else None,
         ]
     )
+    h.set(True,3).battle_loop()
 
 
 # tasks=[
@@ -55,7 +56,7 @@ def battle_callback(cancel_on_failed:bool=True):
 @register_task
 def task():
     ensure_in("外域区域")
-    click(T("信标定位"))
+    click(T("信标定位",box=Box(1040,600,110,-1)))
     wait_for_appear(T("定位完成"))
     click(B(630,360))
     wait_for_appear(T("总灵根值"))
@@ -90,19 +91,19 @@ def task():
                 wait_for_disappear(I("加载中"))
             bg.set_signal("Pause_battle", False)
 
-    bg.add(
-        name="try_pause",
-        identifier=T("继续挑战"),
-        callback=callback,
-        once=False
-    )
 
     while not bg.signal("task_done"):
+        bg.add(
+            name="try_pause",
+            identifier=(T("继续挑战"),I("荒古-通关成功")),
+            callback=callback,
+        )
         if bg.signal("Pause_battle"): sleep(1);continue
         if ui_T(T("土行孙"),1): bonus_callback()
         else: battle_callback()
     click(B(30,30,30,30),until=lambda: ui_T((T("荒古万界"),I("导航-菜单"),T("世界地图"))))
     click(B(1200,30,30,30))
+    bg.clear(clear_signals=True)
     locate_region()
 
 

@@ -2,5 +2,6 @@ wuguangshise
 wuxingsiji
 tengshefeisheng
 huodong
+luzi
 hd_details
 hd_registry

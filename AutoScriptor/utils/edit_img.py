@@ -16,11 +16,18 @@ import traceback
 class ImageEditor:
     """图片浏览与框选保存编辑器"""
 
-    def __init__(self, image_paths):
+    def __init__(self, image_paths, mixctrl=None):
         self.image_paths = image_paths
+        self._mixctrl = mixctrl
+        # 线宽：绿色=当前红线粗细；红线=绿色的1.5倍
+        self._green_width = 2
+        self._red_width = 3
         self.index = 0
         self.rect = None
+        self._img_item = None
+        self._locate_rects = []
         self.crop_coords = None
+        self._last_box = None  # (left, top, w, h)
         self.start_x = self.start_y = 0
         # self.scale = 0.5
         self.scale = 1
@@ -46,11 +53,18 @@ class ImageEditor:
 
     def _init_variables(self):
         """初始化变量"""
-        self.free_x_var = tk.BooleanVar(master=self.root, value=True)
-        self.free_y_var = tk.BooleanVar(master=self.root, value=True)
+        self.free_x_var = tk.BooleanVar(master=self.root, value=False)
+        self.free_y_var = tk.BooleanVar(master=self.root, value=False)
         self.only_ocr_var = tk.BooleanVar(master=self.root, value=False)
+        self.lock_color_var = tk.BooleanVar(master=self.root, value=False)
+        self.freeze_name_var = tk.BooleanVar(master=self.root, value=False)
+        self.name_var = tk.StringVar()
+        self.name_ok_var = tk.StringVar(value="-")
         self.center_var = tk.StringVar()
         self.box_var = tk.StringVar()
+        self.t_var = tk.StringVar()
+        self.i_var = tk.StringVar()
+        self.color_var = tk.StringVar()
 
     def _setup_ui(self):
         """设置UI组件"""
@@ -76,16 +90,41 @@ class ImageEditor:
         op_frame_line1 = tk.Frame(op_frame_main)
         op_frame_line1.pack(fill=tk.X)
 
-        tk.Label(op_frame_line1, text="名称：").pack(side=tk.LEFT, padx=5)
-        self.name_entry = tk.Entry(op_frame_line1)
-        self.name_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(op_frame_line1, text="名称：").pack(side=tk.LEFT, padx=(5, 0))
+        self.name_ok_label = tk.Label(op_frame_line1, textvariable=self.name_ok_var, width=2)
+        self.name_ok_label.pack(side=tk.LEFT)
+        self.name_entry = tk.Entry(op_frame_line1, textvariable=self.name_var)
+        self.name_entry.pack(side=tk.LEFT, padx=(0, 5))
+        self.name_var.trace_add("write", lambda *_: self._refresh_code_snippets())
+        tk.Checkbutton(op_frame_line1, text="固定名称", 
+                      variable=self.freeze_name_var).pack(side=tk.LEFT, padx=5)
         
         tk.Checkbutton(op_frame_line1, text="x轴范围自由", 
                       variable=self.free_x_var).pack(side=tk.LEFT, padx=5)
         tk.Checkbutton(op_frame_line1, text="y轴范围自由", 
                       variable=self.free_y_var).pack(side=tk.LEFT, padx=5)
+        self.free_x_var.trace_add("write", lambda *_: self._refresh_code_snippets())
+        self.free_y_var.trace_add("write", lambda *_: self._refresh_code_snippets())
         tk.Checkbutton(op_frame_line1, text="仅OCR", 
                       variable=self.only_ocr_var).pack(side=tk.LEFT, padx=5)
+        tk.Checkbutton(op_frame_line1, text="锁定颜色", 
+                      variable=self.lock_color_var).pack(side=tk.LEFT, padx=5)
+        self.lock_color_var.trace_add("write", lambda *_: self._refresh_code_snippets())
+
+        # 把中心点与Box放到滑块左侧（同一排），避免信息区第一行换行
+        center_frame = tk.Frame(op_frame_line1)
+        center_frame.pack(side=tk.LEFT, padx=5)
+        tk.Label(center_frame, text="中心点:").pack(side=tk.LEFT)
+        self.center_entry = tk.Entry(center_frame, textvariable=self.center_var, width=9)
+        self.center_entry.pack(side=tk.LEFT, padx=2)
+        tk.Button(center_frame, text="复制", command=self.copy_center).pack(side=tk.LEFT)
+
+        box_frame = tk.Frame(op_frame_line1)
+        box_frame.pack(side=tk.LEFT, padx=5)
+        tk.Label(box_frame, text="Box:").pack(side=tk.LEFT)
+        self.box_entry = tk.Entry(box_frame, textvariable=self.box_var, width=16)
+        self.box_entry.pack(side=tk.LEFT, padx=2)
+        tk.Button(box_frame, text="复制", command=self.copy_box).pack(side=tk.LEFT)
 
         # 阈值滑块
         tk.Label(op_frame_line1, text="阈值：").pack(side=tk.LEFT, padx=5)
@@ -100,37 +139,48 @@ class ImageEditor:
         """设置信息显示区域"""
         info_frame = tk.Frame(self.root)
         info_frame.pack(fill=tk.X, pady=2)
-        
-        # 中心点坐标框和复制按钮
-        center_frame = tk.Frame(info_frame)
-        center_frame.pack(side=tk.LEFT, padx=5)
-        tk.Label(center_frame, text="中心点:").pack(side=tk.LEFT)
-        self.center_entry = tk.Entry(center_frame, textvariable=self.center_var, width=18)
-        self.center_entry.pack(side=tk.LEFT, padx=2)
-        tk.Button(center_frame, text="复制", command=self.copy_center).pack(side=tk.LEFT)
-        
-        # Box坐标框和复制按钮
-        box_frame = tk.Frame(info_frame)
-        box_frame.pack(side=tk.LEFT, padx=5)
-        tk.Label(box_frame, text="Box:").pack(side=tk.LEFT)
-        self.box_entry = tk.Entry(box_frame, textvariable=self.box_var, width=24)
-        self.box_entry.pack(side=tk.LEFT, padx=2)
-        tk.Button(box_frame, text="复制", command=self.copy_box).pack(side=tk.LEFT)
+
+        # 信息区只保留一行：T代码 / I代码 / 颜色（允许挤一些）
+        code_frame = tk.Frame(info_frame)
+        code_frame.pack(fill=tk.X, pady=2)
+
+        tk.Label(code_frame, text="T代码:").pack(side=tk.LEFT, padx=(5, 0))
+        self.t_entry = tk.Entry(code_frame, textvariable=self.t_var, width=60)
+        self.t_entry.pack(side=tk.LEFT, padx=2)
+        tk.Button(code_frame, text="复制", command=self.copy_t).pack(side=tk.LEFT, padx=2)
+
+        tk.Label(code_frame, text="I代码:").pack(side=tk.LEFT, padx=(8, 0))
+        self.i_entry = tk.Entry(code_frame, textvariable=self.i_var, width=60)
+        self.i_entry.pack(side=tk.LEFT, padx=2)
+        tk.Button(code_frame, text="复制", command=self.copy_i).pack(side=tk.LEFT, padx=2)
+
+        tk.Label(code_frame, text="颜色:").pack(side=tk.LEFT, padx=(8, 0))
+        self.color_entry = tk.Entry(code_frame, textvariable=self.color_var, width=10)
+        self.color_entry.pack(side=tk.LEFT, padx=2)
+        tk.Button(code_frame, text="复制", command=self.copy_color).pack(side=tk.LEFT, padx=2)
 
     def _setup_button_frame(self):
         """设置按钮区域"""
         button_frame = tk.Frame(self.root)
         button_frame.pack(fill=tk.X, pady=5)
+
+        # 让整行按钮居中显示
+        inner = tk.Frame(button_frame)
+        inner.pack(expand=True)
         
         buttons = [
             ("上一张", self.prev_image),
             ("下一张", self.next_image),
             ("保存选区", self.save_crop),
+            ("刷新截图", self.refresh_screenshot),
             ("退出", self.exit)
         ]
         
         for text, command in buttons:
-            tk.Button(button_frame, text=text, command=command).pack(side=tk.LEFT, padx=5)
+            state = tk.NORMAL
+            if text == "刷新截图" and self._mixctrl is None:
+                state = tk.DISABLED
+            tk.Button(inner, text=text, command=command, state=state).pack(side=tk.LEFT, padx=5)
 
     def _center_window(self):
         """居中显示窗口"""
@@ -152,10 +202,27 @@ class ImageEditor:
         self.photo = ImageTk.PhotoImage(disp)
         self.canvas.config(width=nw, height=nh)
         self.canvas.delete("all")
-        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
+        self._img_item = self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
         self.rect = None
+        self._clear_locate_rects()
         self.crop_coords = None
-        self.name_entry.delete(0, tk.END)
+        self.name_var.set("")
+        self.name_ok_var.set("-")
+        self.name_ok_label.config(fg="gray")
+        self._last_box = None
+
+    def _refresh_display_image_only(self):
+        """仅刷新画面，不影响名称/红框/I-T/框选坐标等状态"""
+        if self._img_item is None:
+            return self._show_image()
+        path = self.image_paths[self.index]
+        self.image = Image.open(path)
+        ow, oh = self.image.size
+        nw, nh = int(ow * self.scale), int(oh * self.scale)
+        disp = self.image.resize((nw, nh), Image.LANCZOS)
+        self.photo = ImageTk.PhotoImage(disp)
+        self.canvas.config(width=nw, height=nh)
+        self.canvas.itemconfig(self._img_item, image=self.photo)
 
     def _on_button_press(self, e):
         """鼠标按下事件处理"""
@@ -163,7 +230,7 @@ class ImageEditor:
         if self.rect:
             self.canvas.delete(self.rect)
         self.rect = self.canvas.create_rectangle(
-            self.start_x, self.start_y, self.start_x, self.start_y, outline='red'
+            self.start_x, self.start_y, self.start_x, self.start_y, outline='red', width=self._red_width
         )
 
     def _on_move_press(self, e):
@@ -194,7 +261,7 @@ class ImageEditor:
         if self.rect:
             self.canvas.coords(self.rect, x0_s, y0_s, x1_s, y1_s)
         else:
-            self.rect = self.canvas.create_rectangle(x0_s, y0_s, x1_s, y1_s, outline='red')
+            self.rect = self.canvas.create_rectangle(x0_s, y0_s, x1_s, y1_s, outline='red', width=self._red_width)
         self.crop_coords = (left, top, right, bottom)
 
     def _perform_ocr(self, left, top, right, bottom):
@@ -206,7 +273,10 @@ class ImageEditor:
         pil_to_np = np.array(self.image)
         # PIL图像是RGB格式，需要转换为BGR格式
         bgr_image = cv2.cvtColor(pil_to_np, cv2.COLOR_RGB2BGR)
-        print(get_box_color(bgr_image, Box(left, top, right - left, bottom - top)))
+        try:
+            self.color_var.set(get_box_color(bgr_image, Box(left, top, right - left, bottom - top)) or "")
+        except Exception:
+            self.color_var.set("")
         
         try:
             # 转换为OpenCV格式
@@ -222,8 +292,14 @@ class ImageEditor:
         except Exception as e:
             print(f"OCR错误: {e}")
             first_text = ''
-        self.name_entry.delete(0, tk.END)
-        self.name_entry.insert(0, first_text)
+        # 固定名称时不覆盖已有名称；但若名称为空则仍填充，便于首次使用
+        if (not self.freeze_name_var.get()) or (not (self.name_var.get() or "").strip()):
+            self.name_var.set(first_text)
+        # OCR 为空时，不进行 locate 校验（并清空标记/绿框）
+        if not (first_text or "").strip() and not (self.name_var.get() or "").strip():
+            self.name_ok_var.set("-")
+            self.name_ok_label.config(fg="gray")
+            self._clear_locate_rects()
 
     def _update_coordinates(self, left, top, right, bottom):
         """更新坐标信息"""
@@ -231,6 +307,110 @@ class ImageEditor:
         w, h = right - left, bottom - top
         self.center_var.set(f"{cx},{cy}")
         self.box_var.set(f"Box({left},{top},{w},{h})")
+        self._last_box = (left, top, w, h)
+        self._refresh_code_snippets()
+
+    def _escape_text(self, s: str) -> str:
+        return (s or "").replace("\\", "\\\\").replace('"', '\\"').strip()
+
+    def _effective_box(self):
+        if not self._last_box:
+            return None
+        left, top, w, h = self._last_box
+        # 适配“x/y轴范围自由”的固定逻辑：I/T 都要跟随 toggle
+        if self.free_x_var.get():
+            left, w = 0, 1280
+        if self.free_y_var.get():
+            top, h = 0, 720
+        return left, top, w, h
+
+    def _code_color_part(self) -> str:
+        if not self.lock_color_var.get():
+            return ""
+        c = self._escape_text(self.color_var.get())
+        return f', color="{c}"' if c else ''
+
+    def _refresh_code_snippets(self):
+        if not self._last_box:
+            self.t_var.set("")
+            self.i_var.set("")
+            self.name_ok_var.set("-")
+            self.name_ok_label.config(fg="gray")
+            self._clear_locate_rects()
+            return
+        box = self._effective_box()
+        if not box:
+            self.t_var.set("")
+            self.i_var.set("")
+            self.name_ok_var.set("-")
+            self.name_ok_label.config(fg="gray")
+            self._clear_locate_rects()
+            return
+        left, top, w, h = box
+        text = self._escape_text(self.name_var.get())
+        color_part = self._code_color_part()
+        # x/y 都勾选时等价于全屏，省略 box=Box(0,0,1280,720).margin()
+        box_part = f', box=Box({left},{top},{w},{h}).margin()'
+        if left == 0 and top == 0 and w == 1280 and h == 720:
+            box_part = ""
+        self.t_var.set(f'T("{text}"{box_part}{color_part})')
+        self.i_var.set(f'I("{text}"{box_part}{color_part})')
+        self._validate_t_locate()
+
+    def _clear_locate_rects(self):
+        if not self._locate_rects:
+            return
+        for rid in self._locate_rects:
+            try:
+                self.canvas.delete(rid)
+            except Exception:
+                pass
+        self._locate_rects.clear()
+
+    def _draw_locate_rects(self, boxes):
+        self._clear_locate_rects()
+        if not boxes:
+            return
+        for b in boxes:
+            x0, y0 = b.left * self.scale, b.top * self.scale
+            x1, y1 = (b.left + b.width) * self.scale, (b.top + b.height) * self.scale
+            self._locate_rects.append(
+                self.canvas.create_rectangle(x0, y0, x1, y1, outline="#00cc00", width=self._green_width)
+            )
+
+    def _validate_t_locate(self):
+        """用 api.py 的 locate 逻辑（本质是 mixctrl.locate）验证当前 T 是否能识别到，并用绿色框标出所有结果"""
+        # 仅对截图模式可用；目录图片模式无法调用 mixctrl.locate
+        if self._mixctrl is None:
+            self.name_ok_var.set("-")
+            self.name_ok_label.config(fg="gray")
+            self._clear_locate_rects()
+            return
+        box = self._effective_box()
+        text = (self.name_var.get() or "").strip()
+        if not box or not text:
+            self.name_ok_var.set("-")
+            self.name_ok_label.config(fg="gray")
+            self._clear_locate_rects()
+            return
+
+        left, top, w, h = box
+        tgt_box = Box(left, top, w, h).margin()
+        color = (self.color_var.get() or "").strip() if self.lock_color_var.get() else None
+        screenshot = self._mixctrl.screenshot()
+        if screenshot is None:
+            self.name_ok_var.set("X")
+            self.name_ok_label.config(fg="red")
+            self._clear_locate_rects()
+            return
+
+        # 对齐 AutoScriptor/core/api.py::_locate_all 的输入：[(source, box, color)]
+        boxes_matrix = self._mixctrl.locate([(text, tgt_box, color)], screenshot=screenshot)
+        boxes = boxes_matrix[0] if boxes_matrix else None
+        ok = bool(boxes)
+        self.name_ok_var.set("√" if ok else "X")
+        self.name_ok_label.config(fg="#00aa00" if ok else "red")
+        self._draw_locate_rects(boxes)
 
     def optimize_rect(self, left, top, right, bottom):
         """优化选区"""
@@ -360,6 +540,18 @@ class ImageEditor:
         self.index = (self.index + 1) % len(self.image_paths)
         self._show_image()
 
+    def refresh_screenshot(self):
+        """刷新截图：重新截取当前画面替换当前图片，但不清空名称/红框/I-T；仅刷新 locate 校验与绿框"""
+        if self._mixctrl is None:
+            return
+        path = self.image_paths[self.index]
+        img = self._mixctrl.screenshot()
+        if img is None:
+            return
+        cv2.imwrite(path, img)
+        self._refresh_display_image_only()
+        self._validate_t_locate()
+
     def exit(self):
         """退出程序"""
         self.root.destroy()
@@ -375,6 +567,24 @@ class ImageEditor:
         self.root.clipboard_clear()
         self.root.clipboard_append(self.box_var.get())
         messagebox.showinfo("提示", "Box坐标已复制到剪贴板")
+
+    def copy_t(self):
+        """复制T(...)代码到剪贴板"""
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self.t_var.get())
+        messagebox.showinfo("提示", "T代码已复制到剪贴板")
+
+    def copy_i(self):
+        """复制I(...)代码到剪贴板"""
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self.i_var.get())
+        messagebox.showinfo("提示", "I代码已复制到剪贴板")
+
+    def copy_color(self):
+        """复制颜色到剪贴板"""
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self.color_var.get())
+        messagebox.showinfo("提示", "颜色已复制到剪贴板")
 
 def select_directory(directory="caps"):
     """选择图片目录"""
@@ -417,7 +627,7 @@ def launch_editor(mixctrl,is_screenshot=False):
         ts = int(time.time())
         fp = os.path.join(temp_dir, f"screenshot_{ts}.png")
         cv2.imwrite(fp, img)
-        ImageEditor([fp])
+        ImageEditor([fp], mixctrl=mixctrl)
         os.remove(fp)
     else:
         dir_path = select_directory()
@@ -433,5 +643,6 @@ def launch_editor(mixctrl,is_screenshot=False):
         ImageEditor(files)
 
 if __name__ == "__main__":
-    is_screenshot = messagebox.askyesno("选择模式", "是否立即截取屏幕图进行编辑？")
-    launch_editor(None,is_screenshot)
+    from AutoScriptor.core.api import mixctrl,edit_img
+    mixctrl.window.hidden()
+    edit_img()
