@@ -64,7 +64,14 @@ def fanTianTa(battle_times=1):
     click(T("确认"), if_exist=True)
     sleep(1)
     for _ in range(battle_times):
-        FTT_battle_one_round()
+        if not ui_T(T("碾压")):
+            FTT_battle_one_round()
+        else:
+            click(T("碾压"))
+            wait_for_appear("优先级")
+            click(T("烦恼"))
+            click(T("立即碾压"))
+            click(T("空白处"))
         sleep(3)
     click(B(30,30,30,30))
     sleep(1)

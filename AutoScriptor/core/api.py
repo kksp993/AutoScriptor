@@ -220,9 +220,74 @@ def click(
         assure_stable: bool = True,
         save_screenshot: bool = True
     ):
+    """
+    点击目标元素
+    
+    Args:
+        target: 目标对象或目标对象元组/列表
+            - 单个 Target: 定位并点击该目标
+            - tuple[Target, ...]: 任一目标出现即点击（OR逻辑）
+            - list[Target]: 所有目标都出现才点击（AND逻辑）
+        
+        long_click_duration_s: 长按时长（秒），0表示普通点击
+        
+        timeout: 定位超时时间（秒），默认30秒
+        
+        if_exist: 如果为True，目标不存在时不抛异常，直接返回False
+        
+        repeat: 重复点击次数，默认1次
+        
+        delay: 点击前延迟（秒），默认0
+        
+        interval: 多次点击之间的间隔（秒），默认0
+        
+        offset: 点击位置偏移量 (x, y)，相对于定位到的Box左上角
+            - 示例: offset=(120, 120) 表示在定位到的Box基础上，向右偏移120px，向下偏移120px
+            - 偏移后的Box会先应用resize（如果指定），然后在其中心点附近随机点击
+            - 用途：当目标文本/图片区域较大，需要点击其内部特定位置时使用
+            - 默认: (0, 0) 表示不偏移，直接点击Box中心附近
+        
+        resize: 调整定位到的Box大小 (width, height)
+            - 示例: resize=(80, 80) 将Box调整为80x80像素
+            - 如果为(-1, -1)则保持原Box大小
+            - 调整后的Box会先应用offset偏移，然后在其中心点附近随机点击
+            - 用途：当目标区域太大，需要缩小到更精确的点击范围时使用
+            - 默认: (-1, -1) 表示不调整
+        
+        until: 可调用对象，返回True时停止点击循环
+            - 示例: until=lambda: ui_F(T("确定")) 表示点击直到"确定"按钮消失
+            - 如果指定until，会忽略timeout参数，持续点击直到until返回True或超时
+        
+        assure_stable: 是否保证定位稳定，True时会连续两次定位结果一致才认为成功
+        
+        save_screenshot: 是否在debug模式下保存点击截图（带标注），默认True
+    
+    Returns:
+        bool: 点击是否成功（如果if_exist=True且目标不存在，返回False）
+    
+    Raises:
+        RuntimeError: 目标定位失败或until条件超时
+    
+    Examples:
+        # 普通点击
+        click(T("确定"))
+        
+        # 点击目标内部偏移位置（常用于大按钮内部特定区域）
+        click(T("第1关"), offset=(120, 120))  # 在"第1关"文本区域向右下各偏移120px
+        
+        # 缩小点击范围并偏移
+        click(T("第1关"), offset=(120, 120), resize=(80, 80))  # 先缩小到80x80，再偏移
+        
+        # 长按
+        click(B(100, 200), long_click_duration_s=2)
+        
+        # 点击直到条件满足
+        click(T("确定"), until=lambda: ui_F(T("确定")))
+    """
     if until:
         t = time.time()
-        click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize,assure_stable=assure_stable)
+        # 如果until函数返回True，则必须至少要点一次，确保能够定位到目标，否则直接跳过了while循环，容易出错。
+        click(target, long_click_duration_s, timeout=timeout, if_exist=False, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize,assure_stable=assure_stable)
         while not until():
             click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize,assure_stable=assure_stable)
             if time.time() - t > timeout:
