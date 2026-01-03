@@ -88,8 +88,8 @@ def way():
 @path("荒古万界", LOC_ENV)
 def way():
     click(B(30,30,30,30))
-    wait_for_appear(I("洪荒遗境背景"))
-    mm.set_loc(mm.get_region()[0])
+    from ZmxyOL.nav.api import locate_region
+    locate_region()
 
 def travel_to_dst_loc(target_env: str):
     click(T("万界穿梭"))

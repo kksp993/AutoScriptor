@@ -4,19 +4,19 @@ from ZmxyOL.nav.api import ensure_in, try_close_via_x
 EXIT_RADIUS=0  # 退出范围 for safety
 
 TASK_TABLE = {
-    "龙宫":{"location":("天庭",4),"target":T("龙宫"),"idx":0, "exit_loc":300-EXIT_RADIUS,"crash_suddenly":False},
-    "九重天":{"location":("天庭",0),"target":T("九重天"),"idx":0, "exit_loc":626-20-EXIT_RADIUS,"crash_suddenly":False},
-    "南天王殿·精英":{"location":("天庭",0),"target":T("南天王殿"),"idx":0, "exit_loc":416-EXIT_RADIUS,"crash_suddenly":False    },
-    "南天王殿·终":{"location":("天庭",0),"target":T("南天王殿"),"idx":1, "exit_loc":416-EXIT_RADIUS,"crash_suddenly":False},
-    "西天王殿·精英":{"location":("天庭",0),"target":T("西天王殿"),"idx":0, "exit_loc":416-EXIT_RADIUS,"crash_suddenly":False},
-    "西天王殿·终":{"location":("天庭",0),"target":T("西天王殿"),"idx":1, "exit_loc":416-EXIT_RADIUS,"crash_suddenly":False},
-    "北天王殿·终":{"location":("天庭",-1),"target":T("北天王殿"),"idx":0, "exit_loc":416-EXIT_RADIUS,"crash_suddenly":False},
-    "御马监":{"location":("天庭",-1),"target":T("北天王殿"),"idx":1, "exit_loc":416-EXIT_RADIUS,"crash_suddenly":False},
-    "彩虹楼":{"location":("天庭",-1),"target":I("彩虹楼"),"idx":1, "exit_loc":416-EXIT_RADIUS,"crash_suddenly":False},
-    "东天王殿":{"location":("天庭",-1),"target":I("彩虹楼"),"idx":0, "exit_loc":476-EXIT_RADIUS,"crash_suddenly":False},
-    "朝会殿":{"location":("天庭",-1),"target":T("朝会殿"),"idx":0, "exit_loc":416-EXIT_RADIUS,"crash_suddenly":False},
+    "龙宫":{"location":("天庭",4),"target":T("龙宫"),"idx":0, "exit_loc":300-50-EXIT_RADIUS,"crash_suddenly":False},
+    "九重天":{"location":("天庭",0),"target":T("九重天"),"idx":0, "exit_loc":626-50-EXIT_RADIUS,"crash_suddenly":False},
+    "南天王殿·精英":{"location":("天庭",0),"target":T("南天王殿"),"idx":0, "exit_loc":416-50-EXIT_RADIUS,"crash_suddenly":False    },
+    "南天王殿·终":{"location":("天庭",0),"target":T("南天王殿"),"idx":1, "exit_loc":416-50-EXIT_RADIUS,"crash_suddenly":False},
+    "西天王殿·精英":{"location":("天庭",0),"target":T("西天王殿"),"idx":0, "exit_loc":416-50-EXIT_RADIUS,"crash_suddenly":False},
+    "西天王殿·终":{"location":("天庭",0),"target":T("西天王殿"),"idx":1, "exit_loc":416-50-EXIT_RADIUS,"crash_suddenly":False},
+    "北天王殿·终":{"location":("天庭",-1),"target":T("北天王殿"),"idx":0, "exit_loc":416-50-EXIT_RADIUS,"crash_suddenly":False},
+    "御马监":{"location":("天庭",-1),"target":T("北天王殿"),"idx":1, "exit_loc":416-50-EXIT_RADIUS,"crash_suddenly":False},
+    "彩虹楼":{"location":("天庭",-1),"target":I("彩虹楼"),"idx":1, "exit_loc":416-50-EXIT_RADIUS,"crash_suddenly":False},
+    "东天王殿":{"location":("天庭",-1),"target":I("彩虹楼"),"idx":0, "exit_loc":476-50-EXIT_RADIUS,"crash_suddenly":False},
+    "朝会殿":{"location":("天庭",-1),"target":T("朝会殿"),"idx":0, "exit_loc":416-50-EXIT_RADIUS,"crash_suddenly":False},
     # 凌霄宝殿 识别不对，用凌宵宝殿代替
-    "凌霄宝殿":{"location":("天庭",-2),"target":T("凌宵宝殿"),"idx":0, "exit_loc":416-EXIT_RADIUS,"crash_suddenly":False},
+    "凌霄宝殿":{"location":("天庭",-2),"target":T("凌宵宝殿"),"idx":0, "exit_loc":416-50-EXIT_RADIUS,"crash_suddenly":False},
 
     "混沌火焰山·噩梦":{"location":("天庭", 0),"target":B(1120,5,20,80),"idx":0, "exit_loc":643-EXIT_RADIUS,"crash_suddenly":False},
     "混沌五指山·噩梦":{"location":("天庭", 0),"target":B(130,210,1,1),"idx":0, "exit_loc":625-EXIT_RADIUS,"crash_suddenly":False},
