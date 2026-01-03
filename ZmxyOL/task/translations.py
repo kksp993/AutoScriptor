@@ -61,6 +61,7 @@ TRANSLATION_MAP = {
     '联盟悬赏': 'lianmengxuanshang',
     '混沌炼狱塔': 'hundunlianyaota',
     '联盟任务': 'lianmengrenwu',
+    '造化烘炉': 'luzi',
 }
 
 

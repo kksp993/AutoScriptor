@@ -21,7 +21,7 @@ def get_weekday_number():
     weekday_num = today.weekday() + 1 # Monday is 1, Sunday is 7
     return weekday_num
 
-
+1111
 @register_task
 def task():
     if not(get_week_number() %2 == 0 and get_weekday_number() <= 4):
@@ -29,7 +29,7 @@ def task():
         return 
     ensure_in("荒古万界")
     click(T("万界穿梭"));sleep(1)
-    click(T("荒古巨兽"),until=lambda: ui_T(T("荒古秘术")))
+    click(T("荒古巨兽"),until=lambda: ui_T(T("荒古灵机",box=Box(118,113,123,32).margin())))
     if ui_T(T("荒古灵机")):
         click(B(175,285), repeat=3)
     click(B(1000,30))
