@@ -21,7 +21,7 @@ def get_weekday_number():
     weekday_num = today.weekday() + 1 # Monday is 1, Sunday is 7
     return weekday_num
 
-1111
+
 @register_task
 def task():
     if not(get_week_number() %2 == 0 and get_weekday_number() <= 4):
