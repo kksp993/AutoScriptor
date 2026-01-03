@@ -125,6 +125,29 @@ def ocr(frame,
         List[List[Box]]，所有匹配到的区域
         外层列表长度与target_strings相同，内层列表长度与target_strings中每个字符串匹配到的区域数量相同
     """
+    def _iter_substring_spans(haystack: str, needle: str):
+        if not haystack or not needle:
+            return
+        start = 0
+        while True:
+            idx = haystack.find(needle, start)
+            if idx < 0:
+                break
+            yield idx, idx + len(needle)
+            start = idx + len(needle)
+
+    def _subbox_by_span(left: int, top: int, width: int, height: int, full_len: int, span: tuple[int, int]):
+        """把 (left,top,width,height) 按 span 在 full_len 中的位置做水平等比例切分"""
+        s, e = span
+        if full_len <= 0:
+            return Box(left, top, width, height)
+        # 限制在 [0, full_len]
+        s = max(0, min(full_len, s))
+        e = max(s, min(full_len, e))
+        x0 = left + int(width * (s / full_len))
+        x1 = left + int(width * (e / full_len))
+        return Box(x0, top, max(1, x1 - x0), height)
+
     target_string = None
     engine = get_ocr_engine()
     if engine is None:  
@@ -154,10 +177,11 @@ def ocr(frame,
             for line_idx, line_info in enumerate(result[0]):
                 bounding_points = line_info[0]
                 recognized_text, _ = line_info[1]
-                # 使用全字符串相似度匹配，避免匹配包含目标串的更长文本
                 for target_string in target_strings:
                     similarity_ratio = fuzz.ratio(recognized_text, target_string)
-                    if target_string in recognized_text: similarity_ratio=100
+                    # 关键：只要目标串被包含，就视为命中（项目默认 fuzzy_threshold=100，否则会大量漏检）
+                    if target_string and target_string in (recognized_text or ""):
+                        similarity_ratio = 100
                     if similarity_ratio >= fuzzy_threshold:
                         all_x_coords = [p[0] for p in bounding_points]
                         all_y_coords = [p[1] for p in bounding_points]
@@ -172,8 +196,19 @@ def ocr(frame,
                         factor = stride / scale
                         final_left = preferred_box.left + int(s_left * factor)
                         final_top = preferred_box.top + int(s_top * factor)
-                        final_bounding_box = Box(final_left, final_top, int(s_width * factor), int(s_height * factor))
-                        found_boxes[target_strings.index(target_string)].append(final_bounding_box)
+                        final_width = max(1, int(s_width * factor))
+                        final_height = max(1, int(s_height * factor))
+                        full_len = len(recognized_text or "")
+                        # 关键：当 OCR 把多个词粘连成一个字符串时，按子串位置等比例切分返回更准确的子Box
+                        if (recognized_text or "") != target_string and target_string and target_string in (recognized_text or "") and full_len > 0:
+                            for span in _iter_substring_spans(recognized_text, target_string):
+                                found_boxes[target_strings.index(target_string)].append(
+                                    _subbox_by_span(final_left, final_top, final_width, final_height, full_len, span)
+                                )
+                        else:
+                            found_boxes[target_strings.index(target_string)].append(
+                                Box(final_left, final_top, final_width, final_height)
+                            )
         elif result is None:
             logger.warning("OCR engine returned None. This might indicate an issue with the input image or engine.")
         if scale != 1.0:

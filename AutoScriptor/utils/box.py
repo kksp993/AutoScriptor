@@ -9,8 +9,8 @@ class Box(collections.namedtuple('Box', 'left top width height')):
     __slots__ = ()
 
     def __new__(cls, left=0, top=0, width=-1, height=-1):
-        width = width if width > 0 else (1280-width) 
-        height = height if height > 0 else (720-height)
+        width = width if width >= 0 else (1280-width) 
+        height = height if height >= 0 else (720-height)
         return super(Box, cls).__new__(cls, int(left), int(top), int(width), int(height))
 
     def center(self):
@@ -140,8 +140,12 @@ class Box(collections.namedtuple('Box', 'left top width height')):
             raise ValueError("other must be a tuple of length 2 or 4")
 
     def margin(self, margin: int=20) -> 'Box':
-        "扩大box的区域，用于ocr识别"
-        return Box(self.left - margin, self.top - margin, self.width + margin * 2, self.height + margin * 2)
+        "扩大box的区域，用于ocr识别（自动裁剪到屏幕范围 0,0,1280,720）"
+        l = max(0, self.left - margin)
+        t = max(0, self.top - margin)
+        r = min(1280, self.left + self.width + margin)
+        b = min(720, self.top + self.height + margin)
+        return Box(l, t, max(0, r - l), max(0, b - t))
 
 def dp(r: Box) -> Tuple[Union[int, None], Union[int, None]]:
     center_x, center_y = r.center()
@@ -163,7 +167,43 @@ def b2p(
         offset: tuple[int, int] = (0, 0),
         resize: tuple[int, int] = (-1, -1)
     ) -> Tuple[int, int]:
-    """基于左上角进行变换，返回点"""
+    """
+    将Box转换为点击坐标点（带偏移和大小调整）
+    
+    变换流程：
+    1. 先应用 offset：将Box从左上角 (left, top) 偏移到 (left+offset[0], top+offset[1])
+    2. 再应用 resize：如果指定了resize且>0，将Box大小调整为 (resize[0], resize[1])
+    3. 最后返回：变换后Box的中心点 + 随机偏移（±width/6, ±height/6）
+    
+    Args:
+        r: 原始Box对象
+        offset: 偏移量 (x, y)，相对于原Box左上角
+            - 示例: offset=(120, 120) 表示向右偏移120px，向下偏移120px
+            - 用途：当目标区域较大，需要点击其内部特定位置时使用
+        resize: 调整Box大小 (width, height)
+            - 如果为(-1, -1)则保持原Box大小
+            - 如果>0则调整为指定大小（位置不变，仍基于左上角）
+            - 用途：缩小点击范围，提高点击精度
+    
+    Returns:
+        Tuple[int, int]: 最终点击坐标 (x, y)
+    
+    Examples:
+        # 原Box: Box(100, 200, 200, 100)  # left=100, top=200, width=200, height=100
+        # 中心点: (200, 250)
+        
+        # 不偏移，直接点击中心附近
+        b2p(Box(100, 200, 200, 100), offset=(0, 0))  
+        # -> 变换后Box: Box(100, 200, 200, 100)，点击中心附近
+        
+        # 偏移到右下角区域
+        b2p(Box(100, 200, 200, 100), offset=(120, 120))  
+        # -> 变换后Box: Box(220, 320, 200, 100)，点击新中心附近
+        
+        # 先偏移，再缩小范围
+        b2p(Box(100, 200, 200, 100), offset=(120, 120), resize=(80, 80))  
+        # -> 变换后Box: Box(220, 320, 80, 80)，点击新中心附近
+    """
     r_new = Box(
         r.left+offset[0],
         r.top+offset[1],
