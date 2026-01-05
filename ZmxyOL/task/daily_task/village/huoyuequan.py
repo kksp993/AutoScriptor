@@ -6,6 +6,7 @@ from logzero import logger
 
 def buy_item(item_name: str):
     box = locate(T(item_name),timeout=10)
+    if box is None: return
     if first(get_colors(T("购买", box=box+(0,240))))=="绿色":
         click(B(box),offset=(0,240),delay=0.5)
         sleep(4)
