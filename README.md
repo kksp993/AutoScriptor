@@ -1,17 +1,20 @@
 # AutoScriptor
 
 ## 项目介绍
-AutoScriptor 是一个基于 Python 和 Vue 的自动化脚本与任务管理器，设计用于管理和自动执行特定设备上的日常操作任务。
+AutoScriptor 是一个基于 Python 的自动化脚本与任务编排器，专注于安卓模拟器（优先支持 MuMu）操作自动化。项目集成了图像识别、OCR 文本识别、任务调度等功能，提供 CLI 命令行和 WebUI 可视化两种管理方式，支持灵活配置和二次开发。
 
-本项目集成了模拟器操作、OCR 识别、自动任务调度等功能，支持灵活配置，可通过 Web 界面实现任务分组管理、状态查看和配置编辑。无需深厚的编程基础即可灵活添加、启用、编辑或禁用自动化任务。
+本项目集成了模拟器控制、OCR 识别、自动任务调度、错误归档等核心功能，支持灵活配置，可通过 CLI 或 Web 界面实现任务分组管理、状态查看和配置编辑。无需深厚的编程基础即可灵活添加、启用、编辑或禁用自动化任务。
 
 主要特性：
 
-- 支持Mumu模拟器上的多种任务自动任务执行
-- 集成 PaddleOCR/图像匹配 识别，可用于游戏界面、截图等自动判定
-- 提供可视化 Web 管理界面（基于 Vue3），操作便捷
-- 支持任务分组（每日、每周、一般任务等）、状态统计与实时日志查看
-- 配置文件灵活易懂，便于自定义扩展至其他应用
+- **双模式管理**：支持 CLI 命令行界面和 WebUI 可视化界面两种操作方式
+- **模拟器控制**：支持 MuMu 模拟器的点击、长按、滑动、输入、按键事件等操作
+- **智能识别**：集成 PaddleOCR 文本识别和图像匹配，支持颜色采样、稳定性检测
+- **任务编排**：按"每日/每周/一般/活动"分类管理任务，支持参数配置、执行后冷却与状态持久化
+- **实时监控**：WebUI 提供实时日志查看（SSE），CLI 提供交互式任务导航
+- **错误处理**：自动归档错误日志和截图，便于问题排查
+- **账号管理**：支持加密存储账号密码，安全可靠
+- **扩展性强**：配置文件灵活易懂，便于自定义扩展至其他应用场景
 
 适用于手游自动日常、批量重复操作等自动化场景，极大解放双手。
 
@@ -34,81 +37,154 @@ AutoScriptor 是一个基于 Python 和 Vue 的自动化脚本与任务管理器
 
 ## 使用说明与配置指南
 
-如需完整的入门到进阶与 API 参考，请查阅: [AutoScriptor/core/API.md](AutoScriptor/core/API.md)
+如需完整的入门到进阶与 API 参考，请查阅: [docs/core/API.md](docs/core/API.md)
 
 ### 环境配置
 
-0. 请确保使用 Windows 系统，并优先选择 Mumu 模拟器或 Mumu 12 版本（暂不支持其他模拟器）。
+**系统要求**：
+- Windows 10/11 系统
+- MuMu 或 MuMu12 模拟器（暂不支持其他模拟器）
+- Python 3.10.15 (使用本地.venv管理环境)
 
-1. 建议将模拟器设置为平板 1280x720 分辨率，同时适当提高内存和 CPU 分配，以获得更好的运行性能。
+**模拟器设置建议**：
+- 分辨率：平板 1280x720
+- 适当提高内存和 CPU 分配，以获得更好的运行性能
 
-### Python安装
+### Python 安装
 
 #### 自动配置
 
-- 运行 launcher.ps1
+运行 `launcher.ps1` 脚本，将自动完成环境配置和依赖安装。
 
-#### 手动配置
+### 启动方式
 
-1. 安装 Anaconda 或 Miniconda，并创建独立虚拟环境：
+#### CLI 命令行模式
 
-   ```
-   conda create -n zmxy python==3.10.15
-   ```
+运行以下命令启动 CLI 界面：
 
-2. 配置国内源以提升 Python 和 Conda 的下载速度，以及相关依赖项：
+```bash
+python services/main_cli/run.py
+```
 
-   ```text
-   pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
-   conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/free/
-   conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/
-   conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/pytorch/
-   conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/pytorch/linux-64/
-   conda config --set show_channel_urls yes
-   ```
+或使用启动脚本：
+- `launcher-cli -l.bat` - 带日志的 CLI 启动
 
-   ```bash
-   conda activate zmxy
-   python -m pip install -r requirements.txt
-   ```
+-l：表示使用本地版本启动，暂不拉取远程更新，
+-cli：表示使用非图形化界面启动游戏（稳定）。
 
-3. 配置 `config.json` 文件
+#### WebUI 可视化模式
 
-   - 首先复制 `config template.json` 为 `config.json`。
-   - 根据你的模拟器实际情况调整如下字段：
+运行以下命令启动 Web 界面：
 
-   ```
+```bash
+python services/webui/server.py
+```
+
+启动后自动打开浏览器访问 `http://127.0.0.1:5000`
+
+或使用启动脚本：
+- `launcher.bat` - Windows 批处理启动
+- `launcher.ps1` - PowerShell 启动
+
+### 游戏内容配置
+
+1. **设置账号密码**：在账号管理【A】->更新账号信息【U】中输入账号密码+主角色信息，并设置安全密码作为加密
+   账号密码等始终密文保留在本地，当且仅当输入安全密码才会解密。
+
+
+2. **技能键位设定**：按要求修改游戏内技能键位配置
+
+![image-20250906210648638.png](https://cdn.nlark.com/yuque/0/2025/png/39311747/1757165540832-c46387e3-c580-4705-ba97-7d3c1bd63104.png?x-oss-process=image%2Fformat%2Cwebp)
+
+3. **性能优化**：建议关闭游戏内"飘字"功能
+   - 进入【九重天】-【设置】，找到"飘字"并关闭，可有效提升自动化处理性能
+
+4. **其他建议**：
+   - 各关卡可设置为 5 倍出怪速度和 3 倍加速
+   - 建议先手动进入每个场景以跳过首次过场动画，确保脚本执行更流畅
+
+### 任务管理
+
+- **任务分类**：每日任务、每周任务、一般任务、活动任务
+- **任务状态**：支持开启/关闭、执行时间记录、完成状态追踪
+- **任务参数**：支持枚举、多选枚举、布尔、列表等多种参数类型
+- **任务执行**：自动按配置顺序执行，支持重试机制和错误处理
+
+### 扩展开发
+
+当前内置任务数量有限，欢迎有兴趣的开发者参与适配与功能拓展！任务定义位于 `ZmxyOL/task/` 目录下，支持自动注册机制。
+可以使用AutoScriptor\utils\edit_img.py文件辅助定位提取元素，方便定位。
+
+
+## 常见问题 (FAQ)
+
+### 1. 配置文件设置错误
+
+1. **复制配置模板**：
+   - 复制 `config template.json` 为 `config.json`
+
+2. **配置模拟器信息**：
+   根据你的模拟器实际情况调整如下字段：
+
+   ```json
    "emulator": {
        "index": 1,                        # 你的模拟器索引
        "adb_addr": "127.0.0.1:16416",     # 你的 adb 地址，可在 MuMu 模拟器设置中查找
        "emu_path": "C:/Program Files/Netease/MuMu/nx_main/MuMuManager.exe",
        "adb_path": "C:/Program Files/Netease/MuMu/nx_main/adb.exe",
        "mumu_folder": "C:/Program Files/Netease/MuMu"
-   },
+   }
    ```
-### 游戏内容配置
 
-5. 按需修改技能键位设定
+### 2. 模拟器连接失败
 
-   ![image-20250906210648638.png](https://cdn.nlark.com/yuque/0/2025/png/39311747/1757165540832-c46387e3-c580-4705-ba97-7d3c1bd63104.png?x-oss-process=image%2Fformat%2Cwebp)
+- 确认 MuMu 模拟器已启动
+- 检查 `config.json` 中的 `adb_addr` 是否正确
+- 确认 ADB 路径配置正确
+- 尝试重启模拟器或重新连接 ADB
 
-6. 优化性能：建议关闭游戏内“飘字”功能
+### 3. 任务执行失败
 
-   - 进入【九重天】-【设置】，找到“飘字”并关闭，可有效提升自动化处理性能。
+- 查看 `logs/log/` 目录下的日志文件
+- 查看 `logs/errors/` 目录下的错误归档
+- 检查 `logs/click_screenshots/` 目录下的点击截图
+- 确认游戏界面状态正常，未出现异常弹窗，可反馈
 
-7. 其他前期准备建议
+### 4. WebUI 无法访问
 
-   - 各关卡可设置为 5 倍出怪速度和 3 倍加速。
-   - 建议先手动进入每个场景以跳过首次过场动画，确保脚本执行更流畅。
+- 确认端口 5000 未被占用
+- 检查防火墙设置
+- 尝试使用 `http://127.0.0.1:5000` 访问
 
-8. 当前内置任务数量有限，欢迎有兴趣的开发者参与适配与功能拓展！
+## 技术栈
 
+- **后端**：Python 3.10.15, Flask, Flask-SocketIO
+- **前端**：Vue 3, Element Plus, Tailwind CSS
+- **OCR**：PaddleOCR 2.7.0, PaddlePaddle 3.0.0
+- **模拟器控制**：ADB, uiautomator2
+- **AI 框架**：Agno（可选，用于 AI Agent 功能）
+- **其他**：logzero（日志）, questionary（CLI交互）, cryptography（加密）
 
-## QA
-1. 如果出现无法安装av包，尝试以下命令安装：
+## 项目结构
+
 ```
-conda activate zmxy
-conda install -n zmxy -c conda-forge "av=10.*" ffmpeg
-python -m pip install -U pip setuptools wheel
-python -m pip install -r requirements.txt
+AutoScriptor/
+├── AutoScriptor/          # 核心框架代码
+│   ├── core/             # 核心 API 和控制逻辑
+│   ├── control/          # 模拟器控制适配器
+│   ├── recognition/      # OCR 和图像识别
+│   ├── utils/            # 工具函数
+│   ├── crypto/           # 配置加密管理
+│   └── vlm/              # 视觉语言模型支持
+├── services/             # 服务入口
+│   ├── main_cli/         # CLI 命令行界面
+│   ├── webui/            # Web 可视化界面
+│   └── core/             # 核心服务（任务管理等）
+├── ZmxyOL/               # 游戏任务定义
+│   ├── task/             # 任务实现
+│   ├── nav/              # 导航和环境管理
+│   └── battle/           # 战斗相关
+├── docs/                 # 文档
+├── logs/                 # 日志和截图
+└── config.json           # 配置文件
 ```

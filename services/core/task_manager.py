@@ -67,24 +67,10 @@ class TaskManager:
         self._cancel_event.clear()
 
     def _archive_error(self, task: str, exc: Exception) -> None:
-        """归档错误日志和截图"""
+        """归档错误日志和截图（使用统一的错误归档服务）"""
+        from AutoScriptor.utils.log_archiver import archive_error
         try:
-            from datetime import datetime
-            import cv2
-            ts = datetime.now().strftime('%y%m%d_%H%M%S')
-            safe = task.replace('/', '_')
-            err_dir = os.path.join(os.getcwd(), 'logs', 'errors')
-            os.makedirs(err_dir, exist_ok=True)
-            err_file = os.path.join(err_dir, f"[{ts}][{safe}].log")
-            with open(err_file, 'w', encoding='utf-8') as ef:
-                ef.write(f"[{ts}] {task} 执行错误: {exc}\n")
-                ef.write(traceback.format_exc())
-            # 保存错误截图
-            try:
-                img = mixctrl.screenshot()
-                if img is not None:
-                    cv2.imwrite(os.path.join(err_dir, f"[{ts}][{safe}].png"), img)
-            except: pass
+            archive_error(task, exc, mixctrl=mixctrl, include_click_screenshots=True)
         except Exception as e:
             logger.error(f"归档错误失败: {e}")
 
