@@ -13,7 +13,7 @@ def hundunlianyaota():
     shop_tmp = wait_for_appear(T("妖魄商铺",box=Box(20,230,120,50)))
     click(B(160,600));sleep(1)
     click(B(0,0));sleep(1)
-    click(B(*shop_tmp))
+    click(B(*shop_tmp),until=lambda: ui_T(T("拥有")))
     yy_tmp = wait_for_appear(T("拥有"))
     for i in range(8):
         items = locate([T("功绩"),T("6级灵玉")],is_simplify=False)
