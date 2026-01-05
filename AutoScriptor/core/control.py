@@ -1,8 +1,10 @@
+import time
 from logzero import logger
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import NemuIpc
 from AutoScriptor.recognition.rec import locate_on_screen
 from AutoScriptor.utils.box import Box
+from AutoScriptor.utils.tracer import save_debug_screenshot
 
 class BaseMumuControl:
     def screenshot(self):
@@ -72,6 +74,8 @@ class MixControl(BaseMumuControl):
         self.mumu = mumu
         self.nemu_control = NemuIpcControl(mumu, serial)
         self.mode="mumu"
+        self.last_screenshot_time=0
+        self.screenshot_interval=5
 
     def switch_to_mumu(self)->None:
         logger.info("切换到mumu")
@@ -103,7 +107,12 @@ class MixControl(BaseMumuControl):
 
     def screenshot(self):
         """根据当前模式返回相应的截图"""
-        return self.nemu_control.screenshot()
+        from AutoScriptor import cfg
+        screenshot=self.nemu_control.screenshot()
+        if cfg["app"]["debug_mode"] and (t:=time.time()) - self.last_screenshot_time > self.screenshot_interval:
+            self.last_screenshot_time = t
+            save_debug_screenshot(target=None, screenshot=screenshot, prefix="s")
+        return screenshot
 
     
     def long_click(self, x, y, duration=1.0)->None:

@@ -3,6 +3,7 @@ import traceback
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
+from AutoScriptor.errors import TaskRequireReTry
 
 
 
@@ -14,7 +15,11 @@ def zudui_task():
     click(T("普通难度"))
     click(T("组队挑战"))
     wait_for_appear(T("队伍列表"))
-    click(T("快速加入"), until=lambda: ui_T(T("我的队伍")))
+    # 快速加入：失败则抛出可重试异常，让框架按 max_retry 重试
+    try:
+        click(T("快速加入"), until=lambda: ui_T(T("我的队伍")))
+    except Exception:
+        raise TaskRequireReTry("快速加入失败，重试")
     bg.add(
         name="组队进图",
         identifier=I("加载中"),
@@ -30,7 +35,10 @@ def zudui_task():
             cnt += 1
             if cnt % 5 == 0 :
                 click(B(1050,50,30,30),delay=1.5)
-                click(T("快速加入"), until=lambda: ui_T(T("我的队伍")))
+                try:
+                    click(T("快速加入"), until=lambda: ui_T(T("我的队伍")))
+                except Exception:
+                    raise TaskRequireReTry("快速加入失败，重试")
             click((T("开始"),T("准备")), if_exist=True, timeout=1)
             sleep(1)
     h.set(True,1).heaven_battle(exit_loc=get_task_table("东天王殿")["exit_loc"])
