@@ -54,14 +54,15 @@ def login(account: str=None, password: str=None, character_name: str=None, chara
     if ui_T(T("确定")):# 账号有效性验证失败
         click(T("确定"))
         return login(account, password, character_name, character_index)
+    wait_for_appear(I("加载中"))
     locate(I("活动公告页面"), 30)
     click(B(1240, 5, 40, 60))
     time.sleep(0.5)
     # swipe(B(640, 650, 10, 10),B(200, 10, 10, 10) , duration_s=1) # 悬浮窗位置改了
     swipe(B(200, 10, 10, 10), B(640, 650, 10, 10), duration_s=2) # 悬浮窗位置改了
-    if ui_T(T("隐藏悬浮球"), 5):
+    if ui_T(T("隐藏悬浮球"), 3):
         click(B(740, 555, 10, 10))
-    if ui_T(T("精彩活动")):
+    if ui_T(T("精彩活动"),3):
         click(B(1100, 40, 40, 40))
     logger.info("登录完成")
 

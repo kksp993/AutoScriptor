@@ -51,7 +51,7 @@ def find_in_bag(bag_class: BAG, item: str):
     input(item)
     sleep(2)
     # while ui_T(T(item,box=Box(0,0,640,200))):
-    while ui_T(T(item,box=Box(0,0,640,200)), timeout=1):
+    while ui_F(T("全部"),timeout=1):
         key_event(AndroidKey.KEYCODE_ENTER)
         sleep(1)
 
@@ -61,7 +61,7 @@ def wear_item(item_dict: dict):
     find_in_bag(item_dict["bag_class"], item_dict["item_name"])
     sleep(1)
     click(get_pos_tgt(0,0))
-    click(T("装备", color="红色"))
+    click(T("装备",color="红色"), if_exist=True, delay=0.5, timeout=2)
 
 def wear_suite(suite_name: str):
     ensure_in("背包")

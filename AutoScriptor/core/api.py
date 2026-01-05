@@ -5,6 +5,7 @@ import time
 import traceback
 import getpass
 import cv2
+from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
 from AutoScriptor.core.control import MixControl
 from AutoScriptor.core.targets import Target, B,I,T
 from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget
@@ -12,6 +13,7 @@ from AutoScriptor.recognition.ocr_rec import ocr_for_box
 from AutoScriptor.recognition.rec import get_box_color
 from AutoScriptor.utils.box import Box, b2p
 from AutoScriptor.utils.logger import log_flush
+from AutoScriptor.utils.tracer import save_debug_screenshot
 from logzero import logger,logfile
 from AutoScriptor.utils.constant import cfg
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
@@ -78,6 +80,7 @@ def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->in
     boxes = locate(target, timeout, assure_stable=False)
     if not first(boxes): return -1
     return index(boxes)
+
 
 def ui_T(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->bool:
     boxes = locate(target, timeout, assure_stable=False)
@@ -233,7 +236,7 @@ def click(
         
         timeout: 定位超时时间（秒），默认30秒
         
-        if_exist: 如果为True，目标不存在时不抛异常，直接返回False
+        if_exist: 如果为True，目标不存在时不抛异常，直接返回False，此时默认timeout=2s
         
         repeat: 重复点击次数，默认1次
         
@@ -307,21 +310,8 @@ def click(
         else:
             mixctrl.click(*pt)
         time.sleep(interval)
-    if not isinstance(target, BoxTarget) and save_screenshot and cfg["app"]["debug_mode"]:
-        try:
-            img = mixctrl.screenshot().copy()
-            cx, cy = pt
-            # Box类没有right/bottom属性，需要计算
-            right = box.left + box.width
-            bottom = box.top + box.height
-            cv2.rectangle(img, (box.left, box.top), (right, bottom), (0,0,255), 3)
-            cv2.circle(img, (cx, cy), 5, (0,0,255), -1)
-            ts = datetime.now().strftime('%y%m%d_%H%M%S_%f')
-            cv2.imwrite(os.path.join(CLICK_DIR, f'c_{ts}.png'), img)
-            # 只保留5张最新截图
-            files = sorted([f for f in os.listdir(CLICK_DIR) if f.startswith('c_')], key=lambda x: os.path.getmtime(os.path.join(CLICK_DIR, x)), reverse=True)
-            for f in files[5:]: os.remove(os.path.join(CLICK_DIR, f))
-        except: pass
+    if not isinstance(target, BoxTarget) and save_screenshot:
+        save_debug_screenshot(target, mixctrl.screenshot(), box, pt, prefix="c")
     return True  
 
 
@@ -348,9 +338,11 @@ def input(text: str, target_field: Target|tuple[Target, ...] = None):
     mixctrl.input_text(text)
 
 def key_event(key_code: int):
+    logger.info("Key event: {}".format(next((attr for attr in dir(AndroidKey) if attr.startswith("KEYCODE_") and getattr(AndroidKey, attr) == key_code), key_code)))
     mixctrl.key_event(key_code)
 
-def extract_info(target: BoxTarget, post_process: callable = None, ensure_not_empty: bool = True)->str|None:
+def extract_info(target: BoxTarget, post_process: callable = None, ensure_not_empty: bool = True, save_screenshot: bool = True)->str|None:
+    res = None
     for _ in range(40):
         screenshot = mixctrl.screenshot()
         res = ocr_for_box(screenshot, target.box)
@@ -363,6 +355,8 @@ def extract_info(target: BoxTarget, post_process: callable = None, ensure_not_em
                 continue
         if ensure_not_empty and isinstance(res, str) and len(res) == 0: continue
         if res is not None: break
+    if save_screenshot and cfg["app"]["debug_mode"]:
+        save_debug_screenshot(target=target, screenshot=mixctrl.screenshot(), box=target.box, ocr_text=res, prefix="e")
     return res
 
 def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), resize: tuple = (-1, -1))->list[str|None]:

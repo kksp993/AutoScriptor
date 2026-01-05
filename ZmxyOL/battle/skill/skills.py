@@ -53,7 +53,7 @@ def battle_loop(
     self: Hero,
     battle_weight:int=1,
     delay:float=0,
-    max_duration:int=500
+    max_duration:int=300/3
 ):
     """
         try_exit 为 True 时，退出循环
@@ -89,12 +89,14 @@ def way_to_exit(self: Hero, until: str = "", exit_loc: float = 0, timeout: float
     with _way_to_exit_lock:
         start_time = time()
         # switch_base("mumu")
-        self.move_right(125).move_left(exit_loc)
+        self.move_right(400).move_left(exit_loc)
+        sleep(1)
         while not until():
             if time() - start_time > timeout:
                 raise RuntimeError(f"way_to_exit 超时: {timeout}秒, 条件 {until.__name__} 未满足")
             self.sleep(0.5)
             self.move_left(25, directly=True)
+        # self.move_right(20, directly=True) # 视觉与指令往往延迟一拍
         # switch_base("nemu")
         return self
 

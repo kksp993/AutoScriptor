@@ -13,6 +13,7 @@ from threading import Event, RLock
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.constant import cfg
+from AutoScriptor import TaskRequireReTry
 from logzero import logger
 import sys
 from ZmxyOL.nav import ensure_in
@@ -67,24 +68,10 @@ class TaskManager:
         self._cancel_event.clear()
 
     def _archive_error(self, task: str, exc: Exception) -> None:
-        """归档错误日志和截图"""
+        """归档错误日志和截图（使用统一的错误归档服务）"""
+        from AutoScriptor.utils.log_archiver import archive_error
         try:
-            from datetime import datetime
-            import cv2
-            ts = datetime.now().strftime('%y%m%d_%H%M%S')
-            safe = task.replace('/', '_')
-            err_dir = os.path.join(os.getcwd(), 'logs', 'errors')
-            os.makedirs(err_dir, exist_ok=True)
-            err_file = os.path.join(err_dir, f"[{ts}][{safe}].log")
-            with open(err_file, 'w', encoding='utf-8') as ef:
-                ef.write(f"[{ts}] {task} 执行错误: {exc}\n")
-                ef.write(traceback.format_exc())
-            # 保存错误截图
-            try:
-                img = mixctrl.screenshot()
-                if img is not None:
-                    cv2.imwrite(os.path.join(err_dir, f"[{ts}][{safe}].png"), img)
-            except: pass
+            archive_error(task, exc, mixctrl=mixctrl, include_click_screenshots=True)
         except Exception as e:
             logger.error(f"归档错误失败: {e}")
 
@@ -160,8 +147,18 @@ class TaskManager:
         self,
         tasks: List[str]
     ) -> Tuple[int, int]:
-        # 每次开始执行前复位取消标记
+    
+        # 每次开始执行前复位取消标记，并清理调试截图目录
         self._reset_cancel()
+        try:
+            debug_dir = os.path.join(os.getcwd(), 'logs', 'debug_screenshot')
+            if os.path.isdir(debug_dir):
+                for f in os.listdir(debug_dir):
+                    fp = os.path.join(debug_dir, f)
+                    if os.path.isfile(fp):
+                        os.remove(fp)
+        except Exception:
+            pass
         failed_count = 0
         success_count = 0
         for task in tasks:
@@ -196,6 +193,17 @@ class TaskManager:
                 except Exception as e:
                     logger.error(f"Error executing task: {task} {e}")
                     if isinstance(e, KeyboardInterrupt): raise
+
+                    # TaskRequireReTry: 不归档，不计失败，按 max_retry 重试
+                    if isinstance(e, TaskRequireReTry):
+                        if retry_count < max_retry:
+                            retry_count += 1
+                            logger.info(f"🔄 任务请求重试: {task} ({retry_count}/{max_retry})，原因: {e}")
+                            continue
+                        else:
+                            logger.info(f"⚠️ 任务重试次数已满，仍未成功: {task}，原因: {e}")
+                            failed_count += 1
+                            break
 
                     logger.error(f"❌ 执行失败: {task}，错误: {e}")
                     # 保存错误截图和日志
