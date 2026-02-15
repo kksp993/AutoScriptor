@@ -499,7 +499,7 @@ def archive_error(
                 # 格式化堆栈跟踪
                 stack_lines = []
                 for frame_summary in tb_exc.stack:
-                    stack_lines.append(f'  File "{frame_summary.filename}", line {frame_summary.lineno}, in {frame_summary.name}\n')
+                    stack_lines.append(f'  File "{frame_summary.filename}:line {frame_summary.lineno}", in {frame_summary.name}\n')
                     if frame_summary.line:
                         stack_lines.append(f'    {frame_summary.line.strip()}\n')
                     # 写入局部变量

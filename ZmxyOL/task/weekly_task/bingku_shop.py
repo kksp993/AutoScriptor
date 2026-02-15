@@ -18,6 +18,7 @@ def buy(item):
 
 @register_task
 def task():
+    switch_base("mumu")
     ensure_in("幽冥冰窟")
 
     click(T("奖励",box=Box(37,232,84,89)))
@@ -28,10 +29,10 @@ def task():
     click(T("商店"))
     click(B(276,149,125,48))
     buy("符印之匙")
-    swipe(B(640,600),B(640,300),duration_s=3,ensure_stable_after_swipe=False)
+    swipe(B(640,600),B(640,300),duration_s=1,ensure_stable_after_swipe=False)
     sleep(1)
     buy("天陨星晶")
-    swipe(B(640,300),B(640,600),duration_s=3,ensure_stable_after_swipe=False)
+    swipe(B(640,300),B(640,600),duration_s=1,ensure_stable_after_swipe=False)
     sleep(1)
     buy("精刻符")
 
@@ -39,8 +40,8 @@ def task():
     buy("随机初级灵晶礼包")
     buy("下品仙玉")
     buy("玉髓")
-    swipe(B(640,600),B(640,300),duration_s=3,ensure_stable_after_swipe=False)
-    swipe(B(640,600),B(640,300),duration_s=3,ensure_stable_after_swipe=False)
+    swipe(B(640,600),B(640,300),duration_s=1,ensure_stable_after_swipe=False)
+    swipe(B(640,600),B(640,300),duration_s=1,ensure_stable_after_swipe=False)
     sleep(1)
     buy("随机一级环境药剂")
     buy("随机二级万灵药剂")
@@ -55,6 +56,14 @@ def task():
 if __name__ == "__main__":
     try:
         task()
+        # swipe(B(640,600),B(640,300),duration_s=1)
+        # swipe(B(640,600),B(640,300),duration_s=1)
+        # swipe(B(640,600),B(640,300),duration_s=1)
+        # swipe(B(640,600),B(640,300),duration_s=1)
+        # swipe(B(640,300),B(640,600),duration_s=1)
+        # swipe(B(640,300),B(640,600),duration_s=1)
+        # swipe(B(640,300),B(640,600),duration_s=1)
+        # swipe(B(640,300),B(640,600),duration_s=1)
     except Exception as e:
         traceback.print_exc()
     finally:

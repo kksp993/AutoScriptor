@@ -61,6 +61,36 @@ class TaskManager:
         # 配置与任务注册的并发保护：避免重载过程中出现临时缺失 'fn'
         self._cfg_lock: RLock = RLock()
 
+    def _restart_adb_and_wait(self) -> None:
+        import subprocess, threading, time
+        adb_path = cfg["emulator"]["adb_path"]
+        adb_addr = str(cfg["emulator"].get("adb_addr", ""))
+        subprocess.run([adb_path, "kill-server"], capture_output=True, text=True)
+        subprocess.run([adb_path, "start-server"], capture_output=True, text=True)
+        if adb_addr:
+            subprocess.run([adb_path, "connect", adb_addr], capture_output=True, text=True)
+
+        mixctrl.switch_to_mumu()
+        intervals = [1, 2, 3, 4, 5, 5, 5]
+        for i, interval in enumerate(intervals, 1):
+            click_result = {}
+            def _click_test():
+                try:
+                    mixctrl.click(2000, 0)
+                    click_result["ok"] = True
+                except Exception as e:
+                    click_result["error"] = e
+                    logger.error(f"ADB重启后测试点击失败，第{i}次尝试，第{interval}秒后重试, 错误信息: {e}")
+            t = threading.Thread(target=_click_test)
+            t.daemon = True
+            t.start()
+            t.join(5)
+            if not t.is_alive() and click_result.get("ok"):
+                logger.info("✅ ADB重启完成，点击测试成功。")
+                return
+            time.sleep(interval)
+        raise RuntimeError("ADB重启后仍无法控制(点击测试失败)")
+
     def request_cancel(self) -> None:
         self._cancel_event.set()
 
@@ -220,6 +250,8 @@ class TaskManager:
                     if cfg["app"]["restart_on_error"]:
                         mixctrl.app.close(cfg["app"]["app_to_start"])
                         sleep(1)
+                        if retry_count >= 1:
+                            self._restart_adb_and_wait()
                         while mixctrl.app.state(cfg["app"]["app_to_start"]) != "running":
                             mixctrl.app.launch(cfg["app"]["app_to_start"])
                             sleep(1)
