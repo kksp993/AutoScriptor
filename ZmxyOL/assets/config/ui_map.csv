@@ -296,3 +296,8 @@ S,S,0,0,1280,720,S@0#0#1280#720.png
 洪荒遗境背景,洪荒遗境背景,0,0,1280,720,honghuangyijingbeijing@0#0#1280#720.png
 仙盟-联盟,联盟,0,0,1280,720,xianmeng-lianmeng@0#0#1280#720.png
 荒古-通关成功,通关成功,0,0,1280,720,huanggu-tongguanchenggong@0#0#1280#720.png
+悬浮窗-右,右,1220,0,60,720,xuanfuchuang-you@0#0#1280#720.png
+悬浮窗-上,上,0,0,1280,60,xuanfuchuang-shang@0#-1#1280#14.png
+悬浮窗-左,左,0,0,60,720,xuanfuchuang-zuo@0#0#1280#720.png
+悬浮窗-下,下,0,660,1280,60,xuanfuchuang-xia@0#0#1280#720.png
+悬浮窗,悬浮窗,0,0,1280,720,xuanfuchuang@0#0#1280#720.png

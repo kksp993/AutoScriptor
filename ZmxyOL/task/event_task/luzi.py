@@ -9,14 +9,14 @@ from logzero import logger
 def task(battle_loop: int = 1000):
     from ZmxyOL.battle.character.hero import h
     TASK_TABLE_LIST = [
-        # "龙宫",
+        "龙宫",
         # "九重天",
         # "南天王殿·精英",
-        # "南天王殿·终",
+        "南天王殿·终",
         # "西天王殿·精英",
-        # "西天王殿·终",
-        "北天王殿·终",
-        "彩虹楼",
+        "西天王殿·终",
+        # "北天王殿·终",
+        # "彩虹楼",
         # "东天王殿", 
         # "朝会殿",
         "凌霄宝殿",

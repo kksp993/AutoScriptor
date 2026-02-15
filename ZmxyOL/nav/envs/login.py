@@ -22,10 +22,11 @@ def login(account: str=None, password: str=None, character_name: str=None, chara
         click(B(719, 536, 144, 26))
         click(T("授权并登录"), if_exist=True, timeout=3)
         click(T("添加账号"), if_exist=True)
-        locate(T("手机号验证登录"), 10)
+        locate(T("手机号验证登录"), 3)
         if ui_idx((T("请输入手机号或用户名"),T("账号登录"),T("进入游戏",color="橙色"))) in [0,1]:
             click(T("账号登录"), delay=1, repeat=2)
-            click(T("请输入手机号或用户名"))
+            wait_for_appear(T("账号密码登录"))
+            click(T("请输入手机号或用户名"), if_exist=True)
             input(account)
             click(T("请输入密码"))
             input(password)
@@ -44,7 +45,7 @@ def login(account: str=None, password: str=None, character_name: str=None, chara
             sleep(1)
             click(B(104,63+70*(character_index-6),149,54))
     else:
-        if character_name: click(T(character_name),delay=1)
+        if character_name: click(T(character_name), delay=1, timeout=60)
         else:
             if not cfg["game"].get("character_name", None):
                 raise ValueError("请先配合完成安全密码验证")

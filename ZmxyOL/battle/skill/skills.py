@@ -53,7 +53,7 @@ def battle_loop(
     self: Hero,
     battle_weight:int=1,
     delay:float=0,
-    max_duration:int=300/3
+    max_duration:int=300
 ):
     """
         try_exit 为 True 时，退出循环
@@ -63,6 +63,9 @@ def battle_loop(
     self.sleep(delay)
     op_count = 0
     switch_base("nemu")
+    from ZmxyOL.battle.character.hero import h
+    h.huashen()
+    niter = 0
     from time import time
     start_time = time()
     bg.set_signal("try_exit", False)
@@ -77,6 +80,9 @@ def battle_loop(
                 op_count += 1
         else:
            self.sleep(1)
+        if time() - start_time > 60 * niter:
+            h.huashen()
+            niter += 1
         if time() - start_time > max_duration:
             raise RuntimeError(f"battle_loop 超时: {max_duration}秒, 战斗持续时间超过 {max_duration}秒")
     return self

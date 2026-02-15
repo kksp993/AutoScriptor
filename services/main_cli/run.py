@@ -104,6 +104,7 @@ def find_and_execute_tasks(
     total_count = len(ui_branch.keys())
     from datetime import datetime
     now = datetime.now()
+    mm.cur_env=mm.cur_loc=None
 
     for key, ui_node in list(ui_branch.items()):
         path_list = current_path + [key]

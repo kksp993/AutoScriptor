@@ -124,8 +124,9 @@ def battle_tasks(self:"Hero", task_table:list[str], speed_x:int=1):#type: ignore
         click(T("开始挑战"))
         if ui_T(T("确定",box=Box(658,495,142,82)),1):
             click(T("确定",box=Box(658,495,142,82)), if_exist=True)
-            try_close_via_x()
-            click(I("回家"))
+            # try_close_via_x()
+            click(B(1061,172,47,50))
+            ensure_in("村庄")
         else:
             wait_for_disappear(I("加载中"))
             self.set(has_cd=False, speed_x=speed_x).heaven_battle(exit_loc=v["exit_loc"])
