@@ -12,7 +12,7 @@ from logzero import logger
 from AutoScriptor import bg, mixctrl, click
 from AutoScriptor.core.targets import BoxTarget
 from AutoScriptor.utils.box import Box
-from AutoScriptor.vlm.frontend import VLMAgent
+from AutoScriptor.vlm.vlm import VLMAgent
 from AutoScriptor.vlm.utils import parse_qwen_vl_coordinates
 
 SCREENSHOT_PATH = "screenshot.png"
@@ -49,7 +49,7 @@ if __name__ == "__main__":
         res = ""
         history = []
         while "__END_OF_TASK__" not in res:
-            res = run_agent("点击腾蛇飞升", history)
+            res = run_agent("4399悬浮窗在哪", history)
             history.append(f"Action Output: {res}")
             if res in history[:-2]:
                 logger.warning("检测到死循环，强制停止")
