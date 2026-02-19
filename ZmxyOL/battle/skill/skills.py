@@ -41,7 +41,8 @@ def battle(self: Hero):
             self.move_right()
     else:
         self.prop(True, True, True)
-        self.sleep(0.3).move_right()
+        self.sleep(0.3)
+        self.jump().move_right(50, directly=True)
         self.skill(1)
         self.skill(4)
         self.skill(3)
@@ -89,15 +90,17 @@ def battle_loop(
 
 
 @combo
-def way_to_exit(self: Hero, until: str = "", exit_loc: float = 0, timeout: float = 60):
+def way_to_exit(self: Hero, until: str = "", exit_loc: float = 0, timeout: float = 120):
     """当看见出口时，点击左键，直到出去；超时后抛出异常"""
     from time import time
     with _way_to_exit_lock:
         start_time = time()
         # switch_base("mumu")
         self.move_right(400).move_left(exit_loc)
-        sleep(1)
+        sleep(3)
         while not until():
+            if time() - start_time > timeout/3:
+                self.move_right(2000, directly=True)
             if time() - start_time > timeout:
                 raise RuntimeError(f"way_to_exit 超时: {timeout}秒, 条件 {until.__name__} 未满足")
             self.sleep(0.5)

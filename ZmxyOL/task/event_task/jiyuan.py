@@ -6,10 +6,10 @@ from ZmxyOL import *
 from logzero import logger
 
 @register_task
-def task(battle_loop: int = 1000):
+def task():
     from ZmxyOL.battle.character.hero import h
-    h.set(has_cd=False, speed_x=3)
-    h.kunlunshan_task(battle_loop=battle_loop)
+    from ZmxyOL.battle.tasks import JIYUAN_TASK_TABLE
+    h.battle_tasks(task_table=JIYUAN_TASK_TABLE)
 
 if __name__ == "__main__":
     try:
