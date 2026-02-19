@@ -44,6 +44,12 @@ print(f"mumu_manager_path: {mumu_manager_path}")
 mumu = Mumu().select(selected_emulator_index)
 mumu.power.start(app_to_start) if cfg["app"]["auto_start"] else None
 mixctrl = MixControl(mumu)
+
+# 性能优化：提升进程优先级 + 阻止系统休眠 + 延迟提升 MuMu 进程优先级
+from AutoScriptor.utils.perf import boost, boost_mumu_deferred
+boost(boost_mumu=False)          # 先提升 Python 进程自身
+boost_mumu_deferred(delay=5.0)   # 等模拟器完全启动后再提升 MuMu 进程
+
 logger.info("编排器初始化完成.")
 success = False
 intervals = [1, 2, 3, 4, 5, 5, 5, 5]
