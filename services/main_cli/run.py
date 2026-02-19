@@ -441,6 +441,9 @@ def run_cli_navigation():
             questionary.press_any_key_to_continue().ask()
 
         elif action == "--execute--":
+            # 执行前确保性能优化已启用（MuMu 进程此时应已就绪）
+            from AutoScriptor.utils.perf import boost
+            boost()
             while mixctrl.app.state(cfg["app"]["app_to_start"]) != "running":
                 mixctrl.app.launch(cfg["app"]["app_to_start"])
                 sleep(5)
@@ -545,4 +548,10 @@ if __name__ == "__main__":
         run_cli_navigation()
     except KeyboardInterrupt:
         traceback.print_exc()
-        logger.info("\n程序已退出")   
+        logger.info("\n程序已退出")
+    finally:
+        try:
+            from AutoScriptor.utils.perf import unboost
+            unboost()
+        except Exception:
+            pass   

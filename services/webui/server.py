@@ -288,20 +288,8 @@ def refresh_config():
         logger.error("refresh error: %s", e)
         return jsonify({"error": str(e)}), 500
 
-# 添加：设置线程为高优先级
-def _set_thread_high_priority(thread_obj):
-    try:
-        THREAD_SET_INFORMATION = 0x0020
-        THREAD_QUERY_INFORMATION = 0x0040
-        # 使用 native_id 获取操作系统线程 ID
-        tid = getattr(thread_obj, 'native_id', None) or thread_obj.ident
-        handle = ctypes.windll.kernel32.OpenThread(THREAD_SET_INFORMATION | THREAD_QUERY_INFORMATION, False, tid)
-        if handle:
-            # THREAD_PRIORITY_HIGHEST = 2
-            ctypes.windll.kernel32.SetThreadPriority(handle, 2)
-            ctypes.windll.kernel32.CloseHandle(handle)
-    except Exception as e:
-        logger.warning("set thread priority failed: %s", e)
+# 线程优先级提升（委托给 perf 模块）
+from AutoScriptor.utils.perf import set_thread_high_priority as _set_thread_high_priority
 
 @app.route('/run', methods=['POST'])
 def run_tasks():
