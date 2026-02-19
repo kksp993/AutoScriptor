@@ -23,5 +23,10 @@
         "url":"YOUR_LLM_URL # Not Available Yet. Stay Tuned."
     },
     "encryption": {},
-    "tasks": {}
+    "tasks": {},
+    "status": {
+        "kunlunshan": {
+            "has_YuxuDian_ticket": false
+        }
+    }
 }

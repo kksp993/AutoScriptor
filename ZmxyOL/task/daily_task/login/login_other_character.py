@@ -11,7 +11,7 @@ def login_other_role(character_index=0, character_name="请输入文本", clear_
     logger.info(f"登录其他角色: {character_index}, {character_name}")
     login(character_index=character_index, character_name=character_name)
     from ZmxyOL.task.daily_task.bmkj.bmkj import task as bmkj_task
-    bmkj_task(clear_all=True, lianbao=False)
+    bmkj_task(clear_all=False, lianbao=False)
     ensure_in("登录")
 
 if __name__ == "__main__":
