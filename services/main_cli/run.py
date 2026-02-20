@@ -46,6 +46,10 @@ task_menu = cfg["tasks"]
 ui_tasks = copy.deepcopy(cfg["tasks"])
 task_manager = TaskManager()
 
+# 初始化调度器
+from services.core.scheduler import scheduler, SchedulerState
+scheduler.set_task_manager(task_manager)
+
 def is_leaf_node(node: Dict[str, Any]) -> bool:
     """判断一个节点是否为叶子节点（即一个具体的任务）。"""
     return 'fn' in node and 'on' in node
@@ -113,7 +117,9 @@ def find_and_execute_tasks(
         # Case A: UI中是目录，Master中也应该是目录
         if isinstance(ui_node, dict) and not is_ui_task_node(ui_node):
             if isinstance(master_node, dict):
-                executed_count += find_and_execute_tasks(master_node, ui_node, path_list)[0]
+                sub_exec, sub_fail, _ = find_and_execute_tasks(master_node, ui_node, path_list)
+                executed_count += sub_exec
+                failed_count += sub_fail
             else:
                 logger.warning(f"⚠️ 跳过目录: {path_str} - 主配置与UI状态不同步 (UI为目录，主配置中不存在或不是目录)。")
                 continue
@@ -134,7 +140,7 @@ def find_and_execute_tasks(
             prev_ts = master_node.get('next_exec_time', 0)
             prev_on = master_node.get('on', False)
 
-            success_count, failed_count = task_manager.execute_tasks([task_key])
+            success_count, failed_count_task = task_manager.execute_tasks([task_key])
 
             # 执行后，同步 UI 节点，并判断是否视为成功
             refreshed_master = get_node_by_path(cfg["tasks"], path_list)
@@ -145,11 +151,11 @@ def find_and_execute_tasks(
                 ui_node['on'] = new_on
 
             executed_count += success_count
-            failed_count += failed_count
+            failed_count += failed_count_task
             logger.info(f"▶️  [{executed_count}/{total_count}] 执行完毕: {path_str}，等待3秒")
             sleep(3)
                 
-    return executed_count, total_count
+    return executed_count, failed_count, total_count
 
 def update_task_post_execution(
     master_task_node: Dict[str, Any], 
@@ -195,8 +201,16 @@ def update_task_post_execution(
         logger.info(f"    - 状态更新: 每周任务, 下次执行时间设置为 {next_exec_dt.strftime('%Y-%m-%d %H:%M')}")
 
     elif "活动任务" in category:
-        logger.info(f"    - 状态更新: 活动任务, 状态保持不变。")
-        pass
+        # 活动任务视为 24h 刷新，同每日任务
+        if now.hour >= 5:
+            next_date = (now + timedelta(days=1)).date()
+        else:
+            next_date = now.date()
+        next_exec_dt = datetime.combine(next_date, datetime.min.time().replace(hour=5))
+        new_timestamp = next_exec_dt.timestamp()
+        master_task_node['next_exec_time'] = new_timestamp
+        ui_task_node['next_exec_time'] = new_timestamp
+        logger.info(f"    - 状态更新: 活动任务(24h), 下次执行时间设置为 {next_exec_dt.strftime('%Y-%m-%d %H:%M')}")
 
     else:  # "一般任务"
         master_task_node['on'] = False
@@ -391,12 +405,17 @@ def run_cli_navigation():
             choices.append(questionary.Choice(title=f"💾 保存配置{unsaved_marker}【S】", value="--save--"))
             choices.append(questionary.Choice(title="🚀 开始执行【R】", value="--execute--"))
         else:
+            # 调度器状态指示
+            sched_icons = {"pending": "🟢", "running": "🟡", "error": "🔴"}
+            sched_state = scheduler.state.value
+            sched_icon = sched_icons.get(sched_state, "⚪")
+            sched_label = scheduler.state_label
             choices.append(questionary.Choice(title="🚪 退出程序【Q】", value="--exit--"))
             auth_status = "✅已验证" if cfg["game"].get("character_name", None) else "❌未验证"
             choices.append(questionary.Choice(title=f"👤 账号管理【A】{auth_status}", value="--Account--"))
             choices.append(questionary.Choice(title="🏷 标注目标【L】", value="--label--"))
             choices.append(questionary.Choice(title="🔍 搜索任务【F】", value="--search--"))
-            choices.append(questionary.Choice(title="🚀 开始执行【R】", value="--execute--"))
+            choices.append(questionary.Choice(title=f"🚀 开始执行【R】 {sched_icon}{sched_label}", value="--execute--"))
             choices.append(questionary.Choice(title="🔄 重新加载【T】", value="--reload--"))
 
         action = questionary.select("请选择:", choices=choices, use_search_filter=True, use_jk_keys=False).ask()
@@ -441,9 +460,14 @@ def run_cli_navigation():
             questionary.press_any_key_to_continue().ask()
 
         elif action == "--execute--":
-            # 执行前确保性能优化已启用（MuMu 进程此时应已就绪）
-            from AutoScriptor.utils.perf import boost
-            boost()
+            # 账密检验：未验证时拒绝执行
+            character_name = cfg._config.get("game", {}).get("character_name", "")
+            if not character_name:
+                logger.warning("⚠️ 请先验证账号密码后再执行任务（主菜单 → 👤 账号管理）")
+                questionary.press_any_key_to_continue().ask()
+                continue
+            # 激活调度器
+            scheduler.activate()
             while mixctrl.app.state(cfg["app"]["app_to_start"]) != "running":
                 mixctrl.app.launch(cfg["app"]["app_to_start"])
                 sleep(5)
@@ -451,7 +475,9 @@ def run_cli_navigation():
             ui_node_counterpart = get_node_by_path(ui_tasks, navigation_path)
             # 全局执行异常处理
             try:
-                total_executed, total_count = find_and_execute_tasks(master_node_to_execute, ui_node_counterpart, navigation_path)
+                total_executed, total_failed, total_count = find_and_execute_tasks(master_node_to_execute, ui_node_counterpart, navigation_path)
+                # 反馈结果给调度器
+                scheduler.record_result(total_executed, total_failed)
                 if total_executed > 0:
                     cfg.save_config()
                     logger.info(f"\n✅ 执行完毕，{total_executed}/{total_count}个任务的状态变更已自动保存！")
@@ -462,6 +488,9 @@ def run_cli_navigation():
                 logger.info("🔴 任务执行已中断，返回菜单")
                 questionary.press_any_key_to_continue().ask()
                 continue
+            finally:
+                # 执行后行为（关闭模拟器/关闭游戏/无操作）
+                scheduler._post_execution_action()
 
         elif action == "--Account--":
             res = questionary.select(
@@ -471,6 +500,16 @@ def run_cli_navigation():
                 use_jk_keys=False,
             ).ask()
             if res == "更新账号信息【U】":
+                # 覆盖确认：检查是否已有加密数据（未解密时 game 区块不存在）
+                has_existing = bool(cfg._config.get("encryption", {}).get("encrypted_data", ""))
+                if has_existing:
+                    confirm = questionary.confirm(
+                        "更新账密会覆盖当前已有的设置，是否继续？",
+                        default=False
+                    ).ask()
+                    if not confirm:
+                        logger.info("已取消更新。")
+                        continue
                 set_config()
                 cfg.save_config()
                 logger.info("账号信息已更新并保存！")
@@ -550,6 +589,11 @@ if __name__ == "__main__":
         traceback.print_exc()
         logger.info("\n程序已退出")
     finally:
+        try:
+            scheduler.deactivate()
+            scheduler.stop()
+        except Exception:
+            pass
         try:
             from AutoScriptor.utils.perf import unboost
             unboost()

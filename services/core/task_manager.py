@@ -149,18 +149,32 @@ class TaskManager:
         """
         在任务成功执行后，根据类别，同时更新cfg。
         早上5点之后视为第二天。
+        支持任务自定义 next_exec_offset_hours 字段：
+        - 若任务节点中存在 next_exec_offset_hours（数值），则以当前时间 + N 小时作为下次执行时间
+        - 优先级：函数参数 > 任务节点字段 > 默认类别规则
         """
         now = datetime.datetime.now()
         ts = None
-        if not offset_hours and not next_date:
+
+        # 检查任务节点是否自定义了 offset_hours
+        task_data = dpath.get(cfg["tasks"], task)
+        task_custom_offset = task_data.get("next_exec_offset_hours", None)
+        if task_custom_offset is not None and not offset_hours and not next_date:
+            # 任务自定义：当前时间 + N 小时
+            offset_hours = int(task_custom_offset)
+            ts = (now + datetime.timedelta(hours=offset_hours)).timestamp()
+            dpath.set(cfg["tasks"], task + "/next_exec_time", ts)
+        elif not offset_hours and not next_date:
             if task.startswith("每日任务"):
                 ts = next_exec_dt(now, next_date_enum.tomorrow, 0)
                 dpath.set(cfg["tasks"], task + "/next_exec_time", ts)
             elif task.startswith("每周任务"):
                 ts = next_exec_dt(now, next_date_enum.next_week, 0)
                 dpath.set(cfg["tasks"], task + "/next_exec_time", ts)
-            elif task.startswith("活动任务"):   
-                return
+            elif task.startswith("活动任务"):
+                # 活动任务视为 24h 刷新，同每日任务
+                ts = next_exec_dt(now, next_date_enum.tomorrow, 0)
+                dpath.set(cfg["tasks"], task + "/next_exec_time", ts)
             elif task.startswith("一般任务"):
                 dpath.set(cfg["tasks"], task + "/on", False)
         else:
@@ -169,7 +183,7 @@ class TaskManager:
         if ts is not None:
             human = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M')
             logger.info(f"    - 状态更新: 下次执行时间设置为 {human}")
-        print(dpath.get(cfg["tasks"], task + "/next_exec_time"))
+        logger.debug("next_exec_time = %s", dpath.get(cfg["tasks"], task + "/next_exec_time"))
         cfg.save_config()
     
 
@@ -319,7 +333,9 @@ class TaskManager:
                 pass
 
 if __name__ == "__main__":
+    from AutoScriptor.utils.perf import boost, unboost
     try:
+        boost()
         task_manager = TaskManager()
         task_manager.execute_tasks([
             '每日任务/天庭/地狱混沌', 
@@ -349,4 +365,5 @@ if __name__ == "__main__":
             '每日任务/登录/登录其他角色'
         ])
     finally:
+        unboost()
         bg.stop()

@@ -45,10 +45,17 @@ mumu = Mumu().select(selected_emulator_index)
 mumu.power.start(app_to_start) if cfg["app"]["auto_start"] else None
 mixctrl = MixControl(mumu)
 
-# 性能优化：提升进程优先级 + 阻止系统休眠 + 延迟提升 MuMu 进程优先级
-from AutoScriptor.utils.perf import boost, boost_mumu_deferred
-boost(boost_mumu=False)          # 先提升 Python 进程自身
-boost_mumu_deferred(delay=5.0)   # 等模拟器完全启动后再提升 MuMu 进程
+# 性能优化：延迟执行，只在首次实际使用 API 时才 boost（避免验证账号时触发）
+_boosted = False
+def _ensure_boosted():
+    """延迟 boost：只在首次真正使用 API 时才执行性能优化。"""
+    global _boosted
+    if _boosted:
+        return
+    _boosted = True
+    from AutoScriptor.utils.perf import boost, boost_mumu_deferred
+    boost(boost_mumu=False)          # 先提升 Python 进程自身
+    boost_mumu_deferred(delay=5.0)   # 等模拟器完全启动后再提升 MuMu 进程
 
 logger.info("编排器初始化完成.")
 success = False
@@ -175,6 +182,7 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
         timeout: 超时时间
         assure_stable: 是否保证稳定,如果为True，则每次定位都会保证稳定，直到找到目标或超时
     """
+    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     first_attempt = True
     t = time.time()
     # 元组任一满足
@@ -228,7 +236,8 @@ def click(
         until: callable = None,
         assure_stable: bool = True,
         save_screenshot: bool = True
-    ):
+):
+    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     """
     点击目标元素
     
@@ -329,6 +338,7 @@ def swipe(
         delay: float = 0,
         ensure_stable_after_swipe: bool = True,
     ):
+    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     start_box = locate(start_target, 3) if not isinstance(start_target, BoxTarget) else start_target.box
     end_box = locate(end_target, 3, assure_stable=False) if not isinstance(end_target, BoxTarget) else end_target.box
     if start_box is None or end_box is None: raise RuntimeError(f"Swipe {start_target} to {end_target} failed, for failed to locate target")
@@ -338,6 +348,7 @@ def swipe(
     return True
 
 def input(text: str, target_field: Target|tuple[Target, ...] = None):
+    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     if target_field:
         click(target_field)
         time.sleep(0.5)
