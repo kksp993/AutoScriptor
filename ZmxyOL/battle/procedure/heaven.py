@@ -105,10 +105,11 @@ def heaven_battle(
     )
     bg.add(
         name="稍后",
-        identifier=I("稍后"),
+        identifier=(I("稍后"),T("稍后")),
         callback=lambda: [
-            click(I("稍后"), delay=1, repeat=3)
-        ]
+            click((I("稍后"),T("稍后")), delay=1, repeat=3)
+        ],
+        once=False
     )
     self.battle_loop(battle_weight=2, delay=2)
     bg.set_signal("try_exit", False)

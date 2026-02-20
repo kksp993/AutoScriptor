@@ -45,6 +45,7 @@ def battle_callback(cancel_on_failed:bool=True):
             failed_callback(),
         ]
     )
+    wait_for_disappear(I("加载中"))
     h.set(True,3).battle_loop()
 
 

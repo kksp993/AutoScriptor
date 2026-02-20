@@ -149,6 +149,13 @@
                       <template v-else-if="typeof value === 'number'">
                         <el-input-number v-model="filteredConfig[secKey][key]" :min="0"></el-input-number>
                       </template>
+                      <template v-else-if="key === 'post_execution'">
+                        <el-select v-model="filteredConfig[secKey][key]">
+                          <el-option label="什么都不做" value="NULL"></el-option>
+                          <el-option label="关闭模拟器" value="CLOSE_MUMU"></el-option>
+                          <el-option label="仅关闭游戏" value="CLOSE_GAME_ONLY"></el-option>
+                        </el-select>
+                      </template>
                       <template v-else>
                         <el-input v-model="filteredConfig[secKey][key]"></el-input>
                       </template>
@@ -211,6 +218,18 @@
                   <i class="fa fa-eraser mr-1"></i>一键清除
                 </button>
                 <span v-if="characterName" class="px-2 py-1 bg-secondary/10 text-secondary rounded text-sm self-center">角色ID：{{ characterName }}</span>
+                <!-- 调度器状态指示 -->
+                <span class="px-2 py-1 rounded text-sm self-center font-medium"
+                      :style="{ backgroundColor: schedulerStatus.color === 'green' ? '#dcfce7' : schedulerStatus.color === 'orange' ? '#fef3c7' : schedulerStatus.color === 'red' ? '#fecaca' : '#f1f5f9',
+                                color: schedulerStatus.color === 'green' ? '#166534' : schedulerStatus.color === 'orange' ? '#92400e' : schedulerStatus.color === 'red' ? '#991b1b' : '#475569' }">
+                  {{ schedulerStatus.color === 'green' ? '🟢' : schedulerStatus.color === 'orange' ? '🟡' : '🔴' }}
+                  调度: {{ schedulerStatus.label || '未知' }}
+                </span>
+                <button v-if="schedulerStatus.state === 'error'"
+                        class="px-2 py-1 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200 transition-colors self-center"
+                        @click="resetScheduler">
+                  <i class="fa fa-refresh mr-1"></i>恢复调度
+                </button>
               </div>
 
               <!-- 日志区域 -->
@@ -509,6 +528,8 @@
         const characterName = ref(((window.configData && window.configData.game) ? window.configData.game.character_name : '') || '');
         const addDialogVisible = ref(false);
         const addForm = reactive({ account: '', password: '', character_name: '', security_key: '' });
+        // 调度器状态
+        const schedulerStatus = reactive({ state: 'pending', label: '待运行', color: 'green', consecutive_errors: 0 });
         const editModalVisible = ref(false); // 编辑模态框显隐
         const editTaskData = ref({}); // 待编辑的任务数据
         const editTaskPath = ref(""); // 待编辑任务的路径（用于标题）
@@ -540,10 +561,12 @@
           run_in_background: '后台运行',
           auto_start: '自动启动',
           max_retry: '最大重试',
+          debug_mode: '调试模式',
           use_gpu: '使用 GPU',
           index: '模拟器索引',
           adb_addr: 'ADB 地址',
           mumu_folder: 'MuMu 安装目录',
+          post_execution: '执行后动作',
           emu_path: '模拟器路径',
           adb_path: 'ADB 路径'
         };
@@ -727,6 +750,25 @@
           });
         }
 
+        // 调度器状态轮询
+        async function fetchSchedulerStatus() {
+          try {
+            const res = await fetch('/scheduler/status');
+            const data = await res.json();
+            Object.assign(schedulerStatus, data);
+          } catch (e) { /* ignore */ }
+        }
+        async function resetScheduler() {
+          try {
+            const res = await fetch('/scheduler/reset', { method: 'POST' });
+            const data = await res.json();
+            Object.assign(schedulerStatus, data);
+            ElementPlus.ElMessage.success('调度器已恢复');
+          } catch (e) {
+            ElementPlus.ElMessage.error('恢复失败: ' + e);
+          }
+        }
+
         // 初始化：加载数据 + 启动日志接收
         function init() {
           console.log("配置数据已加载");
@@ -735,6 +777,9 @@
           refreshConfig();
           // 页面加载完成后滚动到底部
           setTimeout(scrollToBottom, 100);
+          // 调度器状态轮询（每 30 秒刷新一次）
+          fetchSchedulerStatus();
+          setInterval(fetchSchedulerStatus, 30000);
         }
 
         return {
@@ -761,6 +806,10 @@
           removeListItem,
           refreshConfig,
           init,
+          // 调度器
+          schedulerStatus,
+          resetScheduler,
+          fetchSchedulerStatus,
           // 账号验证
           verifyAccount: async () => {
             try {
@@ -779,13 +828,34 @@
           addForm,
           openAddAccountDialog: () => { addDialogVisible.value = true; },
           submitAddAccount: async () => {
-            const payload = { account: addForm.account, password: addForm.password, character_name: addForm.character_name, security_key: addForm.security_key };
-            const res = await fetch('/account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-            const data = await res.json();
-            characterName.value = data.character_name || '';
-            if (!configData.game) configData.game = {};
-            configData.game.character_name = characterName.value;
-            addDialogVisible.value = false;
+            try {
+              // 第一次请求：检查是否需要确认覆盖
+              const payload = { account: addForm.account, password: addForm.password, character_name: addForm.character_name, security_key: addForm.security_key };
+              const res1 = await fetch('/account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+              const data1 = await res1.json();
+              if (data1.need_confirm) {
+                // 弹出确认对话框
+                try {
+                  await ElementPlus.ElMessageBox.confirm(data1.message, '确认覆盖', { confirmButtonText: '继续', cancelButtonText: '取消', type: 'warning' });
+                } catch (e) {
+                  // 用户取消
+                  return;
+                }
+                // 确认后再次请求
+                payload.confirmed = true;
+                const res2 = await fetch('/account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                const data2 = await res2.json();
+                characterName.value = data2.character_name || '';
+              } else {
+                characterName.value = data1.character_name || '';
+              }
+              if (!configData.game) configData.game = {};
+              configData.game.character_name = characterName.value;
+              addDialogVisible.value = false;
+              ElementPlus.ElMessage.success('账号信息已更新');
+            } catch (e) {
+              ElementPlus.ElMessage.error('更新失败: ' + e);
+            }
           },
           // 清空日志（前端）
           clearLogs: () => {
@@ -830,7 +900,12 @@
               .catch(e => console.error('Stop error:', e));
           },
          
-          startRun: () => {
+          startRun: async () => {
+            // 账密检验
+            if (!characterName.value) {
+              ElementPlus.ElMessage.warning('请先验证账号密码后再执行任务');
+              return;
+            }
             const now = Date.now() / 1000;
             const tasks = [];
             const basePrefix = (activeTabLabel.value ? activeTabLabel.value + '/' : '') + (activeGroupPath.value ? activeGroupPath.value + '/' : '');
@@ -858,13 +933,23 @@
             }
             traverse(subtree);
             console.debug('Sending tasks:', tasks);
-            fetch('/run', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(tasks)
-            })
-            .then(response => response.json())
-            .then(data => console.debug('Server response:', data));
+            try {
+              const response = await fetch('/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(tasks)
+              });
+              const data = await response.json();
+              if (response.status === 403) {
+                ElementPlus.ElMessage.warning(data.message || '请先验证账号密码');
+                return;
+              }
+              console.debug('Server response:', data);
+              // 刷新调度器状态
+              fetchSchedulerStatus();
+            } catch (e) {
+              console.error('Run error:', e);
+            }
           },
         };
       },

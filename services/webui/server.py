@@ -72,6 +72,10 @@ ORDER_MAP={}
 TASK_MANAGER = TaskManager()
 RUN_THREAD = None
 
+# 初始化调度器并注入 TaskManager
+from services.core.scheduler import scheduler, SchedulerState
+scheduler.set_task_manager(TASK_MANAGER)
+
 # 本地静态依赖目录与远端备选地址
 VENDOR_DIR = os.path.join(os.path.dirname(__file__), 'vendor')
 VENDOR_SOURCES = {
@@ -294,11 +298,20 @@ from AutoScriptor.utils.perf import set_thread_high_priority as _set_thread_high
 @app.route('/run', methods=['POST'])
 def run_tasks():
     global ORDER_MAP, RUN_THREAD
+
+    # 账密检验：未验证时拒绝执行
+    character_name = cfg._config.get("game", {}).get("character_name", "")
+    if not character_name:
+        return jsonify({'status': 'error', 'message': '请先验证账号密码后再执行任务'}), 403
+
     tasks = request.get_json()
     logger.debug("Received tasks: %s", tasks)
     sorted_tasks = sorted(tasks, key=lambda x: ORDER_MAP.get(x, float('inf')))
+
     # 后台线程执行，立即返回，避免阻塞请求线程
     def _run(ts):
+        from AutoScriptor.utils.perf import boost, unboost
+        boost()
         try:
             TASK_MANAGER.execute_tasks(ts)
             logger.info("========== 所有任务执行完成 ==========")
@@ -310,10 +323,20 @@ def run_tasks():
             logger.info("========== 任务执行已被中断 ==========")
         except Exception as e:
             logger.error("background run error: %s", e)
+            scheduler._consecutive_errors += 1
+            if scheduler._consecutive_errors >= 3:
+                scheduler.mark_error()
+        finally:
+            unboost()
+            # 执行后行为
+            scheduler._post_execution_action()
+
     RUN_THREAD = Thread(target=_run, args=(sorted_tasks,), daemon=True)
     RUN_THREAD.start()
     # 启动后设置高优先级
     _set_thread_high_priority(RUN_THREAD)
+    # 激活调度器（标记为运行中）
+    scheduler.activate()
     return jsonify({'status': 'ok', 'tasks': sorted_tasks}), 200
 
 @app.route('/stop', methods=['POST'])
@@ -412,6 +435,16 @@ def add_account():
     password = data.get('password', '')
     character_name = data.get('character_name', '')
     security_key = data.get('security_key', '')
+    confirmed = data.get('confirmed', False)
+
+    # 如果已有账密且未确认覆盖，返回需要确认
+    existing_name = cfg._config.get("game", {}).get("character_name", "")
+    if existing_name and not confirmed:
+        return jsonify({
+            "need_confirm": True,
+            "message": f"更新账密会覆盖当前已有的设置（当前角色: {existing_name}），是否继续？"
+        }), 200
+
     # 将敏感数据按现有逻辑写入加密字段，保持 cfg 前后一致
     try:
         from AutoScriptor.crypto.update_config import config_manager
@@ -423,6 +456,17 @@ def add_account():
         logger.error("add_account error: %s", e)
     return jsonify({"character_name": character_name})
 
+# 调度器状态查询
+@app.route('/scheduler/status', methods=['GET'])
+def scheduler_status():
+    return jsonify(scheduler.status_dict()), 200
+
+# 调度器手动恢复
+@app.route('/scheduler/reset', methods=['POST'])
+def scheduler_reset():
+    scheduler.reset()
+    return jsonify(scheduler.status_dict()), 200
+
 def run_webui():
     read_config()
     # 启动日志推送后台任务
@@ -432,15 +476,16 @@ def run_webui():
     socketio.run(app, host='127.0.0.1', port=5000, debug=True, use_reloader=False)
 
 def shutdown_webui():
+    from AutoScriptor.utils.perf import unboost
     try:
+        scheduler.deactivate()
+        scheduler.stop()
+        unboost()
         bg.stop()
-    except Exception:
-        pass
-    try:
         # 在 Socket.IO 的 eventlet 上下文中触发停止，避免跨线程/绿线程停止失效
         socketio.start_background_task(target=socketio.stop)
     except Exception:
-        pass
+        logger.error("shutdown_webui error: %s", e)
 
 if __name__ == '__main__':
     try:
@@ -450,8 +495,9 @@ if __name__ == '__main__':
         traceback.print_exc()
         logger.info("程序已退出")
     finally:
+        from AutoScriptor.utils.perf import unboost 
         try:
-            bg.stop()
             shutdown_webui()
-        except Exception:
-            pass
+            unboost()
+        except Exception as e:
+            logger.error("shutdown_webui error: %s", e)
