@@ -15,11 +15,34 @@ registration_counter = 0
  
 
 
-def register_task(func):
+def register_task(func=None, *, default_offset_hours=None, **task_kwargs):
     """
-    A decorator that registers a function into the global 'menu' dictionary
-    based on its file path relative to a 'task' directory.
+    装饰器：根据函数所在文件路径（'task' 目录下的子路径）将任务注册到全局 cfg["tasks"]。
+
+    支持以下可选参数（仅对指定任务生效）：
+      - default_offset_hours (int): 任务执行后延迟 N 小时再调度，写入 next_exec_offset_hours。
+      - 其他任意元数据参数 (key=value): 会原样写入到任务的配置节点，方便扩展。
+
+    保留 cfg 中的任务字段（自动管理，无需手动指定）：
+      - fn: 任务函数（内部包装）
+      - on: 是否启用（布尔）
+      - next_exec_time: 下次执行的 Unix 时间戳
+      - order: 注册顺序（整数，控制菜单排序）
+
+    扩展字段：
+      - next_exec_offset_hours: 自定义冷却时长（小时）
+      - 其他自定义字段：在装饰器中以 key=value 形式传入并存储
+
+    用法示例：
+      @register_task(default_offset_hours=10, priority="high", category="village")
+      def task():
+          ...
     """
+    if func is None:
+        # Decorator called with arguments
+        def wrapper(f):
+            return register_task(f, default_offset_hours=default_offset_hours)
+        return wrapper
     global registration_counter  # 引入全局计数器
     registration_counter += 1
     reg_order = registration_counter  # 当前注册顺序
@@ -86,6 +109,11 @@ def register_task(func):
         else:
             current_level[last_key] = {'fn': func, 'on': True, 'next_exec_time': 0}
             current_level[last_key]['order'] = reg_order  # 保存注册顺序
+        if default_offset_hours is not None:
+            current_level[last_key]['next_exec_offset_hours'] = default_offset_hours
+        # 存储其他自定义参数
+        for key, value in task_kwargs.items():
+            current_level[last_key][key] = value
         # 为任务添加参数配置
         sig = inspect.signature(func)
         defaults = {}

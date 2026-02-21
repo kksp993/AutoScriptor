@@ -90,12 +90,59 @@ class Scheduler:
 
     # ── 后台循环 ──
 
+    def _get_wait_interval(self):
+        """计算下一次等待的间隔时间，基于任务的最早到期时间。"""
+        from AutoScriptor.utils.constant import cfg
+        import time
+        now_ts = time.time()
+        next_times = []
+
+        def _collect(node: dict):
+            for key, val in node.items():
+                if not isinstance(val, dict):
+                    continue
+                if 'fn' in val and 'on' in val and val.get('on'):
+                    next_times.append(val.get('next_exec_time', now_ts))
+                else:
+                    _collect(val)
+
+        _collect(cfg["tasks"])
+        # 过滤未来时间，计算最早到期任务的间隔
+        future = [t for t in next_times if t > now_ts]
+        if future:
+            return max(min(future) - now_ts, 0)
+        return CHECK_INTERVAL
+
+    def get_next_execution_timestamp(self):
+        """返回最早到期任务的绝对时间戳，如果没有到期任务则返回 None。"""
+        from AutoScriptor.utils.constant import cfg
+        import time
+        now_ts = time.time()
+        next_times = []
+
+        def _collect(node: dict):
+            for key, val in node.items():
+                if not isinstance(val, dict):
+                    continue
+                if 'fn' in val and 'on' in val and val.get('on'):
+                    next_times.append(val.get('next_exec_time', now_ts))
+                else:
+                    _collect(val)
+
+        _collect(cfg["tasks"])
+        # 过滤未来时间，取最早到期任务时间
+        future = [t for t in next_times if t > now_ts]
+        if future:
+            return min(future)
+        return None
+
     def _loop(self):
-        """主循环：用 Event.wait(timeout) 实现可中断的 sleep。"""
-        while not self._stop.wait(CHECK_INTERVAL):
-            if self.state != SchedulerState.RUNNING:
-                continue
-            if not self._task_manager:
+        """主循环：根据最早到期任务时间动态 sleep，实现可中断的精确调度。"""
+        while True:
+            interval = self._get_wait_interval()
+            if self._stop.wait(interval):
+                break
+            if self.state != SchedulerState.RUNNING or not self._task_manager:
                 continue
             self._check_and_run()
 

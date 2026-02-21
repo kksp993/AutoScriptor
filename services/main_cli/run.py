@@ -47,7 +47,7 @@ ui_tasks = copy.deepcopy(cfg["tasks"])
 task_manager = TaskManager()
 
 # 初始化调度器
-from services.core.scheduler import scheduler, SchedulerState
+from services.core.scheduler import scheduler, SchedulerState, CHECK_INTERVAL
 scheduler.set_task_manager(task_manager)
 
 def is_leaf_node(node: Dict[str, Any]) -> bool:
@@ -288,8 +288,6 @@ def run_cli_navigation():
     navigation_path = []
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
-        from services.core.banner import _print_banner
-        _print_banner(banner_only=True)
         current_node = get_node_by_path(ui_tasks, navigation_path)
         # 如果当前节点是叶子任务且有参数，进入参数编辑模式
         if is_leaf_node(current_node) and current_node.get('params'):
@@ -361,7 +359,8 @@ def run_cli_navigation():
         has_unsaved_changes = (ui_tasks != cfg["tasks"])
         unsaved_marker = " *" if has_unsaved_changes else ""
         path_display = " -> ".join(navigation_path) if navigation_path else "主菜单"
-        logger.info(f"当前位置: {path_display}{unsaved_marker}\n")
+        print(f"【AutoScriptor】 Designed by KKsp993 | Repo: https://github.com/kksp993/AutoScriptor")
+        logger.info(f" 当前位置: {path_display}{unsaved_marker}\n")
 
         # 构建对齐的任务/目录列表
         now_ts = _datetime.now().timestamp()
@@ -410,6 +409,11 @@ def run_cli_navigation():
             sched_state = scheduler.state.value
             sched_icon = sched_icons.get(sched_state, "⚪")
             sched_label = scheduler.state_label
+            if sched_state == "running":
+                next_ts = scheduler.get_next_execution_timestamp()
+                if next_ts:
+                    next_run_dt = _datetime.fromtimestamp(next_ts)
+                    sched_label = f"{sched_label} (下次执行: {next_run_dt.strftime('%Y-%m-%d %H:%M')})"
             choices.append(questionary.Choice(title="🚪 退出程序【Q】", value="--exit--"))
             auth_status = "✅已验证" if cfg["game"].get("character_name", None) else "❌未验证"
             choices.append(questionary.Choice(title=f"👤 账号管理【A】{auth_status}", value="--Account--"))
