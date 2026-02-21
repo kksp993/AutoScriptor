@@ -63,7 +63,7 @@ _boosted_pids: list[int] = []          # 记录被提升过优先级的进程 PI
 def boost(
     keep_display: bool = False,
     process_priority: int = HIGH_PRIORITY_CLASS,
-    boost_mumu: bool = True,
+    boost_mumu: bool = False,
 ):
     """
     一键性能优化（幂等，多次调用安全）。
@@ -71,7 +71,8 @@ def boost(
     Args:
         keep_display:     True = 同时阻止显示器关闭（一般不需要，关显示器省电更好）
         process_priority: 当前 Python 进程的优先级（默认 HIGH）
-        boost_mumu:       是否同时提升 MuMu 模拟器相关进程的优先级
+        boost_mumu:       是否同时提升 MuMu 模拟器相关进程的优先级（默认关闭，
+                          避免干扰同机器上其他使用 MuMu 的程序）
     """
     global _boosted
     with _boost_lock:

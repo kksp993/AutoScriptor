@@ -30,7 +30,7 @@ def _render_center_line(content: str, inner_width: int, color_prefix: str = "", 
     suffix = RESET if prefix else ""
     return f"║{' ' * left}{prefix}{raw}{suffix}{' ' * right}║"
 
-def _print_banner(banner_only: bool = False):
+def _print_banner(small_banner: bool = False, banner_only: bool = False):
     """打印商业化风格的启动横幅，自动适配终端宽度。"""
     try:
         cols = shutil.get_terminal_size(fallback=(100, 24)).columns
@@ -39,7 +39,13 @@ def _print_banner(banner_only: bool = False):
     inner = max(72, min(cols - 4, 120))
     top = f"╔{'═' * inner}╗"
     bottom = f"╚{'═' * inner}╝"
-      # 使用 Socket.IO 服务器以支持 WebSocket
+    if small_banner:
+        print("------------------------------"*4)
+        print("   ╭──────╮              ╭╮╭╮╭╮╭╮   ")
+        print("   │  AutoScriptor  │    KKsp993     ")
+        print("   ╰──────╯    https://github.com/kksp993/AutoScriptor")
+        print("------------------------------"*4)
+        return
     print("------------------------------"*4)
     print("""
   ______               __                 ______                       __              __                               

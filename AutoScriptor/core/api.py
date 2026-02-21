@@ -53,9 +53,8 @@ def _ensure_boosted():
     if _boosted:
         return
     _boosted = True
-    from AutoScriptor.utils.perf import boost, boost_mumu_deferred
-    boost(boost_mumu=False)          # 先提升 Python 进程自身
-    boost_mumu_deferred(delay=5.0)   # 等模拟器完全启动后再提升 MuMu 进程
+    from AutoScriptor.utils.perf import boost
+    boost()                          # 提升 Python 进程自身（不提升 MuMu，避免干扰其他程序）
 
 logger.info("编排器初始化完成.")
 success = False

@@ -4,7 +4,7 @@ from ZmxyOL import *
 from AutoScriptor import *
 from logzero import logger
 
-@register_task
+@register_task(next_exec_offset_hours=10)
 def task():
     ensure_in("村庄")
     click(I("导航-战令"))
@@ -15,6 +15,7 @@ def task():
         click(T("完成",color="绿色"),if_exist=True)
         sleep(0.5)
     click(B(1200,30,30,30))
+
 
 
 if __name__ == "__main__":
