@@ -6,10 +6,13 @@ from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from ZmxyOL.battle.character.hero import h
+from time import time
 
 def bonus_callback():
     click(B(1015,85))
-    while bg.signal("try_exit"): click(I("地鼠", color="蓝色"), if_exist=True, save_screenshot=False)
+    start = time()
+    while bg.signal("try_exit") and time() - start < 120:
+        click(I("地鼠", color="蓝色"), if_exist=True, save_screenshot=False)
 
 def battle_callback(cancel_on_failed:bool=True):
     from ZmxyOL.battle.character.hero import h
@@ -30,6 +33,19 @@ def battle_callback(cancel_on_failed:bool=True):
             failed_callback() if cancel_on_failed else None,
         ]
     )
+    bg.add(
+        name="通关失败",
+        identifier=(T("重新挑战")),
+        callback=lambda : [
+            switch_base("mumu"),
+            logger.info("战斗结束"),
+            bg.set_signal("Failed", True),
+            switch_base("mumu"),
+            click(T("重新挑战")),
+            failed_callback(),
+        ]
+    )
+    wait_for_disappear(I("加载中"))
     h.set(True,3).battle_loop()
 
 
@@ -54,6 +70,10 @@ def battle_callback(cancel_on_failed:bool=True):
 #     "荒古-奖励-1",
 # ]
 @register_task
+def task2():
+    task()
+    task()
+
 def task():
     ensure_in("外域区域")
     click(T("信标定位",box=Box(1040,600,110,-1)))

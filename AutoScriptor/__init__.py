@@ -4,8 +4,11 @@ from AutoScriptor.utils.ui_map import ui
 from AutoScriptor.utils.constant import cfg
 from AutoScriptor.core.background import bg
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import RequestHumanTakeover
+from AutoScriptor.errors import *
+from AutoScriptor.errors import __all__ as _errors_all
 from AutoScriptor.crypto.update_config import set_config, verify_config
 from AutoScriptor.utils.logger import log_flush
+from AutoScriptor.utils.perf import boost as perf_boost
 __all__ = [
     # targets
     "Box", "Target", "ui", "B", "I", "T",
@@ -17,8 +20,11 @@ __all__ = [
     "first", "simple", "full", "count", "switch_base", "sleep", "extract_info",
     "bg","mixctrl",
     "set_config", "verify_config",
-    "RequestHumanTakeover",
+    "RequestHumanTakeover", "TaskRequireReTry",
+    "perf_boost",
 ] 
+
+__all__ += _errors_all
 
 
 

@@ -62,6 +62,8 @@ TRANSLATION_MAP = {
     '混沌炼狱塔': 'hundunlianyaota',
     '联盟任务': 'lianmengrenwu',
     '造化烘炉': 'luzi',
+    '机缘大集副本': 'jiyuan',
+    '烘炉+机缘': 'luzi&jiyuan',
 }
 
 

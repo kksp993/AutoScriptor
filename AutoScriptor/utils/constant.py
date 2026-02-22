@@ -3,6 +3,8 @@ import datetime
 import getpass
 import os
 import json
+
+from logzero import logger
 from AutoScriptor.crypto.config_manager import ConfigManager
 
 class AutoConfig:
@@ -101,6 +103,22 @@ class AutoConfig:
             return value
         else:
             return self._config[key]
+    
+    def get(self, key, default=None):
+        """支持通过 cfg.get("xxx") 或 cfg.get("xxx.yyy", default) 获取配置，如果不存在则返回默认值"""
+        try:
+            logger.info(f"配置已获取: {key} = {self.__getitem__(key)}")
+            return self.__getitem__(key)
+        except (KeyError, TypeError):
+            logger.info(f"配置未获取: {key} = {default}")
+            return default
+    
+    def set(self, key, value):
+        """支持通过 cfg.set("xxx", value) 或 cfg.set("xxx.yyy", value) 设置配置并自动保存
+        如果键不存在，会自动创建所需的嵌套结构"""
+        self.__setitem__(key, value)
+        self.save_config()
+        logger.info(f"配置已更新: {key} = {value}")
             
     def __str__(self):
         return json.dumps(self._config, ensure_ascii=False, indent=4)

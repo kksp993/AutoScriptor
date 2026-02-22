@@ -15,6 +15,9 @@ def back_to_map():
     return
 
 def kls_yxd_callback():
+    # 消耗玉虚殿门票，设置为False并保存
+    cfg.set("status.kunlunshan.has_YuxuDian_ticket", False)
+    
     bg.set_signal("Pause_battle", True),
     h.battle(),
     cur, pre = 0,99999
@@ -51,24 +54,33 @@ def kunlunshan_battle(num: int = 5):
             ],
             once=False
         )
-        bg.add( 
-            name="昆仑山-玉虚殿",
-            identifier=I("昆仑山-玉虚殿"),
-            callback=kls_yxd_callback,
-            once=False
-        )
+        # 每次迭代开始时重新读取门票状态，只有在config中has_YuxuDian_ticket为True时才添加玉虚殿监控
+        has_ticket = cfg.get("status.kunlunshan.has_YuxuDian_ticket", False)
+        if has_ticket:
+            bg.add( 
+                name="昆仑山-玉虚殿",
+                identifier=I("昆仑山-玉虚殿"),
+                callback=kls_yxd_callback,
+                once=False
+            )
         bg.add(
             name="昆仑山-战斗结束",
-            identifier=(T("站在这里"), B(803,546,46,19, color="白色"),B(1022,535,7,27, color="白色")),
+            identifier=(T("站在这里"), 
+                # 会误判，但是目前这样可能玉虚殿会出问题
+                # B(803,546,46,19, color="白色"),
+                # B(1022,535,7,27, color="白色")
+            ),
             callback=lambda: [
                 h.set(has_cd=False, speed_x=1 if ui_T((B(803,546,46,19, color="白色"),B(1022,535,7,27, color="白色")),2) else 3),
                 bg.set_signal("try_exit", True)
             ],
+            once=True
         )
-        h.set(has_cd=False, speed_x=3).battle_loop()
+        h.set(has_cd=False, speed_x=3).battle_loop(max_duration=1000)
         h.way_to_exit(until=lambda: ui_T((I("加载中"), T("还有"))), exit_loc=0)
         wait_for_disappear(I("加载中"))
-        bg.remove(["昆仑山-突发事件", "昆仑山-玉虚殿", "昆仑山-战斗结束"])
+        for name in ("昆仑山-突发事件", "昆仑山-玉虚殿", "昆仑山-战斗结束"):
+            bg.remove(name)
     back_to_map()
 
 
@@ -86,6 +98,7 @@ def kunlunshan_task(self, battle_loop: int = 7):
         logger.info(f"task_num: {task_num}")
         click(B(int(513.1+252.3*(400/task_num)), 405, 0, 25))
         click(T("确定",color="绿色"))
+        cfg.set("status.kunlunshan.has_YuxuDian_ticket", True)
     else:
         click(T("继续挑战"))
     wait_for_disappear(I("加载中"))

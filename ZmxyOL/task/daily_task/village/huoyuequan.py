@@ -6,6 +6,7 @@ from logzero import logger
 
 def buy_item(item_name: str):
     box = locate(T(item_name),timeout=10)
+    if box is None: return
     if first(get_colors(T("购买", box=box+(0,240))))=="绿色":
         click(B(box),offset=(0,240),delay=0.5)
         sleep(4)
@@ -16,7 +17,7 @@ def task():
     ensure_in(["村庄"])
     click(I("导航-菜单"))
     click(I("菜单-荣誉勋章"))
-    click(T("荣誉商店"))
+    click(T("荣誉商店", box=Box(200,545,203,76).margin()))
     buy_item("至尊成长礼包")
     switch_base("nemu")
     for i in range(3):

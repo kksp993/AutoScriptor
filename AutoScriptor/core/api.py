@@ -5,13 +5,14 @@ import time
 import traceback
 import getpass
 import cv2
+from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
 from AutoScriptor.core.control import MixControl
 from AutoScriptor.core.targets import Target, B,I,T
 from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget
 from AutoScriptor.recognition.ocr_rec import ocr_for_box
 from AutoScriptor.recognition.rec import get_box_color
 from AutoScriptor.utils.box import Box, b2p
-from AutoScriptor.utils.logger import log_flush
+from AutoScriptor.utils.logger import log_flush, setup_task_aware_logging
 from AutoScriptor.utils.tracer import save_debug_screenshot
 from logzero import logger,logfile
 from AutoScriptor.utils.constant import cfg
@@ -27,6 +28,7 @@ os.makedirs(log_dir, exist_ok=True)
 timestamp = datetime.now().strftime('%y%m%d_%H%M%S')
 # 指定 encoding='utf-8' 确保中文正常写入
 logfile(os.path.join(log_dir, f"[{timestamp}].log"), encoding='utf-8')
+setup_task_aware_logging()  # logfile 之后应用任务感知格式
 selected_emulator_index = cfg["emulator"]["index"]
 adb_addr = cfg["emulator"]["adb_addr"]
 app_to_start = cfg["app"]["app_to_start"]
@@ -43,6 +45,18 @@ print(f"mumu_manager_path: {mumu_manager_path}")
 mumu = Mumu().select(selected_emulator_index)
 mumu.power.start(app_to_start) if cfg["app"]["auto_start"] else None
 mixctrl = MixControl(mumu)
+
+# 性能优化：延迟执行，只在首次实际使用 API 时才 boost（避免验证账号时触发）
+_boosted = False
+def _ensure_boosted():
+    """延迟 boost：只在首次真正使用 API 时才执行性能优化。"""
+    global _boosted
+    if _boosted:
+        return
+    _boosted = True
+    from AutoScriptor.utils.perf import boost
+    boost()                          # 提升 Python 进程自身（不提升 MuMu，避免干扰其他程序）
+
 logger.info("编排器初始化完成.")
 success = False
 intervals = [1, 2, 3, 4, 5, 5, 5, 5]
@@ -168,6 +182,7 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
         timeout: 超时时间
         assure_stable: 是否保证稳定,如果为True，则每次定位都会保证稳定，直到找到目标或超时
     """
+    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     first_attempt = True
     t = time.time()
     # 元组任一满足
@@ -221,7 +236,8 @@ def click(
         until: callable = None,
         assure_stable: bool = True,
         save_screenshot: bool = True
-    ):
+):
+    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     """
     点击目标元素
     
@@ -235,7 +251,7 @@ def click(
         
         timeout: 定位超时时间（秒），默认30秒
         
-        if_exist: 如果为True，目标不存在时不抛异常，直接返回False
+        if_exist: 如果为True，目标不存在时不抛异常，直接返回False，此时默认timeout=2s
         
         repeat: 重复点击次数，默认1次
         
@@ -310,7 +326,7 @@ def click(
             mixctrl.click(*pt)
         time.sleep(interval)
     if not isinstance(target, BoxTarget) and save_screenshot:
-        save_debug_screenshot(target, mixctrl.screenshot(), box, pt)
+        save_debug_screenshot(target, mixctrl.screenshot(), box, pt, prefix="c")
     return True  
 
 
@@ -322,6 +338,7 @@ def swipe(
         delay: float = 0,
         ensure_stable_after_swipe: bool = True,
     ):
+    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     start_box = locate(start_target, 3) if not isinstance(start_target, BoxTarget) else start_target.box
     end_box = locate(end_target, 3, assure_stable=False) if not isinstance(end_target, BoxTarget) else end_target.box
     if start_box is None or end_box is None: raise RuntimeError(f"Swipe {start_target} to {end_target} failed, for failed to locate target")
@@ -331,12 +348,14 @@ def swipe(
     return True
 
 def input(text: str, target_field: Target|tuple[Target, ...] = None):
+    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     if target_field:
         click(target_field)
         time.sleep(0.5)
     mixctrl.input_text(text)
 
 def key_event(key_code: int):
+    logger.info("Key event: {}".format(next((attr for attr in dir(AndroidKey) if attr.startswith("KEYCODE_") and getattr(AndroidKey, attr) == key_code), key_code)))
     mixctrl.key_event(key_code)
 
 def extract_info(target: BoxTarget, post_process: callable = None, ensure_not_empty: bool = True, save_screenshot: bool = True)->str|None:
@@ -354,7 +373,7 @@ def extract_info(target: BoxTarget, post_process: callable = None, ensure_not_em
         if ensure_not_empty and isinstance(res, str) and len(res) == 0: continue
         if res is not None: break
     if save_screenshot and cfg["app"]["debug_mode"]:
-        save_debug_screenshot(target=target, screenshot=mixctrl.screenshot(), box=target.box, ocr_text=res)
+        save_debug_screenshot(target=target, screenshot=mixctrl.screenshot(), box=target.box, ocr_text=res, prefix="e")
     return res
 
 def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), resize: tuple = (-1, -1))->list[str|None]:
@@ -395,3 +414,55 @@ def sleep(seconds: float):
 
 def edit_img():
     launch_editor(mixctrl,is_screenshot=True) 
+
+def detect_floating_window(debug: bool = False) -> dict:
+    """
+    检测屏幕边缘的 4399 悬浮窗（基于 HSV 绿色边缘扫描，不依赖模板匹配）。
+    
+    Returns:
+        dict: {'found': bool, 'edge': str, 'box': Box, 'center': (x,y), ...}
+    """
+    from AutoScriptor.recognition.floating_window import detect_floating_window as _detect
+    screenshot = mixctrl.screenshot()
+    return _detect(screenshot, debug=debug)
+
+
+def dismiss_floating_window(max_retries: int = 3, debug: bool = False) -> bool:
+    """
+    检测并移除 4399 悬浮窗：检测到后将其滑动到屏幕中央触发设置面板，然后隐藏。
+    
+    Args:
+        max_retries: 最大重试次数（悬浮窗可能需要多次截图才能稳定检测到）
+        debug: 保存调试图像
+    
+    Returns:
+        bool: True 表示检测到并处理了悬浮窗，False 表示未检测到
+    """
+    from AutoScriptor.recognition.floating_window import detect_floating_window as _detect
+
+    for attempt in range(max_retries):
+        screenshot = mixctrl.screenshot()
+        result = _detect(screenshot, debug=debug)
+        if not result["found"]:
+            time.sleep(0.3)
+            continue
+
+        logger.info(f"🔍 检测到悬浮窗: {result['edge']}边 {result['box']} (第{attempt+1}次)")
+
+        # 从悬浮窗位置滑到屏幕中央，触发悬浮窗设置面板
+        cx, cy = result["center"]
+        swipe(B(cx, cy, 10, 10), B(640, 360, 10, 10), duration_s=1)
+        time.sleep(1)
+
+        # 尝试隐藏悬浮球
+        if box:=ui_T(T("隐藏悬浮球"), timeout=3):
+            swipe(B(box.x, box.y, box.width, box.height), B(640, 360, 10, 10), duration_s=1)
+            if ui_T(T("隐藏悬浮球"), 3):
+                click(B(740, 555, 10, 10))
+            logger.info("✅ 悬浮窗已隐藏")
+        else:
+            logger.info("⚠️ 没有悬浮窗")
+
+        return True
+
+    return False

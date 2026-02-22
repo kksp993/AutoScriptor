@@ -16,12 +16,18 @@
         "adb_addr": "YOUR_ADB_ADDR, e.g.127.0.0.1:16416",
         "mumu_folder": "YOUR_MUMU_FOLDER, e.g.C:/Program Files/Netease/MuMu",
         "emu_path": "YOUR_EMU_PATH, e.g.C:/Program Files/Netease/MuMu/nx_main/MuMuManager.exe",
-        "adb_path": "YOUR_ADB_PATH, e.g.C:/Program Files/Netease/MuMu/nx_main/adb.exe"
+        "adb_path": "YOUR_ADB_PATH, e.g.C:/Program Files/Netease/MuMu/nx_main/adb.exe",
+        "post_execution": "NULL"
     },
     "llm":{
         "use_agent":false,  
         "url":"YOUR_LLM_URL # Not Available Yet. Stay Tuned."
     },
     "encryption": {},
-    "tasks": {}
+    "tasks": {},
+    "status": {
+        "kunlunshan": {
+            "has_YuxuDian_ticket": false
+        }
+    }
 }
