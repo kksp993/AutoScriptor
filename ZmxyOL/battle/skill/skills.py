@@ -41,7 +41,8 @@ def battle(self: Hero):
             self.move_right()
     else:
         self.prop(True, True, True)
-        self.sleep(0.3).move_right()
+        self.sleep(0.3)
+        self.jump(2)
         self.skill(1)
         self.skill(4)
         self.skill(3)
@@ -53,7 +54,7 @@ def battle_loop(
     self: Hero,
     battle_weight:int=1,
     delay:float=0,
-    max_duration:int=500
+    max_duration:int=300
 ):
     """
         try_exit 为 True 时，退出循环
@@ -63,6 +64,9 @@ def battle_loop(
     self.sleep(delay)
     op_count = 0
     switch_base("nemu")
+    from ZmxyOL.battle.character.hero import h
+    h.huashen()
+    niter = 0
     from time import time
     start_time = time()
     bg.set_signal("try_exit", False)
@@ -77,25 +81,32 @@ def battle_loop(
                 op_count += 1
         else:
            self.sleep(1)
+        if time() - start_time > 60 * niter:
+            h.huashen()
+            niter += 1
         if time() - start_time > max_duration:
             raise RuntimeError(f"battle_loop 超时: {max_duration}秒, 战斗持续时间超过 {max_duration}秒")
     return self
 
 
 @combo
-def way_to_exit(self: Hero, until: str = "", exit_loc: float = 0, timeout: float = 60):
+def way_to_exit(self: Hero, until: str = "", exit_loc: float = 0, timeout: float = 180):
     """当看见出口时，点击左键，直到出去；超时后抛出异常"""
     from time import time
     with _way_to_exit_lock:
         start_time = time()
         # switch_base("mumu")
-        self.move_right(125).move_left(exit_loc)
+        self.move_right(400).move_left(exit_loc)
+        sleep(3)
+        has_moved = False
         while not until():
+            if not has_moved and time() - start_time > timeout/3:
+                self.move_right(2000, directly=True)
+                has_moved = True
             if time() - start_time > timeout:
                 raise RuntimeError(f"way_to_exit 超时: {timeout}秒, 条件 {until.__name__} 未满足")
             self.sleep(0.5)
             self.move_left(25, directly=True)
-        # switch_base("nemu")
         return self
 
 

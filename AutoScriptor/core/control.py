@@ -1,8 +1,10 @@
+import time
 from logzero import logger
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import NemuIpc
 from AutoScriptor.recognition.rec import locate_on_screen
 from AutoScriptor.utils.box import Box
+from AutoScriptor.utils.tracer import save_debug_screenshot
 
 class BaseMumuControl:
     def screenshot(self):
@@ -72,6 +74,8 @@ class MixControl(BaseMumuControl):
         self.mumu = mumu
         self.nemu_control = NemuIpcControl(mumu, serial)
         self.mode="mumu"
+        self.last_screenshot_time=0
+        self.screenshot_interval=5
 
     def switch_to_mumu(self)->None:
         logger.info("切换到mumu")
@@ -82,20 +86,21 @@ class MixControl(BaseMumuControl):
         self.mode="nemu"
 
     def click(self, x, y)->None:
-        logger.info(f"Click: {x}, {y}")
+        logger.info(f"【{self.mode}】Click: {x}, {y}")
         if self.mode=="mumu":
             self.mumu.adb.click(x, y)
         else:
             self.nemu_control.click(x, y)
 
     def swipe(self, x1, y1, x2, y2, duration_s=1)->None:
-        logger.info(f"Swipe: ({x1},{y1}) -> ({x2},{y2})")
+        logger.info(f"【{self.mode}】Swipe: ({x1},{y1}) -> ({x2},{y2})")
         if self.mode=="mumu":
             self.mumu.adb.swipe(x1, y1, x2, y2, int(duration_s*1000))
         else:
             self.nemu_control.swipe(x1, y1, x2, y2, duration_s)
 
     def input_text(self, text)->None:
+        logger.info(f"【{self.mode}】InputText: {text}")
         if self.mode=="mumu":
             self.mumu.adb.input_text(text)
         else:
@@ -103,11 +108,16 @@ class MixControl(BaseMumuControl):
 
     def screenshot(self):
         """根据当前模式返回相应的截图"""
-        return self.nemu_control.screenshot()
+        from AutoScriptor import cfg
+        screenshot=self.nemu_control.screenshot()
+        if cfg["app"]["debug_mode"] and (t:=time.time()) - self.last_screenshot_time > self.screenshot_interval:
+            self.last_screenshot_time = t
+            save_debug_screenshot(target=None, screenshot=screenshot, prefix="s")
+        return screenshot
 
     
     def long_click(self, x, y, duration=1.0)->None:
-        logger.info(f"LongClick: {x}, {y} % {duration:0.3f}sec")
+        logger.info(f"【{self.mode}】LongClick: {x}, {y} % {duration:0.3f}sec")
         # mumu 长按不支持，连续长按会造成RuntimeError，所以使用nemu_control.long_click
         # self.mumu.adb.swipe(x, y, x, y, int(duration*1000))
         self.nemu_control.long_click(x, y, duration)

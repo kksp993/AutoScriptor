@@ -3,5 +3,7 @@ wuxingsiji
 tengshefeisheng
 huodong
 luzi
+jiyuan
+luzi&jiyuan
 hd_details
 hd_registry

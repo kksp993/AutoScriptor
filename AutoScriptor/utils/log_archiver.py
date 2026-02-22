@@ -337,13 +337,22 @@ def _format_variable_value(value: Any, max_length: int = 200) -> str:
                 return str_value[:max_length] + "..."
             return str_value
         if isinstance(value, (list, tuple)):
+            if len(value) == 0:
+                return f"{type(value).__name__}([])"
             if len(value) > 10:
-                return f"{type(value).__name__}(len={len(value)}, first={_format_variable_value(value[0], 50)}...)"
-            return f"{type(value).__name__}({[_format_variable_value(v, 50) for v in value[:5]]}...)"
+                items_str = ", ".join([_format_variable_value(v, 50) for v in value[:5]])
+                return f"{type(value).__name__}([{items_str}...], len={len(value)})"
+            items_str = ", ".join([_format_variable_value(v, 50) for v in value])
+            return f"{type(value).__name__}([{items_str}])"
         if isinstance(value, dict):
+            if len(value) == 0:
+                return "dict({})"
             if len(value) > 10:
-                return f"dict(len={len(value)}, keys={list(value.keys())[:5]}...)"
-            return f"dict({dict(list(value.items())[:5])})"
+                items = list(value.items())[:5]
+                items_str = ", ".join([f"{k!r}: {_format_variable_value(v, 50)}" for k, v in items])
+                return f"dict({{{items_str}...}}, len={len(value)})"
+            items_str = ", ".join([f"{k!r}: {_format_variable_value(v, 50)}" for k, v in value.items()])
+            return f"dict({{{items_str}}})"
         # 对于其他对象，尝试获取其字符串表示
         str_value = repr(value)
         if len(str_value) > max_length:
@@ -490,7 +499,7 @@ def archive_error(
                 # 格式化堆栈跟踪
                 stack_lines = []
                 for frame_summary in tb_exc.stack:
-                    stack_lines.append(f'  File "{frame_summary.filename}", line {frame_summary.lineno}, in {frame_summary.name}\n')
+                    stack_lines.append(f'  File "{frame_summary.filename}:line {frame_summary.lineno}", in {frame_summary.name}\n')
                     if frame_summary.line:
                         stack_lines.append(f'    {frame_summary.line.strip()}\n')
                     # 写入局部变量
@@ -535,10 +544,10 @@ def archive_error(
             except Exception as e:
                 logger.warning(f"保存截图失败: {e}")
         
-        # 6. 复制 click_screenshots 目录下的所有截图
+        # 6. 复制调试点击截图目录下的所有截图
         if include_click_screenshots:
             try:
-                click_dir = os.path.join(os.getcwd(), 'logs', 'click_screenshots')
+                click_dir = os.path.join(os.getcwd(), 'logs', 'debug_screenshot')
                 if os.path.isdir(click_dir):
                     click_screenshots_dest = os.path.join(archive_dir, 'click_screenshots')
                     os.makedirs(click_screenshots_dest, exist_ok=True)

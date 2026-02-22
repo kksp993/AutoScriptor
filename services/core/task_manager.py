@@ -13,7 +13,9 @@ from threading import Event, RLock
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.constant import cfg
+from AutoScriptor import TaskRequireReTry
 from logzero import logger
+from AutoScriptor.utils.logger import set_current_task
 import sys
 from ZmxyOL.nav import ensure_in
 from ZmxyOL.nav.envs.decorators import LOC_ENV
@@ -59,6 +61,36 @@ class TaskManager:
         self._cancel_event: Event = Event()
         # 配置与任务注册的并发保护：避免重载过程中出现临时缺失 'fn'
         self._cfg_lock: RLock = RLock()
+
+    def _restart_adb_and_wait(self) -> None:
+        import subprocess, threading, time
+        adb_path = cfg["emulator"]["adb_path"]
+        adb_addr = str(cfg["emulator"].get("adb_addr", ""))
+        subprocess.run([adb_path, "kill-server"], capture_output=True, text=True)
+        subprocess.run([adb_path, "start-server"], capture_output=True, text=True)
+        if adb_addr:
+            subprocess.run([adb_path, "connect", adb_addr], capture_output=True, text=True)
+
+        mixctrl.switch_to_mumu()
+        intervals = [1, 2, 3, 4, 5, 5, 5]
+        for i, interval in enumerate(intervals, 1):
+            click_result = {}
+            def _click_test():
+                try:
+                    mixctrl.click(2000, 0)
+                    click_result["ok"] = True
+                except Exception as e:
+                    click_result["error"] = e
+                    logger.error(f"ADB重启后测试点击失败，第{i}次尝试，第{interval}秒后重试, 错误信息: {e}")
+            t = threading.Thread(target=_click_test)
+            t.daemon = True
+            t.start()
+            t.join(5)
+            if not t.is_alive() and click_result.get("ok"):
+                logger.info("✅ ADB重启完成，点击测试成功。")
+                return
+            time.sleep(interval)
+        raise RuntimeError("ADB重启后仍无法控制(点击测试失败)")
 
     def request_cancel(self) -> None:
         self._cancel_event.set()
@@ -118,18 +150,32 @@ class TaskManager:
         """
         在任务成功执行后，根据类别，同时更新cfg。
         早上5点之后视为第二天。
+        支持任务自定义 next_exec_offset_hours 字段：
+        - 若任务节点中存在 next_exec_offset_hours（数值），则以当前时间 + N 小时作为下次执行时间
+        - 优先级：函数参数 > 任务节点字段 > 默认类别规则
         """
         now = datetime.datetime.now()
         ts = None
-        if not offset_hours and not next_date:
+
+        # 检查任务节点是否自定义了 offset_hours
+        task_data = dpath.get(cfg["tasks"], task)
+        task_custom_offset = task_data.get("next_exec_offset_hours", None)
+        if task_custom_offset is not None and not offset_hours and not next_date:
+            # 任务自定义：当前时间 + N 小时
+            offset_hours = int(task_custom_offset)
+            ts = (now + datetime.timedelta(hours=offset_hours)).timestamp()
+            dpath.set(cfg["tasks"], task + "/next_exec_time", ts)
+        elif not offset_hours and not next_date:
             if task.startswith("每日任务"):
                 ts = next_exec_dt(now, next_date_enum.tomorrow, 0)
                 dpath.set(cfg["tasks"], task + "/next_exec_time", ts)
             elif task.startswith("每周任务"):
                 ts = next_exec_dt(now, next_date_enum.next_week, 0)
                 dpath.set(cfg["tasks"], task + "/next_exec_time", ts)
-            elif task.startswith("活动任务"):   
-                return
+            elif task.startswith("活动任务"):
+                # 活动任务视为 24h 刷新，同每日任务
+                ts = next_exec_dt(now, next_date_enum.tomorrow, 0)
+                dpath.set(cfg["tasks"], task + "/next_exec_time", ts)
             elif task.startswith("一般任务"):
                 dpath.set(cfg["tasks"], task + "/on", False)
         else:
@@ -138,7 +184,7 @@ class TaskManager:
         if ts is not None:
             human = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M')
             logger.info(f"    - 状态更新: 下次执行时间设置为 {human}")
-        print(dpath.get(cfg["tasks"], task + "/next_exec_time"))
+        logger.debug("next_exec_time = %s", dpath.get(cfg["tasks"], task + "/next_exec_time"))
         cfg.save_config()
     
 
@@ -146,14 +192,28 @@ class TaskManager:
         self,
         tasks: List[str]
     ) -> Tuple[int, int]:
-        # 每次开始执行前复位取消标记
+    
+        # 每次开始执行前复位取消标记，并清理调试截图目录
         self._reset_cancel()
+        try:
+            debug_dir = os.path.join(os.getcwd(), 'logs', 'debug_screenshot')
+            if os.path.isdir(debug_dir):
+                for f in os.listdir(debug_dir):
+                    fp = os.path.join(debug_dir, f)
+                    if os.path.isfile(fp):
+                        os.remove(fp)
+        except Exception:
+            pass
         failed_count = 0
         success_count = 0
         for task in tasks:
             if self._cancel_event.is_set():
                 logger.info("⏹ 检测到终止请求，停止后续任务执行")
                 break
+
+            # 设置当前任务名（取路径最后一段中文名），让日志显示任务名称
+            task_display = task.rsplit("/", 1)[-1]
+            set_current_task(task_display)
 
             max_retry = cfg["app"].get("max_retry", 0)
             retry_count = 0
@@ -171,9 +231,9 @@ class TaskManager:
                     kwargs = self._solve_task_params(task_data, real_fn=fn)
                 try:
                     # 释放锁后执行具体任务，避免长时间阻塞其它请求
+                    set_current_task(task.split("/")[-1])  # "一般任务/登录" → "登录"
                     fn(**kwargs)
                     logger.info(f"▶️  执行成功: {task}")
-                    ensure_in(LOC_ENV)
                     # 执行完毕后再加锁更新配置
                     with self._cfg_lock:
                         self._update_task_post_execution(task)
@@ -182,6 +242,17 @@ class TaskManager:
                 except Exception as e:
                     logger.error(f"Error executing task: {task} {e}")
                     if isinstance(e, KeyboardInterrupt): raise
+
+                    # TaskRequireReTry: 不归档，不计失败，按 max_retry 重试
+                    if isinstance(e, TaskRequireReTry):
+                        if retry_count < max_retry:
+                            retry_count += 1
+                            logger.info(f"🔄 任务请求重试: {task} ({retry_count}/{max_retry})，原因: {e}")
+                            continue
+                        else:
+                            logger.info(f"⚠️ 任务重试次数已满，仍未成功: {task}，原因: {e}")
+                            failed_count += 1
+                            break
 
                     logger.error(f"❌ 执行失败: {task}，错误: {e}")
                     # 保存错误截图和日志
@@ -198,6 +269,8 @@ class TaskManager:
                     if cfg["app"]["restart_on_error"]:
                         mixctrl.app.close(cfg["app"]["app_to_start"])
                         sleep(1)
+                        if retry_count >= 1:
+                            self._restart_adb_and_wait()
                         while mixctrl.app.state(cfg["app"]["app_to_start"]) != "running":
                             mixctrl.app.launch(cfg["app"]["app_to_start"])
                             sleep(1)
@@ -213,7 +286,9 @@ class TaskManager:
                     failed_count += 1
                     break
                 finally:
+                    set_current_task(None)
                     logger.info(f"Task [END] {task}")
+            set_current_task(None)  # 任务结束，恢复原始日志格式
         return success_count, failed_count
 
     def reload_tasks(self, security_key: str=None) -> None:
@@ -265,7 +340,9 @@ class TaskManager:
                 pass
 
 if __name__ == "__main__":
+    from AutoScriptor.utils.perf import boost, unboost
     try:
+        boost()
         task_manager = TaskManager()
         task_manager.execute_tasks([
             '每日任务/天庭/地狱混沌', 
@@ -295,4 +372,5 @@ if __name__ == "__main__":
             '每日任务/登录/登录其他角色'
         ])
     finally:
+        unboost()
         bg.stop()

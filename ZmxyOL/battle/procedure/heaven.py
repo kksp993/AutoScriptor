@@ -66,7 +66,7 @@ def battle_task(
                 self.way_to_exit(until=lambda:ui_T((I("加载中"), I("极北-加载中"), T("还有"))), exit_loc=exit_loc)
         else:
             wait_for_appear((I("返回地图"), T("回家", box=Box(18,607,87,109))))
-            if ui_T(I("返回地图")): click(I("返回地图"), until=lambda:ui_F((I("返回地图"),T("返回地图"))))
+            if ui_T((I("返回地图"),T("返回地图"))): click((I("返回地图"),T("返回地图")), until=lambda:ui_F((I("返回地图"),T("返回地图"))))
     wait_for_appear(T("回家", box=Box(18,607,87,109)))
     switch_base("mumu")
 
@@ -105,10 +105,11 @@ def heaven_battle(
     )
     bg.add(
         name="稍后",
-        identifier=I("稍后"),
+        identifier=(I("稍后"),T("稍后")),
         callback=lambda: [
-            click(I("稍后"), delay=1, repeat=3)
-        ]
+            click((I("稍后"),T("稍后")), delay=0, repeat=3, timeout=5, if_exist=True)
+        ],
+        once=False
     )
     self.battle_loop(battle_weight=2, delay=2)
     bg.set_signal("try_exit", False)

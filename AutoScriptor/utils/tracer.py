@@ -3,37 +3,48 @@
 """
 import os
 import cv2
+import numpy as np
 from datetime import datetime
 from typing import Optional
 from logzero import logger
 from AutoScriptor.core.targets import Target, BoxTarget
 from AutoScriptor.utils.box import Box
 
-# 点击截图目录
-CLICK_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'logs', 'click_screenshots')
+try:
+    from PIL import Image, ImageDraw, ImageFont
+    _HAS_PIL = True
+except ImportError:
+    _HAS_PIL = False
+
+# 调试截图目录
+CLICK_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'logs', 'debug_screenshot')
 CLICK_DIR = os.path.abspath(CLICK_DIR)
 os.makedirs(CLICK_DIR, exist_ok=True)
 
 
 def _draw_text_with_bg(img, text: str, position: tuple[int, int], font_scale: float = 0.6, thickness: int = 2):
-    """在图片上绘制带背景的文字"""
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    text_color = (255, 255, 255)  # 白色文字
-    bg_color = (0, 0, 0)  # 黑色背景
-    
-    (text_width, text_height), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+    """在图片上绘制带背景的文字（支持中文）"""
     text_x, text_y = position
-    
-    # 绘制文字背景
-    cv2.rectangle(img, 
-                 (text_x - 2, text_y - text_height - 2), 
-                 (text_x + text_width + 2, text_y + baseline + 2), 
-                 bg_color, -1)
-    
-    # 绘制文字
+    text_color, bg_color = (255, 255, 255), (0, 0, 0)
+    text = text[:40] + "..." if len(text) > 40 else text
+    if any('\u4e00' <= c <= '\u9fff' for c in text) and _HAS_PIL:
+        try:
+            img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            draw = ImageDraw.Draw(img_pil)
+            font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", int(20 * font_scale)) if os.path.exists("C:/Windows/Fonts/msyh.ttc") else ImageFont.load_default()
+            bbox = draw.textbbox((0, 0), text, font=font)
+            w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+            draw.rectangle([(text_x - 2, text_y - h - 2), (text_x + w + 2, text_y + 2)], fill=bg_color)
+            draw.text((text_x, text_y - h), text, fill=text_color, font=font)
+            img[:] = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+            return h + 4
+        except:
+            pass
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    (text_width, text_height), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+    cv2.rectangle(img, (text_x - 2, text_y - text_height - 2), (text_x + text_width + 2, text_y + baseline + 2), bg_color, -1)
     cv2.putText(img, text, (text_x, text_y), font, font_scale, text_color, thickness)
-    
-    return text_height + baseline + 4  # 返回文字高度，用于计算下一个文字位置
+    return text_height + baseline + 4
 
 
 def save_debug_screenshot(
@@ -42,6 +53,7 @@ def save_debug_screenshot(
     box: Optional[Box] = None, 
     pt: Optional[tuple[int, int]] = None,
     ocr_text: Optional[str] = None,
+    prefix: str = "c"
 ):
     """
     保存调试截图，支持多种标注方式
@@ -72,9 +84,10 @@ def save_debug_screenshot(
             bottom = box.top + box.height
             cv2.rectangle(img, (box.left, box.top), (right, bottom), (0, 0, 255), 3)
             
-            # 绘制 Target 信息文字
+            # 绘制 Target 信息文字（简化显示）
             if target is not None:
-                target_str = repr(target) if isinstance(target, tuple) else repr(target.set_box(box))
+                t = target[0] if isinstance(target, tuple) else target
+                target_str = f"T('{t.ui.text}')" if hasattr(t, 'ui') and hasattr(t.ui, 'text') and t.ui.text else f"Box[{box.left},{box.top}]"
                 _draw_text_with_bg(img, target_str, (box.left, max(box.top - 10, 20)))
         
         # 2. 绘制点击位置
@@ -98,12 +111,17 @@ def save_debug_screenshot(
         
         # 保存截图
         ts = datetime.now().strftime('%y%m%d_%H%M%S_%f')
-        cv2.imwrite(os.path.join(CLICK_DIR, f'c_{ts}.png'), img)
+        cv2.imwrite(os.path.join(CLICK_DIR, f'{prefix}_{ts}.png'), img)
         
         # 只保留20张最新截图
-        files = sorted([f for f in os.listdir(CLICK_DIR) if f.startswith('c_')], 
-                      key=lambda x: os.path.getmtime(os.path.join(CLICK_DIR, x)), reverse=True)
-        for f in files[20:]: 
+        files = sorted([f for f in os.listdir(CLICK_DIR)], key=lambda x: os.path.getmtime(os.path.join(CLICK_DIR, x)), reverse=True)
+        c_files = [f for f in files if f.startswith('c')]
+        s_files = [f for f in files if f.startswith('s')]
+        e_files = [f for f in files if f.startswith('e')]
+        # 保留c开头10张，s/e各3张，其余删除
+        keep = set(c_files[:10] + s_files[:3] + e_files[:3])
+        files_to_remove = [f for f in files if f not in keep]
+        for f in files_to_remove: 
             os.remove(os.path.join(CLICK_DIR, f))
     except Exception as e:
         logger.debug(f"保存调试截图失败: {e}")

@@ -126,12 +126,17 @@ def B(x, y=None, w=0, h=0, color=None):
     box = Box(x, y, w, h)
     return BoxTarget(box, color)
 
-def I(key,*,box=Box(0,0,1280,720),color=None):
+def I(key,*,box:Box|None=None,color=None):
     from AutoScriptor.utils.ui_map import ui
-    return ui[key].set_box(box).set_color(color).i
+    entry = ui[key]
+    if box is not None: entry = entry.set_box(box)
+    return entry.set_color(color).i
 
-def T(text=None, *, key=None,box=Box(0,0,1280,720),color=None):
+def T(text=None, *, key=None,box:Box|None=None,color=None):
     from AutoScriptor.utils.ui_map import ui
     if isinstance(key,str):
-        return ui[key].set_box(box).set_color(color).t
-    return ui_str(text).set_box(box).set_color(color).t
+        entry = ui[key]
+    else:
+        entry = ui_str(text)
+    if box is not None: entry = entry.set_box(box)
+    return entry.set_color(color).t

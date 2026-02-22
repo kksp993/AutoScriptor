@@ -22,10 +22,11 @@ def login(account: str=None, password: str=None, character_name: str=None, chara
         click(B(719, 536, 144, 26))
         click(T("授权并登录"), if_exist=True, timeout=3)
         click(T("添加账号"), if_exist=True)
-        locate(T("手机号验证登录"), 10)
+        locate(T("手机号验证登录"), 3)
         if ui_idx((T("请输入手机号或用户名"),T("账号登录"),T("进入游戏",color="橙色"))) in [0,1]:
             click(T("账号登录"), delay=1, repeat=2)
-            click(T("请输入手机号或用户名"))
+            wait_for_appear(T("账号密码登录"))
+            click(T("请输入手机号或用户名"), if_exist=True)
             input(account)
             click(T("请输入密码"))
             input(password)
@@ -44,7 +45,7 @@ def login(account: str=None, password: str=None, character_name: str=None, chara
             sleep(1)
             click(B(104,63+70*(character_index-6),149,54))
     else:
-        if character_name: click(T(character_name),delay=1)
+        if character_name: click(T(character_name), delay=1, timeout=60)
         else:
             if not cfg["game"].get("character_name", None):
                 raise ValueError("请先配合完成安全密码验证")
@@ -54,14 +55,15 @@ def login(account: str=None, password: str=None, character_name: str=None, chara
     if ui_T(T("确定")):# 账号有效性验证失败
         click(T("确定"))
         return login(account, password, character_name, character_index)
+    wait_for_appear(I("加载中"))
     locate(I("活动公告页面"), 30)
     click(B(1240, 5, 40, 60))
     time.sleep(0.5)
     # swipe(B(640, 650, 10, 10),B(200, 10, 10, 10) , duration_s=1) # 悬浮窗位置改了
     swipe(B(200, 10, 10, 10), B(640, 650, 10, 10), duration_s=2) # 悬浮窗位置改了
-    if ui_T(T("隐藏悬浮球"), 5):
+    if ui_T(T("隐藏悬浮球"), 3):
         click(B(740, 555, 10, 10))
-    if ui_T(T("精彩活动")):
+    if ui_T(T("精彩活动"),3):
         click(B(1100, 40, 40, 40))
     logger.info("登录完成")
 

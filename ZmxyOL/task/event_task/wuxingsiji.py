@@ -13,7 +13,7 @@ def task(battle_loop: int = 1000):
 
 if __name__ == "__main__":
     try:
-        task(battle_loop=7)
+        task()
     except Exception as e:
         traceback.print_exc()
     finally:
