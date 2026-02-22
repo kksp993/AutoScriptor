@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 from AutoScriptor import *
 from ZmxyOL.nav import *
 import traceback

@@ -12,7 +12,7 @@ from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget
 from AutoScriptor.recognition.ocr_rec import ocr_for_box
 from AutoScriptor.recognition.rec import get_box_color
 from AutoScriptor.utils.box import Box, b2p
-from AutoScriptor.utils.logger import log_flush
+from AutoScriptor.utils.logger import log_flush, setup_task_aware_logging
 from AutoScriptor.utils.tracer import save_debug_screenshot
 from logzero import logger,logfile
 from AutoScriptor.utils.constant import cfg
@@ -28,6 +28,7 @@ os.makedirs(log_dir, exist_ok=True)
 timestamp = datetime.now().strftime('%y%m%d_%H%M%S')
 # 指定 encoding='utf-8' 确保中文正常写入
 logfile(os.path.join(log_dir, f"[{timestamp}].log"), encoding='utf-8')
+setup_task_aware_logging()  # logfile 之后应用任务感知格式
 selected_emulator_index = cfg["emulator"]["index"]
 adb_addr = cfg["emulator"]["adb_addr"]
 app_to_start = cfg["app"]["app_to_start"]
@@ -413,3 +414,55 @@ def sleep(seconds: float):
 
 def edit_img():
     launch_editor(mixctrl,is_screenshot=True) 
+
+def detect_floating_window(debug: bool = False) -> dict:
+    """
+    检测屏幕边缘的 4399 悬浮窗（基于 HSV 绿色边缘扫描，不依赖模板匹配）。
+    
+    Returns:
+        dict: {'found': bool, 'edge': str, 'box': Box, 'center': (x,y), ...}
+    """
+    from AutoScriptor.recognition.floating_window import detect_floating_window as _detect
+    screenshot = mixctrl.screenshot()
+    return _detect(screenshot, debug=debug)
+
+
+def dismiss_floating_window(max_retries: int = 3, debug: bool = False) -> bool:
+    """
+    检测并移除 4399 悬浮窗：检测到后将其滑动到屏幕中央触发设置面板，然后隐藏。
+    
+    Args:
+        max_retries: 最大重试次数（悬浮窗可能需要多次截图才能稳定检测到）
+        debug: 保存调试图像
+    
+    Returns:
+        bool: True 表示检测到并处理了悬浮窗，False 表示未检测到
+    """
+    from AutoScriptor.recognition.floating_window import detect_floating_window as _detect
+
+    for attempt in range(max_retries):
+        screenshot = mixctrl.screenshot()
+        result = _detect(screenshot, debug=debug)
+        if not result["found"]:
+            time.sleep(0.3)
+            continue
+
+        logger.info(f"🔍 检测到悬浮窗: {result['edge']}边 {result['box']} (第{attempt+1}次)")
+
+        # 从悬浮窗位置滑到屏幕中央，触发悬浮窗设置面板
+        cx, cy = result["center"]
+        swipe(B(cx, cy, 10, 10), B(640, 360, 10, 10), duration_s=1)
+        time.sleep(1)
+
+        # 尝试隐藏悬浮球
+        if box:=ui_T(T("隐藏悬浮球"), timeout=3):
+            swipe(B(box.x, box.y, box.width, box.height), B(640, 360, 10, 10), duration_s=1)
+            if ui_T(T("隐藏悬浮球"), 3):
+                click(B(740, 555, 10, 10))
+            logger.info("✅ 悬浮窗已隐藏")
+        else:
+            logger.info("⚠️ 没有悬浮窗")
+
+        return True
+
+    return False

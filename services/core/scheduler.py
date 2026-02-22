@@ -35,6 +35,7 @@ class Scheduler:
         self._task_manager = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self._wake = threading.Event()      # 用于中断 sleep，立即重新检查
         self._consecutive_errors = 0
 
     # ── 外部注入 ──
@@ -74,8 +75,13 @@ class Scheduler:
         self.state = SchedulerState.PENDING
         self._consecutive_errors = 0
 
+    def wake(self):
+        """中断当前等待，立即重新检查到期任务。"""
+        self._wake.set()
+
     def stop(self):
         self._stop.set()
+        self._wake.set()  # 同时唤醒，让线程能退出
 
     # ── 结果反馈（由 CLI/WebUI 在 execute 结束后调用）──
 
@@ -107,11 +113,14 @@ class Scheduler:
                     _collect(val)
 
         _collect(cfg["tasks"])
-        # 过滤未来时间，计算最早到期任务的间隔
-        future = [t for t in next_times if t > now_ts]
-        if future:
-            return max(min(future) - now_ts, 0)
-        return CHECK_INTERVAL
+        if not next_times:
+            return CHECK_INTERVAL
+        # 如果有已到期任务（next_exec_time <= now），立即执行
+        due_now = [t for t in next_times if t <= now_ts]
+        if due_now:
+            return 0
+        # 否则等到最早的未来任务到期
+        return max(min(next_times) - now_ts, 0)
 
     def get_next_execution_timestamp(self):
         """返回最早到期任务的绝对时间戳，如果没有到期任务则返回 None。"""
@@ -140,49 +149,68 @@ class Scheduler:
         """主循环：根据最早到期任务时间动态 sleep，实现可中断的精确调度。"""
         while True:
             interval = self._get_wait_interval()
-            if self._stop.wait(interval):
+            self._wake.clear()
+            self._wake.wait(interval)       # 可被 wake() 打断
+            if self._stop.is_set():
                 break
             if self.state != SchedulerState.RUNNING or not self._task_manager:
                 continue
             self._check_and_run()
 
     def _check_and_run(self):
-        """扫描到期任务并执行。"""
+        """逐个扫描并执行到期任务，每个任务完成后保存配置并重新加载，再重新扫描。"""
         from AutoScriptor.utils.constant import cfg
-        now_ts = time.time()
-        due = self._collect_due(cfg["tasks"], "", now_ts)
-        if not due:
-            return
+        emulator_launched = False
+        total_success, total_failed = 0, 0
 
-        logger.info("📅 发现 %d 个到期任务: %s", len(due), due)
+        while self.state == SchedulerState.RUNNING:
+            now_ts = time.time()
+            due = self._collect_due(cfg["tasks"], "", now_ts)
+            if not due:
+                break
 
-        # 启动模拟器（如果没在运行）
-        try:
-            from AutoScriptor import mixctrl
-            app_name = cfg["app"]["app_to_start"]
-            if mixctrl.app.state(app_name) != "running":
-                logger.info("📅 正在启动模拟器...")
-                mixctrl.app.launch(app_name)
-                time.sleep(10)
-        except Exception as e:
-            logger.error("📅 启动模拟器失败: %s", e)
-            self._consecutive_errors += 1
-            if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                self.mark_error()
-            return
+            if not emulator_launched:
+                logger.info("📅 发现 %d 个到期任务: %s", len(due), due)
+                # 首次执行前启动模拟器（如果没在运行）
+                try:
+                    from AutoScriptor import mixctrl
+                    app_name = cfg["app"]["app_to_start"]
+                    if mixctrl.app.state(app_name) != "running":
+                        logger.info("📅 正在启动模拟器...")
+                        mixctrl.app.launch(app_name)
+                        time.sleep(10)
+                except Exception as e:
+                    logger.error("📅 启动模拟器失败: %s", e)
+                    self._consecutive_errors += 1
+                    if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                        self.mark_error()
+                    return
+                emulator_launched = True
 
-        # 执行任务（不做 boost/unboost，api.py 启动时已经 boost 过了）
-        try:
-            success, failed = self._task_manager.execute_tasks(due)
-            logger.info("📅 定时执行完成: 成功 %d, 失败 %d", success, failed)
-            self.record_result(success, failed)
-        except Exception as e:
-            logger.error("📅 定时执行异常: %s", e)
-            self._consecutive_errors += 1
-            if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                self.mark_error()
-        finally:
+            # 只取第一个到期任务执行
+            task_key = due[0]
+            try:
+                success, failed = self._task_manager.execute_tasks([task_key])
+                total_success += success
+                total_failed += failed
+                self.record_result(success, failed)
+            except Exception as e:
+                logger.error("📅 执行异常: %s - %s", task_key, e)
+                self._consecutive_errors += 1
+                if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                    self.mark_error()
+                    break
+
+            # 每个任务执行后保存配置并重新加载，然后重新扫描到期任务
+            cfg.save_config()
+            self._task_manager.reload_tasks()
+            logger.info("🔄 [%s] 完成，配置已保存并重新加载", task_key)
+
+        # 全部到期任务执行完毕后，统一执行后续动作（关闭模拟器等）
+        if total_success > 0 or total_failed > 0:
+            logger.info("📅 定时执行完成: 成功 %d, 失败 %d", total_success, total_failed)
             self._post_execution_action()
+            logger.info("📅 已回到待命状态，按 Enter 刷新主菜单")
 
     # ── 辅助 ──
 

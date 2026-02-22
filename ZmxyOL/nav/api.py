@@ -110,6 +110,16 @@ def try_close_via_x():
     """
     尝试关闭各种弹窗和等待加载完成
     """
+    from AutoScriptor import detect_floating_window, dismiss_floating_window
+
+    # 仅检测
+    result = detect_floating_window()
+    if result['found']:
+        print(f"悬浮窗在{result['edge']}边，位置: {result['box']}")
+
+    # 检测 + 自动移除（滑动到中央 → 隐藏悬浮球）
+    dismiss_floating_window()
+
     # 关闭目标列表
     close_targets = [
         (I("极北之地-取消"), I("极北之地-取消")),

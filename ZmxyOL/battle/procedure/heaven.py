@@ -107,7 +107,7 @@ def heaven_battle(
         name="稍后",
         identifier=(I("稍后"),T("稍后")),
         callback=lambda: [
-            click((I("稍后"),T("稍后")), delay=1, repeat=3)
+            click((I("稍后"),T("稍后")), delay=0, repeat=3, timeout=5, if_exist=True)
         ],
         once=False
     )
