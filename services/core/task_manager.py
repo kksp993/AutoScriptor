@@ -15,6 +15,7 @@ from AutoScriptor import *
 from AutoScriptor.utils.constant import cfg
 from AutoScriptor import TaskRequireReTry
 from logzero import logger
+from AutoScriptor.utils.logger import set_current_task
 import sys
 from ZmxyOL.nav import ensure_in
 from ZmxyOL.nav.envs.decorators import LOC_ENV
@@ -210,6 +211,10 @@ class TaskManager:
                 logger.info("⏹ 检测到终止请求，停止后续任务执行")
                 break
 
+            # 设置当前任务名（取路径最后一段中文名），让日志显示任务名称
+            task_display = task.rsplit("/", 1)[-1]
+            set_current_task(task_display)
+
             max_retry = cfg["app"].get("max_retry", 0)
             retry_count = 0
             
@@ -226,9 +231,9 @@ class TaskManager:
                     kwargs = self._solve_task_params(task_data, real_fn=fn)
                 try:
                     # 释放锁后执行具体任务，避免长时间阻塞其它请求
+                    set_current_task(task.split("/")[-1])  # "一般任务/登录" → "登录"
                     fn(**kwargs)
                     logger.info(f"▶️  执行成功: {task}")
-                    ensure_in(LOC_ENV)
                     # 执行完毕后再加锁更新配置
                     with self._cfg_lock:
                         self._update_task_post_execution(task)
@@ -281,7 +286,9 @@ class TaskManager:
                     failed_count += 1
                     break
                 finally:
+                    set_current_task(None)
                     logger.info(f"Task [END] {task}")
+            set_current_task(None)  # 任务结束，恢复原始日志格式
         return success_count, failed_count
 
     def reload_tasks(self, security_key: str=None) -> None:
