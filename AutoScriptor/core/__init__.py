@@ -25,5 +25,7 @@ __all__ = [
  "sleep",
  "extract_info",
  "key_event",
+ "detect_floating_window",
+ "dismiss_floating_window",
  "mixctrl"
 ]

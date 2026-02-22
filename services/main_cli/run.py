@@ -13,8 +13,12 @@ from AutoScriptor.crypto.update_config import set_config, verify_config
 from ZmxyOL.nav.envs.decorators import LOC_ENV
 from ZmxyOL.nav.api import ensure_in
 from logzero import logfile, logger
+from AutoScriptor.utils.logger import setup_task_aware_logging
 from pypinyin import lazy_pinyin
 from services.core.task_manager import TaskManager
+
+# 启用任务感知日志格式（执行任务时 module:lineno 显示为任务中文名）
+setup_task_aware_logging()
 
 # 判断分支下是否存在未完成的任务
 def branch_uncompleted(branch: dict, now_ts: float) -> bool:
@@ -472,8 +476,12 @@ def run_cli_navigation():
                 continue
             # 激活调度器
             scheduler.activate()
-            while mixctrl.app.state(cfg["app"]["app_to_start"]) != "running":
-                mixctrl.app.launch(cfg["app"]["app_to_start"])
+            app_name = cfg["app"]["app_to_start"]
+            _launch_attempt = 0
+            while mixctrl.app.state(app_name) != "running":
+                _launch_attempt += 1
+                logger.info(f"📱 正在启动模拟器 (第{_launch_attempt}次尝试)...")
+                mixctrl.app.launch(app_name)
                 sleep(5)
             master_node_to_execute = get_node_by_path(cfg["tasks"], navigation_path)
             ui_node_counterpart = get_node_by_path(ui_tasks, navigation_path)
@@ -483,10 +491,14 @@ def run_cli_navigation():
                 # 反馈结果给调度器
                 scheduler.record_result(total_executed, total_failed)
                 if total_executed > 0:
-                    cfg.save_config()
                     logger.info(f"\n✅ 执行完毕，{total_executed}/{total_count}个任务的状态变更已自动保存！")
                 else:
                     logger.info("\n🔵 没有需要执行的任务。")
+                # 自动保存配置并重新加载（等同于手动按 T）
+                cfg.save_config()
+                task_manager.reload_tasks()
+                ui_tasks = copy.deepcopy(cfg["tasks"])
+                logger.info("🔄 配置已自动保存并重新加载")
             except KeyboardInterrupt:
                 bg.clear(clear_signals=True)
                 logger.info("🔴 任务执行已中断，返回菜单")
@@ -566,8 +578,9 @@ def run_cli_navigation():
                 continue
         elif action == "--reload--":
             task_manager.reload_tasks()
+            ui_tasks = copy.deepcopy(cfg["tasks"])
+            scheduler.wake()  # 唤醒调度器立即检查到期任务
             logger.info("任务已重新加载！")
-            questionary.press_any_key_to_continue().ask()
             continue
 
         elif action == "--home--":
