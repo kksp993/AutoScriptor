@@ -68,6 +68,15 @@ class NemuIpcControl(BaseMumuControl):
     def switch_to_nemu(self)->None:
         logger.info("切换到nemu")
     
+    def release_all_keys(self)->None:
+        """释放所有按键（触摸和键盘）"""
+        try:
+            # NemuIpcImpl 的 up() 方法可以释放触摸按键
+            # self.nemu_ipc 是 NemuIpc 实例，self.nemu_ipc.nemu_ipc 是 NemuIpcImpl 实例
+            if hasattr(self.nemu_ipc, 'nemu_ipc') and self.nemu_ipc.nemu_ipc is not None:
+                self.nemu_ipc.nemu_ipc.up()
+        except (AttributeError, Exception) as e:
+            logger.debug(f"释放NemuIpc按键失败: {e}")
 
 class MixControl(BaseMumuControl):
     def __init__(self, mumu: Mumu, serial: str = '127.0.0.1:16416'):
@@ -100,7 +109,6 @@ class MixControl(BaseMumuControl):
             self.nemu_control.swipe(x1, y1, x2, y2, duration_s)
 
     def input_text(self, text)->None:
-        logger.info(f"【{self.mode}】InputText: {text}")
         if self.mode=="mumu":
             self.mumu.adb.input_text(text)
         else:
@@ -121,6 +129,14 @@ class MixControl(BaseMumuControl):
         # mumu 长按不支持，连续长按会造成RuntimeError，所以使用nemu_control.long_click
         # self.mumu.adb.swipe(x, y, x, y, int(duration*1000))
         self.nemu_control.long_click(x, y, duration)
+
+    def release_all_keys(self)->None:
+        """释放所有按键（主要是触摸按键）"""
+        # 使用 NemuIpc 的 up() 方法释放触摸按键
+        try:
+            self.nemu_control.release_all_keys()
+        except Exception as e:
+            logger.debug(f"释放按键失败: {e}")
 
 
 

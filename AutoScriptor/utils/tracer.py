@@ -113,15 +113,25 @@ def save_debug_screenshot(
         ts = datetime.now().strftime('%y%m%d_%H%M%S_%f')
         cv2.imwrite(os.path.join(CLICK_DIR, f'{prefix}_{ts}.png'), img)
         
-        # 只保留20张最新截图
+        # 按类型保留最新截图：c_30 + s_10 + e_5 = 45 张
         files = sorted([f for f in os.listdir(CLICK_DIR)], key=lambda x: os.path.getmtime(os.path.join(CLICK_DIR, x)), reverse=True)
         c_files = [f for f in files if f.startswith('c')]
         s_files = [f for f in files if f.startswith('s')]
         e_files = [f for f in files if f.startswith('e')]
-        # 保留c开头10张，s/e各3张，其余删除
-        keep = set(c_files[:10] + s_files[:3] + e_files[:3])
+        keep = set(c_files[:30] + s_files[:10] + e_files[:5])
         files_to_remove = [f for f in files if f not in keep]
         for f in files_to_remove: 
             os.remove(os.path.join(CLICK_DIR, f))
     except Exception as e:
         logger.debug(f"保存调试截图失败: {e}")
+
+
+def clear_debug_screenshots():
+    """清空调试截图目录，在每个任务开始前调用，确保截图都属于当前任务"""
+    try:
+        for f in os.listdir(CLICK_DIR):
+            fp = os.path.join(CLICK_DIR, f)
+            if os.path.isfile(fp):
+                os.remove(fp)
+    except Exception as e:
+        logger.debug(f"清理调试截图目录失败: {e}")

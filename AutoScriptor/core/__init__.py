@@ -27,5 +27,7 @@ __all__ = [
  "key_event",
  "detect_floating_window",
  "dismiss_floating_window",
- "mixctrl"
+ "mixctrl",
+ "ensure_app_running",
+ "ensure_all_environment_ready"
 ]

@@ -5,7 +5,7 @@ from ZmxyOL import *
 from AutoScriptor import *
 from logzero import logger
 
-@register_task
+@register_task(default_offset_hours=12)
 def eunan_fuBen():
     ensure_in("极北",-1)
     click(I("厄难魔域"),repeat=2,until=lambda: ui_T(I("厄难-右")))

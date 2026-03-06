@@ -9,6 +9,7 @@ from AutoScriptor.errors import __all__ as _errors_all
 from AutoScriptor.crypto.update_config import set_config, verify_config
 from AutoScriptor.utils.logger import log_flush
 from AutoScriptor.utils.perf import boost as perf_boost
+from AutoScriptor.core.api import dismiss_floating_window
 __all__ = [
     # targets
     "Box", "Target", "ui", "B", "I", "T",
@@ -22,6 +23,9 @@ __all__ = [
     "set_config", "verify_config",
     "RequestHumanTakeover", "TaskRequireReTry",
     "perf_boost",
+    "dismiss_floating_window",
+    "ensure_app_running",
+    "ensure_all_environment_ready"
 ] 
 
 __all__ += _errors_all
