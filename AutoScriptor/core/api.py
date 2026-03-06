@@ -18,75 +18,78 @@ from logzero import logger,logfile
 from AutoScriptor.utils.constant import cfg
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
 from AutoScriptor.utils.edit_img import launch_editor
-# 初始化编排器
-logger.info("编排器初始化开始...")
-# 初始化 logzero 全量日志文件（UTF-8 编码）
-import os
-from datetime import datetime
-log_dir = os.path.join(os.getcwd(), 'logs', 'log')
-os.makedirs(log_dir, exist_ok=True)
-timestamp = datetime.now().strftime('%y%m%d_%H%M%S')
-# 指定 encoding='utf-8' 确保中文正常写入
-logfile(os.path.join(log_dir, f"[{timestamp}].log"), encoding='utf-8')
-setup_task_aware_logging()  # logfile 之后应用任务感知格式
-selected_emulator_index = cfg["emulator"]["index"]
-adb_addr = cfg["emulator"]["adb_addr"]
-app_to_start = cfg["app"]["app_to_start"]
 
-# 点击截图目录（基于文件路径）
-CLICK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'logs', 'click_screenshots')
-CLICK_DIR = os.path.abspath(CLICK_DIR)  # 转换为绝对路径
-os.makedirs(CLICK_DIR, exist_ok=True)
-mumu_manager_path = cfg["emulator"]["emu_path"]
-print(f"selected_emulator_index: {selected_emulator_index}")
-print(f"adb_addr: {adb_addr}")
-print(f"app_to_start: {app_to_start}")
-print(f"mumu_manager_path: {mumu_manager_path}")
-mumu = Mumu().select(selected_emulator_index)
-mumu.power.start(app_to_start) if cfg["app"]["auto_start"] else None
-mixctrl = MixControl(mumu)
+def ensure_all_environment_ready():
+    # 初始化编排器
+    logger.info("编排器初始化开始...")
+    # 初始化 logzero 全量日志文件（UTF-8 编码）
+    import os
+    from datetime import datetime
+    log_dir = os.path.join(os.getcwd(), 'logs', 'log')
+    os.makedirs(log_dir, exist_ok=True)
+    timestamp = datetime.now().strftime('%y%m%d_%H%M%S')
+    # 指定 encoding='utf-8' 确保中文正常写入
+    logfile(os.path.join(log_dir, f"[{timestamp}].log"), encoding='utf-8')
+    setup_task_aware_logging()  # logfile 之后应用任务感知格式
+    selected_emulator_index = cfg["emulator"]["index"]
+    adb_addr = cfg["emulator"]["adb_addr"]
+    app_to_start = cfg["app"]["app_to_start"]
+    return selected_emulator_index, adb_addr, app_to_start
 
-# 性能优化：延迟执行，只在首次实际使用 API 时才 boost（避免验证账号时触发）
-_boosted = False
-def _ensure_boosted():
-    """延迟 boost：只在首次真正使用 API 时才执行性能优化。"""
-    global _boosted
-    if _boosted:
-        return
-    _boosted = True
-    from AutoScriptor.utils.perf import boost
-    boost()                          # 提升 Python 进程自身（不提升 MuMu，避免干扰其他程序）
+def ensure_app_running(selected_emulator_index, adb_addr, app_to_start):
+    """
+    确保模拟器和应用都在运行。若模拟器未启动则先启动模拟器，再启动应用。
+    
+    Args:
+        package: 应用包名，默认使用 cfg 中配置的 app_to_start
+        wait: 启动模拟器后等待就绪的秒数，默认 15s
+    
+    Returns:
+        bool: True 表示应用已在运行或已成功启动
+    """
+    mumu_manager_path = cfg["emulator"]["emu_path"]
+    print(f"selected_emulator_index: {selected_emulator_index}")
+    print(f"adb_addr: {adb_addr}")
+    print(f"app_to_start: {app_to_start}")
+    print(f"mumu_manager_path: {mumu_manager_path}")
+    mumu = Mumu().select(selected_emulator_index)
+    mumu.power.start(app_to_start) if cfg["app"]["auto_start"] else None
+    mixctrl = MixControl(mumu)
+    logger.info("编排器初始化完成.")
+    success = False
+    intervals = [1, 2, 3, 4, 5, 5, 5, 5]
+    for i, interval in enumerate(intervals, 1):
+        click_result = {}
+        def _click_test():
+            try:
+                mixctrl.click(2000, 0)
+                click_result['ok'] = True
+            except Exception as e:
+                click_result['error'] = e
+                logger.error(f"测试点击(0,0)，第{i}次尝试，第{interval}秒后重试, 错误信息: {e}")
+        t = threading.Thread(target=_click_test)
+        t.daemon = True
+        t.start()
+        t.join(5)
+        if not t.is_alive() and 'error' not in click_result:
+            success = True
+        if success:
+            logger.info("测试点击(0,0)成功，模拟器响应正常。")
+            break
+        logger.error(f"测试点击(0,0)，第{i}次尝试，第{interval}秒后重试")
+        time.sleep(interval)
+    if not success:
+        logger.error("多次点击测试失败，准备重启框架")
+        from AutoScriptor.core.background import bg
+        bg.stop()
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    mixctrl.window.hidden() if cfg["app"]["run_in_background"] else None
+    return mixctrl, mumu
 
-logger.info("编排器初始化完成.")
-success = False
-intervals = [1, 2, 3, 4, 5, 5, 5, 5]
-for i, interval in enumerate(intervals, 1):
-    click_result = {}
-    def _click_test():
-        try:
-            mixctrl.click(2000, 0)
-            click_result['ok'] = True
-        except Exception as e:
-            click_result['error'] = e
-            logger.error(f"测试点击(0,0)，第{i}次尝试，第{interval}秒后重试, 错误信息: {e}")
-    t = threading.Thread(target=_click_test)
-    t.daemon = True
-    t.start()
-    t.join(5)
-    if not t.is_alive() and 'error' not in click_result:
-        success = True
-    if success:
-        logger.info("测试点击(0,0)成功，模拟器响应正常。")
-        break
-    logger.error(f"测试点击(0,0)，第{i}次尝试，第{interval}秒后重试")
-    time.sleep(interval)
-if not success:
-    logger.error("多次点击测试失败，准备重启框架")
-    from AutoScriptor.core.background import bg
-    bg.stop()
-    os.execv(sys.executable, [sys.executable] + sys.argv)
-mixctrl.window.hidden() if cfg["app"]["run_in_background"] else None
-# cfg.load_config(getpass.getpass("请输入安全密码: "))
+
+selected_emulator_index, adb_addr, app_to_start = ensure_all_environment_ready()
+mixctrl, mumu = ensure_app_running(selected_emulator_index, adb_addr, app_to_start)
+
 
 def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->int:
     target = [t for t in target]
@@ -194,6 +197,12 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
             if assure_stable and not stable(boxes, _locate_all(target)): continue
             if first(boxes): return first(boxes) if is_simplify else boxes  # 确保返回单个Box或None
             # if delta > 5 and cfg["llm"]["use_agent"]:
+        # 超时未找到目标时，保存搜索失败截图
+        if timeout >= 5:
+            try:
+                save_debug_screenshot(target, mixctrl.screenshot(), prefix="s")
+            except Exception:
+                pass
         return None if is_simplify else boxes
     
     # 列表需全满足
@@ -204,6 +213,12 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
             boxes = _locate_all(target)
             if assure_stable and not stable(boxes, _locate_all(target)): continue
             if full(boxes): return simple(boxes) if is_simplify else boxes
+        # 超时未全部找到目标时，保存搜索失败截图
+        if timeout >= 5:
+            try:
+                save_debug_screenshot(target, mixctrl.screenshot(), prefix="s")
+            except Exception:
+                pass
         return boxes if not is_simplify else simple(boxes)
     
     # 单个Target对象，转换为元组处理
@@ -316,7 +331,13 @@ def click(
     else:
         box = locate(target, timeout if not if_exist else max(2, timeout) if timeout != 30 else 2, assure_stable)    # 至少2s
     if if_exist and first(box) is None: return False
-    if first(box) is None: raise RuntimeError(f"Click {target} failed, for failed to locate target in {timeout} seconds")
+    if first(box) is None:
+        # 保存失败时的即时截图，便于定位问题
+        try:
+            save_debug_screenshot(target, mixctrl.screenshot(), prefix="s")
+        except Exception:
+            pass
+        raise RuntimeError(f"Click {target} failed, for failed to locate target in {timeout} seconds")
     time.sleep(delay)
     for i in range(repeat):
         pt=b2p(box, offset, resize)
@@ -451,18 +472,20 @@ def dismiss_floating_window(max_retries: int = 3, debug: bool = False) -> bool:
 
         # 从悬浮窗位置滑到屏幕中央，触发悬浮窗设置面板
         cx, cy = result["center"]
-        swipe(B(cx, cy, 10, 10), B(640, 360, 10, 10), duration_s=1)
+        swipe(B(cx, cy, 10, 10), B(640, 650, 10, 10), duration_s=1)
         time.sleep(1)
-
-        # 尝试隐藏悬浮球
-        if box:=ui_T(T("隐藏悬浮球"), timeout=3):
-            swipe(B(box.x, box.y, box.width, box.height), B(640, 360, 10, 10), duration_s=1)
-            if ui_T(T("隐藏悬浮球"), 3):
-                click(B(740, 555, 10, 10))
-            logger.info("✅ 悬浮窗已隐藏")
-        else:
-            logger.info("⚠️ 没有悬浮窗")
-
+        click(B(740, 555, 10, 10))
+        logger.info("✅ 悬浮窗已隐藏")
         return True
 
     return False
+
+_boosted = False
+def _ensure_boosted():
+    """延迟 boost：只在首次真正使用 API 时才执行性能优化。"""
+    global _boosted
+    if _boosted:
+        return
+    _boosted = True
+    from AutoScriptor.utils.perf import boost
+    boost()                          # 提升 Python 进程自身（不提升 MuMu，避免干扰其他程序）

@@ -15,7 +15,7 @@ def task():
     for i in range(5):
         wait_for_appear(T("荣耀之战",box=Box(510, 0, 250, 80)))
         sleep(3)
-        if first(get_colors(T("挑战",box=Box(894,569,190,72))))=="灰色":
+        if first(get_colors(T("挑战",box=Box(894,569,190,72)))) != "黄色":
             break
         click(T("挑战",box=Box(894,569,190,72)))
         bg.add(
@@ -24,12 +24,11 @@ def task():
             callback=lambda: [
                 bg.set_signal("try_exit", True),
                 bg.clear(),
-                sleep(1),
-                click(T("确定"))
             ],
             once=True
         )
         h.set(True,1).battle_loop(battle_weight=100)
+        click(T("确定"), if_exist=True)
         click(B(1090,25,30,30))
     sleep(2)
     click(B(1200,30,30,30))

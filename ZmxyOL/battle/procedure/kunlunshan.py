@@ -28,7 +28,7 @@ def kls_yxd_callback():
         h.battle()
     [h.move_right(5, directly=True) for _ in range(2)]
     h.move_left(1280)
-    h.way_to_exit(until=lambda: ui_T((I("加载中"), T("还有"))), exit_loc=0)
+    h.way_to_exit(until=lambda: ui_T((I("加载中"), T("还有"))), exit_loc=300)
     wait_for_disappear(I("加载中"))
     bg.add(
         name="昆仑山-玉虚殿-战斗结束",
@@ -52,7 +52,8 @@ def kunlunshan_battle(num: int = 5):
                 sleep(0.03),
                 click((T("知道了"),T("取消")), if_exist=True),
             ],
-            once=False
+            once=False,
+            allow_concurrent=True
         )
         # 每次迭代开始时重新读取门票状态，只有在config中has_YuxuDian_ticket为True时才添加玉虚殿监控
         has_ticket = cfg.get("status.kunlunshan.has_YuxuDian_ticket", False)
@@ -77,6 +78,7 @@ def kunlunshan_battle(num: int = 5):
             once=True
         )
         h.set(has_cd=False, speed_x=3).battle_loop(max_duration=1000)
+        sleep(1)
         h.way_to_exit(until=lambda: ui_T((I("加载中"), T("还有"))), exit_loc=0)
         wait_for_disappear(I("加载中"))
         for name in ("昆仑山-突发事件", "昆仑山-玉虚殿", "昆仑山-战斗结束"):

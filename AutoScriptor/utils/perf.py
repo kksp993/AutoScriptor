@@ -56,6 +56,7 @@ THREAD_QUERY_INFORMATION  = 0x0040
 _boosted = False
 _boost_lock = threading.Lock()
 _boosted_pids: list[int] = []          # 记录被提升过优先级的进程 PID（用于恢复）
+_original_affinity_mask: int | None = None  # 记录原始 CPU 亲和性掩码（用于恢复）
 
 
 # ==================== 核心 API ====================
@@ -81,6 +82,9 @@ def boost(
         _boosted = True
 
     logger.info("⚡ 正在启用性能优化...")
+
+    # 0) 根据配置限制 CPU 亲和性（防止程序占满所有核心导致电脑卡死）
+    _apply_cpu_affinity()
 
     # 1) 阻止系统休眠 / 显示器关闭
     prevent_sleep(keep_display=keep_display)
@@ -118,6 +122,9 @@ def unboost():
 
     logger.info("⚡ 正在恢复默认优先级与电源策略...")
 
+    # 0) 恢复 CPU 亲和性
+    _restore_cpu_affinity()
+
     # 1) 清除 SetThreadExecutionState
     try:
         ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
@@ -152,6 +159,98 @@ def unboost():
 
 
 # ==================== 底层工具函数 ====================
+
+def _apply_cpu_affinity():
+    """
+    根据 config.json 中 app.cpu_cores 的值限制当前进程可使用的 CPU 核心数。
+    
+    配置项：app.cpu_cores
+        - 正整数：限制使用前 N 个核心（例如 4 表示只用 CPU 0~3）
+        - 0 / 负数 / 未设置：不限制，使用所有核心
+    
+    使用 Windows API SetProcessAffinityMask 实现。
+    """
+    global _original_affinity_mask
+
+    try:
+        from AutoScriptor.utils.constant import cfg
+        cpu_cores = cfg.get("app.cpu_cores", 0)
+    except Exception:
+        cpu_cores = 0
+
+    if not cpu_cores or not isinstance(cpu_cores, int) or cpu_cores <= 0:
+        return  # 未配置或无效值，不限制
+
+    total_cores = os.cpu_count() or 1
+    # 限制核心数不超过实际核心数
+    use_cores = min(cpu_cores, total_cores)
+    if use_cores >= total_cores:
+        logger.info("⚡ CPU 亲和性: 配置核心数(%d) >= 实际核心数(%d)，无需限制", use_cores, total_cores)
+        return
+
+    # 构建亲和性掩码：使用前 N 个核心
+    affinity_mask = (1 << use_cores) - 1  # e.g. 4 cores -> 0b1111 = 15
+
+    try:
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(
+            PROCESS_SET_INFORMATION | PROCESS_QUERY_INFORMATION, False, os.getpid()
+        )
+        if not handle:
+            logger.warning("⚡ CPU 亲和性: OpenProcess 失败，无法设置")
+            return
+
+        try:
+            # 先保存原始亲和性掩码
+            proc_mask = ctypes.c_ulonglong(0)
+            sys_mask = ctypes.c_ulonglong(0)
+            if kernel32.GetProcessAffinityMask(
+                handle, ctypes.byref(proc_mask), ctypes.byref(sys_mask)
+            ):
+                _original_affinity_mask = proc_mask.value
+
+            # 设置新的亲和性掩码
+            ok = kernel32.SetProcessAffinityMask(handle, affinity_mask)
+            if ok:
+                logger.info(
+                    "⚡ CPU 亲和性已设置: 限制使用 %d/%d 个核心 (mask=0x%X)",
+                    use_cores, total_cores, affinity_mask,
+                )
+            else:
+                logger.warning("⚡ CPU 亲和性: SetProcessAffinityMask 失败")
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception as e:
+        logger.warning("⚡ CPU 亲和性设置异常: %s", e)
+
+
+def _restore_cpu_affinity():
+    """恢复进程的原始 CPU 亲和性掩码。"""
+    global _original_affinity_mask
+
+    if _original_affinity_mask is None:
+        return  # 没有保存过，说明没修改过
+
+    try:
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(
+            PROCESS_SET_INFORMATION | PROCESS_QUERY_INFORMATION, False, os.getpid()
+        )
+        if not handle:
+            return
+        try:
+            ok = kernel32.SetProcessAffinityMask(handle, _original_affinity_mask)
+            if ok:
+                logger.info("⚡ CPU 亲和性已恢复 (mask=0x%X)", _original_affinity_mask)
+            else:
+                logger.warning("⚡ CPU 亲和性恢复失败")
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception as e:
+        logger.warning("⚡ CPU 亲和性恢复异常: %s", e)
+    finally:
+        _original_affinity_mask = None
+
 
 def prevent_sleep(keep_display: bool = False):
     """

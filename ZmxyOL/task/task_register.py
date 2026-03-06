@@ -157,6 +157,10 @@ def task_wrapper(func):
         from AutoScriptor.core.background import bg
         bg.clear(clear_signals=True)
 
+        # 每个任务开始前清空调试截图目录，确保截图都属于当前任务
+        from AutoScriptor.utils.tracer import clear_debug_screenshots
+        clear_debug_screenshots()
+
         # 在任务执行前注入必要的导航符号到函数的全局命名空间
         func_globals = func.__globals__
         if 'ensure_in' not in func_globals:

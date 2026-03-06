@@ -16,6 +16,8 @@ import time
 from enum import Enum
 from logzero import logger
 
+from AutoScriptor import ensure_app_running
+
 
 class SchedulerState(Enum):
     PENDING = "pending"   # 绿色：待运行
@@ -36,6 +38,7 @@ class Scheduler:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._wake = threading.Event()      # 用于中断 sleep，立即重新检查
+        self._tasks_updated = threading.Event()  # 标记后台执行完毕，UI 应刷新
         self._consecutive_errors = 0
 
     # ── 外部注入 ──
@@ -78,6 +81,13 @@ class Scheduler:
     def wake(self):
         """中断当前等待，立即重新检查到期任务。"""
         self._wake.set()
+
+    def consume_tasks_updated(self) -> bool:
+        """检查后台是否已更新任务配置。返回 True 时 UI 应刷新 ui_tasks。"""
+        if self._tasks_updated.is_set():
+            self._tasks_updated.clear()
+            return True
+        return False
 
     def stop(self):
         self._stop.set()
@@ -160,32 +170,18 @@ class Scheduler:
     def _check_and_run(self):
         """逐个扫描并执行到期任务，每个任务完成后保存配置并重新加载，再重新扫描。"""
         from AutoScriptor.utils.constant import cfg
-        emulator_launched = False
         total_success, total_failed = 0, 0
-
+        import os
+        os.system('cls' if os.name == 'nt' else 'clear')
         while self.state == SchedulerState.RUNNING:
             now_ts = time.time()
             due = self._collect_due(cfg["tasks"], "", now_ts)
-            if not due:
-                break
+            if not due: break
 
-            if not emulator_launched:
-                logger.info("📅 发现 %d 个到期任务: %s", len(due), due)
-                # 首次执行前启动模拟器（如果没在运行）
-                try:
-                    from AutoScriptor import mixctrl
-                    app_name = cfg["app"]["app_to_start"]
-                    if mixctrl.app.state(app_name) != "running":
-                        logger.info("📅 正在启动模拟器...")
-                        mixctrl.app.launch(app_name)
-                        time.sleep(10)
-                except Exception as e:
-                    logger.error("📅 启动模拟器失败: %s", e)
-                    self._consecutive_errors += 1
-                    if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                        self.mark_error()
-                    return
-                emulator_launched = True
+            logger.info("📅 发现 %d 个到期任务: %s", len(due), due)
+            
+            # 首次执行前确保模拟器和应用都在运行
+            ensure_app_running(cfg["emulator"]["index"], cfg["emulator"]["adb_addr"], cfg["app"]["app_to_start"])
 
             # 只取第一个到期任务执行
             task_key = due[0]
@@ -200,16 +196,17 @@ class Scheduler:
                 if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
                     self.mark_error()
                     break
-
-            # 每个任务执行后保存配置并重新加载，然后重新扫描到期任务
-            cfg.save_config()
-            self._task_manager.reload_tasks()
-            logger.info("🔄 [%s] 完成，配置已保存并重新加载", task_key)
+            finally:
+                # 每个任务执行后保存配置并重新加载，然后重新扫描到期任务
+                cfg.save_config()
+                self._task_manager.reload_tasks()
+                logger.info("🔄 [%s] 完成，配置已保存并重新加载", task_key)
 
         # 全部到期任务执行完毕后，统一执行后续动作（关闭模拟器等）
         if total_success > 0 or total_failed > 0:
             logger.info("📅 定时执行完成: 成功 %d, 失败 %d", total_success, total_failed)
             self._post_execution_action()
+            self._tasks_updated.set()  # 通知 UI 刷新 ui_tasks
             logger.info("📅 已回到待命状态，按 Enter 刷新主菜单")
 
     # ── 辅助 ──
@@ -232,31 +229,19 @@ class Scheduler:
         """根据 config 执行任务完成后的动作。"""
         from AutoScriptor.utils.constant import cfg
         action = cfg["emulator"].get("post_execution", "NULL").upper()
-        if action == "NULL":
-            return
-        try:
-            from AutoScriptor import mixctrl
-            app_name = cfg["app"]["app_to_start"]
-            if action == "CLOSE_MUMU":
-                logger.info("📅 执行后: 关闭模拟器")
-                try:
-                    mixctrl.app.close(app_name)
-                except Exception:
-                    pass
-                time.sleep(2)
-                try:
-                    from AutoScriptor.control.MumuAdaptor.mumu import Mumu
-                    Mumu().select(cfg["emulator"]["index"]).power.shutdown()
-                except Exception:
-                    pass
-            elif action == "CLOSE_GAME_ONLY":
-                logger.info("📅 执行后: 仅关闭游戏")
-                try:
-                    mixctrl.app.close(app_name)
-                except Exception:
-                    pass
-        except Exception as e:
-            logger.warning("📅 执行后动作异常: %s", e)
+        if action == "NULL":  return
+        from AutoScriptor import mixctrl
+        app_name = cfg["app"]["app_to_start"]
+        if action == "CLOSE_MUMU":
+            logger.info("📅 执行后: 关闭模拟器")
+            mixctrl.app.close(app_name)
+            time.sleep(2)
+            from AutoScriptor.control.MumuAdaptor.mumu import Mumu
+            Mumu().select(cfg["emulator"]["index"]).power.shutdown()
+        elif action == "CLOSE_GAME_ONLY":
+            logger.info("📅 执行后: 仅关闭游戏")
+            mixctrl.app.close(app_name)
+
 
     # ── 状态查询 ──
 

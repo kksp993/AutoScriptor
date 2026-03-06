@@ -17,8 +17,7 @@ from AutoScriptor import TaskRequireReTry
 from logzero import logger
 from AutoScriptor.utils.logger import set_current_task
 import sys
-from ZmxyOL.nav import ensure_in
-from ZmxyOL.nav.envs.decorators import LOC_ENV
+
 
 class next_date_enum(enum.Enum):
     past = "past"
@@ -232,6 +231,8 @@ class TaskManager:
                 try:
                     # 释放锁后执行具体任务，避免长时间阻塞其它请求
                     set_current_task(task.split("/")[-1])  # "一般任务/登录" → "登录"
+                    # 执行任务前先释放所有按键，避免按键卡住
+                    mixctrl.release_all_keys()
                     fn(**kwargs)
                     logger.info(f"▶️  执行成功: {task}")
                     # 执行完毕后再加锁更新配置
@@ -274,6 +275,8 @@ class TaskManager:
                         while mixctrl.app.state(cfg["app"]["app_to_start"]) != "running":
                             mixctrl.app.launch(cfg["app"]["app_to_start"])
                             sleep(1)
+                            while not dismiss_floating_window(max_retries=1, debug=False):
+                                sleep(1)
                         sleep(5)
                     
                     mm.set_region("登录")

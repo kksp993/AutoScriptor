@@ -10,6 +10,16 @@ def login(account: str=None, password: str=None, character_name: str=None, chara
     logger.info("等待启动完毕")
     while ui_F((T("进入游戏"), T("已阅读并同意"),T("账号登录"))):
         time.sleep(0.5)
+    def login_by_account():
+        wait_for_appear(T("账号密码登录"))
+        click(T("请输入手机号或用户名"), if_exist=True)
+        input(account)
+        click(T("请输入密码"))
+        input(password)
+        click(T("登录",color="青色"))
+        time.sleep(1)
+        click(T("同意并登录",color="青色", box=Box(160,707,442,95)))
+        click(T("授权并登录"), if_exist=True)
     if ui_T((T("已阅读并同意"), T("账号登录"))):
         click(T("账号登录"), if_exist=True)
         if not account or not password:
@@ -25,15 +35,11 @@ def login(account: str=None, password: str=None, character_name: str=None, chara
         locate(T("手机号验证登录"), 3)
         if ui_idx((T("请输入手机号或用户名"),T("账号登录"),T("进入游戏",color="橙色"))) in [0,1]:
             click(T("账号登录"), delay=1, repeat=2)
-            wait_for_appear(T("账号密码登录"))
-            click(T("请输入手机号或用户名"), if_exist=True)
-            input(account)
-            click(T("请输入密码"))
-            input(password)
-            click(T("登录",color="青色"))
-            time.sleep(1)
-            click(T("同意并登录",color="青色", box=Box(160,707,442,95)))
-            click(T("授权并登录"), if_exist=True)
+            login_by_account()
+    elif ui_T(T("登录", color="青色")):
+        click(T("登录"))
+        login_by_account()
+
     click(T("开心收下"), if_exist=True)
     click(B(640, 575))
     if character_index:
