@@ -10,7 +10,8 @@ AutoScriptor 是一个基于 Python 的自动化脚本与任务编排器，专�
 - **双模式管理**：支持 CLI 命令行界面和 WebUI 可视化界面两种操作方式
 - **模拟器控制**：支持 MuMu 模拟器的点击、长按、滑动、输入、按键事件等操作
 - **智能识别**：集成 PaddleOCR 文本识别和图像匹配，支持颜色采样、稳定性检测
-- **任务编排**：按"每日/每周/一般/活动"分类管理任务，支持参数配置、执行后冷却与状态持久化
+- **任务编排**：按"每日/每周/一般/活动"分类管理任务，支持参
+数配置、执行后冷却与状态持久化
 - **实时监控**：WebUI 提供实时日志查看（SSE），CLI 提供交互式任务导航
 - **错误处理**：自动归档错误日志和截图，便于问题排查
 - **账号管理**：支持加密存储账号密码，安全可靠
@@ -162,7 +163,6 @@ python services/webui/server.py
 - **前端**：Vue 3, Element Plus, Tailwind CSS
 - **OCR**：PaddleOCR 2.7.0, PaddlePaddle 3.0.0
 - **模拟器控制**：ADB, uiautomator2
-- **AI 框架**：Agno（可选，用于 AI Agent 功能）
 - **其他**：logzero（日志）, questionary（CLI交互）, cryptography（加密）
 
 ## 项目结构

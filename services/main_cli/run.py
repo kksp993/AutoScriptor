@@ -291,6 +291,12 @@ def run_cli_navigation():
 
     navigation_path = []
     while True:
+        # 后台调度器执行完任务后，自动将 ui_tasks 刷新为最新的 cfg["tasks"]
+        # 避免 UI 显示过时状态，也防止用户误按"保存"写入脏数据
+        if scheduler.consume_tasks_updated():
+            ui_tasks = copy.deepcopy(cfg["tasks"])
+            logger.info("🔄 后台任务已完成，UI 状态已自动同步")
+
         os.system('cls' if os.name == 'nt' else 'clear')
         current_node = get_node_by_path(ui_tasks, navigation_path)
         # 如果当前节点是叶子任务且有参数，进入参数编辑模式
@@ -474,39 +480,13 @@ def run_cli_navigation():
                 logger.warning("⚠️ 请先验证账号密码后再执行任务（主菜单 → 👤 账号管理）")
                 questionary.press_any_key_to_continue().ask()
                 continue
+            # 保存最新的任务配置，确保调度器能读到
+            cfg["tasks"] = copy.deepcopy(ui_tasks)
+            cfg.save_config()
             # 激活调度器
             scheduler.activate()
-            app_name = cfg["app"]["app_to_start"]
-            _launch_attempt = 0
-            while mixctrl.app.state(app_name) != "running":
-                _launch_attempt += 1
-                logger.info(f"📱 正在启动模拟器 (第{_launch_attempt}次尝试)...")
-                mixctrl.app.launch(app_name)
-                sleep(5)
-            master_node_to_execute = get_node_by_path(cfg["tasks"], navigation_path)
-            ui_node_counterpart = get_node_by_path(ui_tasks, navigation_path)
-            # 全局执行异常处理
-            try:
-                total_executed, total_failed, total_count = find_and_execute_tasks(master_node_to_execute, ui_node_counterpart, navigation_path)
-                # 反馈结果给调度器
-                scheduler.record_result(total_executed, total_failed)
-                if total_executed > 0:
-                    logger.info(f"\n✅ 执行完毕，{total_executed}/{total_count}个任务的状态变更已自动保存！")
-                else:
-                    logger.info("\n🔵 没有需要执行的任务。")
-                # 自动保存配置并重新加载（等同于手动按 T）
-                cfg.save_config()
-                task_manager.reload_tasks()
-                ui_tasks = copy.deepcopy(cfg["tasks"])
-                logger.info("🔄 配置已自动保存并重新加载")
-            except KeyboardInterrupt:
-                bg.clear(clear_signals=True)
-                logger.info("🔴 任务执行已中断，返回菜单")
-                questionary.press_any_key_to_continue().ask()
-                continue
-            finally:
-                # 执行后行为（关闭模拟器/关闭游戏/无操作）
-                scheduler._post_execution_action()
+            scheduler.wake()  # 立即检查到期任务
+
 
         elif action == "--Account--":
             res = questionary.select(

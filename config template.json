@@ -6,7 +6,8 @@
         "name": "ZmxyOL",
         "restart_on_error": true,
         "run_in_background": false,
-        "debug_mode": true
+        "debug_mode": true,
+        "cpu_cores": 8
     },
     "ocr": {
         "use_gpu": false
