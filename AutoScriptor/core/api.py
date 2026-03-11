@@ -54,6 +54,7 @@ def ensure_app_running(selected_emulator_index, adb_addr, app_to_start):
     print(f"mumu_manager_path: {mumu_manager_path}")
     mumu = Mumu().select(selected_emulator_index)
     mumu.power.start(app_to_start) if cfg["app"]["auto_start"] else None
+    logger.info("模拟器启动完成")
     mixctrl = MixControl(mumu)
     logger.info("编排器初始化完成.")
     success = False
@@ -79,10 +80,8 @@ def ensure_app_running(selected_emulator_index, adb_addr, app_to_start):
         logger.error(f"测试点击(0,0)，第{i}次尝试，第{interval}秒后重试")
         time.sleep(interval)
     if not success:
-        logger.error("多次点击测试失败，准备重启框架")
-        from AutoScriptor.core.background import bg
-        bg.stop()
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+        logger.error("多次点击测试失败，模拟器无响应")
+        raise RuntimeError("ensure_app_running: 多次点击测试失败，模拟器无响应，请检查模拟器状态")
     mixctrl.window.hidden() if cfg["app"]["run_in_background"] else None
     return mixctrl, mumu
 
@@ -475,8 +474,14 @@ def dismiss_floating_window(max_retries: int = 3, debug: bool = False) -> bool:
         swipe(B(cx, cy, 10, 10), B(640, 650, 10, 10), duration_s=1)
         time.sleep(1)
         click(B(740, 555, 10, 10))
-        logger.info("✅ 悬浮窗已隐藏")
-        return True
+        time.sleep(0.5)
+
+        verify = _detect(mixctrl.screenshot(), debug=debug)
+        if not verify["found"]:
+            logger.info("✅ 悬浮窗已隐藏")
+            return True
+
+        logger.warning(f"⚠️ 悬浮窗关闭后仍检测到: {verify['edge']}边 {verify['box']}")
 
     return False
 
