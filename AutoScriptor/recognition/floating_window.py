@@ -94,6 +94,8 @@ def detect_floating_window(
                 continue
 
             bx, by, bw, bh = cv2.boundingRect(cnt)
+            if not _touches_screen_edge(edge_name, bx, by, bw, bh, sw, sh):
+                continue
 
             # 长宽比过滤：悬浮窗是扁平矩形（水平或垂直方向），排除正方形噪声
             aspect = max(bw, bh) / max(min(bw, bh), 1)
@@ -128,6 +130,19 @@ def detect_floating_window(
     best = max(results, key=lambda r: r["green_ratio"])
     return best
 
+
+
+def _touches_screen_edge(edge_name: str, bx: int, by: int, bw: int, bh: int, sw: int, sh: int, margin: int = 2) -> bool:
+    """Require the candidate to touch the real screen boundary for that edge."""
+    if edge_name == "上":
+        return by <= margin
+    if edge_name == "下":
+        return by + bh >= sh - margin
+    if edge_name == "左":
+        return bx <= margin
+    if edge_name == "右":
+        return bx + bw >= sw - margin
+    return False
 
 def _save_debug(edge_name: str, strip: np.ndarray, mask: np.ndarray):
     """保存调试图像"""

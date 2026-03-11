@@ -126,6 +126,7 @@ def way():
     # 等待加载中消失
     while ui_T(I("加载中"), 1):
         time.sleep(0.5)
+    time.sleep(3)
     mm.set_region("村庄")
 
 @path("登录", "村庄")

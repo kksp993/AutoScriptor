@@ -40,7 +40,7 @@ def _check_idx(get_identifier: Callable[[str], Any], names: list[str]) -> int:
     """通用索引查找：展平 identifiers，定位，再还原原始索引"""
     idfs = [get_identifier(name) for name in names]
     flat, groups = _flatten_identifiers(idfs)
-    flat_idx = ui_idx(flat)
+    flat_idx = ui_idx(tuple(flat))
     if flat_idx < 0: return -1
     res = _restore_flat_idx(flat_idx, groups)
     return res
@@ -82,6 +82,12 @@ def locate_region(cnt = 0, check_only = False) -> tuple[str, str]:
         return mm.set_region(loc.envs[0].name, loc.name)
     if cnt % 2 == 0:
         try_close_via_x()
+    if cnt in (3, 7):
+        try:
+            mixctrl.app.launch(cfg["app"]["app_to_start"])
+            time.sleep(2)
+        except Exception:
+            pass
     if cnt > 10:
         raise ValueError("无法找到当前位置，请检查环境是否正确")
     return locate_region(cnt + 1)
@@ -139,7 +145,7 @@ def try_close_via_x():
         found = False
         tgts = tuple(target for target, _ in close_targets)
         idx = ui_idx(tgts)
-        if idx > 0:
+        if idx >= 0:
             click(close_targets[idx][1], if_exist=True)
             found = True
             sleep(0.5)

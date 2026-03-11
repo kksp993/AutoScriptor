@@ -40,7 +40,7 @@ def hundunlianyaota():
     sleep(1)
     click(B(30,30,30,30))
     wait_for_appear(I("混沌炼狱塔"))
-    click(B(30,30,30,30))
+    click(B(30,30,30,30), until=lambda: ui_F(I("混沌炼狱塔")))
 
 
 if __name__ == "__main__":
