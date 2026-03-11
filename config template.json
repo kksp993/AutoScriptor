@@ -29,6 +29,8 @@
     "status": {
         "kunlunshan": {
             "has_YuxuDian_ticket": false
-        }
+        },
+        "first_login_after_5am": false,
+        "first_login_after_5am_date": ""
     }
 }
