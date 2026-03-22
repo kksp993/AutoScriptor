@@ -100,9 +100,25 @@ python -m services.webui.server
 
 若要用 **带窗口的桌面壳**（而非自己开浏览器），在项目里还有 **`webapp/`** 下的 Electron 应用：它会自动拉起后端的 **`gui.py`**（内部仍走 `services.webui.server` / uvicorn，与上面命令同一套界面）。
 
-1. 安装 [Node.js](https://nodejs.org/)（LTS 即可）。
-2. 先按上文装好 Python 依赖与 **`.venv`**（Electron 会优先用项目根目录的 `.venv\Scripts\python.exe`）。
-3. 在仓库根目录执行：
+1. 安装 [Node.js](https://nodejs.org/)（LTS 即可）。**Windows** 若已启用 [winget](https://learn.microsoft.com/windows/package-manager/winget/)，可在 **以管理员身份打开的 PowerShell** 或普通 PowerShell 中执行：
+   ```powershell
+   winget install OpenJS.NodeJS.LTS -e --accept-source-agreements --accept-package-agreements
+   ```
+   亦可从官网下载 **`.msi` 安装包**，安装时勾选 **Add to PATH**（默认会勾选）。装完后**先关掉当前所有终端**，在**新开的**终端里执行 `node -v`、`npm -v`，应能看到版本号。
+
+   **若仍提示「无法将 npm 识别为…」**（常见于 **Cursor / VS Code 在装 Node 之前就开着**）：旧窗口里的环境变量不会自动刷新。请按顺序试：
+   - **完全退出 当前IDE/窗口**（不是只关终端标签），再重新打开项目，新开终端后重试 `npm -v`。
+   - 或在本机 **Windows 自带的「终端」/「PowerShell」**（从开始菜单打开）里试一次 `npm -v`；若这里正常而 当前IDE 里不行，说明只需重启 当前IDE
+   - 或在当前 PowerShell **临时刷新 PATH** 后再进 `webapp`（复制整段执行即可）：
+     ```powershell
+     $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+     node -v
+     npm -v
+     ```
+   - 若以上仍失败：在资源管理器中查看是否存在 如 **`C:\Program Files\nodejs\npm.cmd`**。若没有，说明 Node 未装好，请重新运行安装包或 `winget` 命令；若有，请到 **设置 → 系统 → 关于 → 高级系统设置 → 环境变量**，在「系统变量」或「用户变量」的 **Path** 中确认含有 **`C:\Program Files\nodejs`**，保存后**新开终端**再试。
+
+
+2. 直接运行在仓库根目录执行：
 
 ```bash
 cd webapp

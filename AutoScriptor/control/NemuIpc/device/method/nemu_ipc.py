@@ -556,26 +556,16 @@ class NemuIpc():
                 logger.error(e)
                 logger.error('Emulator info incorrect')
 
-        # Search emulator instance
-        # C:\Program Files\Netease\MuMu Player 12\shell\MuMuPlayer.exe
-        # with E:\ProgramFiles\MuMuPlayer-12.0\shell\MuMuPlayer.exe
-        # installation path is E:\ProgramFiles\MuMuPlayer-12.0
-        if self.emulator_instance is None:
-            logger.error('Unable to use NemuIpc because emulator instance not found')
-            raise RequestHumanTakeover
-        if 'MuMuPlayerGlobal' in self.emulator_instance.path:
-            logger.info(f'nemu_ipc is not available on MuMuPlayerGlobal, {self.emulator_instance.path}')
-            raise RequestHumanTakeover
-        try:
-            return NemuIpcImpl(
-                nemu_folder=self.emulator_instance.emulator.abspath('../'),
-                instance_id=self.emulator_instance.MuMuPlayer12_id,
-                display_id=0
-            ).__enter__()
-        except (NemuIpcIncompatible, NemuIpcError) as e:
-            logger.error(e)
-            logger.error('Unable to initialize NemuIpc')
-            raise RequestHumanTakeover
+        logger.error(
+            f'Unable to initialize NemuIpc: '
+            f'serial={self.serial}, '
+            f'mumu_folder={folder}, '
+            f'serial_to_id={index}. '
+            f'请检查: 1) 模拟器是否已启动  '
+            f'2) config.json 中 mumu_folder 路径是否正确  '
+            f'3) adb_addr 是否与模拟器实例匹配'
+        )
+        raise NemuIpcError('NemuIpc initialization failed')
 
     def nemu_ipc_available(self) -> bool:
         if not self.is_mumu_family:

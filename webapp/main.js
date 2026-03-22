@@ -354,6 +354,9 @@ ipcMain.on('installer:start', (event, config) => {
   if (config && config.pipSource) {
     args.push('--pip-source', config.pipSource);
   }
+  if (config && config.fresh) {
+    args.push('--fresh');
+  }
 
   console.log('[installer] Starting:', pythonPath, args.join(' '));
 

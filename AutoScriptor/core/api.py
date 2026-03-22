@@ -55,7 +55,7 @@ def ensure_app_running(selected_emulator_index, adb_addr, app_to_start):
     mumu = Mumu().select(selected_emulator_index)
     mumu.power.start(app_to_start) if cfg["app"]["auto_start"] else None
     logger.info("模拟器启动完成")
-    mixctrl = MixControl(mumu)
+    mixctrl = MixControl(mumu, serial=adb_addr)
     logger.info("编排器初始化完成.")
     success = False
     intervals = [1, 2, 3, 4, 5, 5, 5, 5]
