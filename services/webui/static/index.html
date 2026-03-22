@@ -39,21 +39,22 @@
       .stat-label { @apply text-base text-gray-500 mt-1.5; }
     }
   </style>
-  <link rel="stylesheet" href="/static/css/style.css?v=11" />
+  <link rel="stylesheet" href="/static/css/style.css?v=13" />
 </head>
-<body class="bg-gray-100 overflow-hidden" style="height:100vh;">
+<body class="app-body overflow-hidden" style="height:100vh;">
   <div id="app" class="flex h-screen overflow-hidden">
 
     <!-- 侧边栏 -->
     <app-sidebar
       :active-tab="activeTab"
+      :theme="currentTheme"
       :scheduler-status="schedulerStatus"
       :character-name="characterName"
       @navigate="activeTab=$event">
     </app-sidebar>
 
     <!-- 右侧主区域 -->
-    <div class="flex flex-col flex-1 min-w-0 overflow-hidden">
+    <div class="main-shell flex flex-col flex-1 min-w-0 overflow-hidden">
 
       <!-- 顶栏 -->
       <header class="topbar flex-shrink-0">
@@ -62,15 +63,15 @@
 
           <!-- 最小化到托盘（仅 Electron 模式显示） -->
           <button v-if="isElectron"
-                  class="inline-flex items-center justify-center w-7 h-7 rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                  class="topbar-icon-btn inline-flex items-center justify-center w-7 h-7 rounded transition-colors"
                   title="最小化到系统托盘"
                   @click="minimizeToTray">
             <i class="fa fa-arrow-down text-sm"></i>
           </button>
 
-          <!-- 档案切换下拉 -->
-          <el-dropdown v-if="profiles.length > 0" trigger="click" @command="switchProfile">
-            <span class="profile-dropdown text-sm font-medium text-gray-600">
+          <!-- 档案切换下拉（始终显示：无 config_*.json 时仍可「新建档案」） -->
+          <el-dropdown trigger="click" @command="switchProfile">
+            <span class="profile-dropdown topbar-profile text-sm font-medium">
               <i class="fa fa-id-card-o"></i>
               {{ currentProfile }}
               <i class="fa fa-caret-down" style="margin-left:3px"></i>
@@ -81,7 +82,7 @@
                   :class="{ 'font-bold': p === currentProfile }">
                   <i class="fa fa-check" v-if="p === currentProfile" style="margin-right:6px;color:#22c55e"></i>
                   {{ p }}
-                  <el-button v-if="p !== 'default'" type="danger" link size="small"
+                  <el-button v-if="p !== currentProfile" type="danger" link size="small"
                     style="margin-left:12px" @click.stop="deleteProfile(p)">
                     <i class="fa fa-trash-o"></i>
                   </el-button>
@@ -202,8 +203,10 @@
     <!-- 新建档案对话框 -->
     <teleport to="body">
       <el-dialog v-model="profileDialogVisible" title="新建档案" width="500px">
+        <el-alert type="info" :closable="false" style="margin-bottom:16px"
+          description="每个档案保存为独立配置文件（config_名称.json），切换时自动替换当前配置并用安全密码解密验证。"></el-alert>
         <el-form :model="newProfileForm" label-width="90px">
-          <el-form-item label="档案名称">
+          <el-form-item label="档案名称" required>
             <el-input v-model="newProfileForm.name" placeholder="如: 小号、大号"></el-input>
           </el-form-item>
           <el-form-item label="账号">
@@ -215,8 +218,8 @@
           <el-form-item label="角色名">
             <el-input v-model="newProfileForm.character_name" placeholder="角色名/ID"></el-input>
           </el-form-item>
-          <el-form-item label="安全密码">
-            <el-input v-model="newProfileForm.security_key" type="password" placeholder="用于加密保存" show-password></el-input>
+          <el-form-item label="安全密码" required>
+            <el-input v-model="newProfileForm.security_key" type="password" placeholder="设置此档案的安全密码" show-password></el-input>
           </el-form-item>
         </el-form>
         <template #footer>
@@ -247,7 +250,7 @@
   </div>
 
   <!-- Vue 组件 -->
-  <script src="/static/js/components/AppSidebar.js?v=10"></script>
+  <script src="/static/js/components/AppSidebar.js?v=11"></script>
   <script src="/static/js/components/TaskTree.js?v=8"></script>
   <script src="/static/js/components/Overview.js?v=8"></script>
   <script src="/static/js/components/SchedulerPanel.js?v=9"></script>
@@ -256,6 +259,6 @@
   <script src="/static/js/components/editor/EditorCanvas.js?v=8"></script>
   <script src="/static/js/components/editor/EditorControls.js?v=9"></script>
   <script src="/static/js/components/editor/EditorPanel.js?v=9"></script>
-  <script src="/static/js/app.js?v=9"></script>
+  <script src="/static/js/app.js?v=10"></script>
 </body>
 </html>
