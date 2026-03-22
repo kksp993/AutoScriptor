@@ -2,7 +2,7 @@
 --extra-index-url https://pypi.org/simple
 --prefer-binary
 adbutils==1.2.15
-numpy==1.24.4
+numpy>=1.24.4,<2.0.0
 pandas
 opencv-python
 questionary==2.1.0
@@ -16,11 +16,9 @@ pypinyin>=0.54.0
 cryptography
 paddlepaddle==3.0.0
 paddleocr==2.7.0
-paddlex==3.1.3
 fuzzywuzzy
 python-Levenshtein
 mkl>=2023.0.0
-mkl-include>=2023.0.0
 colormath
 uiautomator2==2.16.17
 uiautomator2cache==0.3.1

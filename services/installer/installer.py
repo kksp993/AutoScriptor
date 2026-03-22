@@ -45,6 +45,49 @@ COMMON_MUMU_PORTS =[
 ]
 
 
+def _detect_security_software() -> list[str]:
+    """Detect running security software that may slow down venv file operations."""
+    known = {
+        "360tray.exe": "360\u5b89\u5168\u536b\u58eb",
+        "360safe.exe": "360\u5b89\u5168\u536b\u58eb",
+        "360sd.exe": "360\u6740\u6bd2",
+        "zhudongfangyu.exe": "360\u4e3b\u52a8\u9632\u5fa1",
+        "hipstray.exe": "\u706b\u7ed2\u5b89\u5168",
+        "wsctrlsvc.exe": "\u706b\u7ed2\u5b89\u5168",
+        "qqpctray.exe": "\u817e\u8baf\u7535\u8111\u7ba1\u5bb6",
+        "kxetray.exe": "\u91d1\u5c71\u6bd2\u9738",
+        "avp.exe": "\u5361\u5df4\u65af\u57fa",
+    }
+    found: list[str] = []
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=10,
+        )
+        for line in out.stdout.splitlines():
+            if not line.strip():
+                continue
+            name = line.split(",")[0].strip('"').lower()
+            if name in known and known[name] not in found:
+                found.append(known[name])
+    except Exception:
+        pass
+    return found
+
+
+def _try_add_defender_exclusion(target_path: str) -> bool:
+    """Best-effort: add Windows Defender real-time scan exclusion."""
+    try:
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             f'Add-MpPreference -ExclusionPath "{target_path}" -ErrorAction SilentlyContinue'],
+            capture_output=True, text=True, timeout=15,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 def _prompt_text(message: str, default: str | None = None) -> str | None:
     """Prompt helper tolerant to missing questionary or non-interactive sessions."""
     try:
@@ -71,6 +114,41 @@ def get_venv_python(project_root: Path) -> Path:
     return project_root / ".venv" / "Scripts" / "python.exe"
 
 
+def _fresh_install_requested(argv: list[str]) -> bool:
+    ev = os.environ.get("AUTOSCRIPTOR_FRESH_INSTALL", "").strip().lower()
+    if ev in ("1", "true", "yes", "on"):
+        return True
+    for a in argv[1:]:
+        if a.strip().lower() in ("--fresh-install", "--fresh"):
+            return True
+    return False
+
+
+def _apply_fresh_install_prep(project_root: Path) -> None:
+    """清除依赖完成标记与 wheelhouse 中的 Python 安装包缓存，便于重新下载。"""
+    stamp = project_root / ".venv" / ".deps_installed.stamp"
+    stamp.unlink(missing_ok=True)
+    py_cache = project_root / "wheelhouse" / "python"
+    if py_cache.is_dir():
+        for p in py_cache.glob("*.exe"):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
+
+def _pip_cache_purge(venv_python: Path) -> None:
+    try:
+        subprocess.run(
+            [str(venv_python), "-m", "pip", "cache", "purge"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except Exception:
+        pass
+
+
 def ensure_venv(project_root: Path) -> Path:
     """Create .venv if missing. Returns venv python path."""
     venv_python = get_venv_python(project_root)
@@ -81,7 +159,7 @@ def ensure_venv(project_root: Path) -> Path:
     return venv_python
 
 
-def reinstall_pip_and_install(project_root: Path, extra_index: str | None = None) -> None:
+def reinstall_pip_and_install(project_root: Path, extra_index: str | None = None, fresh: bool = False) -> None:
     venv_python = get_venv_python(project_root)
     # 若已安装依赖的标记文件存在，则跳过重复安装以缩短启动时间
     stamp = project_root / ".venv" / ".deps_installed.stamp"
@@ -101,10 +179,17 @@ def reinstall_pip_and_install(project_root: Path, extra_index: str | None = None
             subprocess.check_call([str(venv_python), str(get_pip_script)])
 
     # Upgrade pip first (use python -m pip to avoid self-modify issues)
-    subprocess.check_call([str(venv_python), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"]) 
+    if fresh:
+        up = [str(venv_python), "-m", "pip", "install", "--no-cache-dir", "--upgrade", "pip", "setuptools", "wheel"]
+    else:
+        up = [str(venv_python), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"]
+    subprocess.check_call(up)
     # 标准在线安装；不再优先 wheelhouse
     req = project_root / "requirements.txt"
-    args = [str(venv_python), "-m", "pip", "install", "-r", str(req)]
+    args = [str(venv_python), "-m", "pip", "install"]
+    if fresh:
+        args += ["--no-cache-dir", "--upgrade", "--force-reinstall"]
+    args += ["-r", str(req)]
     if extra_index:
         args += ["-i", extra_index]
     subprocess.check_call(args)
@@ -366,12 +451,31 @@ def main() -> int:
     # Inside venv now
     # Optional pip index from environment variable AUTOSCRIPTOR_PIP_INDEX
     extra_index = os.environ.get("AUTOSCRIPTOR_PIP_INDEX", None)
+    fresh = _fresh_install_requested(sys.argv)
+    if fresh:
+        _apply_fresh_install_prep(project_root)
 
     # Ensure venv present (no-op if already)
     ensure_venv(project_root)
 
+    if fresh:
+        _pip_cache_purge(get_venv_python(project_root))
+
+    # Antivirus check
+    av_list = _detect_security_software()
+    _try_add_defender_exclusion(str(project_root / ".venv"))
+    _try_add_defender_exclusion(str(project_root))
+    if av_list:
+        names = "\u3001".join(av_list)
+        print(f"\n{'='*60}")
+        print(f"  \u26a0 \u68c0\u6d4b\u5230\u5b89\u5168\u8f6f\u4ef6: {names}")
+        print(f"  \u5176\u5b9e\u65f6\u626b\u63cf\u53ef\u80fd\u663e\u8457\u62d6\u6162\u5b89\u88c5\u548c\u8fd0\u884c\u901f\u5ea6\u3002")
+        print(f"  \u5efa\u8bae\u5c06\u4ee5\u4e0b\u76ee\u5f55\u6dfb\u52a0\u5230\u5b89\u5168\u8f6f\u4ef6\u7684\u767d\u540d\u5355/\u4fe1\u4efb\u533a:")
+        print(f"  \u2192 {project_root}")
+        print(f"{'='*60}\n")
+
     # Install dependencies
-    reinstall_pip_and_install(project_root, extra_index=extra_index)
+    reinstall_pip_and_install(project_root, extra_index=extra_index, fresh=fresh)
 
     # 根据 README 约定自动配置 MuMu（仅 Windows 有效，忽略失败）
     try:
@@ -379,12 +483,13 @@ def main() -> int:
     except Exception:
         pass
 
-    # Decide run target
+    # Decide run target（与 --fresh-install 等标志共存，任意位置可写 webui|cli|install-only）
     target = "webui"
-    if len(sys.argv) > 1:
-        tgt = sys.argv[1].strip().lower()
-        if tgt in {"webui", "cli", "install-only"}:
-            target = tgt
+    for a in sys.argv[1:]:
+        t = a.strip().lower()
+        if t in {"webui", "cli", "install-only"}:
+            target = t
+            break
 
     try:
         run_target_func = _import_run_target()
