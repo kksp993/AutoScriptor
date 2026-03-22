@@ -46,16 +46,8 @@ class NemuIpcControl(BaseMumuControl):
         self.mumu.adb.input_text(text)
 
     def screenshot(self):
-        """rgb image，若 NemuIpc 初始化缺少 emulator_instance 则回退至 Mumu.adb.screenshot()"""
-        try:
-            return self.nemu_ipc.screenshot_nemu_ipc()
-        except AttributeError as e:
-            logger.warning(f"NemuIpcControl.screenshot failed ({e}), fallback to adb screenshot.")
-            try:
-                return self.mumu.adb.screenshot()
-            except Exception as ex:
-                logger.error(f"Fallback adb.screenshot() also failed: {ex}")
-                return None
+        """rgb image via NemuIpc"""
+        return self.nemu_ipc.screenshot_nemu_ipc()
     
     def long_click(self, x, y, duration=1.0)->None:
         self.nemu_ipc.long_click_nemu_ipc(x, y, duration)
