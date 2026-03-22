@@ -15,18 +15,19 @@ class TaskTree:
 
     @staticmethod
     def is_leaf(node: Dict[str, Any]) -> bool:
-        """判断一个节点是否为叶子节点（具体任务），含 'fn' 和 'on'。"""
-        return isinstance(node, dict) and 'fn' in node and 'on' in node
+        """判断一个节点是否为叶子节点（具体任务），含 'on' 键。
 
-    @staticmethod
-    def is_ui_leaf(node: Dict[str, Any]) -> bool:
-        """判断 UI 副本中的节点是否为任务节点（无 'fn'，只看 'on'）。"""
+        fn / order / param_meta 已迁至 TaskRegistry，cfg 侧仅保留
+        用户可序列化配置 (on, next_exec_time, params …)。
+        """
         return isinstance(node, dict) and 'on' in node
+
+    is_ui_leaf = is_leaf  # 统一后两者等价
 
     @staticmethod
     def is_branch(node: Dict[str, Any]) -> bool:
         """判断一个节点是否为目录节点（非叶子的 dict）。"""
-        return isinstance(node, dict) and 'fn' not in node and 'on' not in node
+        return isinstance(node, dict) and 'on' not in node
 
     # ── 路径操作 ──
 

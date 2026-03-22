@@ -1,12 +1,13 @@
 import cv2
 from paddleocr import PaddleOCR
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.box import Box
 from AutoScriptor.utils.constant import cfg
 from fuzzywuzzy import fuzz
 import threading
 import paddle
 import time
+import numpy as np
 OCR_VERSION = 'PP-OCRv4'
 # OCR_VERSION = 'PP-OCRv5'
 # OCR_VERSION = 'PP-OCRv5_server_rec'
@@ -102,6 +103,41 @@ def get_ocr_engine():
     return _thread_local.ocr_engine
 
 
+# ===== 帧级 OCR 缓存 =====
+
+_frame_cache_lock = threading.Lock()
+_frame_cache = None
+
+
+_SAMPLE_N = 7  # 7×7 = 49 均匀采样点
+def _frame_fingerprint(img):
+    """7×7 均匀网格采样指纹，覆盖全图，避免局部变化漏检。"""
+    h, w = img.shape[:2]
+    rs = np.linspace(0, h - 1, _SAMPLE_N, dtype=int)
+    cs = np.linspace(0, w - 1, _SAMPLE_N, dtype=int)
+    return (h, w, img[np.ix_(rs, cs)].tobytes())
+
+
+def _raw_ocr_cached(img_for_ocr, ttl=0.5):
+    """执行 PaddleOCR 并缓存原始结果；同一帧图像在 TTL 内复用上次结果。"""
+    global _frame_cache
+    fp = _frame_fingerprint(img_for_ocr)
+    now = time.time()
+    with _frame_cache_lock:
+        if (_frame_cache is not None
+                and _frame_cache['fp'] == fp
+                and now - _frame_cache['ts'] < ttl):
+            return _frame_cache['result']
+    engine = get_ocr_engine()
+    if engine is None:
+        logger.error("OCR engine is not initialized.")
+        return None
+    result = engine.ocr(img_for_ocr, cls=False)
+    with _frame_cache_lock:
+        _frame_cache = {'fp': fp, 'ts': now, 'result': result}
+    return result
+
+
 # ===== 主OCR方法（推荐） =====
 
 def ocr(frame,
@@ -110,7 +146,7 @@ def ocr(frame,
         preferred_box=None,
         stride=1,
         fuzzy_threshold=100,
-        scale=0.5
+        scale=1.0
 )->list[list[Box]]:
     """
     标准OCR识别方法，直接用PaddleOCR标准API。
@@ -149,10 +185,6 @@ def ocr(frame,
         return Box(x0, top, max(1, x1 - x0), height)
 
     target_string = None
-    engine = get_ocr_engine()
-    if engine is None:  
-        logger.error("OCR engine is not initialized. Cannot perform OCR.")
-        return []
     if frame is None:
         logger.error("Input frame is None.")
         return []
@@ -171,7 +203,9 @@ def ocr(frame,
             img_for_ocr = img_roi[::stride, ::stride]
         else:
             img_for_ocr = img_roi
-        result = engine.ocr(img_for_ocr, cls=False)
+        result = _raw_ocr_cached(img_for_ocr)
+        if result is None:
+            return []
         found_boxes = [[] for _ in range(len(target_strings))]
         if result and result[0]:
             for line_idx, line_info in enumerate(result[0]):
@@ -211,22 +245,15 @@ def ocr(frame,
                             )
         elif result is None:
             logger.warning("OCR engine returned None. This might indicate an issue with the input image or engine.")
-        if scale != 1.0:
-            from AutoScriptor.core.api import first
-            # fallback to full scale for missing targets
-            if first(found_boxes) is None:
-                fallback_boxes = ocr(frame, target_strings, confidence, preferred_box, stride, fuzzy_threshold, scale=1.0)
-                found_boxes = fallback_boxes
         return found_boxes
     except Exception as e:
         logger.error(f"Exception during OCR processing for '{target_string}': {e}", exc_info=True)
         return []
     
 
-def ocr_for_box(haystack_frame, box):
+def ocr_for_box(haystack_frame, box, *, ttl: float = 0.5):
     roi = haystack_frame[box.top:box.top + box.height, box.left:box.left + box.width]
-    engine = get_ocr_engine()
-    result = engine.ocr(roi, cls = False)
+    result = _raw_ocr_cached(roi, ttl=ttl)
     recognized_text = ""
     if result and result[0]:
         for line_info in result[0]:

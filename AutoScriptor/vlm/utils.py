@@ -5,66 +5,87 @@ VLM 辅助工具
 from __future__ import annotations
 
 import base64
+import json
 import os
+import re
 from typing import Optional
 
 from AutoScriptor.core.targets import BoxTarget
 from AutoScriptor.utils.box import Box
 
+# pre-compiled patterns for coordinate extraction
+_BOX_2D_RE = re.compile(
+    r"<box[^>]*>\s*\(?\s*(\d+)\s*,\s*(\d+)\s*\)?\s*,?\s*\(?\s*(\d+)\s*,\s*(\d+)\s*\)?\s*</box>",
+    re.IGNORECASE,
+)
+_JSON_RE = re.compile(r"\{[^{}]*\}")
+_PAIR_RE = re.compile(r"\(?\s*(\d+)\s*,\s*(\d+)\s*\)?")
+
 
 def encode_image_to_base64(image_path: Optional[str]) -> str:
     """读取图片并返回 base64 编码字符串"""
-    path = image_path or ''
+    path = image_path or ""
     if not path or not os.path.exists(path):
         raise FileNotFoundError(f"图片不存在: {path}")
-
     with open(path, "rb") as fp:
         return base64.b64encode(fp.read()).decode("utf-8")
 
 
+def parse_qwen_vl_coordinates(
+    coord_str: str | tuple[int, int],
+    *,
+    width: int = 1280,
+    height: int = 720,
+) -> tuple[int, int]:
+    """Parse VLM grounding output → pixel (x, y).
 
-def parse_qwen_vl_coordinates(coord_str: str|tuple[int, int], *, width: int = 1280, height: int = 720) -> tuple[int, int]:
-    """将 Qwen-VL 返回的坐标转换为像素坐标（支持归一化和像素值）"""
-    import re
-    import json
+    Supported formats (all with 0-999 normalised range):
+      - ``(x, y)``  or  ``x, y``
+      - ``<box>(x1,y1),(x2,y2)</box>``  →  returns centre
+      - ``{"x": N, "y": N}``  JSON
+      - tuple passthrough  ``(x, y)``
+    """
+    if isinstance(coord_str, (tuple, list)) and len(coord_str) >= 2:
+        x_norm, y_norm = int(coord_str[0]), int(coord_str[1])
+        return int(x_norm / 1000 * width), int(y_norm / 1000 * height)
 
-    # 1. 尝试解析 JSON 格式 (e.g. {"x": 632, "y": 197})
-    try:
-        if isinstance(coord_str, str) and "{" in coord_str:
-            match = re.search(r"\{.*\}", coord_str)
-            if match:
-                data = json.loads(match.group(0))
-                if "arguments" in data: data = data["arguments"]
-                if "x" in data and "y" in data:
-                    x, y = float(data["x"]), float(data["y"])
-                    # 简单的启发式判断：如果坐标看起来是归一化的 (0-1 之间的小数)
-                    if 0 <= x <= 1 and 0 <= y <= 1:
-                        return int(x * width), int(y * height)
-                    # 如果是归一化整数 (0-1000)
-                    elif 0 <= x <= 1000 and 0 <= y <= 1000 and (x > 1 or y > 1):
-                        # 这里的歧义很大，有些模型输出 0-1000，有些输出真实像素
-                        # 假设: 如果 x 或 y 大于 1，且看起来不像屏幕尺寸的一半，可能是 0-1000
-                        # 但如果屏幕很小... 无论如何，Qwen-VL 默认是 0-1000
-                        # 除非明确知道这是像素坐标。
-                        # 给定日志里的 (632, 197)，在 720p 屏幕上，这既可能是像素也可能是 0-1000。
-                        # 必须看 Prompt 要求。通常 Tool Call 输出的是像素。
-                        # 让我们假设 JSON tool call 输出的是绝对像素，除非它特别大。
-                        return int(x), int(y)
-    except Exception:
-        pass
+    text: str = coord_str or ""
 
-    # 2. 回退到正则提取数字 (Qwen-VL 默认输出 <box_2d> [x1, y1, x2, y2] </box_2d> 是 0-1000)
-    if isinstance(coord_str, tuple):
-        x_norm, y_norm = coord_str
-    else:
-        numbers = re.findall(r"\d+", coord_str or "")
-        if len(numbers) < 2:
-            raise ValueError(f"无法解析坐标: {coord_str}")
-        x_norm, y_norm = map(int, numbers[-2:])
+    # 1) <box>(x1,y1),(x2,y2)</box>  →  centre point
+    m = _BOX_2D_RE.search(text)
+    if m:
+        x1, y1, x2, y2 = map(int, m.groups())
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        return int(cx / 1000 * width), int(cy / 1000 * height)
 
-    x = int(x_norm / 1000 * width)
-    y = int(y_norm / 1000 * height)
-    return x, y
+    # 2) JSON  {"x": N, "y": N}
+    for jm in _JSON_RE.finditer(text):
+        try:
+            data = json.loads(jm.group(0))
+            if "arguments" in data:
+                data = data["arguments"]
+            if "x" in data and "y" in data:
+                x, y = float(data["x"]), float(data["y"])
+                if 0 <= x <= 1 and 0 <= y <= 1:
+                    return int(x * width), int(y * height)
+                return int(x / 1000 * width), int(y / 1000 * height)
+        except (json.JSONDecodeError, KeyError, TypeError):
+            continue
+
+    # 3) (x, y) or bare  x, y  — take LAST pair found
+    pairs = _PAIR_RE.findall(text)
+    if pairs:
+        x_norm, y_norm = map(int, pairs[-1])
+        return int(x_norm / 1000 * width), int(y_norm / 1000 * height)
+
+    # 4) fallback: any two numbers
+    numbers = re.findall(r"\d+", text)
+    if len(numbers) >= 2:
+        x_norm, y_norm = int(numbers[-2]), int(numbers[-1])
+        return int(x_norm / 1000 * width), int(y_norm / 1000 * height)
+
+    raise ValueError(f"无法解析坐标: {coord_str}")
+
 
 def make_box_target(x: int, y: int, size: int = 5) -> BoxTarget:
     """将坐标转换为可供 click 使用的 BoxTarget"""

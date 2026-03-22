@@ -1,8 +1,9 @@
 import traceback
+from ZmxyOL.battle.utils import ChiBang, WuQi, YiFu, wear_shizhuang_choice
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 def Shield_handle_bk():
     """默认4号位藤蔓，2-3号位无位移技能"""
@@ -27,7 +28,7 @@ def Boss_handle_bk():
 def bingku_battle():
     """默认4号位藤蔓，2-3号位无位移技能"""
     bg.clear_signals()
-    wait_for_appear(T("特性说明", box=Box(576,159,127,33)))
+    wait_for_appear(T("特性说明", box=Box(577,159,125,33).margin()))
     click(B(1000,450,10,10),repeat=3)
     sleep(3.5)
     switch_base("nemu")
@@ -36,7 +37,7 @@ def bingku_battle():
     sleep(0.1)
     h.huashen()
     while not (bg.signal("Failed",False) or bg.signal("Exit",False)):
-        Wave = extract_info(B(652,85,82,54), lambda x: int(x.strip().split("/")[0]), ensure_not_empty=False)
+        Wave = extract_info(B(652,85,82,54), lambda x: int(x.strip().split("/")[0]), ensure_not_empty=False, max_retries=1)
         if Wave:
             if Wave==12:
                 Boss_handle_bk()
@@ -51,9 +52,17 @@ def bingku_battle():
     switch_base("mumu")
 
 @register_task
-def task():
-    from ZmxyOL.battle.utils import wear_suite
-    wear_suite("风虎")
+def task(
+    Bingku_WuQi=WuQi.风虎之怒,
+    Bingku_YiFu=YiFu.风虎潮流,
+    Bingku_ChiBang=ChiBang.风虎背饰,    
+    Changgui_WuQi=WuQi.影蛇之刃,
+    Changgui_YiFu=YiFu.影蛇灵袍,
+    Changgui_ChiBang=ChiBang.影蛇风翼
+):
+    wear_shizhuang_choice(Bingku_WuQi)
+    wear_shizhuang_choice(Bingku_YiFu)
+    wear_shizhuang_choice(Bingku_ChiBang)
     ensure_in("幽冥冰窟")
     h.set(True,1)
     while ui_F(T("重新挑战")):
@@ -64,7 +73,9 @@ def task():
             click(T("确定"), delay=0.5)
         bingku_battle()
     click(T("返回主界面"))
-    wear_suite("蛇年")
+    wear_shizhuang_choice(Changgui_WuQi)
+    wear_shizhuang_choice(Changgui_YiFu)
+    wear_shizhuang_choice(Changgui_ChiBang)
 
 
 

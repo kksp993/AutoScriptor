@@ -2,7 +2,7 @@ import traceback
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 @register_task
 def task(cancel_on_failed:bool=True):
@@ -25,7 +25,7 @@ def task(cancel_on_failed:bool=True):
         h.set(has_cd=True,speed_x=3).battle_task(crash_suddenly=True, bonus_x=3, cancel_on_failed=cancel_on_failed)
     else:
         click(B(1200,30,30,30))
-        wait_for_appear(T("回家", box=Box(18,607,87,109)))
+        wait_for_appear(T("回家", box=Box(29,613,77,88).margin()))
 
     logger.info("====极寒深渊-噩梦====")
     for name in JHSY_CHAOS_TABLE:
@@ -47,7 +47,7 @@ def task(cancel_on_failed:bool=True):
             )
         else:
             click(B(1200,30,30,30))
-            wait_for_appear(T("回家", box=Box(18,607,87,109)))
+            wait_for_appear(T("回家", box=Box(29,613,77,88).margin()))
 
 
 if __name__ == "__main__":

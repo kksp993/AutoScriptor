@@ -25,7 +25,7 @@ import copy
 import time
 import threading
 from typing import List, Tuple
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 from services.testing.harness import TestHarness
 from services.testing.mock_tasks import reset_counters
@@ -188,11 +188,10 @@ class StabilityTestRunner:
             "每日任务/测试村庄/立即成功",
             "每日任务/测试村庄/慢速成功",
         ]
-        # 预先设置取消标记
+        # 预先设置取消标记：execute_tasks 在入口处若已取消则整批跳过
         tm._cancel_event.set()
         success, failed = tm.execute_tasks(tasks)
-        # _reset_cancel 在 execute_tasks 开头被调用，所以取消标记被清除
-        # 但我们需要在执行第一个任务后设置取消
+        # 以下用延迟 request_cancel 验证执行过程中能打断
         # 重新测试：在另一个线程中延迟设置取消
         tm._cancel_event.clear()
 
@@ -237,19 +236,19 @@ class StabilityTestRunner:
     def test_10_max_retry_respected(self):
         """重试次数严格等于 max_retry（不多不少）。"""
         from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.task_registry import task_registry
         cfg["app"]["max_retry"] = 3
         tm = self._make_task_manager()
 
-        # 使用一个计数器来追踪实际调用次数
         call_count = 0
-        original_fn = cfg["tasks"]["每日任务"]["测试村庄"]["重试耗尽"]["fn"]
+        original_fn = task_registry.get_fn("每日任务/测试村庄/重试耗尽")
 
         def counting_fn():
             nonlocal call_count
             call_count += 1
             original_fn()
 
-        cfg["tasks"]["每日任务"]["测试村庄"]["重试耗尽"]["fn"] = counting_fn
+        task_registry.set_fn("每日任务/测试村庄/重试耗尽", counting_fn)
         tm.execute_tasks(["每日任务/测试村庄/重试耗尽"])
 
         expected = 3 + 1  # max_retry + 1 (initial attempt)
@@ -377,9 +376,9 @@ class StabilityTestRunner:
     def test_19_task_tree_is_leaf(self):
         """TaskTree.is_leaf 应正确识别叶子节点。"""
         from services.core.task_tree import TaskTree
-        assert TaskTree.is_leaf({"fn": lambda: None, "on": True})
+        assert TaskTree.is_leaf({"on": True, "next_exec_time": 0})
         assert not TaskTree.is_leaf({"子目录": {}})
-        assert not TaskTree.is_leaf({"on": True})  # 无 fn 不算
+        assert TaskTree.is_leaf({"on": True})  # 有 on 即为叶子（fn 在 TaskRegistry）
 
     def test_20_task_tree_branch_active(self):
         """TaskTree.is_branch_active 应递归检查。"""
@@ -463,12 +462,12 @@ class StabilityTestRunner:
     def test_26_scheduler_no_reexecute_failed(self):
         """调度器不应在同一轮重复执行失败任务。"""
         from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.task_registry import task_registry
         from services.core.scheduler import SchedulerState
         sched = self._make_scheduler()
         tm = self._make_task_manager()
         sched.set_task_manager(tm)
 
-        # 只开启"总是失败"
         for k, v in cfg["tasks"]["每日任务"]["测试村庄"].items():
             if isinstance(v, dict) and "on" in v:
                 v["on"] = False
@@ -478,14 +477,14 @@ class StabilityTestRunner:
         cfg["tasks"]["每周任务"]["随机结果"]["on"] = False
 
         call_count = 0
-        original_fn = cfg["tasks"]["每日任务"]["测试村庄"]["总是失败"]["fn"]
+        original_fn = task_registry.get_fn("每日任务/测试村庄/总是失败")
 
         def counting_fn():
             nonlocal call_count
             call_count += 1
             original_fn()
 
-        cfg["tasks"]["每日任务"]["测试村庄"]["总是失败"]["fn"] = counting_fn
+        task_registry.set_fn("每日任务/测试村庄/总是失败", counting_fn)
 
         sched.state = SchedulerState.RUNNING
         sched._check_and_run()

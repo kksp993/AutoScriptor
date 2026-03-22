@@ -5,7 +5,7 @@
 # @File : power.py
 # @Software: PyCharm
 
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 
 class Power:

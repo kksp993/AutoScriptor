@@ -10,7 +10,7 @@ import time
 import inspect
 from datetime import datetime
 from typing import Optional, Dict, Any, Set
-from logzero import logger, logfile
+from AutoScriptor.utils.logger import logger, setup_logfile
 import cv2
 import numpy as np
 
@@ -658,7 +658,7 @@ def archive_error_with_log(
         log_dir = os.path.join(os.getcwd(), 'logs', 'log')
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, f"[{ts}][{safe_name}].log")
-        logfile(log_file, encoding='utf-8')
+        setup_logfile(log_file)
     except Exception as e:
         logger.warning(f"切换日志文件失败: {e}")
     

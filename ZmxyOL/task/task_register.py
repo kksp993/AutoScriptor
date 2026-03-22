@@ -5,7 +5,8 @@ import traceback
 from ZmxyOL import *
 import enum
 from AutoScriptor.utils.constant import cfg
-from logzero import logger
+from AutoScriptor.utils.task_registry import task_registry
+from AutoScriptor.utils.logger import logger
 from ZmxyOL.task.translations import normalize_to_cn
 from ZmxyOL.nav.api import locate_region
 
@@ -17,31 +18,26 @@ registration_counter = 0
 
 def register_task(func=None, *, default_offset_hours=None, **task_kwargs):
     """
-    装饰器：根据函数所在文件路径（'task' 目录下的子路径）将任务注册到全局 cfg["tasks"]。
+    装饰器：根据函数所在文件路径（'task' 目录下的子路径）注册任务。
+
+    注册数据分两处存储：
+      - cfg["tasks"]（用户配置，持久化到 JSON）：on、next_exec_time、params、next_exec_offset_hours
+      - TaskRegistry（运行时数据，不持久化）：fn、order、param_meta
 
     支持以下可选参数（仅对指定任务生效）：
-      - default_offset_hours (int): 任务执行后延迟 N 小时再调度，写入 next_exec_offset_hours。
-      - 其他任意元数据参数 (key=value): 会原样写入到任务的配置节点，方便扩展。
-
-    保留 cfg 中的任务字段（自动管理，无需手动指定）：
-      - fn: 任务函数（内部包装）
-      - on: 是否启用（布尔）
-      - next_exec_time: 下次执行的 Unix 时间戳
-      - order: 注册顺序（整数，控制菜单排序）
-
-    扩展字段：
-      - next_exec_offset_hours: 自定义冷却时长（小时）
-      - 其他自定义字段：在装饰器中以 key=value 形式传入并存储
+      - default_offset_hours (int): 任务执行后延迟 N 小时再调度
+      - sched_window_hours (tuple[int,int]): 本地时间可执行时段 [start, end)，如 (10, 22)；
+        调度器在时段外不会执行该任务，执行后 next_exec_time 也会落在时段内
+      - 其他任意元数据参数 (key=value): 写入 cfg 配置节点
 
     用法示例：
-      @register_task(default_offset_hours=10, priority="high", category="village")
+      @register_task(default_offset_hours=10)
       def task():
           ...
     """
     if func is None:
-        # Decorator called with arguments
         def wrapper(f):
-            return register_task(f, default_offset_hours=default_offset_hours)
+            return register_task(f, default_offset_hours=default_offset_hours, **task_kwargs)
         return wrapper
     global registration_counter  # 引入全局计数器
     registration_counter += 1
@@ -93,57 +89,50 @@ def register_task(func=None, *, default_offset_hours=None, **task_kwargs):
         # 将路径片段统一归一为中文键（兼容英文目录/文件名）
         keys = [normalize_to_cn(key) for key in keys]
 
-        # 6. Traverse the 'menu' dictionary, creating nested dictionaries if they don't exist.
+        # 6. Traverse cfg["tasks"], creating nested dicts for the path.
         current_level = cfg["tasks"]
-        for key in keys[:-1]: # Go up to the second-to-last key
-            # setdefault is perfect here: it gets the value of the key if it exists,
-            # otherwise it sets it to a new empty dict {} and returns that new dict.
+        for key in keys[:-1]:
             current_level = current_level.setdefault(key, {})
 
-        # 7. At the final level, add the function and its status.
+        # 7. cfg["tasks"] 只存用户配置（on、next_exec_time、params 等）
         last_key = keys[-1]
-        if last_key in current_level:
-            current_level[last_key]["fn"] = task_wrapper(func)
-            current_level[last_key].setdefault('next_exec_time', 0)
-            current_level[last_key]['order'] = reg_order  # 保存注册顺序
+        if last_key not in current_level:
+            current_level[last_key] = {'on': True, 'next_exec_time': 0}
         else:
-            current_level[last_key] = {'fn': func, 'on': True, 'next_exec_time': 0}
-            current_level[last_key]['order'] = reg_order  # 保存注册顺序
+            current_level[last_key].setdefault('on', True)
+            current_level[last_key].setdefault('next_exec_time', 0)
         if default_offset_hours is not None:
             current_level[last_key]['next_exec_offset_hours'] = default_offset_hours
-        # 存储其他自定义参数
         for key, value in task_kwargs.items():
             current_level[last_key][key] = value
-        # 为任务添加参数配置
+
+        # 解析函数签名，提取参数默认值和枚举元数据
         sig = inspect.signature(func)
         defaults = {}
         param_meta = {}
         for name, param in sig.parameters.items():
             default = param.default if param.default is not inspect._empty else None
-            # 枚举类型处理
             if isinstance(default, enum.Enum):
-                # 单选枚举：存储枚举成员名称并记录类型元数据
                 defaults[name] = default.name
                 enum_path = default.__class__.__module__ + '.' + default.__class__.__qualname__
-                param_meta[name] = enum_path
-            # 多选枚举：列表中都是枚举成员
+                param_meta[name] = {"enum": enum_path, "multiple": False}
             elif isinstance(default, (list, tuple)) and default and all(isinstance(item, enum.Enum) for item in default):
-                # 多选枚举（列表或元组中都是枚举成员），存储成员名称列表并记录类型元数据
                 defaults[name] = [item.name for item in default]
                 enum_path = default[0].__class__.__module__ + '.' + default[0].__class__.__qualname__
-                param_meta[name] = enum_path
+                param_meta[name] = {"enum": enum_path, "multiple": True}
             else:
-                # 其他类型或空列表
                 defaults[name] = default
+
+        # params 是用户可编辑配置，留在 cfg
         task_cfg = current_level[last_key]
         existing_params = task_cfg.get('params', {})
         merged_params = defaults.copy()
         merged_params.update(existing_params)
         task_cfg['params'] = merged_params
-        # 如果有枚举参数，保存类型元数据
-        if param_meta:
-            task_cfg['param_meta'] = param_meta
-        a = {k:v for k,v in current_level[last_key].items() if k!= 'fn'}
+
+        # 8. fn / order / param_meta 注册到 TaskRegistry（运行时数据，不写入 JSON）
+        task_path = "/".join(keys)
+        task_registry.register(task_path, task_wrapper(func), reg_order, param_meta)
         # print(f"✅ 【{'/'.join(keys)}】 => {a}")
     except Exception as e:
         logger.error(f"An error occurred during registration for {func.__name__}: {e}，{traceback.format_exc()}")

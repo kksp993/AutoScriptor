@@ -14,7 +14,7 @@ from AutoScriptor import *
 from AutoScriptor.core.api import ui_idx
 from ZmxyOL.nav.envs.decorators import LOC_ENV
 from .map_manager import mm
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 from typing import Any, Callable
 
 def _flatten_identifiers(idfs: list[Any]) -> tuple[list[Any], list[list[Any]]]:
@@ -55,6 +55,12 @@ def check_env_idx(env_list: list[str]) -> int:
 
 
 def locate_region(cnt = 0, check_only = False) -> tuple[str, str]:
+    if cnt == 0:
+        try:
+            mixctrl.app.launch(cfg["app"]["app_to_start"])
+            time.sleep(2)
+        except Exception:
+            pass
     """
         按优先级检查当前位置
     """
@@ -82,12 +88,6 @@ def locate_region(cnt = 0, check_only = False) -> tuple[str, str]:
         return mm.set_region(loc.envs[0].name, loc.name)
     if cnt % 2 == 0:
         try_close_via_x()
-    if cnt in (3, 7):
-        try:
-            mixctrl.app.launch(cfg["app"]["app_to_start"])
-            time.sleep(2)
-        except Exception:
-            pass
     if cnt > 10:
         raise ValueError("无法找到当前位置，请检查环境是否正确")
     return locate_region(cnt + 1)
@@ -125,7 +125,7 @@ def try_close_via_x():
         (I("x"), I("x")),
         (I("x-in"), B(1061,178,39,47)),
         (I("菜单-宠物"), B(10,10)),
-        # (T("回家",box=Box(18,607,87,109)), T("回家",box=Box(18,607,87,109))),
+        # (T("回家", box=Box(29,613,77,88).margin()), T("回家", box=Box(29,613,77,88).margin())),
         (T("确认"), T("确认")),
         (T("返回地图"), T("返回地图")),
         (T("返回大厅"), T("返回大厅")),

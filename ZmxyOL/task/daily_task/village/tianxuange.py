@@ -6,14 +6,14 @@ from AutoScriptor.core.api import _locate_all
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 def reset_task():
     if extract_info(B(1053,581,213,48), lambda x: int(x.strip()[-1])==0):
         logger.info("今日天选阁已通关")
         return False
     click(T("重置"))
-    click(T("确定"),if_exist=True,timeout=2)
+    click(T("确定"), until=lambda:ui_F(T("确定")))
     sleep(2)
     return True
 
@@ -31,16 +31,16 @@ def task():
         return
     if ui_T(T("报名"),timeout=2):
         click(T("报名"))
-        click(T("回家", box=Box(18,607,87,109)))
+        click(T("回家", box=Box(1,663,94,56).margin()))
         wait_for_appear(T("天选阁"))
         sleep(0.5)
         click(B(60,680,30,30))
         return
-    wait_for_appear(T("回家", box=Box(18,607,87,109)))
+    wait_for_appear(T("回家", box=Box(1,663,94,56).margin()))
     sleep(1)
     if ui_T(T("云端模式")):
         logger.critical("AutoScriptor暂不支持天选阁云端模式，请手动操作！")
-        click(T("回家", box=Box(18,607,87,109)))
+        click(T("回家", box=Box(1,663,94,56).margin()))
         wait_for_appear(T("天选阁"))
         sleep(0.5)
         click(B(1200,30,30,30))
@@ -90,7 +90,7 @@ def task():
             sleep(1)
             if not reset_task(): break
             not_finish = False
-    click(T("回家", box=Box(18,607,87,109)))
+    click(T("回家", box=Box(1,663,94,56).margin()))
     wait_for_appear(T("天选阁"))
     sleep(0.5)
     click(B(1200,30,30,30))

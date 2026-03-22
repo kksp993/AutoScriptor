@@ -9,7 +9,7 @@ import copy
 import os
 import questionary
 from typing import Dict, Any, List
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 from AutoScriptor.utils.constant import cfg
 from AutoScriptor.utils.logger import setup_task_aware_logging
@@ -63,7 +63,7 @@ class CLIApp:
 
             # 叶子任务带参数 → 直接进入参数编辑
             if TaskTree.is_leaf(current) and current.get('params'):
-                self._actions.do_param_edit(current)
+                self._actions.do_param_edit(current, "/".join(self._nav))
                 if self._nav:
                     self._nav.pop()
                 continue
