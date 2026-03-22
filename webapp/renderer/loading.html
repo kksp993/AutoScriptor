@@ -8,17 +8,65 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
+    @keyframes loading-breathe {
+      0%, 100% { background-position: 0% 20%; }
+      50% { background-position: 0% 80%; }
+    }
+    @keyframes logoPulse {
+      0%, 100% { box-shadow: 0 8px 28px rgba(22,163,74,0.22), 0 2px 8px rgba(0,0,0,0.08); }
+      50% { box-shadow: 0 8px 40px rgba(22,163,74,0.38), 0 2px 12px rgba(0,0,0,0.10); }
+    }
+
     body {
-      background: #0f172a;
-      color: #e2e8f0;
+      position: relative;
+      min-height: 100vh;
+      color: #1e293b;
       font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
-      height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       user-select: none;
       overflow: hidden;
+    }
+
+    .loading-gradient {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      background: linear-gradient(160deg, #d4f0d9 0%, #f0fdf4 42%, #e0f2fe 100%);
+      background-size: 100% 220%;
+      animation: loading-breathe 8s ease-in-out infinite;
+    }
+
+    .particle-canvas {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .particle-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      background: linear-gradient(180deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.32) 100%);
+    }
+
+    .loading-main {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+      min-height: 100vh;
+      padding: 0 16px;
     }
 
     .logo {
@@ -36,16 +84,16 @@
       align-items: center;
       justify-content: center;
       font-size: 28px;
-      box-shadow: 0 8px 32px rgba(34, 197, 94, 0.35);
+      animation: logoPulse 3s ease-in-out infinite;
     }
     .logo-text {
       font-size: 32px;
       font-weight: 700;
       letter-spacing: -0.5px;
-      color: #f8fafc;
+      color: #1e293b;
     }
     .logo-text span {
-      color: #22c55e;
+      color: #16a34a;
     }
 
     .status-area {
@@ -59,7 +107,7 @@
     .spinner {
       width: 36px;
       height: 36px;
-      border: 3px solid rgba(34, 197, 94, 0.2);
+      border: 3px solid rgba(22, 163, 74, 0.2);
       border-top-color: #22c55e;
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
@@ -77,7 +125,7 @@
     .progress-bar {
       width: 280px;
       height: 3px;
-      background: rgba(255,255,255,0.06);
+      background: rgba(0, 0, 0, 0.06);
       border-radius: 2px;
       overflow: hidden;
     }
@@ -98,8 +146,14 @@
       width: 560px;
       max-width: 90vw;
       height: 140px;
-      background: rgba(255,255,255,0.03);
-      border: 1px solid rgba(255,255,255,0.06);
+      /* 比全屏呼吸渐变更淡的薄荷绿底，避免「一片白」 */
+      background: linear-gradient(
+        165deg,
+        rgba(220, 252, 231, 0.38) 0%,
+        rgba(209, 250, 229, 0.32) 45%,
+        rgba(200, 245, 220, 0.28) 100%
+      );
+      border: 1px solid rgba(22, 163, 74, 0.09);
       border-radius: 10px;
       padding: 12px 14px;
       overflow-y: auto;
@@ -107,27 +161,28 @@
       font-size: 11.5px;
       line-height: 1.6;
       color: #475569;
+      box-shadow: 0 1px 8px rgba(22, 163, 74, 0.06);
     }
     .log-box::-webkit-scrollbar { width: 4px; }
     .log-box::-webkit-scrollbar-thumb {
-      background: rgba(255,255,255,0.1);
+      background: rgba(22, 163, 74, 0.14);
       border-radius: 2px;
     }
     .log-line { white-space: pre-wrap; word-break: break-all; }
-    .log-line.highlight { color: #22c55e; }
-    .log-line.error     { color: #f87171; }
+    .log-line.highlight { color: #15803d; font-weight: 500; }
+    .log-line.error     { color: #dc2626; }
 
     .ready-badge {
       display: none;
       align-items: center;
       gap: 8px;
       padding: 8px 20px;
-      background: rgba(34, 197, 94, 0.12);
-      border: 1px solid rgba(34, 197, 94, 0.3);
+      background: rgba(34, 197, 94, 0.14);
+      border: 1px solid rgba(34, 197, 94, 0.35);
       border-radius: 999px;
       font-size: 13px;
       font-weight: 500;
-      color: #4ade80;
+      color: #166534;
     }
     .ready-badge.show { display: flex; }
     .ready-dot {
@@ -146,7 +201,13 @@
       position: absolute;
       bottom: 24px;
       font-size: 11px;
-      color: #334155;
+      color: #64748b;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .loading-gradient { animation: none; }
+      .logo-icon { animation: none; }
+      .progress-fill { animation: none; }
     }
 
     /* 窗口控制按钮（右上角） */
@@ -165,7 +226,7 @@
       border: none;
       background: transparent;
       border-radius: 6px;
-      color: #475569;
+      color: #64748b;
       cursor: pointer;
       display: flex;
       align-items: center;
@@ -174,41 +235,129 @@
       transition: background 0.15s, color 0.15s;
     }
     .win-btn:hover {
-      background: rgba(255,255,255,0.08);
-      color: #94a3b8;
+      background: rgba(22, 163, 74, 0.1);
+      color: #15803d;
     }
     .win-btn.close:hover {
-      background: rgba(239, 68, 68, 0.15);
-      color: #f87171;
+      background: rgba(239, 68, 68, 0.12);
+      color: #dc2626;
     }
   </style>
 </head>
 <body>
-  <!-- 窗口控制按钮（仅 Electron 模式可用） -->
-  <div class="win-controls" id="winControls" style="display:none">
-    <button class="win-btn" id="btnTray" title="最小化到系统托盘">↓</button>
-    <button class="win-btn close" id="btnClose" title="退出应用">✕</button>
-  </div>
+  <div class="loading-gradient" aria-hidden="true"></div>
+  <canvas id="particleCanvas" class="particle-canvas" aria-hidden="true"></canvas>
+  <div class="particle-overlay" aria-hidden="true"></div>
 
-  <div class="logo">
-    <div class="logo-icon">⚡</div>
-    <div class="logo-text">Auto<span>Scriptor</span></div>
-  </div>
-
-  <div class="status-area">
-    <div class="spinner" id="spinner"></div>
-    <div class="status-text" id="statusText">正在启动 Python 服务...</div>
-    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-    <div class="ready-badge" id="readyBadge">
-      <span class="ready-dot"></span>服务就绪，正在加载界面…
+  <div class="loading-main">
+    <!-- 窗口控制按钮（仅 Electron 模式可用） -->
+    <div class="win-controls" id="winControls" style="display:none">
+      <button class="win-btn" id="btnTray" title="最小化到系统托盘">↓</button>
+      <button class="win-btn close" id="btnClose" title="退出应用">✕</button>
     </div>
+
+    <div class="logo">
+      <div class="logo-icon">⚡</div>
+      <div class="logo-text">Auto<span>Scriptor</span></div>
+    </div>
+
+    <div class="status-area">
+      <div class="spinner" id="spinner"></div>
+      <div class="status-text" id="statusText">正在启动 Python 服务...</div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="ready-badge" id="readyBadge">
+        <span class="ready-dot"></span>服务就绪，正在加载界面…
+      </div>
+    </div>
+
+    <div class="log-box" id="logBox"></div>
+
+    <div class="version">AutoScriptor v1.0</div>
   </div>
-
-  <div class="log-box" id="logBox"></div>
-
-  <div class="version">AutoScriptor v1.0</div>
 
   <script>
+    (function(){
+      const cvs = document.getElementById('particleCanvas');
+      if (!cvs || !cvs.getContext) return;
+      const ctx = cvs.getContext('2d');
+      const particles = [];
+      const PARTICLE_COUNT = 60;
+      const CONNECT_DIST = 105;
+
+      function resizeCanvas() {
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        const dpr = window.devicePixelRatio || 1;
+        cvs.width = w * dpr;
+        cvs.height = h * dpr;
+        cvs.style.width = w + 'px';
+        cvs.style.height = h + 'px';
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      function createParticle(w, h) {
+        return {
+          x: Math.random() * w,
+          y: Math.random() * h,
+          vx: (Math.random() - 0.5) * 0.3,
+          vy: (Math.random() - 0.5) * 0.3,
+          r: Math.random() * 2 + 0.5,
+          a: Math.random() * 0.35 + 0.12,
+        };
+      }
+
+      function initParticles() {
+        const w = cvs.width / (window.devicePixelRatio || 1);
+        const h = cvs.height / (window.devicePixelRatio || 1);
+        particles.length = 0;
+        for (let i = 0; i < PARTICLE_COUNT; i++) particles.push(createParticle(w, h));
+      }
+
+      function animateParticles() {
+        const dpr = window.devicePixelRatio || 1;
+        const w = cvs.width / dpr;
+        const h = cvs.height / dpr;
+        ctx.clearRect(0, 0, w, h);
+
+        for (let i = 0; i < particles.length; i++) {
+          const a = particles[i];
+          for (let j = i + 1; j < particles.length; j++) {
+            const b = particles[j];
+            const dx = a.x - b.x, dy = a.y - b.y;
+            const d = Math.sqrt(dx * dx + dy * dy);
+            if (d < CONNECT_DIST) {
+              ctx.beginPath();
+              ctx.moveTo(a.x, a.y);
+              ctx.lineTo(b.x, b.y);
+              ctx.strokeStyle = 'rgba(22,163,74,' + (0.12 * (1 - d / CONNECT_DIST)) + ')';
+              ctx.lineWidth = 0.6;
+              ctx.stroke();
+            }
+          }
+        }
+
+        for (const p of particles) {
+          p.x += p.vx;
+          p.y += p.vy;
+          if (p.x < 0 || p.x > w) p.vx *= -1;
+          if (p.y < 0 || p.y > h) p.vy *= -1;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(22,163,74,' + p.a + ')';
+          ctx.fill();
+        }
+        requestAnimationFrame(animateParticles);
+      }
+
+      resizeCanvas();
+      initParticles();
+      animateParticles();
+      window.addEventListener('resize', function() {
+        resizeCanvas();
+        initParticles();
+      });
+    })();
+
     const statusText  = document.getElementById('statusText');
     const spinner     = document.getElementById('spinner');
     const progressFill = document.getElementById('progressFill');
@@ -228,7 +377,6 @@
       if (logBox.children.length > 120) logBox.removeChild(logBox.firstChild);
       logBox.scrollTop = logBox.scrollHeight;
 
-      // Advance progress bar as logs arrive
       progress = Math.min(progress + 1.2, 90);
       progressFill.style.width = progress + '%';
     }
@@ -238,7 +386,6 @@
     }
 
     if (window.electron) {
-      // 显示窗口控制按钮
       document.getElementById('winControls').style.display = 'flex';
       document.getElementById('btnTray').onclick  = () => window.electron.windowTray();
       document.getElementById('btnClose').onclick = () => window.electron.windowClose();
@@ -266,12 +413,10 @@
         }
       });
     } else {
-      // Fallback when opened directly in browser (dev)
       setStatus('加载中... (开发模式)');
       addLog('[dev] preload not available', 'error');
     }
 
-    // Animate progress bar while waiting
     setInterval(() => {
       if (progress < 85) {
         progress += 0.3;

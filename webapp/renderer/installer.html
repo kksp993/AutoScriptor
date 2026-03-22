@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+  <title>AutoScriptor 安装向导</title>
+  <style>
+    :root {
+      --bg-body: #f0f4f8;
+      --bg-panel: #ffffff;
+      --bg-card: rgba(0,0,0,0.028);
+      --bg-card-hover: rgba(22,163,74,0.06);
+      --accent: #16a34a;
+      --accent-light: #22c55e;
+      --accent-soft: rgba(22,163,74,0.10);
+      --accent-glow: rgba(22,163,74,0.28);
+      --text-primary: #1e293b;
+      --text-secondary: #475569;
+      --text-muted: #94a3b8;
+      --border: rgba(0,0,0,0.07);
+      --border-accent: rgba(22,163,74,0.35);
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+      --shadow-md: 0 4px 16px rgba(0,0,0,0.07);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, 'Segoe UI', 'Microsoft YaHei UI', system-ui, sans-serif;
+      background: var(--bg-body);
+      color: var(--text-primary);
+      height: 100vh;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* ── Titlebar ──────────────────────────────────────────── */
+    .titlebar {
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 6px 0 16px;
+      background: #fff;
+      -webkit-app-region: drag;
+      position: relative;
+      z-index: 100;
+      border-bottom: 1px solid var(--border);
+    }
+    .titlebar-text {
+      font-size: 12px;
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+    }
+    .titlebar-btns {
+      display: flex;
+      -webkit-app-region: no-drag;
+    }
+    .titlebar-btn {
+      width: 36px; height: 36px;
+      border: none; background: none;
+      color: var(--text-muted);
+      font-size: 11px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .15s, color .15s;
+    }
+    .titlebar-btn:hover { background: rgba(0,0,0,0.05); color: var(--text-secondary); }
+    .titlebar-btn.close:hover { background: rgba(239,68,68,0.12); color: #dc2626; }
+
+    /* ── Main Layout ───────────────────────────────────────── */
+    .installer {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      height: calc(100vh - 36px);
+    }
+
+    /* ── Left Panel ────────────────────────────────────────── */
+    .left-panel {
+      position: relative;
+      overflow: hidden;
+      background: linear-gradient(160deg, #e8f5e9 0%, #f1fdf3 40%, #e0f2fe 100%);
+    }
+    .left-panel canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%; height: 100%;
+    }
+    .left-overlay {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.35) 100%);
+      pointer-events: none;
+    }
+    .left-content {
+      position: relative;
+      z-index: 2;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 40px 32px;
+    }
+    .logo-icon {
+      width: 72px; height: 72px;
+      background: linear-gradient(135deg, #22c55e, #16a34a);
+      border-radius: 20px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 36px;
+      box-shadow: 0 8px 28px rgba(22,163,74,0.22), 0 2px 8px rgba(0,0,0,0.08);
+      animation: logoPulse 3s ease-in-out infinite;
+    }
+    @keyframes logoPulse {
+      0%, 100% { box-shadow: 0 8px 28px rgba(22,163,74,0.22), 0 2px 8px rgba(0,0,0,0.08); }
+      50% { box-shadow: 0 8px 40px rgba(22,163,74,0.32), 0 2px 12px rgba(0,0,0,0.10); }
+    }
+    .logo-title {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: #1e293b;
+    }
+    .logo-title span { color: var(--accent); }
+    .logo-subtitle {
+      font-size: 13px;
+      color: var(--text-muted);
+      letter-spacing: 1px;
+    }
+    .left-version {
+      position: absolute;
+      bottom: 20px;
+      left: 0; right: 0;
+      text-align: center;
+      font-size: 11px;
+      color: var(--text-muted);
+      z-index: 2;
+    }
+
+    /* ── Right Panel ───────────────────────────────────────── */
+    .right-panel {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-panel);
+      border-left: 1px solid var(--border);
+    }
+    .step-container {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* ── Steps ─────────────────────────────────────────────── */
+    .step {
+      position: absolute;
+      inset: 0;
+      padding: 48px 48px 24px;
+      display: flex;
+      flex-direction: column;
+      opacity: 0;
+      transform: translateX(40px);
+      pointer-events: none;
+      transition: opacity .4s ease, transform .4s ease;
+      overflow-y: auto;
+    }
+    .step.active {
+      opacity: 1;
+      transform: translateX(0);
+      pointer-events: auto;
+    }
+    .step.exit-left {
+      opacity: 0;
+      transform: translateX(-40px);
+    }
+    .step::-webkit-scrollbar { width: 4px; }
+    .step::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.10); border-radius: 2px; }
+
+    .step h2 {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      letter-spacing: -0.3px;
+      color: var(--text-primary);
+    }
+    .step .subtitle {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 32px;
+      line-height: 1.6;
+    }
+
+    /* ── Welcome Features ──────────────────────────────────── */
+    .features {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 32px;
+    }
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 16px;
+      transition: border-color .2s, background .2s, box-shadow .2s;
+    }
+    .feature-card:hover {
+      border-color: var(--border-accent);
+      background: var(--bg-card-hover);
+      box-shadow: var(--shadow-sm);
+    }
+    .feature-icon {
+      font-size: 22px;
+      margin-bottom: 8px;
+      display: block;
+    }
+    .feature-title {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      color: var(--text-primary);
+    }
+    .feature-desc {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* ── Settings ──────────────────────────────────────────── */
+    .setting-group {
+      margin-bottom: 28px;
+    }
+    .setting-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+      letter-spacing: 0.3px;
+    }
+    .radio-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .radio-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      cursor: pointer;
+      transition: border-color .2s, background .2s, box-shadow .2s;
+    }
+    .radio-item:hover { border-color: rgba(0,0,0,0.14); box-shadow: var(--shadow-sm); }
+    .radio-item.selected {
+      border-color: var(--border-accent);
+      background: var(--accent-soft);
+      box-shadow: 0 0 0 1px var(--border-accent);
+    }
+    .radio-dot {
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      border: 2px solid var(--text-muted);
+      position: relative;
+      flex-shrink: 0;
+      transition: border-color .2s;
+    }
+    .radio-item.selected .radio-dot {
+      border-color: var(--accent);
+    }
+    .radio-item.selected .radio-dot::after {
+      content: '';
+      position: absolute;
+      top: 3px; left: 3px;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+    .radio-text {
+      font-size: 13px;
+      color: var(--text-primary);
+    }
+    .radio-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+
+    .path-input-row {
+      display: flex;
+      gap: 8px;
+    }
+    .path-input {
+      flex: 1;
+      height: 40px;
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0 14px;
+      color: var(--text-primary);
+      font-size: 12.5px;
+      font-family: 'Consolas', 'Courier New', monospace;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .path-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+    .path-input:read-only { color: var(--text-secondary); cursor: default; }
+
+    /* ── Installing ────────────────────────────────────────── */
+    .install-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .install-step-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-radius: 10px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      transition: border-color .3s, background .3s;
+    }
+    .install-step-item.running {
+      border-color: var(--border-accent);
+      background: var(--accent-soft);
+    }
+    .install-step-item.done {
+      border-color: rgba(22,163,74,0.15);
+      background: rgba(22,163,74,0.04);
+    }
+    .step-icon {
+      width: 24px; height: 24px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px;
+      flex-shrink: 0;
+      transition: all .3s;
+    }
+    .step-icon.pending {
+      border: 2px solid #cbd5e1;
+      color: transparent;
+    }
+    .step-icon.running {
+      border: 2px solid var(--accent);
+      border-top-color: transparent;
+      animation: spin .8s linear infinite;
+    }
+    .step-icon.done {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      font-weight: 700;
+    }
+    .step-icon.error {
+      background: #ef4444;
+      color: #fff;
+      border: none;
+      font-weight: 700;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .step-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+    .step-text {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+    .step-eta {
+      font-size: 11px;
+      color: var(--text-muted);
+      letter-spacing: 0.2px;
+    }
+    .step-eta.slow {
+      color: #d97706;
+      font-weight: 500;
+    }
+    .install-step-item.running .step-text { color: var(--text-primary); font-weight: 500; }
+    .install-step-item.running .step-eta { color: var(--accent); font-weight: 400; }
+    .install-step-item.running .step-eta.slow { color: var(--accent); }
+    .install-step-item.done .step-text { color: var(--text-muted); }
+    .install-step-item.done .step-eta { display: none; }
+
+    /* Progress bar */
+    .progress-section {
+      margin-bottom: 16px;
+    }
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .progress-label {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+    .progress-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .progress-elapsed {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .progress-pct {
+      font-size: 12px;
+      color: var(--accent);
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+    .progress-track {
+      height: 6px;
+      background: #e2e8f0;
+      border-radius: 3px;
+      overflow: hidden;
+      position: relative;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-light));
+      border-radius: 3px;
+      width: 0%;
+      transition: width .5s ease;
+      position: relative;
+    }
+    .progress-fill::after {
+      content: '';
+      position: absolute;
+      top: -2px; right: -1px;
+      width: 12px; height: 10px;
+      background: var(--accent-light);
+      border-radius: 50%;
+      box-shadow: 0 0 10px var(--accent-glow);
+      opacity: 0.9;
+    }
+
+    /* Log box */
+    .log-box {
+      flex: 1;
+      min-height: 100px;
+      max-height: 180px;
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      overflow-y: auto;
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 11px;
+      line-height: 1.65;
+      color: var(--text-secondary);
+    }
+    .log-box::-webkit-scrollbar { width: 3px; }
+    .log-box::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 2px; }
+    .log-line { white-space: pre-wrap; word-break: break-all; }
+    .log-line.error { color: #dc2626; }
+    .log-line.success { color: var(--accent); }
+
+    /* ── Complete ──────────────────────────────────────────── */
+    .complete-center {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+    }
+    .success-ring {
+      width: 80px; height: 80px;
+      border-radius: 50%;
+      background: var(--accent-soft);
+      display: flex; align-items: center; justify-content: center;
+      animation: successPop .5s cubic-bezier(.34,1.56,.64,1) both;
+    }
+    @keyframes successPop {
+      0% { transform: scale(0); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+    .success-check {
+      width: 36px; height: 36px;
+      stroke: var(--accent);
+      stroke-width: 3;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .success-check .check-path {
+      stroke-dasharray: 48;
+      stroke-dashoffset: 48;
+      animation: drawCheck .4s .3s ease forwards;
+    }
+    @keyframes drawCheck {
+      to { stroke-dashoffset: 0; }
+    }
+    .complete-title {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .complete-desc {
+      font-size: 13px;
+      color: var(--text-secondary);
+      text-align: center;
+      line-height: 1.7;
+    }
+    .complete-summary {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .summary-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+    .summary-check {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    /* ── Bottom Bar ────────────────────────────────────────── */
+    .bottom-bar {
+      height: 64px;
+      padding: 0 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+      background: #fff;
+    }
+    .step-dots {
+      display: flex;
+      gap: 8px;
+    }
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #e2e8f0;
+      transition: background .3s, box-shadow .3s, transform .3s;
+    }
+    .dot.active {
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent-glow);
+      transform: scale(1.2);
+    }
+    .dot.done {
+      background: rgba(22,163,74,0.35);
+    }
+
+    /* Buttons */
+    .btn-primary {
+      height: 40px;
+      padding: 0 28px;
+      border: none;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent-light), var(--accent));
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      letter-spacing: 0.3px;
+      transition: box-shadow .2s, transform .15s, opacity .2s;
+      position: relative;
+      overflow: hidden;
+    }
+    .btn-primary:hover {
+      box-shadow: 0 4px 18px var(--accent-glow);
+      transform: translateY(-1px);
+    }
+    .btn-primary:active { transform: scale(0.98); }
+    .btn-primary:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+    .btn-primary::after {
+      content: '';
+      position: absolute;
+      top: 0; left: -75%;
+      width: 50%; height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.22), transparent);
+      transform: skewX(-20deg);
+      transition: left .5s;
+    }
+    .btn-primary:hover::after { left: 125%; }
+
+    .btn-row { display: flex; gap: 12px; }
+  </style>
+</head>
+<body>
+
+  <!-- ── Titlebar ──────────────────────────────────────────── -->
+  <div class="titlebar">
+    <span class="titlebar-text">AutoScriptor 安装向导</span>
+    <div class="titlebar-btns">
+      <button class="titlebar-btn" id="btnMin" title="最小化">─</button>
+      <button class="titlebar-btn close" id="btnClose" title="关闭">✕</button>
+    </div>
+  </div>
+
+  <!-- ── Installer Body ───────────────────────────────────── -->
+  <div class="installer">
+
+    <!-- Left Panel -->
+    <div class="left-panel">
+      <canvas id="particleCanvas"></canvas>
+      <div class="left-overlay"></div>
+      <div class="left-content">
+        <div class="logo-icon">⚡</div>
+        <div class="logo-title">Auto<span>Scriptor</span></div>
+        <div class="logo-subtitle">AUTOMATION FRAMEWORK</div>
+      </div>
+      <div class="left-version">v1.0.0</div>
+    </div>
+
+    <!-- Right Panel -->
+    <div class="right-panel">
+      <div class="step-container">
+
+        <!-- Step 0: Welcome -->
+        <div class="step active" id="step0">
+          <h2>欢迎安装 AutoScriptor</h2>
+          <p class="subtitle">安装向导将引导您完成环境配置。首次安装需下载约 500MB 依赖包，预计耗时 3-10 分钟（取决于网络速度）。</p>
+          <div class="features">
+            <div class="feature-card">
+              <span class="feature-icon">🎮</span>
+              <div class="feature-title">模拟器自动化</div>
+              <div class="feature-desc">支持 MuMu 等主流安卓模拟器的智能控制</div>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">🔍</span>
+              <div class="feature-title">OCR 识别</div>
+              <div class="feature-desc">PaddleOCR 驱动，精准识别游戏内文字</div>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">📋</span>
+              <div class="feature-title">任务编排</div>
+              <div class="feature-desc">可视化配置每日、每周、活动任务流程</div>
+            </div>
+            <div class="feature-card">
+              <span class="feature-icon">🌐</span>
+              <div class="feature-title">Web 管理</div>
+              <div class="feature-desc">现代化 WebUI 界面，支持远程监控管理</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 1: Settings -->
+        <div class="step" id="step1">
+          <h2>安装配置</h2>
+          <p class="subtitle">选择适合您的安装选项，推荐国内用户使用镜像源以加速下载。</p>
+
+          <div class="setting-group">
+            <div class="setting-label">Pip 镜像源</div>
+            <div class="radio-group" id="pipSourceGroup">
+              <div class="radio-item selected" data-value="https://pypi.tuna.tsinghua.edu.cn/simple">
+                <div class="radio-dot"></div>
+                <span class="radio-text">清华大学镜像</span>
+                <span class="radio-hint">推荐国内用户</span>
+              </div>
+              <div class="radio-item" data-value="https://mirrors.aliyun.com/pypi/simple/">
+                <div class="radio-dot"></div>
+                <span class="radio-text">阿里云镜像</span>
+                <span class="radio-hint">国内备选</span>
+              </div>
+              <div class="radio-item" data-value="https://pypi.org/simple">
+                <div class="radio-dot"></div>
+                <span class="radio-text">PyPI 官方源</span>
+                <span class="radio-hint">海外用户</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="setting-group">
+            <div class="setting-label">安装路径</div>
+            <div class="path-input-row">
+              <input class="path-input" id="installPath" readonly />
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 2: Installing -->
+        <div class="step" id="step2">
+          <h2>正在安装</h2>
+          <p class="subtitle" id="installSubtitle">正在准备安装环境...</p>
+
+          <div class="install-steps" id="installSteps">
+            <div class="install-step-item" data-sid="python">
+              <div class="step-icon pending">✓</div>
+              <div class="step-info">
+                <span class="step-text">检查 Python 环境</span>
+                <span class="step-eta">&lt; 1 秒</span>
+              </div>
+            </div>
+            <div class="install-step-item" data-sid="venv">
+              <div class="step-icon pending">✓</div>
+              <div class="step-info">
+                <span class="step-text">创建虚拟环境</span>
+                <span class="step-eta">约 5-10 秒</span>
+              </div>
+            </div>
+            <div class="install-step-item" data-sid="deps">
+              <div class="step-icon pending">✓</div>
+              <div class="step-info">
+                <span class="step-text">安装依赖包</span>
+                <span class="step-eta slow">约 3-8 分钟 · 需下载 ~500MB</span>
+              </div>
+            </div>
+            <div class="install-step-item" data-sid="config">
+              <div class="step-icon pending">✓</div>
+              <div class="step-info">
+                <span class="step-text">环境配置</span>
+                <span class="step-eta">&lt; 5 秒</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="progress-section">
+            <div class="progress-header">
+              <span class="progress-label" id="progressLabel">准备中...</span>
+              <div class="progress-right">
+                <span class="progress-elapsed" id="progressElapsed"></span>
+                <span class="progress-pct" id="progressPct">0%</span>
+              </div>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" id="progressFill"></div>
+            </div>
+          </div>
+
+          <div class="log-box" id="logBox"></div>
+        </div>
+
+        <!-- Step 3: Complete -->
+        <div class="step" id="step3">
+          <div class="complete-center">
+            <div class="success-ring">
+              <svg class="success-check" viewBox="0 0 36 36">
+                <path class="check-path" d="M8 18 L15 25 L28 11" />
+              </svg>
+            </div>
+            <div class="complete-title">安装完成</div>
+            <div class="complete-desc">
+              AutoScriptor 已准备就绪。<br>
+              点击下方按钮启动应用程序。
+            </div>
+            <div class="complete-summary">
+              <div class="summary-item"><span class="summary-check">✓</span> Python 虚拟环境已创建</div>
+              <div class="summary-item"><span class="summary-check">✓</span> 所有依赖已安装</div>
+              <div class="summary-item"><span class="summary-check">✓</span> 模拟器路径已配置</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Bottom Bar -->
+      <div class="bottom-bar">
+        <div class="step-dots">
+          <div class="dot active" data-dot="0"></div>
+          <div class="dot" data-dot="1"></div>
+          <div class="dot" data-dot="2"></div>
+          <div class="dot" data-dot="3"></div>
+        </div>
+        <div class="btn-row">
+          <button class="btn-primary" id="btnNext">开始配置 →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ═══════════════════════════════════════════════════════
+       Particle Canvas (light-theme colours)
+       ═══════════════════════════════════════════════════════ */
+    const cvs = document.getElementById('particleCanvas');
+    const ctx = cvs.getContext('2d');
+    const particles = [];
+    const PARTICLE_COUNT = 60;
+    const CONNECT_DIST = 105;
+
+    function resizeCanvas() {
+      const panel = cvs.parentElement;
+      cvs.width = panel.offsetWidth * devicePixelRatio;
+      cvs.height = panel.offsetHeight * devicePixelRatio;
+      ctx.scale(devicePixelRatio, devicePixelRatio);
+      cvs.style.width = panel.offsetWidth + 'px';
+      cvs.style.height = panel.offsetHeight + 'px';
+    }
+
+    function createParticle() {
+      const w = cvs.width / devicePixelRatio;
+      const h = cvs.height / devicePixelRatio;
+      return {
+        x: Math.random() * w,
+        y: Math.random() * h,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+        r: Math.random() * 2 + 0.5,
+        a: Math.random() * 0.35 + 0.12,
+      };
+    }
+
+    function initParticles() {
+      particles.length = 0;
+      for (let i = 0; i < PARTICLE_COUNT; i++) particles.push(createParticle());
+    }
+
+    function animateParticles() {
+      const w = cvs.width / devicePixelRatio;
+      const h = cvs.height / devicePixelRatio;
+      ctx.clearRect(0, 0, w, h);
+
+      for (let i = 0; i < particles.length; i++) {
+        const a = particles[i];
+        for (let j = i + 1; j < particles.length; j++) {
+          const b = particles[j];
+          const dx = a.x - b.x, dy = a.y - b.y;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          if (d < CONNECT_DIST) {
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.strokeStyle = `rgba(22,163,74,${0.12 * (1 - d / CONNECT_DIST)})`;
+            ctx.lineWidth = 0.6;
+            ctx.stroke();
+          }
+        }
+      }
+
+      for (const p of particles) {
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0 || p.x > w) p.vx *= -1;
+        if (p.y < 0 || p.y > h) p.vy *= -1;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(22,163,74,${p.a})`;
+        ctx.fill();
+      }
+      requestAnimationFrame(animateParticles);
+    }
+
+    resizeCanvas();
+    initParticles();
+    animateParticles();
+    window.addEventListener('resize', () => { resizeCanvas(); initParticles(); });
+
+    /* ═══════════════════════════════════════════════════════
+       Step Navigation
+       ═══════════════════════════════════════════════════════ */
+    let currentStep = 0;
+    const totalSteps = 4;
+    const steps = [
+      document.getElementById('step0'),
+      document.getElementById('step1'),
+      document.getElementById('step2'),
+      document.getElementById('step3'),
+    ];
+    const dots = document.querySelectorAll('.dot');
+    const btnNext = document.getElementById('btnNext');
+
+    function goToStep(n) {
+      if (n < 0 || n >= totalSteps) return;
+      const prev = currentStep;
+      steps[prev].classList.remove('active');
+      steps[prev].classList.add('exit-left');
+      setTimeout(() => steps[prev].classList.remove('exit-left'), 400);
+
+      currentStep = n;
+      steps[n].classList.add('active');
+
+      dots.forEach((d, i) => {
+        d.classList.remove('active', 'done');
+        if (i < n) d.classList.add('done');
+        else if (i === n) d.classList.add('active');
+      });
+
+      updateButton();
+    }
+
+    function updateButton() {
+      switch (currentStep) {
+        case 0:
+          btnNext.textContent = '开始配置 →';
+          btnNext.disabled = false;
+          btnNext.onclick = () => goToStep(1);
+          break;
+        case 1:
+          btnNext.textContent = '开始安装';
+          btnNext.disabled = false;
+          btnNext.onclick = startInstall;
+          break;
+        case 2:
+          btnNext.textContent = '安装中...';
+          btnNext.disabled = true;
+          btnNext.onclick = null;
+          break;
+        case 3:
+          btnNext.textContent = '启动 AutoScriptor';
+          btnNext.disabled = false;
+          btnNext.onclick = launchApp;
+          break;
+      }
+    }
+
+    /* ═══════════════════════════════════════════════════════
+       Settings
+       ═══════════════════════════════════════════════════════ */
+    let selectedPipSource = 'https://pypi.tuna.tsinghua.edu.cn/simple';
+
+    document.querySelectorAll('#pipSourceGroup .radio-item').forEach(item => {
+      item.addEventListener('click', () => {
+        document.querySelectorAll('#pipSourceGroup .radio-item').forEach(r => r.classList.remove('selected'));
+        item.classList.add('selected');
+        selectedPipSource = item.dataset.value;
+      });
+    });
+
+    /* ═══════════════════════════════════════════════════════
+       Installation
+       ═══════════════════════════════════════════════════════ */
+    const logBox = document.getElementById('logBox');
+    const progressFill = document.getElementById('progressFill');
+    const progressLabel = document.getElementById('progressLabel');
+    const progressPct = document.getElementById('progressPct');
+    const progressElapsed = document.getElementById('progressElapsed');
+    const installSubtitle = document.getElementById('installSubtitle');
+
+    let installStartTime = null;
+    let elapsedTimer = null;
+
+    function formatElapsed(ms) {
+      const s = Math.floor(ms / 1000);
+      const m = Math.floor(s / 60);
+      const sec = s % 60;
+      return m > 0 ? `${m}:${String(sec).padStart(2, '0')}` : `${sec}s`;
+    }
+
+    function startElapsedTimer() {
+      installStartTime = Date.now();
+      elapsedTimer = setInterval(() => {
+        const elapsed = Date.now() - installStartTime;
+        progressElapsed.textContent = '已用时 ' + formatElapsed(elapsed);
+      }, 1000);
+    }
+
+    function stopElapsedTimer() {
+      if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+    }
+
+    function addLog(msg, type = '') {
+      const line = document.createElement('div');
+      line.className = 'log-line' + (type ? ' ' + type : '');
+      line.textContent = msg;
+      logBox.appendChild(line);
+      if (logBox.children.length > 200) logBox.removeChild(logBox.firstChild);
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    function setProgress(pct, msg) {
+      progressFill.style.width = pct + '%';
+      progressPct.textContent = pct + '%';
+      if (msg) progressLabel.textContent = msg;
+    }
+
+    const stepTimers = {};
+
+    function updateStepItem(sid, status) {
+      const item = document.querySelector(`.install-step-item[data-sid="${sid}"]`);
+      if (!item) return;
+      const icon = item.querySelector('.step-icon');
+      const eta = item.querySelector('.step-eta');
+      item.className = 'install-step-item ' + status;
+      icon.className = 'step-icon ' + status;
+      icon.textContent = status === 'done' ? '✓' : status === 'error' ? '✕' : '';
+
+      if (status === 'running') {
+        stepTimers[sid] = Date.now();
+        if (eta) eta.textContent = '进行中...';
+      } else if (status === 'done' && stepTimers[sid]) {
+        const elapsed = Date.now() - stepTimers[sid];
+        if (eta) {
+          eta.classList.remove('slow');
+          eta.style.display = '';
+          eta.textContent = '✓ ' + formatElapsed(elapsed);
+          eta.style.color = 'var(--accent)';
+        }
+      }
+    }
+
+    function startInstall() {
+      goToStep(2);
+      startElapsedTimer();
+      if (window.electron && window.electron.installer) {
+        window.electron.installer.startInstall({ pipSource: selectedPipSource });
+      } else {
+        addLog('[dev] Electron installer API not available', 'error');
+      }
+    }
+
+    function launchApp() {
+      if (window.electron && window.electron.installer) {
+        window.electron.installer.launch();
+      }
+    }
+
+    /* ═══════════════════════════════════════════════════════
+       Electron IPC
+       ═══════════════════════════════════════════════════════ */
+    if (window.electron) {
+      if (window.electron.installer) {
+        window.electron.installer.getProjectRoot().then(p => {
+          document.getElementById('installPath').value = p || '';
+        }).catch(() => {});
+
+        window.electron.installer.onProgress(data => {
+          if (!data) return;
+          switch (data.type) {
+            case 'step':
+              updateStepItem(data.id, data.status);
+              if (data.status === 'running') {
+                installSubtitle.textContent = data.title + '...';
+              }
+              break;
+            case 'progress':
+              setProgress(data.percent, data.message);
+              break;
+            case 'log':
+              addLog(data.message);
+              break;
+            case 'error':
+              addLog(data.message, 'error');
+              stopElapsedTimer();
+              installSubtitle.textContent = '安装出错';
+              btnNext.textContent = '重试';
+              btnNext.disabled = false;
+              btnNext.onclick = () => { goToStep(1); };
+              break;
+            case 'complete': {
+              stopElapsedTimer();
+              const total = installStartTime ? formatElapsed(Date.now() - installStartTime) : '';
+              addLog('✅ 安装完成！' + (total ? ` (耗时 ${total})` : ''), 'success');
+              if (total) {
+                const descEl = document.querySelector('.complete-desc');
+                if (descEl) descEl.innerHTML =
+                  `AutoScriptor 已准备就绪。<br>安装耗时 <strong>${total}</strong>，点击下方按钮启动应用程序。`;
+              }
+              setTimeout(() => goToStep(3), 600);
+              break;
+            }
+          }
+        });
+      }
+
+      document.getElementById('btnMin').onclick = () => {
+        if (window.electron.windowMinimize) window.electron.windowMinimize();
+      };
+      document.getElementById('btnClose').onclick = () => {
+        if (window.electron.windowClose) window.electron.windowClose();
+      };
+    } else {
+      document.getElementById('installPath').value = 'D:\\Projects\\AutoScriptor (dev)';
+    }
+
+    updateButton();
+  </script>
+</body>
+</html>
