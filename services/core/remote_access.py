@@ -50,7 +50,7 @@ class RemoteAccess:
                 user = ssh_user or "nokey"
                 cmd = [
                     ssh_executable,
-                    "-o", "StrictHostKeyChecking=no",
+                    "-o", "StrictHostKeyChecking=accept-new",
                     "-o", "ServerAliveInterval=60",
                     "-R", f"0:127.0.0.1:{local_port}",
                     "-p", str(port),

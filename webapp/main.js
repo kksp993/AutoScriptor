@@ -8,12 +8,14 @@ const http = require('http');
 const fs = require('fs');
 
 // ── Config ──────────────────────────────────────────────────────────────────
-const ROOT       = path.resolve(__dirname, '..');          // project root
-const SERVER_URL = 'http://127.0.0.1:5000';
-const GUI_SCRIPT = path.join(ROOT, 'gui.py');
-const ICON_PATH  = path.join(__dirname, 'icon.ico');
-const ICON_PNG   = path.join(__dirname, 'icon.png');
-const LOAD_HTML  = path.join(__dirname, 'renderer', 'loading.html');
+const ROOT         = path.resolve(__dirname, '..');          // project root
+const SERVER_URL   = 'http://127.0.0.1:5000';
+const GUI_SCRIPT   = path.join(ROOT, 'gui.py');
+const ICON_PATH    = path.join(__dirname, 'icon.ico');
+const ICON_PNG     = path.join(__dirname, 'icon.png');
+const LOAD_HTML    = path.join(__dirname, 'renderer', 'loading.html');
+const INSTALL_HTML = path.join(__dirname, 'renderer', 'installer.html');
+const INSTALL_STEP_SCRIPT = path.join(ROOT, 'services', 'installer', 'install_steps.py');
 
 /** 窗口 / 托盘用图标：优先 .ico，其次同目录 icon.png（避免缺失时托盘为空白） */
 function loadAppIcon() {
@@ -96,12 +98,19 @@ function createLineReader(onLine) {
   };
 }
 
+/** Check if the Python venv is already set up (i.e. installation completed) */
+function isInstalled() {
+  return fs.existsSync(path.join(ROOT, '.venv', 'Scripts', 'python.exe'));
+}
+
 // ── State ────────────────────────────────────────────────────────────────────
-let mainWindow  = null;
-let tray        = null;
-let pyProc      = null;
-let pyPid       = null;
-let serverReady = false;
+let mainWindow    = null;
+let tray          = null;
+let pyProc        = null;
+let pyPid         = null;
+let serverReady   = false;
+let installerProc = null;
+let installerMode = false;
 
 /** 加载页尚未完成时 Python 已输出日志，IPC 无订阅会丢包 —— 先缓冲再补发 */
 const LOG_BUFFER_MAX = 500;
@@ -282,6 +291,141 @@ function createTray() {
   tray.on('right-click', () => tray.popUpContextMenu(menu));
 }
 
+// ── Installer Window ──────────────────────────────────────────────────────────
+function createInstallerWindow() {
+  const icon = loadAppIcon();
+  installerMode = true;
+
+  mainWindow = new BrowserWindow({
+    width: 960,
+    height: 640,
+    frame: false,
+    resizable: false,
+    show: false,
+    icon,
+    title: 'AutoScriptor 安装向导',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+
+  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.loadFile(INSTALL_HTML);
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  mainWindow.on('close', (e) => {
+    if (!app.isQuitting) {
+      e.preventDefault();
+      quitApp();
+    }
+  });
+
+  return mainWindow;
+}
+
+/** Transition from installer to normal app mode */
+function transitionToApp() {
+  installerMode = false;
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    app.isQuitting = true;
+    mainWindow.close();
+    app.isQuitting = false;
+    mainWindow = null;
+  }
+
+  createMainWindow();
+  createTray();
+  startPython();
+}
+
+// ── Installer IPC handlers ──────────────────────────────────────────────────
+ipcMain.handle('installer:get-project-root', () => ROOT);
+
+ipcMain.on('installer:start', (event, config) => {
+  const pythonPath = findPython();
+  const args = [INSTALL_STEP_SCRIPT, '--project-root', ROOT];
+  if (config && config.pipSource) {
+    args.push('--pip-source', config.pipSource);
+  }
+
+  console.log('[installer] Starting:', pythonPath, args.join(' '));
+
+  installerProc = spawn(pythonPath, args, {
+    cwd: ROOT,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      PYTHONIOENCODING: 'utf-8',
+      PYTHONUTF8: '1',
+      NO_COLOR: '1',
+    },
+  });
+
+  const sendProgress = (data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('installer:progress', data);
+    }
+  };
+
+  // Installer 脚本输出 ensure_ascii=True 的 JSON，纯 ASCII 安全，
+  // 但 pip 子进程的日志可能含中文；统一用 UTF-8 解码，不走 GBK 回退
+  const utf8Line = (onLine) => {
+    let remainder = Buffer.alloc(0);
+    return (chunk) => {
+      remainder = Buffer.concat([remainder, chunk]);
+      let start = 0;
+      for (let i = 0; i < remainder.length; i++) {
+        if (remainder[i] === 0x0A) {
+          let end = i;
+          if (end > start && remainder[end - 1] === 0x0D) end--;
+          onLine(remainder.slice(start, end).toString('utf-8'));
+          start = i + 1;
+        }
+      }
+      remainder = remainder.slice(start);
+    };
+  };
+
+  installerProc.stdout.on('data', utf8Line(line => {
+    console.log('[installer:out]', line);
+    try {
+      sendProgress(JSON.parse(line));
+    } catch {
+      sendProgress({ type: 'log', message: line });
+    }
+  }));
+
+  installerProc.stderr.on('data', utf8Line(line => {
+    console.log('[installer:err]', line);
+    sendProgress({ type: 'log', message: line });
+  }));
+
+  installerProc.on('error', err => {
+    console.error('[installer:error]', err);
+    sendProgress({ type: 'error', message: String(err) });
+  });
+
+  installerProc.on('exit', (code) => {
+    console.log('[installer] exited with code', code);
+    installerProc = null;
+  });
+});
+
+ipcMain.on('installer:launch', () => {
+  if (installerProc) {
+    try { installerProc.kill(); } catch (_) {}
+    installerProc = null;
+  }
+  transitionToApp();
+});
+
 // ── IPC handlers (window controls from renderer) ──────────────────────────────
 ipcMain.on('window-tray', () => {
   mainWindow?.hide();
@@ -340,6 +484,10 @@ function quitApp() {
   if (pyProc) {
     try { pyProc.kill(); } catch (_) {}
   }
+  if (installerProc) {
+    try { installerProc.kill(); } catch (_) {}
+    installerProc = null;
+  }
   setTimeout(() => {
     tray?.destroy();
     app.quit();
@@ -349,9 +497,14 @@ function quitApp() {
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
   app.isQuitting = false;
-  createMainWindow();
-  createTray();
-  startPython();
+
+  if (isInstalled()) {
+    createMainWindow();
+    createTray();
+    startPython();
+  } else {
+    createInstallerWindow();
+  }
 });
 
 app.on('window-all-closed', (e) => {
