@@ -1,60 +1,132 @@
-from logzero import logger
-import logzero
-import logging
-import inspect
-import os
-import threading
+"""
+统一日志模块 — 基于 rich
+========================
+对外提供与旧 logzero 完全兼容的 ``logger`` 实例（标准 logging.Logger），
+同时使用 rich.logging.RichHandler 处理控制台输出，天然支持 UTF-8 & 终端颜色。
 
-# ── 任务名注入：让日志的 module:lineno 位置显示当前任务中文名 ──
+公共 API
+--------
+- ``logger``               — 全局 Logger（INFO 级别）
+- ``set_current_task(name)`` — 注入当前线程的任务名
+- ``setup_task_aware_logging()`` — 应用任务感知的日志格式
+- ``setup_logfile(path)``  — 添加 / 切换文件 handler（UTF-8）
+- ``log_flush(msg)``       — 单行覆写式控制台输出（进度用）
+"""
+from __future__ import annotations
+
+import logging
+import os
+import sys
+import threading
+import inspect
+
+# ── rich console: 统一 UTF-8；Electron 管道禁用 legacy Windows 路径 ──
+from rich.console import Console
+from rich.logging import RichHandler
+from rich.text import Text
+
+_force_terminal = not os.environ.get("NO_COLOR")
+_electron_pipe = os.environ.get("AUTOSCRIPTOR_ELECTRON_PIPE") == "1"
+# Electron 下必须走纯「文本写 sys.stderr」，避免 Rich 在 Windows 上走控制台 API 绕过 UTF-8 包装
+_kw = dict(
+    file=sys.stderr,
+    stderr=False,
+    force_terminal=_force_terminal,
+    force_jupyter=False,
+    color_system="auto" if _force_terminal else None,
+    legacy_windows=False,
+)
+if _electron_pipe:
+    _kw["width"] = 120
+_console = Console(**_kw)
+
+# ── 任务名注入 ──────────────────────────────────────────────────
 _task_ctx = threading.local()
+
 
 def set_current_task(name: str | None):
     """设置当前线程正在执行的任务名称（None 表示清除）"""
     _task_ctx.name = name
 
-class _TaskAwareFormatter(logzero.LogFormatter):
-    """继承 logzero 彩色 Formatter，有任务时在 level 和时间之间插入任务名"""
-    _FMT = '%(color)s[%(levelname)1.1s %(task_prefix)s%(asctime)s %(module)s:%(lineno)d]%(end_color)s %(message)s'
 
-    def __init__(self):
-        super().__init__(fmt=self._FMT, datefmt='%y%m%d %H:%M:%S')
+class _TaskFilter(logging.Filter):
+    """在 LogRecord 上附加 task_prefix 字段，供 Formatter 使用。"""
+    def filter(self, record: logging.LogRecord) -> bool:
+        task_name = getattr(_task_ctx, "name", None)
+        record.task_prefix = f"[{task_name}] " if task_name else ""
+        return True
 
-    def format(self, record):
-        task_name = getattr(_task_ctx, 'name', None)
-        record.task_prefix = f"{task_name} " if task_name else ""
-        return super().format(record)
+
+# ── 文件 handler 使用的纯文本 Formatter ─────────────────────────
+_FILE_FMT = "%(task_prefix)s[%(levelname)1.1s %(asctime)s %(module)s:%(lineno)d] %(message)s"
+_FILE_DATEFMT = "%y%m%d %H:%M:%S"
+
+# ── 构建全局 logger ─────────────────────────────────────────────
+logger = logging.getLogger("AutoScriptor")
+logger.setLevel(logging.DEBUG)
+logger.propagate = False
+
+class _ElectronRichHandler(RichHandler):
+    """Electron 管道下：不显示源码路径，级别列不 ljust(8) 以免与竖线之间空一大截。"""
+
+    def get_level_text(self, record: logging.LogRecord) -> Text:
+        level_name = record.levelname
+        return Text.styled(level_name, f"logging.level.{level_name.lower()}")
+
+
+# 防止重复添加 handler（热重载场景）
+if not logger.handlers:
+    _rh_kw = dict(
+        console=_console,
+        show_time=True,
+        show_path=not _electron_pipe,
+        rich_tracebacks=True,
+        tracebacks_show_locals=False,
+        markup=False,
+        log_time_format="%H:%M:%S",
+    )
+    _rich_handler = (_ElectronRichHandler if _electron_pipe else RichHandler)(**_rh_kw)
+    _rich_handler.setLevel(logging.DEBUG)
+    _rich_handler.addFilter(_TaskFilter())
+    logger.addHandler(_rich_handler)
+
+_file_handler: logging.FileHandler | None = None
+
 
 def setup_task_aware_logging():
-    """应用任务感知的日志格式（在 logfile 配置之后调用）"""
-    logzero.formatter(_TaskAwareFormatter())
+    """兼容旧调用——rich handler 已自带任务感知 filter，此处为空操作。"""
+    pass
 
-last_msg = ""
-def log_flush(msg):
-    """使用 logzero 在控制台打印 msg，不写入文件，并支持无终止符刷新"""
-    global last_msg
-    # 组装与当前 formatter 一致的前缀，例如: [I 250930 09:15:44 background:70]
-    # 1) 找到控制台 handler
-    console_handlers = [h for h in logger.handlers if hasattr(h, 'stream')]
-    if not console_handlers:
+
+def setup_logfile(path: str, encoding: str = "utf-8"):
+    """添加 / 切换文件日志 handler（UTF-8），替代 logzero.logfile()。"""
+    global _file_handler
+    if _file_handler is not None:
+        logger.removeHandler(_file_handler)
+        try:
+            _file_handler.close()
+        except Exception:
+            pass
+
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    _file_handler = logging.FileHandler(path, encoding=encoding, errors="replace")
+    _file_handler.setLevel(logging.DEBUG)
+    _file_handler.setFormatter(logging.Formatter(_FILE_FMT, datefmt=_FILE_DATEFMT))
+    _file_handler.addFilter(_TaskFilter())
+    logger.addHandler(_file_handler)
+
+
+# ── log_flush: 单行覆写式控制台输出 ─────────────────────────────
+_last_flush_msg = ""
+
+
+def log_flush(msg: str):
+    """在控制台以 \\r 覆写方式打印进度信息，不写入文件。"""
+    global _last_flush_msg
+    if msg == _last_flush_msg:
         return
-    ch = console_handlers[0]
-    stream = ch.stream
-
-    # 2) 查找调用方（跳过当前模块栈帧）
-    frame = inspect.currentframe()
-    frame = frame.f_back  # 跳过 log_flush 自身
-    this_file = os.path.normcase(os.path.abspath(__file__))
-    while frame and os.path.normcase(os.path.abspath(frame.f_code.co_filename)) == this_file:
-        frame = frame.f_back
-    if frame is None:
-        pathname, lineno = this_file, 0
-    else:
-        pathname, lineno = frame.f_code.co_filename, frame.f_lineno
-
-    # 3) 使用 LogRecord 和已有 formatter 生成“前缀”，不包含 message
-    record = logging.LogRecord(logger.name, logging.INFO, pathname, lineno, "", None, None)
-    prefix = ch.format(record).rstrip()
-    out = prefix + " " + msg
-    if last_msg != out:
-        last_msg = out
-        print(out, end="\r")
+    _last_flush_msg = msg
+    try:
+        _console.print(msg, end="\r", highlight=False)
+    except Exception:
+        print(msg, end="\r", flush=True)

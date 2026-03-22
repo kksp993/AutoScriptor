@@ -1,6 +1,7 @@
 import traceback
 
-from logzero import logger
+from AutoScriptor.utils.logger import logger
+from AutoScriptor.utils.cancel import check_cancel_raise
 from ZmxyOL.nav.api import locate_region
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
@@ -10,9 +11,12 @@ from time import time
 
 def bonus_callback():
     click(B(1015,85))
+    logger.info("打地鼠开始！！！")
     start = time()
-    while bg.signal("try_exit") and time() - start < 120:
-        click(I("地鼠", color="蓝色"), if_exist=True, save_screenshot=False)
+    # 与 battle_loop 一致：try_exit 为 True 时退出；未设置时 .signal(..., False) 为 False，应继续打地鼠
+    while not bg.signal("try_exit", False) and time() - start < 120:
+        box = locate(I("地鼠", color="蓝色"), timeout=0, assure_stable=False)
+        if box: click(B(box), save_screenshot=False)
 
 def battle_callback(cancel_on_failed:bool=True):
     from ZmxyOL.battle.character.hero import h
@@ -104,7 +108,9 @@ def task():
             sleep(0.5)
             click(T("确认",color="蓝色"))
             bg.set_signal("task_done", True)
-            bg.clear()
+            bg.remove("try_pause")
+            bg.set_signal("Pause_battle", True)
+            bg.set_signal("try_exit", True)
         else:
             click(T("确定"),if_exist=True)
             if ui_T(I("加载中"), timeout=0.5):
@@ -115,11 +121,11 @@ def task():
     while not bg.signal("task_done"):
         bg.add(
             name="try_pause",
-            identifier=(T("继续挑战"),I("荒古-通关成功")),
+            identifier=(T("继续挑战"), T("通关成功", box=Box(275,114,733,490).margin()), T("付费"), T("购买3次", box=Box(284,148,706,396).margin())),
             callback=callback,
-        )
-        if bg.signal("Pause_battle"): sleep(1);continue
-        if ui_T(T("土行孙"),1): bonus_callback()
+        )# 在2000点券购买处不奏效
+        if ui_T(T("规则", box=Box(551,43,144,56).margin()),2): bonus_callback()
+        elif bg.signal("Pause_battle"): sleep(1);continue
         else: battle_callback()
     click(B(30,30,30,30),until=lambda: ui_T((T("荒古万界"),I("导航-菜单"),T("世界地图"))))
     click(B(1200,30,30,30))
@@ -132,6 +138,7 @@ def task():
 
 if __name__ == "__main__":
     try:
+        init()
         task()
     except Exception as e:
         traceback.print_exc()

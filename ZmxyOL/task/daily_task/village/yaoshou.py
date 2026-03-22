@@ -2,9 +2,9 @@ import traceback
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
-@register_task
+@register_task(sched_window_hours=(10, 22))
 def task():
     global cfg
     if cfg["weekday"] in [1,2,3,4]:

@@ -5,7 +5,7 @@ import os.path
 from AutoScriptor.core.targets import UiEntry
 import threading
 import time
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 """
 1. ui["登录成功"] => UiEntry
 2. ui["登录成功"].box => Box

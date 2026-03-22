@@ -6,7 +6,7 @@
 from typing import Dict, Optional, Callable, Any, List
 import numpy as np
 from scipy.sparse.csgraph import floyd_warshall
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 
 
@@ -209,6 +209,7 @@ class MapManager:
         return path_edges
         
     def navigate_to(self, cur_env: str, cur_loc: str, tar_env: str, tar_loc: str) -> str:
+        from AutoScriptor import wait_for_appear
         """执行导航"""
         route = []
         if cur_loc == tar_loc: return
@@ -225,6 +226,7 @@ class MapManager:
 
         for from_env, to_env in route:
             self.paths[(from_env, to_env)]()
+            wait_for_appear(mm.locs[to_env].identifier, timeout=10)
 
         self.set_region(tar_env, tar_loc)
         return

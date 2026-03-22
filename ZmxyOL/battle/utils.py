@@ -1,3 +1,4 @@
+import enum
 import traceback
 from AutoScriptor import *
 from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
@@ -27,9 +28,40 @@ ITEM_TABLE = {
         "武器": {"bag_class": BAG.SHIZHUANG, "item_name": "风虎之怒"},
         "衣服": {"bag_class": BAG.SHIZHUANG, "item_name": "风虎潮流"},
         "翅膀": {"bag_class": BAG.SHIZHUANG, "item_name": "风虎背饰"},
+    },
+    "马年":{
+        "武器": {"bag_class": BAG.SHIZHUANG, "item_name": "星轨裁决"},
+        "衣服": {"bag_class": BAG.SHIZHUANG, "item_name": "天律华装"},
+        "翅膀": {"bag_class": BAG.SHIZHUANG, "item_name": "命定光轮"},
+    },
+    "昆虫":{
+        "武器": {"bag_class": BAG.SHIZHUANG, "item_name": "仲夏裁决"},
+    },
+    "冰神":{
+        "武器": {"bag_class": BAG.SHIZHUANG, "item_name": "冰神之殇"},
+        "衣服": {"bag_class": BAG.SHIZHUANG, "item_name": "冰神甲胄"},
+        "翅膀": {"bag_class": BAG.SHIZHUANG, "item_name": "冰神翼"},
     }
 }
 
+class WuQi(str, enum.Enum):
+    风虎之怒 = "风虎之怒"
+    影蛇之刃 = "影蛇之刃"
+    星轨裁决 = "星轨裁决"
+    仲夏裁决 = "仲夏裁决"
+    冰神之殇 = "冰神之殇"
+
+class YiFu(str, enum.Enum):
+    风虎潮流 = "风虎潮流"
+    影蛇灵袍 = "影蛇灵袍"
+    天律华装 = "天律华装"
+    冰神甲胄 = "冰神甲胄"
+
+class ChiBang(str, enum.Enum):
+    风虎背饰 = "风虎背饰"
+    影蛇风翼 = "影蛇风翼"
+    命定光轮 = "命定光轮"
+    冰神翼 = "冰神翼"
 
 
 def check_quality(item_name: str):
@@ -54,6 +86,29 @@ def find_in_bag(bag_class: BAG, item: str):
     while ui_F(T("全部"),timeout=1):
         key_event(AndroidKey.KEYCODE_ENTER)
         sleep(1)
+
+
+def item_dict_by_item_name(item_name: str) -> dict:
+    """在 ITEM_TABLE 中按 item_name 查找装备字典。"""
+    for suite in ITEM_TABLE.values():
+        for item_dict in suite.values():
+            if item_dict["item_name"] == item_name:
+                return item_dict
+    raise KeyError(item_name)
+
+
+def wear_shizhuang_choice(choice: list | enum.Enum | None):
+    """任务参数：单枚举，或 list 取首项；空则跳过。"""
+    if choice is None:
+        return
+    if isinstance(choice, enum.Enum):
+        e = choice
+    else:
+        if not choice:
+            return
+        e = choice[0]
+    name = e.value if isinstance(e, enum.Enum) else e
+    wear_item(item_dict_by_item_name(name))
 
 
 def wear_item(item_dict: dict):

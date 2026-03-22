@@ -4,7 +4,7 @@ from functools import wraps
 from threading import Lock, Thread
 from typing import Generic, TypeVar
 
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 ResultT = TypeVar("ResultT")
 

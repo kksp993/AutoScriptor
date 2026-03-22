@@ -1,7 +1,7 @@
 from functools import partial
 from typing import Any
 from AutoScriptor import *
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 NORMAL_SPEED_1X = 0.025
 NORMAL_SPEED_3X = 0.012
 

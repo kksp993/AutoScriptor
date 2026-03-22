@@ -4,7 +4,7 @@ from ZmxyOL.task.task_register import register_task
 from AutoScriptor import *
 from ZmxyOL import *
 
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 from ZmxyOL.task.event_task.hd_registry import HD_TASK_TABLE
 from ZmxyOL.task.event_task.hd_details import *

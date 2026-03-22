@@ -10,15 +10,28 @@ import time
 import inspect
 from datetime import datetime
 from typing import Optional, Dict, Any, Set
-from logzero import logger, logfile
+from AutoScriptor.utils.logger import logger, setup_logfile
 import cv2
+import numpy as np
+
+def _imwrite_unicode(path: str, img) -> bool:
+    """cv2.imwrite 在 Windows 上不支持中文路径，用 imencode + tofile 替代"""
+    try:
+        success, buf = cv2.imencode('.png', img)
+        if success:
+            buf.tofile(path)
+            return True
+        return False
+    except Exception:
+        return False
 
 # 默认上下文收集配置
 _DEFAULT_CONTEXT_CONFIG = {
     "mm_current_region": True,      # MapManager 中存储的当前 env 和 loc
-    "locate_region_result": True,   # locate_region() 实际识别结果（只跑一次）
+    "locate_region_result": True,   # locate_region() 实际识别结果（只跑 q一次）
     "bg_active_callbacks": True,   # BackgroundMonitor 中正在运行的后台任务
     "bg_signals": True,             # BackgroundMonitor 中的信号状态
+    "bg_event_history": True,       # BackgroundMonitor 最近50条事件历史
     "code_coverage": True,          # 代码覆盖率信息（执行过的文件和函数）
     "python_version": True,          # Python 版本
     "timestamp": True,              # 错误发生时间戳
@@ -123,7 +136,22 @@ def collect_default_context(config: Optional[Dict[str, bool]] = None) -> Dict[st
         except Exception as e:
             context["bg_signals"] = f"获取失败: {e}"
     
-    # 5. 代码覆盖率信息
+    # 5. BackgroundMonitor 事件历史
+    if config.get("bg_event_history", False):
+        try:
+            from AutoScriptor.core.background import bg
+            if hasattr(bg, 'get_event_history'):
+                event_history = bg.get_event_history()
+                if event_history:
+                    context["bg_event_history"] = "\n    " + "\n    ".join(event_history)
+                else:
+                    context["bg_event_history"] = "(无事件记录)"
+            else:
+                context["bg_event_history"] = "(BackgroundMonitor 不支持事件历史)"
+        except Exception as e:
+            context["bg_event_history"] = f"获取失败: {e}"
+    
+    # 6. 代码覆盖率信息
     if config.get("code_coverage", False):
         try:
             coverage_info = get_code_coverage()
@@ -132,11 +160,11 @@ def collect_default_context(config: Optional[Dict[str, bool]] = None) -> Dict[st
         except Exception as e:
             context["code_coverage"] = f"获取失败: {e}"
     
-    # 6. Python 版本
+    # 7. Python 版本
     if config.get("python_version", False):
         context["python_version"] = sys.version.split()[0]
     
-    # 7. 错误发生时间戳
+    # 8. 错误发生时间戳
     if config.get("timestamp", False):
         context["error_timestamp"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
@@ -398,7 +426,7 @@ def archive_error(
         # 1. 生成时间戳和安全的文件夹名
         ts = datetime.now().strftime('%y%m%d_%H%M%S')
         safe_name = error_name.replace('/', '_').replace(' -> ', '_').replace('\\', '_')
-        folder_name = f"[{ts}][{safe_name}]"
+        folder_name = f"{ts}_{safe_name}"
         
         # 2. 创建归档文件夹
         err_base_dir = os.path.join(os.getcwd(), 'logs', 'errors')
@@ -527,7 +555,7 @@ def archive_error(
                 img = mixctrl.screenshot()
                 if img is not None:
                     screenshot_file = os.path.join(archive_dir, 'current_screenshot.png')
-                    cv2.imwrite(screenshot_file, img)
+                    _imwrite_unicode(screenshot_file, img)
                     logger.debug(f"已保存当前截图: {screenshot_file}")
                 
                 # 每隔1秒截图一张，共3张
@@ -537,7 +565,7 @@ def archive_error(
                         img = mixctrl.screenshot()
                         if img is not None:
                             timed_screenshot_file = os.path.join(archive_dir, f'timed_screenshot_{i}.png')
-                            cv2.imwrite(timed_screenshot_file, img)
+                            _imwrite_unicode(timed_screenshot_file, img)
                             logger.debug(f"已保存定时截图 {i}/3: {timed_screenshot_file}")
                     except Exception as e:
                         logger.warning(f"保存定时截图 {i}/3 失败: {e}")
@@ -630,7 +658,7 @@ def archive_error_with_log(
         log_dir = os.path.join(os.getcwd(), 'logs', 'log')
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, f"[{ts}][{safe_name}].log")
-        logfile(log_file, encoding='utf-8')
+        setup_logfile(log_file)
     except Exception as e:
         logger.warning(f"切换日志文件失败: {e}")
     
