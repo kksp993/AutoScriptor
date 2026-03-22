@@ -56,5 +56,5 @@ def chaos_select(self:Hero, task_list:list[str], Weather:str, task_type: str)->s
             if cur_linggen in Weather: same_linggen_chaos = name
             sleep(1)
             click(B(1200,30,30,30))
-            wait_for_appear(T("回家", box=Box(18,607,87,109)))
+            wait_for_appear(T("回家", box=Box(29,613,77,88).margin()))
     return same_linggen_chaos

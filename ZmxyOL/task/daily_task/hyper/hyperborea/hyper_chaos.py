@@ -3,7 +3,7 @@ from ZmxyOL.battle.tasks import JIBEI_CHAOS_TABLE, get_task_table
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 @register_task
 def task():
@@ -26,7 +26,7 @@ def task():
         h.set(has_cd=True,speed_x=3).battle_task(crash_suddenly=True)
     else:
         click(B(1200,30,30,30))
-        wait_for_appear(T("回家", box=Box(18,607,87,109)))
+        wait_for_appear(T("回家", box=Box(29,613,77,88).margin()))
 
 if __name__ == "__main__":
     try:

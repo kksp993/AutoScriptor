@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';" />
+  <title>AutoScriptor</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      overflow: hidden;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 48px;
+    }
+    .logo-icon {
+      width: 56px;
+      height: 56px;
+      background: linear-gradient(135deg, #22c55e, #16a34a);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      box-shadow: 0 8px 32px rgba(34, 197, 94, 0.35);
+    }
+    .logo-text {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: #f8fafc;
+    }
+    .logo-text span {
+      color: #22c55e;
+    }
+
+    .status-area {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 40px;
+    }
+
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(34, 197, 94, 0.2);
+      border-top-color: #22c55e;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .status-text {
+      font-size: 14px;
+      color: #64748b;
+      letter-spacing: 0.3px;
+    }
+
+    .progress-bar {
+      width: 280px;
+      height: 3px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #22c55e, #4ade80);
+      border-radius: 2px;
+      width: 0%;
+      transition: width 0.4s ease;
+      animation: progress-pulse 2s ease-in-out infinite;
+    }
+    @keyframes progress-pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.6; }
+    }
+
+    .log-box {
+      width: 560px;
+      max-width: 90vw;
+      height: 140px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 10px;
+      padding: 12px 14px;
+      overflow-y: auto;
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 11.5px;
+      line-height: 1.6;
+      color: #475569;
+    }
+    .log-box::-webkit-scrollbar { width: 4px; }
+    .log-box::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,0.1);
+      border-radius: 2px;
+    }
+    .log-line { white-space: pre-wrap; word-break: break-all; }
+    .log-line.highlight { color: #22c55e; }
+    .log-line.error     { color: #f87171; }
+
+    .ready-badge {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 20px;
+      background: rgba(34, 197, 94, 0.12);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #4ade80;
+    }
+    .ready-badge.show { display: flex; }
+    .ready-dot {
+      width: 8px;
+      height: 8px;
+      background: #22c55e;
+      border-radius: 50%;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.5; transform: scale(0.8); }
+    }
+
+    .version {
+      position: absolute;
+      bottom: 24px;
+      font-size: 11px;
+      color: #334155;
+    }
+
+    /* 窗口控制按钮（右上角） */
+    .win-controls {
+      position: fixed;
+      top: 8px;
+      right: 10px;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      z-index: 9999;
+    }
+    .win-btn {
+      width: 28px;
+      height: 28px;
+      border: none;
+      background: transparent;
+      border-radius: 6px;
+      color: #475569;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      transition: background 0.15s, color 0.15s;
+    }
+    .win-btn:hover {
+      background: rgba(255,255,255,0.08);
+      color: #94a3b8;
+    }
+    .win-btn.close:hover {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+    }
+  </style>
+</head>
+<body>
+  <!-- 窗口控制按钮（仅 Electron 模式可用） -->
+  <div class="win-controls" id="winControls" style="display:none">
+    <button class="win-btn" id="btnTray" title="最小化到系统托盘">↓</button>
+    <button class="win-btn close" id="btnClose" title="退出应用">✕</button>
+  </div>
+
+  <div class="logo">
+    <div class="logo-icon">⚡</div>
+    <div class="logo-text">Auto<span>Scriptor</span></div>
+  </div>
+
+  <div class="status-area">
+    <div class="spinner" id="spinner"></div>
+    <div class="status-text" id="statusText">正在启动 Python 服务...</div>
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="ready-badge" id="readyBadge">
+      <span class="ready-dot"></span>服务就绪，正在加载界面…
+    </div>
+  </div>
+
+  <div class="log-box" id="logBox"></div>
+
+  <div class="version">AutoScriptor v1.0</div>
+
+  <script>
+    const statusText  = document.getElementById('statusText');
+    const spinner     = document.getElementById('spinner');
+    const progressFill = document.getElementById('progressFill');
+    const readyBadge  = document.getElementById('readyBadge');
+    const logBox      = document.getElementById('logBox');
+
+    let logCount = 0;
+    let progress = 5;
+
+    function addLog(msg, type = '') {
+      if (!msg || !msg.trim()) return;
+      logCount++;
+      const line = document.createElement('div');
+      line.className = 'log-line' + (type ? ' ' + type : '');
+      line.textContent = msg;
+      logBox.appendChild(line);
+      if (logBox.children.length > 120) logBox.removeChild(logBox.firstChild);
+      logBox.scrollTop = logBox.scrollHeight;
+
+      // Advance progress bar as logs arrive
+      progress = Math.min(progress + 1.2, 90);
+      progressFill.style.width = progress + '%';
+    }
+
+    function setStatus(text) {
+      statusText.textContent = text;
+    }
+
+    if (window.electron) {
+      // 显示窗口控制按钮
+      document.getElementById('winControls').style.display = 'flex';
+      document.getElementById('btnTray').onclick  = () => window.electron.windowTray();
+      document.getElementById('btnClose').onclick = () => window.electron.windowClose();
+
+      window.electron.onLog(msg => {
+        const isHighlight = /startup complete|running on|就绪|ready/i.test(msg);
+        const isError     = /error|exception|traceback/i.test(msg);
+        addLog(msg, isHighlight ? 'highlight' : isError ? 'error' : '');
+
+        if (/startup complete|running on/i.test(msg)) {
+          setStatus('服务已启动，正在连接...');
+        }
+      });
+
+      window.electron.onStatus(status => {
+        if (status === 'starting') {
+          setStatus('正在启动 Python 服务...');
+          progressFill.style.width = '15%';
+        } else if (status === 'ready') {
+          setStatus('服务就绪，正在跳转...');
+          progressFill.style.width = '100%';
+          spinner.style.display = 'none';
+          readyBadge.classList.add('show');
+          addLog('✅ 服务就绪，正在加载 AutoScriptor...', 'highlight');
+        }
+      });
+    } else {
+      // Fallback when opened directly in browser (dev)
+      setStatus('加载中... (开发模式)');
+      addLog('[dev] preload not available', 'error');
+    }
+
+    // Animate progress bar while waiting
+    setInterval(() => {
+      if (progress < 85) {
+        progress += 0.3;
+        progressFill.style.width = progress + '%';
+      }
+    }, 600);
+  </script>
+</body>
+</html>

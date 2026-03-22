@@ -3,7 +3,7 @@ from abc import ABC
 from typing import Union
 from numpy import ndarray
 import copy
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.box import Box
 from AutoScriptor.recognition.img_rec import _load_cv2
     
@@ -140,3 +140,19 @@ def T(text=None, *, key=None,box:Box|None=None,color=None):
         entry = ui_str(text)
     if box is not None: entry = entry.set_box(box)
     return entry.set_color(color).t
+
+
+class VLMTarget(Target):
+    """VLM grounding target: locates UI elements via vision-language model."""
+
+    def __init__(self, description: str, box: Box = None):
+        self.description = description
+        self.box = box or Box(0, 0, 1280, 720)
+
+    def __repr__(self):
+        return f"V('{self.description}')" \
+            f"{'@['+str(self.box)+']' if self.box != Box(0,0,1280,720) else ''}"
+
+
+def V(description: str, *, box: Box = None):
+    return VLMTarget(description, box)

@@ -2,12 +2,12 @@ import traceback
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 @register_task(next_exec_offset_hours=10)
 def task():
     ensure_in("村庄")
-    click(I("导航-战令"))
+    click(I("导航-战令"))   # 概率失败 （T也有概率）
     wait_for_appear(T("购买等级"))
     click(B(105,244,34,124))
     sleep(1)

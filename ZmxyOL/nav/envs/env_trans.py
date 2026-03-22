@@ -1,4 +1,4 @@
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 from AutoScriptor import *
 from ZmxyOL.nav.map_manager import mm, path
 from .login import login
@@ -35,8 +35,7 @@ def way():
     while ui_F(I("挑战-昆仑山")):
         swipe(B(1000, 300), B(700, 300), duration_s=0.5)
     click(I("挑战-昆仑山"))
-    while ui_T(I("加载中"), 1):
-        time.sleep(0.5)
+    wait_for_disappear(I("加载中"))
     wait_for_appear(T("夺回昆仑山"))
     click(B(1200, 30, 30, 30))
     mm.set_region("天庭")
@@ -60,10 +59,8 @@ def way():
 "=======================    极北    ======================="
 @path("极北", "极北村庄")
 def way():
-    click(T("回家",box=Box(18,607,87,109)))
-    # 等待加载中消失
-    while ui_T(I("加载中"), 1):
-        time.sleep(0.5)
+    click(T("回家", box=Box(29,613,77,88).margin()))
+    wait_for_disappear(I("加载中"))
     wait_for_appear(I("极北村庄背景"))
     sleep(2)
     mm.set_region("极北村庄")
@@ -101,19 +98,15 @@ def way():
 def way():
     wait_for_appear(I("极寒深渊背景"))
     click(B(70,460))
-    # 等待加载中消失
-    while ui_T(I("加载中"), 1):
-        time.sleep(0.5)
+    wait_for_disappear(I("加载中"))
     mm.set_region("极北")
     time.sleep(1)
 
 "=======================    村庄    ======================="
 @path(["天庭", "地狱"], "村庄")
 def way():
-    click(T("回家",box=Box(18,607,87,109)))
-    # 等待加载中消失
-    while ui_T(I("加载中"), 1):
-        time.sleep(0.5)
+    click(T("回家", box=Box(29,613,77,88).margin()))
+    wait_for_disappear(I("加载中"))
     mm.set_region("村庄")
     time.sleep(1)
 
@@ -123,9 +116,8 @@ def way():
     time.sleep(2)
     click(I("菜单-设置"), delay=0.5)
     click(T("村庄",box=Box(964,542,94,120)), delay=1)
-    # 等待加载中消失
-    while ui_T(I("加载中"), 1):
-        time.sleep(0.5)
+    wait_for_disappear(I("加载中"))
+    time.sleep(3)
     mm.set_region("村庄")
 
 @path("登录", "村庄")
@@ -137,19 +129,9 @@ def way():
     )
     mm.set_region("村庄")
 
-# @path(["极北村庄","极北","极寒深渊"], "村庄")
-# def way():
-#     click(I("导航-世界地图"), until=lambda: ui_T(I("世界地图-极北")))
-#     click(T("村庄"))
-#     click(T("确定"))
-#     # 等待加载中消失
-#     while ui_T(I("加载中"), 1):
-#         time.sleep(0.5)
-#     mm.set_region("村庄")
-#     time.sleep(1)
 
 "=======================    仙盟    ======================="
-@path(["村庄", "极北村庄"], "仙盟")
+@path(["村庄"], "仙盟")
 def way():
     while ui_F(T("仙盟",box=Box(16,30,130,400)), 3):
         click(I("导航-按钮收缩"))
@@ -165,21 +147,6 @@ def way():
     sleep(1)
 
 
-"=======================    洪荒遗境    ======================="
-# @path(HAS_SHIJIEDITU, "洪荒遗境")
-# def way():
-#     click(I("导航-世界地图"), until=lambda: ui_T(I("世界地图-极北")))
-#     click(T("洪荒遗境"),offset=(180,90))
-#     click(T("确定"))
-#     wait_for_appear(I("洪荒遗境背景"))
-#     mm.set_region("洪荒遗境")
-#     time.sleep(1)
-
-# def way(env_name: str):
-#     click(I("导航-世界地图"), until=lambda: ui_T(I("世界地图-极北")))
-
-
-
 "=======================    联盟    ======================="
 @path("仙盟", "联盟")
 def way():
@@ -190,8 +157,6 @@ def way():
 @path("联盟", "村庄")
 def way():
     click(T("返回村庄", box=Box(1130,600,150,120)), assure_stable=True, until=lambda: ui_T((I("加载中"))))
-    # from ZmxyOL.nav.api import ensure_in
-    # ensure_in("村庄") # 有概率联盟会bug传到仙盟
     wait_for_disappear(I("加载中"))
     time.sleep(3)
     mm.set_region("村庄")

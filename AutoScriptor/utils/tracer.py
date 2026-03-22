@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from datetime import datetime
 from typing import Optional
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 from AutoScriptor.core.targets import Target, BoxTarget
 from AutoScriptor.utils.box import Box
 
@@ -47,13 +47,52 @@ def _draw_text_with_bg(img, text: str, position: tuple[int, int], font_scale: fl
     return text_height + baseline + 4
 
 
+def _draw_prior_clicks(img, prior_clicks: list[tuple[int, int]], final_color: tuple[int, int, int] = (0, 0, 255)):
+    """绘制累积的 BoxTarget 点击轨迹，编号 1..N，颜色从浅红渐变到深红"""
+    n = len(prior_clicks)
+    if n == 0:
+        return
+    for i, pt in enumerate(prior_clicks):
+        ratio = i / n  # 0 → 最浅, (n-1)/n → 次深 (最深留给当前 click)
+        b = int(200 * (1 - ratio))
+        g = int(200 * (1 - ratio))
+        color = (b, g, 255)  # BGR: 浅红 (200,200,255) → 深红 (0,0,255)
+        cv2.circle(img, pt, 8, color, -1)
+        cv2.circle(img, pt, 8, (0, 0, 0), 1)
+        label = str(i + 1)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        (tw, th), _ = cv2.getTextSize(label, font, 0.4, 1)
+        cv2.putText(img, label, (pt[0] - tw // 2, pt[1] + th // 2), font, 0.4, (255, 255, 255), 1)
+
+
+def _draw_info_bar(img, extra_info: dict):
+    """在图像顶部绘制诊断信息条。click_mode 与 screenshot_src 不一致时显示红色警告。"""
+    if not extra_info:
+        return
+    parts = [f"{k}:{v}" for k, v in extra_info.items()]
+    click_mode = extra_info.get("click", "")
+    src = extra_info.get("src", "")
+    has_mismatch = click_mode and src and click_mode != src
+    if has_mismatch:
+        parts.insert(0, "MISMATCH!")
+    info_text = "  ".join(parts)
+    h, w = img.shape[:2]
+    bar_h = 24
+    bar_color = (0, 0, 200) if has_mismatch else (50, 50, 50)
+    cv2.rectangle(img, (0, 0), (w, bar_h), bar_color, -1)
+    cv2.putText(img, info_text, (4, 17), cv2.FONT_HERSHEY_SIMPLEX, 0.48,
+                (255, 255, 255), 1, cv2.LINE_AA)
+
+
 def save_debug_screenshot(
     target: Target|tuple[Target, ...],
     screenshot,  # numpy array (cv2 image format)
     box: Optional[Box] = None, 
     pt: Optional[tuple[int, int]] = None,
     ocr_text: Optional[str] = None,
-    prefix: str = "c"
+    prefix: str = "c",
+    prior_clicks: Optional[list[tuple[int, int]]] = None,
+    extra_info: Optional[dict] = None
 ):
     """
     保存调试截图，支持多种标注方式
@@ -64,6 +103,7 @@ def save_debug_screenshot(
         box: 用于标注框选区域（可选）
         pt: 点击位置 (x, y)，当点击或长按时有效（可选）
         ocr_text: OCR 结果文字，格式为 "ocr:{识别结果}"（可选）
+        prior_clicks: 两次截图保存之间累积的 BoxTarget 点击位置列表（可选）
     
     Examples:
         from AutoScriptor.utils.tracer import save_debug_screenshot
@@ -74,9 +114,21 @@ def save_debug_screenshot(
         
         # OCR 截图
         save_debug_screenshot(target=BoxTarget(Box(100, 100, 200, 50)), screenshot=img, box=Box(100, 100, 200, 50), ocr_text="ocr:购买")
+        
+        # 带诊断信息的截图（extra_info 会渲染到顶部信息条，click/src 不一致时红色高亮）
+        save_debug_screenshot(target=T("确定"), screenshot=img, prefix="s",
+                              extra_info={"click": "mumu", "src": "nemu", "until": "<lambda>", "elapsed": "30.1s"})
     """
     try:
         img = screenshot.copy()
+        
+        # 0-A. 绘制诊断信息条（mode/mismatch/until 等）
+        if extra_info:
+            _draw_info_bar(img, extra_info)
+        
+        # 0-B. 绘制累积的 BoxTarget 点击轨迹（浅红→深红，编号 1,2,3...）
+        if prior_clicks:
+            _draw_prior_clicks(img, prior_clicks)
         
         # 1. 绘制 Target 相关的标注（红色框和点击位置）
         if box is not None:
@@ -90,7 +142,7 @@ def save_debug_screenshot(
                 target_str = f"T('{t.ui.text}')" if hasattr(t, 'ui') and hasattr(t.ui, 'text') and t.ui.text else f"Box[{box.left},{box.top}]"
                 _draw_text_with_bg(img, target_str, (box.left, max(box.top - 10, 20)))
         
-        # 2. 绘制点击位置
+        # 2. 绘制点击位置（最深红，当前 click）
         if pt is not None:
             cv2.circle(img, pt, 5, (0, 0, 255), -1)
             
@@ -109,19 +161,35 @@ def save_debug_screenshot(
                 # 如果没有 box，在图片左上角显示
                 _draw_text_with_bg(img, ocr_display_text, (10, 30))
         
-        # 保存截图
+        # 保存截图：时间戳在前，类型前缀在后，便于按文件名排序即按时间排序
         ts = datetime.now().strftime('%y%m%d_%H%M%S_%f')
-        cv2.imwrite(os.path.join(CLICK_DIR, f'{prefix}_{ts}.png'), img)
+        cv2.imwrite(os.path.join(CLICK_DIR, f'{ts}_{prefix}.png'), img)
         
-        # 只保留20张最新截图
+        # 按类型保留最新截图：c 30 + s 10 + e 5 = 45 张（兼容旧名 c_/s_/e_ 前缀）
         files = sorted([f for f in os.listdir(CLICK_DIR)], key=lambda x: os.path.getmtime(os.path.join(CLICK_DIR, x)), reverse=True)
-        c_files = [f for f in files if f.startswith('c')]
-        s_files = [f for f in files if f.startswith('s')]
-        e_files = [f for f in files if f.startswith('e')]
-        # 保留c开头10张，s/e各3张，其余删除
-        keep = set(c_files[:10] + s_files[:3] + e_files[:3])
+
+        def _files_of_type(letter: str) -> list[str]:
+            suf = f"_{letter}.png"
+            pre = f"{letter}_"
+            return [f for f in files if f.endswith(suf) or (f.startswith(pre) and f.endswith(".png"))]
+
+        c_files = _files_of_type("c")
+        s_files = _files_of_type("s")
+        e_files = _files_of_type("e")
+        keep = set(c_files[:30] + s_files[:10] + e_files[:5])
         files_to_remove = [f for f in files if f not in keep]
         for f in files_to_remove: 
             os.remove(os.path.join(CLICK_DIR, f))
     except Exception as e:
         logger.debug(f"保存调试截图失败: {e}")
+
+
+def clear_debug_screenshots():
+    """清空调试截图目录，在每个任务开始前调用，确保截图都属于当前任务"""
+    try:
+        for f in os.listdir(CLICK_DIR):
+            fp = os.path.join(CLICK_DIR, f)
+            if os.path.isfile(fp):
+                os.remove(fp)
+    except Exception as e:
+        logger.debug(f"清理调试截图目录失败: {e}")

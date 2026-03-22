@@ -19,7 +19,8 @@
 **/.venv
 **/.env
 **/.env.local
-
+/.cursor/
+/.playwright-mcp/
 # 忽略根目录下的 PNG 和 LOG 文件
 /*.png
 /*.log
@@ -33,3 +34,5 @@
 /wheelhouse/
 /.python*
 /.gitadd*
+/docs/refs/
+**/node_modules

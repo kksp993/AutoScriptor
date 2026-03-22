@@ -14,7 +14,7 @@ from AutoScriptor import *
 from AutoScriptor.core.api import ui_idx
 from ZmxyOL.nav.envs.decorators import LOC_ENV
 from .map_manager import mm
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 from typing import Any, Callable
 
 def _flatten_identifiers(idfs: list[Any]) -> tuple[list[Any], list[list[Any]]]:
@@ -40,7 +40,7 @@ def _check_idx(get_identifier: Callable[[str], Any], names: list[str]) -> int:
     """通用索引查找：展平 identifiers，定位，再还原原始索引"""
     idfs = [get_identifier(name) for name in names]
     flat, groups = _flatten_identifiers(idfs)
-    flat_idx = ui_idx(flat)
+    flat_idx = ui_idx(tuple(flat))
     if flat_idx < 0: return -1
     res = _restore_flat_idx(flat_idx, groups)
     return res
@@ -55,6 +55,12 @@ def check_env_idx(env_list: list[str]) -> int:
 
 
 def locate_region(cnt = 0, check_only = False) -> tuple[str, str]:
+    if cnt == 0:
+        try:
+            mixctrl.app.launch(cfg["app"]["app_to_start"])
+            time.sleep(2)
+        except Exception:
+            pass
     """
         按优先级检查当前位置
     """
@@ -106,19 +112,11 @@ def ensure_in(tar_loc: str|list[str], idx:int|None|list[int]=None):
     mm.navigate_to(cur_env,cur_loc,tar_env,tar_loc)
 
 
+
 def try_close_via_x():
     """
     尝试关闭各种弹窗和等待加载完成
     """
-    from AutoScriptor import detect_floating_window, dismiss_floating_window
-
-    # 仅检测
-    result = detect_floating_window()
-    if result['found']:
-        print(f"悬浮窗在{result['edge']}边，位置: {result['box']}")
-
-    # 检测 + 自动移除（滑动到中央 → 隐藏悬浮球）
-    dismiss_floating_window()
 
     # 关闭目标列表
     close_targets = [
@@ -127,7 +125,7 @@ def try_close_via_x():
         (I("x"), I("x")),
         (I("x-in"), B(1061,178,39,47)),
         (I("菜单-宠物"), B(10,10)),
-        # (T("回家",box=Box(18,607,87,109)), T("回家",box=Box(18,607,87,109))),
+        # (T("回家", box=Box(29,613,77,88).margin()), T("回家", box=Box(29,613,77,88).margin())),
         (T("确认"), T("确认")),
         (T("返回地图"), T("返回地图")),
         (T("返回大厅"), T("返回大厅")),
@@ -147,7 +145,7 @@ def try_close_via_x():
         found = False
         tgts = tuple(target for target, _ in close_targets)
         idx = ui_idx(tgts)
-        if idx > 0:
+        if idx >= 0:
             click(close_targets[idx][1], if_exist=True)
             found = True
             sleep(0.5)

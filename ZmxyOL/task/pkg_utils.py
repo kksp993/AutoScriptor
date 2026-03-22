@@ -3,28 +3,37 @@ import importlib
 import os
 import pathlib
 from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.task_registry import task_registry
 from ZmxyOL.task.translations import translate_path_part, normalize_to_cn
 
 
-def get_min_order(node):
+def get_min_order(node, path_prefix=""):
+    """从 TaskRegistry 获取节点的最小注册顺序。"""
     if isinstance(node, dict):
-        if 'order' in node:
-            v = node['order']
-            # 兼容字符串/None，统一为数字
-            try:
-                return int(v)
-            except Exception:
-                return float('inf')
-        orders = [get_min_order(v) for v in node.values() if isinstance(v, dict)]
+        if 'on' in node:
+            return task_registry.get_order(path_prefix)
+        orders = []
+        for key, v in node.items():
+            if isinstance(v, dict):
+                child_path = f"{path_prefix}/{key}" if path_prefix else key
+                orders.append(get_min_order(v, child_path))
         return min(orders) if orders else float('inf')
     return float('inf')
 
-# 递归对任务树按注册顺序排序
-def sort_tasks(node):
-    for child in node.values():
-        if isinstance(child, dict):
-            sort_tasks(child)
-    sorted_items = sorted(node.items(), key=lambda item: get_min_order(item[1]))
+
+def sort_tasks(node, path_prefix=""):
+    """递归对任务树按注册顺序排序。"""
+    for key, child in list(node.items()):
+        if isinstance(child, dict) and 'on' not in child:
+            child_path = f"{path_prefix}/{key}" if path_prefix else key
+            sort_tasks(child, child_path)
+    sorted_items = sorted(
+        node.items(),
+        key=lambda item: get_min_order(
+            item[1],
+            f"{path_prefix}/{item[0]}" if path_prefix else item[0],
+        ),
+    )
     node.clear()
     node.update(sorted_items)
 
@@ -126,7 +135,7 @@ def normalize_cfg_tasks_to_cn():
     - 就地替换 cfg._config['tasks'] 并保存
     """
     def is_leaf(node: dict) -> bool:
-        return isinstance(node, dict) and ('next_exec_time' in node or 'fn' in node)
+        return isinstance(node, dict) and ('next_exec_time' in node or 'on' in node)
 
     def deep_merge(dst: dict, src: dict) -> dict:
         for k, v in src.items():
@@ -134,13 +143,8 @@ def normalize_cfg_tasks_to_cn():
                 dst[k] = v
                 continue
             if isinstance(dst[k], dict) and isinstance(v, dict):
-                # 叶子节点合并：保留 fn/order 等运行期字段
                 if is_leaf(dst[k]) or is_leaf(v):
-                    # 优先保留已有的 fn；若不存在则使用新的
-                    fn_val = dst[k].get('fn') or v.get('fn')
                     merged = {**v, **dst[k]}
-                    if fn_val:
-                        merged['fn'] = fn_val
                     dst[k] = merged
                 else:
                     deep_merge(dst[k], v)
@@ -217,23 +221,26 @@ def update_order_files(py_files):
 
     def order_key_for(dir_parts_eng, name_eng):
         try:
-            # 映射父路径与当前名称为中文以查询 cfg['tasks']
             node = cfg['tasks']
+            path_parts = []
             if not dir_parts_eng:
-                # 顶层目录英 -> 中
                 top_map_rev = {
                     'daily_task': '每日任务',
                     'weekly_task': '每周任务',
                     'event_task': '活动任务',
                     'normal_task': '一般任务',
                 }
-                node = node.get(top_map_rev.get(name_eng, translate_path_part(name_eng)), {})
-                return get_min_order(node)
-            # 非顶层
+                cn_key = top_map_rev.get(name_eng, translate_path_part(name_eng))
+                node = node.get(cn_key, {})
+                return get_min_order(node, cn_key)
             for seg in dir_parts_eng:
-                node = node.get(translate_path_part(seg), {}) if isinstance(node, dict) else {}
-            child_node = node.get(translate_path_part(name_eng), {}) if isinstance(node, dict) else {}
-            return get_min_order(child_node)
+                cn_seg = translate_path_part(seg)
+                path_parts.append(cn_seg)
+                node = node.get(cn_seg, {}) if isinstance(node, dict) else {}
+            cn_name = translate_path_part(name_eng)
+            path_parts.append(cn_name)
+            child_node = node.get(cn_name, {}) if isinstance(node, dict) else {}
+            return get_min_order(child_node, "/".join(path_parts))
         except Exception:
             return float('inf')
 

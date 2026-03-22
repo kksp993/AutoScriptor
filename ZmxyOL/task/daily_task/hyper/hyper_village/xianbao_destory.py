@@ -7,7 +7,7 @@ from AutoScriptor.utils import box
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 def destory_item():
     click((I("A"), I("B")))

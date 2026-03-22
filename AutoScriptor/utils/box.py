@@ -2,7 +2,7 @@ from typing import Tuple, Union
 import collections
 import random
 
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 
 class Box(collections.namedtuple('Box', 'left top width height')):

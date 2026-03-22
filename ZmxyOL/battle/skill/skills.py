@@ -61,17 +61,21 @@ def battle_loop(
         Pause_battle 为 True 时，暂停战斗
         max_duration 为战斗最大持续时间，超过则抛出异常
     """
+    from AutoScriptor.utils.logger import logger as _logger
+    from AutoScriptor.utils.cancel import check_cancel_raise
+    from time import time
+    _logger.info('🔄 battle_loop 开始 (weight=%d, max=%ds, delay=%.1fs)', battle_weight, max_duration, delay)
     self.sleep(delay)
     op_count = 0
     switch_base("nemu")
     from ZmxyOL.battle.character.hero import h
     h.huashen()
     niter = 0
-    from time import time
     start_time = time()
     bg.set_signal("try_exit", False)
     bg.set_signal("Pause_battle", False)
     while not bg.signal("try_exit", False):
+        check_cancel_raise()
         if not bg.signal("Pause_battle", False):
             if op_count == battle_weight:
                 self.travel()
@@ -85,7 +89,11 @@ def battle_loop(
             h.huashen()
             niter += 1
         if time() - start_time > max_duration:
+            elapsed = time() - start_time
+            _logger.error('🔄 battle_loop 结束: 超时 (耗时 %.1fs, 上限 %ds)', elapsed, max_duration)
             raise RuntimeError(f"battle_loop 超时: {max_duration}秒, 战斗持续时间超过 {max_duration}秒")
+    elapsed = time() - start_time
+    _logger.info('🔄 battle_loop 结束: try_exit 信号触发 (耗时 %.1fs)', elapsed)
     return self
 
 
@@ -100,7 +108,7 @@ def way_to_exit(self: Hero, until: str = "", exit_loc: float = 0, timeout: float
         sleep(3)
         has_moved = False
         while not until():
-            if not has_moved and time() - start_time > timeout/3:
+            if not has_moved and time() - start_time > 30:
                 self.move_right(2000, directly=True)
                 has_moved = True
             if time() - start_time > timeout:

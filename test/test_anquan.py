@@ -1,6 +1,6 @@
 from sre_parse import NEGATE
 import cv2
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 from AutoScriptor import *
 from AutoScriptor.recognition.ocr_rec import ocr, ocr_for_box
 from ZmxyOL.nav import *
