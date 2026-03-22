@@ -2,12 +2,12 @@
     "app": {
         "app_to_start": "org.yjmobile.zmxy",
         "auto_start": true,
-        "max_retry": 3,
+        "max_retry": 2,
         "name": "ZmxyOL",
         "restart_on_error": true,
         "run_in_background": false,
         "debug_mode": true,
-        "cpu_cores": 8
+        "cpu_cores": 4
     },
     "ocr": {
         "use_gpu": false
@@ -49,18 +49,7 @@
         "ssh_user": null,
         "ssh_executable": "ssh"
     },
-    "profiles": {
-        "current": "default",
-        "list": {
-            "default": {
-                "account": "",
-                "password": "",
-                "character_name": "",
-                "character_index": 0,
-                "security_key": ""
-            }
-        }
-    },
+    "current_profile": "default",
     "encryption": {},
     "tasks": {},
     "status": {

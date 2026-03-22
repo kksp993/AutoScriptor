@@ -118,6 +118,36 @@ TASK_MANAGER = TaskManager()
 RUN_THREAD: Thread | None = None
 scheduler.set_task_manager(TASK_MANAGER)
 
+# ── 安全模块 ──
+
+from services.webui.security import (
+    hash_deploy_password as _hash_deploy_password,
+    verify_deploy_password as _verify_deploy_password,
+    create_session as _create_session,
+    validate_session as _validate_session,
+    check_request_freshness as _check_request_freshness,
+    login_limiter as _login_limiter,
+    verify_limiter as _verify_limiter,
+    SESSION_TTL as _SESSION_TTL,
+)
+
+
+def _is_rate_limited(ip: str) -> bool:
+    return _login_limiter.is_limited(ip)
+
+
+def _record_login_failure(ip: str):
+    _login_limiter.record_failure(ip)
+
+
+def _is_verify_rate_limited(ip: str) -> bool:
+    return _verify_limiter.is_limited(ip)
+
+
+def _record_verify_failure(ip: str):
+    _verify_limiter.record_failure(ip)
+
+
 # ── Vendor 文件管理 ──
 
 _HERE = os.path.dirname(__file__)
@@ -214,7 +244,8 @@ def _strip_runtime_tasks_fields(node: dict) -> None:
 def make_public_config():
     config_data = deepcopy(cfg._config)
     for pattern in ["**/fn", "**/encryption", "**/weekday", "**/month",
-                     "**/day", "**/year", "**/account", "**/password"]:
+                     "**/day", "**/year", "**/account", "**/password",
+                     "**/security_key"]:
         try:
             dpath.delete(config_data, pattern)
         except Exception:
@@ -232,26 +263,44 @@ app = FastAPI(title="AutoScriptor WebUI")
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    """WebUI 密码保护中间件 — 仅拦截 /api/ 请求，放行静态资源和首页"""
+    """WebUI 密码保护中间件 — 使用安全会话令牌验证，仅拦截 /api/ 请求"""
     password = cfg._config.get("deploy", {}).get("password")
     if password and request.url.path.startswith("/api/"):
         exempt = ("/api/auth", "/api/deploy")
         if not any(request.url.path.startswith(p) for p in exempt):
             token = request.cookies.get("auth_token") or request.headers.get("X-Auth-Token")
-            if token != password:
+            if not _validate_session(token):
                 return JSONResponse(status_code=401, content={"error": "unauthorized"})
     return await call_next(request)
 
 
 @app.post("/api/auth")
 async def auth_api(request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    if _is_rate_limited(client_ip):
+        return JSONResponse(status_code=429, content={"error": "登录尝试过多，请5分钟后再试"})
+
     data = await request.json()
-    password = cfg._config.get("deploy", {}).get("password")
-    if data.get("password") == password:
+    stored = cfg._config.get("deploy", {}).get("password")
+    raw = data.get("password", "")
+
+    if _verify_deploy_password(raw, stored):
+        if stored and not stored.startswith("pbkdf2$"):
+            cfg._config.setdefault("deploy", {})["password"] = _hash_deploy_password(raw)
+            cfg.save_config()
+        session_token = _create_session()
         resp = JSONResponse(content={"status": "ok"})
-        resp.set_cookie("auth_token", password, httponly=True)
+        resp.set_cookie(
+            "auth_token", session_token,
+            httponly=True, samesite="strict", max_age=_SESSION_TTL,
+        )
         return resp
-    return JSONResponse(status_code=401, content={"error": "密码错误"})
+
+    _record_login_failure(client_ip)
+    remaining = _MAX_LOGIN_FAILURES - len(_login_failures.get(client_ip, []))
+    return JSONResponse(status_code=401, content={
+        "error": f"密码错误（剩余 {max(remaining, 0)} 次尝试）"
+    })
 
 
 # 编辑器 API 路由
@@ -280,6 +329,12 @@ ws_clients: Set[WebSocket] = set()
 
 @app.websocket("/ws/logs")
 async def websocket_logs(websocket: WebSocket):
+    password = cfg._config.get("deploy", {}).get("password")
+    if password:
+        token = websocket.cookies.get("auth_token")
+        if not _validate_session(token):
+            await websocket.close(code=4001, reason="unauthorized")
+            return
     await websocket.accept()
     ws_clients.add(websocket)
     try:
@@ -453,22 +508,57 @@ async def stop_tasks_api():
 
 @app.post("/api/verify")
 async def verify_account_api(request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    if _is_verify_rate_limited(client_ip):
+        return JSONResponse(status_code=429, content={"error": "验证尝试过多，请5分钟后再试"})
+
     data = await request.json()
+    if not _check_request_freshness(data):
+        return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
     security_key = data.get('security_key', '')
     TASK_MANAGER.reload_tasks(security_key)
     cfg._config.setdefault('game', {})
-    cfg._config['game']['character_name'] = cfg["game"].get("character_name", "")
-    return {"character_name": cfg["game"].get("character_name", "")}
+    character_name = cfg["game"].get("character_name", "")
+    if not character_name and security_key:
+        _record_verify_failure(client_ip)
+    cfg._config['game']['character_name'] = character_name
+    return {"character_name": character_name}
 
 
 @app.post("/api/account")
 async def add_account_api(request: Request):
     data = await request.json()
+    if not _check_request_freshness(data):
+        return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
+
+    client_ip = request.client.host if request.client else "unknown"
+    if _is_verify_rate_limited(client_ip):
+        return JSONResponse(status_code=429, content={"error": "操作过于频繁，请5分钟后再试"})
+
     account = data.get('account', '')
     password = data.get('password', '')
     character_name = data.get('character_name', '')
     security_key = data.get('security_key', '')
     confirmed = data.get('confirmed', False)
+    current_security_key = data.get('current_security_key', '')
+
+    existing_enc = cfg._config.get("encryption", {})
+    if existing_enc.get("encrypted_data"):
+        if not current_security_key:
+            return JSONResponse(status_code=403, content={
+                "error": "修改账密需要先验证当前安全密码",
+                "need_current_key": True,
+            })
+        try:
+            from AutoScriptor.crypto.config_manager import ConfigManager
+            cm = ConfigManager(cfg.CONFIG_PATH)
+            decrypted = cm.decrypt_config(current_security_key)
+            if not decrypted:
+                _record_verify_failure(client_ip)
+                return JSONResponse(status_code=401, content={"error": "当前安全密码验证失败"})
+        except Exception:
+            _record_verify_failure(client_ip)
+            return JSONResponse(status_code=401, content={"error": "当前安全密码验证失败"})
 
     existing_name = cfg._config.get("game", {}).get("character_name", "")
     if existing_name and not confirmed:
@@ -715,13 +805,25 @@ async def profiles_list_api():
 @app.post("/api/profiles/switch")
 async def profiles_switch_api(request: Request):
     data = await request.json()
+    if not _check_request_freshness(data):
+        return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
     name = data.get("name", "")
+    security_key = data.get("security_key", "")
+
+    if not security_key:
+        return JSONResponse(status_code=400, content={
+            "error": "请输入安全密码以切换档案", "need_security_key": True,
+        })
     try:
-        cfg.switch_profile(name)
-        TASK_MANAGER.reload_tasks(cfg._config.get("profiles", {}).get("list", {}).get(name, {}).get("security_key", ""))
-        return {"current": name, "character_name": cfg._config.get("game", {}).get("character_name", "")}
+        cfg.switch_profile(name, security_key)
+        TASK_MANAGER.reload_tasks(security_key)
+        character_name = cfg._config.get("game", {}).get("character_name", "")
+        return {"current": name, "character_name": character_name}
     except KeyError as e:
         return JSONResponse(status_code=404, content={"error": str(e)})
+    except Exception as e:
+        logger.error("switch profile error: %s", e)
+        return JSONResponse(status_code=500, content={"error": "切换失败，请检查安全密码是否正确"})
 
 
 @app.post("/api/profiles/add")
@@ -730,23 +832,32 @@ async def profiles_add_api(request: Request):
     name = data.get("name", "")
     if not name:
         return JSONResponse(status_code=400, content={"error": "name is required"})
-    profile_data = {
-        "account": data.get("account", ""),
-        "password": data.get("password", ""),
-        "character_name": data.get("character_name", ""),
-        "character_index": data.get("character_index", 0),
-        "security_key": data.get("security_key", ""),
-    }
-    cfg.add_profile(name, profile_data)
-    return {"profiles": cfg.list_profiles()}
+
+    account = data.get("account", "")
+    password = data.get("password", "")
+    character_name = data.get("character_name", "")
+    security_key = data.get("security_key", "")
+
+    if not security_key:
+        return JSONResponse(status_code=400, content={"error": "安全密码不能为空"})
+
+    try:
+        cfg.add_profile(name, account, password, character_name, security_key)
+        return {"profiles": cfg.list_profiles()}
+    except Exception as e:
+        logger.error("add profile error: %s", e)
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @app.post("/api/profiles/delete")
 async def profiles_delete_api(request: Request):
     data = await request.json()
     name = data.get("name", "")
-    cfg.delete_profile(name)
-    return {"profiles": cfg.list_profiles(), "current": cfg.current_profile()}
+    try:
+        cfg.delete_profile(name)
+        return {"profiles": cfg.list_profiles(), "current": cfg.current_profile()}
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
 
 
 # ── 配置导入导出 API ──
@@ -769,6 +880,14 @@ async def config_import_api(request: Request):
         data = await request.json()
         if not isinstance(data, dict):
             return JSONResponse(status_code=400, content={"error": "invalid JSON"})
+        data.pop("encryption", None)
+        data.pop("current_profile", None)
+        data.pop("profiles", None)
+        data.pop("game", None)
+        if "deploy" in data and isinstance(data["deploy"], dict):
+            data["deploy"].pop("password", None)
+            data["deploy"].pop("ssl_key", None)
+            data["deploy"].pop("ssl_cert", None)
         for key in ("app", "emulator", "ocr", "llm", "tasks", "deploy", "notify", "update", "remote_access"):
             if key in data:
                 val = data[key]
@@ -787,8 +906,12 @@ async def config_import_api(request: Request):
 
 @app.get("/api/deploy")
 async def deploy_get_api():
+    deploy_copy = dict(cfg._config.get("deploy", {}))
+    has_pwd = bool(deploy_copy.get("password"))
+    deploy_copy["password"] = ""
     return {
-        "deploy": cfg._config.get("deploy", {}),
+        "deploy": deploy_copy,
+        "password_protected": has_pwd,
         "notify": cfg._config.get("notify", {}),
         "update": cfg._config.get("update", {}),
         "remote_access": cfg._config.get("remote_access", {}),
@@ -800,6 +923,23 @@ async def deploy_save_api(request: Request):
     data = await request.json()
     for section in ("deploy", "notify", "update", "remote_access"):
         if section in data:
+            if section == "deploy":
+                incoming = data["deploy"]
+                incoming_pwd = incoming.get("password")
+                existing_pwd = cfg._config.get("deploy", {}).get("password")
+                current_pwd = incoming.pop("current_password", None)
+
+                if incoming_pwd is None and existing_pwd:
+                    if not current_pwd or not _verify_deploy_password(current_pwd, existing_pwd):
+                        return JSONResponse(status_code=403, content={"error": "清除密码需要验证当前密码"})
+                    incoming["password"] = None
+                elif incoming_pwd == "":
+                    incoming["password"] = existing_pwd
+                elif incoming_pwd:
+                    if existing_pwd:
+                        if not current_pwd or not _verify_deploy_password(current_pwd, existing_pwd):
+                            return JSONResponse(status_code=403, content={"error": "修改密码需要验证当前密码"})
+                    incoming["password"] = _hash_deploy_password(incoming_pwd)
             cfg._config[section] = data[section]
     cfg.save_config()
     return {"status": "ok"}

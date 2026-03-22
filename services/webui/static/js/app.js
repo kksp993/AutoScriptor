@@ -24,6 +24,14 @@ const app = createApp({
     const paramEnumOptions = reactive({});
     /** 任务参数字段名 -> 表单标签（其余键保持英文原名） */
     const PARAM_KEY_LABELS = {
+      battle_loop:'战斗循环次数',
+      battle_times: '战斗轮数',
+      speed_x: '战斗加速',
+      has_cd: '关卡有CD',
+      battle_weight: '战斗配比',
+      difficulty: '难度选择',
+      preference: '关卡偏好',
+      conquer_TianMo: '天魔挑战',
       method: '完成方式',
       Bingku_WuQi: '冰窟武器',
       Bingku_YiFu: '冰窟防具',
@@ -48,8 +56,8 @@ const app = createApp({
     const authRequired = ref(false);
     const loginPassword = ref('');
 
-    // ── 主题 ──
-    const currentTheme = ref('dark');
+    // ── 主题（固定浅色） ──
+    const currentTheme = ref('light');
 
     const filteredConfig = computed(() => {
       const clone = { ...configData };
@@ -87,14 +95,14 @@ const app = createApp({
         return (await fetch('/api' + url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          body: JSON.stringify({ ...body, _timestamp: Date.now() / 1000 }),
         })).json();
       },
       async postRaw(url, body) {
         return fetch('/api' + url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          body: JSON.stringify({ ...body, _timestamp: Date.now() / 1000 }),
         });
       },
     };
@@ -235,13 +243,21 @@ const app = createApp({
         traverse(subtree);
       }
 
-      if (!tasks.length) { ElementPlus.ElMessage.info('暂无待执行的任务'); return; }
+      const isSchedulerView = activeTab.value === 'overview' || activeTab.value === 'scheduler';
+      // 总览/调度：无到期任务时仍应 activate 调度器，以便在下一计划时间自动执行
+      if (!tasks.length && !isSchedulerView) {
+        ElementPlus.ElMessage.info('暂无待执行的任务');
+        return;
+      }
       try {
         const res = await API.postRaw('/run', { tasks, activate_scheduler: true });
         const data = await res.json();
         if (res.status === 403) { ElementPlus.ElMessage.warning(data.message || '请先验证账号密码'); return; }
         fetchSchedulerStatus();
         fetchOverview();
+        if (res.ok && isSchedulerView && !tasks.length) {
+          ElementPlus.ElMessage.success('调度器已启动，到期任务将自动执行');
+        }
       } catch (e) { console.error('Run error:', e); }
     }
 
@@ -372,8 +388,14 @@ const app = createApp({
       } catch (e) { ElementPlus.ElMessage.error('保存失败: ' + e); }
     }
 
-    function saveSettings() {
-      API.postRaw('/config', configData).then(() => ElementPlus.ElMessage.success('保存成功'));
+    async function saveSettings() {
+      try {
+        await loadTheme();
+        await API.postRaw('/config', configData);
+        ElementPlus.ElMessage.success('保存成功');
+      } catch (e) {
+        ElementPlus.ElMessage.error('保存失败: ' + e);
+      }
     }
 
     function clearLogs() {
@@ -387,16 +409,51 @@ const app = createApp({
     async function submitAddAccount() {
       try {
         const payload = { ...addForm };
-        const data1 = await API.post('/account', payload);
-        if (data1.need_confirm) {
+
+        const res1 = await API.postRaw('/account', payload);
+        const data1 = await res1.json();
+
+        if (data1.need_current_key) {
+          try {
+            const { value: curKey } = await ElementPlus.ElMessageBox.prompt(
+              '修改账密需要验证当前安全密码', '安全验证',
+              { inputType: 'password', confirmButtonText: '验证', cancelButtonText: '取消' });
+            payload.current_security_key = curKey;
+          } catch { return; }
+          const res1b = await API.postRaw('/account', payload);
+          const data1b = await res1b.json();
+          if (!res1b.ok) {
+            ElementPlus.ElMessage.error(data1b.error || '验证失败');
+            return;
+          }
+          if (data1b.need_confirm) {
+            try {
+              await ElementPlus.ElMessageBox.confirm(data1b.message, '确认覆盖', {
+                confirmButtonText: '继续', cancelButtonText: '取消', type: 'warning' });
+            } catch { return; }
+            payload.confirmed = true;
+            const res2 = await API.postRaw('/account', payload);
+            const data2 = await res2.json();
+            if (!res2.ok) { ElementPlus.ElMessage.error(data2.error || '更新失败'); return; }
+            characterName.value = data2.character_name || '';
+          } else {
+            characterName.value = data1b.character_name || '';
+          }
+        } else if (data1.need_confirm) {
           try {
             await ElementPlus.ElMessageBox.confirm(data1.message, '确认覆盖', {
               confirmButtonText: '继续', cancelButtonText: '取消', type: 'warning' });
           } catch { return; }
           payload.confirmed = true;
-          const data2 = await API.post('/account', payload);
+          const res2 = await API.postRaw('/account', payload);
+          const data2 = await res2.json();
+          if (!res2.ok) { ElementPlus.ElMessage.error(data2.error || '更新失败'); return; }
           characterName.value = data2.character_name || '';
-        } else { characterName.value = data1.character_name || ''; }
+        } else {
+          if (!res1.ok) { ElementPlus.ElMessage.error(data1.error || '更新失败'); return; }
+          characterName.value = data1.character_name || '';
+        }
+
         if (!configData.game) configData.game = {};
         configData.game.character_name = characterName.value;
         addDialogVisible.value = false;
@@ -404,21 +461,14 @@ const app = createApp({
       } catch (e) { ElementPlus.ElMessage.error('更新失败: ' + e); }
     }
 
-    // ── 主题切换 ──
-    function applyTheme(theme) {
-      currentTheme.value = theme || 'dark';
-      if (currentTheme.value === 'light') {
-        document.documentElement.classList.add('light');
-      } else {
-        document.documentElement.classList.remove('light');
-      }
+    // ── 主题：始终浅色，不读取部署配置 ──
+    function applyTheme() {
+      currentTheme.value = 'light';
+      document.documentElement.classList.add('light');
     }
 
     async function loadTheme() {
-      try {
-        const data = await (await fetch('/api/deploy')).json();
-        applyTheme((data.deploy || {}).theme);
-      } catch (e) { /* use default */ }
+      applyTheme();
     }
 
     // ── 密码认证 ──
@@ -447,8 +497,14 @@ const app = createApp({
           ElementPlus.ElMessage.success('登录成功');
           refreshConfig(true);
           fetchOverview();
+          setupWebSocket();
         } else {
-          ElementPlus.ElMessage.error('密码错误');
+          const data = await res.json().catch(() => ({}));
+          if (res.status === 429) {
+            ElementPlus.ElMessage.error(data.error || '登录尝试过多，请稍后再试');
+          } else {
+            ElementPlus.ElMessage.error(data.error || '密码错误');
+          }
         }
       } catch (e) { ElementPlus.ElMessage.error('登录失败: ' + e); }
     }
@@ -477,40 +533,55 @@ const app = createApp({
     async function switchProfile(name) {
       if (name === '__new__') return;
       try {
-        const res = await API.postRaw('/profiles/switch', { name });
+        const { value: securityKey } = await ElementPlus.ElMessageBox.prompt(
+          '请输入安全密码以切换档案', '切换档案',
+          { inputType: 'password', confirmButtonText: '切换', cancelButtonText: '取消' });
+        if (!securityKey) return;
+        const res = await API.postRaw('/profiles/switch', { name, security_key: securityKey });
         const data = await res.json();
         if (res.ok) {
           currentProfile.value = name;
           characterName.value = data.character_name || '';
           ElementPlus.ElMessage.success('已切换到档案: ' + name);
-          refreshConfig();
+          refreshConfig(true);
         } else {
           ElementPlus.ElMessage.error(data.error || '切换失败');
         }
-      } catch (e) { ElementPlus.ElMessage.error('切换失败: ' + e); }
+      } catch { /* 用户取消 */ }
     }
 
     async function addProfile() {
       if (!newProfileForm.name) { ElementPlus.ElMessage.warning('请输入档案名称'); return; }
+      if (!newProfileForm.security_key) { ElementPlus.ElMessage.warning('安全密码不能为空'); return; }
       try {
         const res = await API.postRaw('/profiles/add', { ...newProfileForm });
         const data = await res.json();
-        profiles.value = data.profiles || [];
-        profileDialogVisible.value = false;
-        Object.assign(newProfileForm, { name: '', account: '', password: '', character_name: '', security_key: '' });
-        ElementPlus.ElMessage.success('档案已添加');
-      } catch (e) { ElementPlus.ElMessage.error('添加失败: ' + e); }
+        if (res.ok) {
+          profiles.value = data.profiles || [];
+          profileDialogVisible.value = false;
+          Object.assign(newProfileForm, { name: '', account: '', password: '', character_name: '', security_key: '' });
+          ElementPlus.ElMessage.success('档案已创建');
+        } else {
+          ElementPlus.ElMessage.error(data.error || '创建失败');
+        }
+      } catch (e) { ElementPlus.ElMessage.error('创建失败: ' + e); }
     }
 
     async function deleteProfile(name) {
-      if (name === 'default') { ElementPlus.ElMessage.warning('默认档案不能删除'); return; }
       try {
+        await ElementPlus.ElMessageBox.confirm(
+          `确定删除档案 "${name}" 吗？此操作不可恢复。`, '删除档案',
+          { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' });
         const res = await API.postRaw('/profiles/delete', { name });
         const data = await res.json();
-        profiles.value = data.profiles || [];
-        currentProfile.value = data.current || 'default';
-        ElementPlus.ElMessage.success('档案已删除');
-      } catch (e) { ElementPlus.ElMessage.error('删除失败: ' + e); }
+        if (res.ok) {
+          profiles.value = data.profiles || [];
+          currentProfile.value = data.current || 'default';
+          ElementPlus.ElMessage.success('档案已删除');
+        } else {
+          ElementPlus.ElMessage.error(data.error || '删除失败');
+        }
+      } catch { /* 用户取消 */ }
     }
 
     // ── Electron 窗口控制 ──
