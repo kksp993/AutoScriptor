@@ -2,7 +2,7 @@ import traceback
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 def battle():
     wait_for_disappear(I("加载中"))
@@ -68,7 +68,7 @@ def fanTianTa(battle_times=1):
             FTT_battle_one_round()
         else:
             click(T("碾压"))
-            wait_for_appear("优先级")
+            wait_for_appear(T("优先级"))
             click(T("烦恼"))
             click(T("立即碾压"))
             click(T("空白处"))

@@ -48,7 +48,7 @@ except ImportError:
     adbutils._device.BaseDevice.shell = shell
 
 from AutoScriptor.control.NemuIpc.base.decorator import cached_property
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 RETRY_TRIES = 5
 RETRY_DELAY = 3

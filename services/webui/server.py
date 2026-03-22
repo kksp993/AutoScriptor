@@ -1,58 +1,100 @@
-from copy import deepcopy
-import inspect
-import traceback
+"""
+AutoScriptor WebUI Server (FastAPI + WebSocket)
+================================================
+REST API endpoints under /api/*, WebSocket at /ws/logs,
+static files served from ./static and ./vendor.
+"""
 
-from numpy import char
-from AutoScriptor import *
-from services.core.task_manager import TaskManager
-from ZmxyOL import *
-from flask import Flask, render_template, jsonify, send_from_directory, request, stream_with_context
-from flask_socketio import SocketIO, emit
+from __future__ import annotations
+
+import asyncio
+import ctypes
 import importlib
-import json, os
-import urllib.request
-import shutil
+import json
 import logging
-from services.core.banner import _print_banner
-from logzero import logger
-import dpath
+import os
+import shutil
+import time as _time
+import traceback
+import urllib.request
+import webbrowser
+from copy import deepcopy
 from queue import Queue, Empty
 from threading import Thread
-import ctypes
-import webbrowser
+from typing import Set
 
-app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='')
-socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins='*')
+import dpath
+from AutoScriptor.utils.logger import logger, _TaskFilter as _LogTaskFilter
 
-# 高性能日志通道：使用内存队列减少磁盘 IO 与轮询延迟
-console_handlers_for_setup = [h for h in logger.handlers if hasattr(h, 'stream')]
+from AutoScriptor import *
+from AutoScriptor.utils.constant import cfg
+from services.core.task_manager import TaskManager
+from services.core.banner import _print_banner
+from services.core.scheduler import scheduler, SchedulerState
+from AutoScriptor.utils.perf import set_thread_high_priority as _set_thread_high_priority
 
-# 仍然保留文件日志（用于历史追溯），但降低级别以减少写入量
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+# ── 日志队列 ──
+
+# 仿星铁风格的 ANSI 彩色 Formatter，ansi_up 可正确渲染为彩色 HTML
+class _ColoredFormatter(logging.Formatter):
+    _LEVEL_COLORS = {
+        'DEBUG':    '\033[36m',    # cyan
+        'INFO':     '\033[32m',    # green
+        'WARNING':  '\033[33m',    # yellow
+        'ERROR':    '\033[31m',    # red
+        'CRITICAL': '\033[1;31m',  # bold red
+    }
+    _RESET = '\033[0m'
+    _DIM   = '\033[2m'
+    _BOLD  = '\033[1m'
+
+    def format(self, record: logging.LogRecord) -> str:
+        color = self._LEVEL_COLORS.get(record.levelname, '')
+        time_str = self.formatTime(record, '%H:%M:%S')
+        # 网页日志区：级别列收紧（常见 DEBUG/INFO 约 4–5 字符，不拉满 8 格）
+        level_tag = f"{color}{record.levelname:<5}{self._RESET}"
+        msg = record.getMessage()
+        if record.exc_info:
+            msg += '\n' + self.formatException(record.exc_info)
+        task_prefix = getattr(record, 'task_prefix', '')
+        return f"{self._DIM}{time_str}{self._RESET} | {level_tag} | {task_prefix}{msg}"
+
+
+_colored_fmt = _ColoredFormatter()
+_plain_fmt    = logging.Formatter(
+    "%(asctime)s | %(levelname)-8s | %(module)s:%(lineno)d - %(task_prefix)s%(message)s",
+    datefmt="%H:%M:%S",
+)
+
 sse_log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'logs'))
 os.makedirs(sse_log_dir, exist_ok=True)
 sse_log_path = os.path.join(sse_log_dir, 'webui_sse.log')
 file_handler = logging.FileHandler(sse_log_path, encoding='utf-8')
 file_handler.setLevel(logging.INFO)
-if console_handlers_for_setup:
-    file_handler.setFormatter(console_handlers_for_setup[0].formatter)
+file_handler.setFormatter(_plain_fmt)
+file_handler.addFilter(_LogTaskFilter())
 logger.addHandler(file_handler)
 
-# 队列日志处理器（供 SSE 实时推送，捕获 DEBUG+ 级别，零拷贝到前端）
 log_queue: Queue[str] = Queue(maxsize=10000)
+
 
 class QueueHandler(logging.Handler):
     def __init__(self, q: Queue, level=logging.DEBUG):
         super().__init__(level)
         self.q = q
+
     def emit(self, record: logging.LogRecord):
         try:
             msg = self.format(record)
-            # 无阻塞入队，满了就丢弃最旧的数据，确保不阻塞业务线程
             try:
                 self.q.put_nowait(msg)
             except Exception:
                 try:
-                    _ = self.q.get_nowait()
+                    self.q.get_nowait()
                 except Exception:
                     pass
                 try:
@@ -62,41 +104,42 @@ class QueueHandler(logging.Handler):
         except Exception:
             pass
 
+
 queue_handler = QueueHandler(log_queue, level=logging.DEBUG)
-if console_handlers_for_setup:
-    queue_handler.setFormatter(console_handlers_for_setup[0].formatter)
+queue_handler.setFormatter(_colored_fmt)
+queue_handler.addFilter(_LogTaskFilter())
 logger.addHandler(queue_handler)
 
-CONFIG=cfg
-ORDER_MAP={}
-TASK_MANAGER = TaskManager()
-RUN_THREAD = None
+# ── 全局状态 ──
 
-# 初始化调度器并注入 TaskManager
-from services.core.scheduler import scheduler, SchedulerState
+CONFIG = cfg
+ORDER_MAP: dict[str, int] = {}
+TASK_MANAGER = TaskManager()
+RUN_THREAD: Thread | None = None
 scheduler.set_task_manager(TASK_MANAGER)
 
-# 本地静态依赖目录与远端备选地址
-VENDOR_DIR = os.path.join(os.path.dirname(__file__), 'vendor')
+# ── Vendor 文件管理 ──
+
+_HERE = os.path.dirname(__file__)
+VENDOR_DIR = os.path.join(_HERE, 'vendor')
+STATIC_DIR = os.path.join(_HERE, 'static')
 VENDOR_SOURCES = {
     'tailwind.css': 'https://cdn.tailwindcss.com',
     'vue.global.prod.js': 'https://unpkg.com/vue@3/dist/vue.global.prod.js',
-    'socket.io.min.js': 'https://cdn.socket.io/4.7.2/socket.io.min.js',
     'element-plus.css': 'https://unpkg.com/element-plus/dist/index.css',
     'element-plus.full.js': 'https://unpkg.com/element-plus/dist/index.full.js',
     'ansi_up.min.js': 'https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.min.js',
     'font-awesome.min.css': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css',
-    # 添加 fontawesome 字体资源
     'fonts/fontawesome-webfont.woff2': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/fonts/fontawesome-webfont.woff2',
     'fonts/fontawesome-webfont.woff': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/fonts/fontawesome-webfont.woff',
     'fonts/fontawesome-webfont.ttf': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/fonts/fontawesome-webfont.ttf',
 }
 
+
 def _ensure_vendor_files():
     try:
         os.makedirs(VENDOR_DIR, exist_ok=True)
-        fonts_dir = os.path.join(VENDOR_DIR, 'fonts')
-        os.makedirs(fonts_dir, exist_ok=True)
+        os.makedirs(os.path.join(VENDOR_DIR, 'fonts'), exist_ok=True)
         for name, url in VENDOR_SOURCES.items():
             path = os.path.join(VENDOR_DIR, name)
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -107,7 +150,6 @@ def _ensure_vendor_files():
                 with urllib.request.urlopen(url, timeout=10) as resp, open(path, 'wb') as f:
                     shutil.copyfileobj(resp, f)
             except Exception as e:
-                # 下载失败不阻塞启动，前端仍有降级逻辑
                 try:
                     if os.path.exists(path) and os.path.getsize(path) <= 1024:
                         os.remove(path)
@@ -117,271 +159,361 @@ def _ensure_vendor_files():
     except Exception as e:
         logger.warning("ensure vendor dir failed: %s", e)
 
-def read_config():
-    global CONFIG,ORDER_MAP
-    ordered_paths = get_ordered_paths(CONFIG['tasks'])
-    ORDER_MAP = {path: i for i, path in enumerate(ordered_paths)}
-    return CONFIG, ORDER_MAP
 
-def get_ordered_paths(data_dict, prefix=''):
-    """
-    递归遍历字典，生成有序的任务路径列表。
-    """
+# ── 辅助函数 ──
+
+def read_config():
+    global ORDER_MAP
+    ordered_paths = _get_ordered_paths(CONFIG['tasks'])
+    ORDER_MAP = {path: i for i, path in enumerate(ordered_paths)}
+
+
+def _get_ordered_paths(data_dict, prefix=''):
     paths = []
     for key, value in data_dict.items():
         current_path = f"{prefix}/{key}" if prefix else key
-        # 如果值是字典且不包含 'next_exec_time'，则认为是中间节点，继续递归
         if isinstance(value, dict) and 'next_exec_time' not in value:
-            paths.extend(get_ordered_paths(value, prefix=current_path))
+            paths.extend(_get_ordered_paths(value, prefix=current_path))
         else:
-            # 否则认为是叶子节点（一个具体的任务）
             paths.append(current_path)
     return paths
 
+
+def _inject_param_meta_into_tasks(node: dict, prefix: str = "") -> None:
+    """将 TaskRegistry 中的 param_meta 挂到任务叶节点，供 WebUI 枚举下拉使用（仅用于 API 返回副本）。"""
+    from AutoScriptor.utils.task_registry import task_registry
+    from services.core.task_tree import TaskTree
+
+    for key, val in node.items():
+        if not isinstance(val, dict):
+            continue
+        path = f"{prefix}/{key}" if prefix else key
+        if TaskTree.is_leaf(val):
+            meta = task_registry.get_param_meta(path)
+            if meta:
+                val["param_meta"] = meta
+        else:
+            _inject_param_meta_into_tasks(val, path)
+
+
+def _strip_runtime_tasks_fields(node: dict) -> None:
+    """保存配置前移除仅运行期使用的字段，避免写入 JSON。"""
+    from services.core.task_tree import TaskTree
+
+    for key, val in list(node.items()):
+        if not isinstance(val, dict):
+            continue
+        if TaskTree.is_leaf(val):
+            val.pop("param_meta", None)
+            val.pop("fn", None)
+            val.pop("order", None)
+        else:
+            _strip_runtime_tasks_fields(val)
+
+
 def make_public_config():
-    """生成对前端安全可用的配置（去除函数与敏感项）。"""
     config_data = deepcopy(cfg._config)
-    for pattern in ["**/fn","**/encryption","**/weekday","**/month","**/day","**/year","**/account","**/password"]:
-        try: dpath.delete(config_data, pattern)
-        except: pass
+    for pattern in ["**/fn", "**/encryption", "**/weekday", "**/month",
+                     "**/day", "**/year", "**/account", "**/password"]:
+        try:
+            dpath.delete(config_data, pattern)
+        except Exception:
+            pass
+    tasks = config_data.get("tasks")
+    if isinstance(tasks, dict):
+        _inject_param_meta_into_tasks(tasks)
     return config_data
 
-@app.route('/')
-def index():
-    # 将 AutoConfig 实例转换为原生 dict 供模板序列化
-    _ensure_vendor_files()
-    return render_template('app.html', config=make_public_config())
 
-def get_log_prefix(msg):
-    # 2) 查找调用方（跳过当前模块栈帧）
-    frame = inspect.currentframe()
-    frame = frame.f_back  # 跳过 log_flush 自身
-    this_file = os.path.normcase(os.path.abspath(__file__))
-    while frame and os.path.normcase(os.path.abspath(frame.f_code.co_filename)) == this_file:
-        frame = frame.f_back
-    if frame is None:
-        pathname, lineno = this_file, 0
-    else:
-        pathname, lineno = frame.f_code.co_filename, frame.f_lineno
+# ── FastAPI 应用 ──
 
-    # 3) 使用 LogRecord 和已有 formatter 生成“前缀”，不包含 message
-    record = logging.LogRecord(logger.name, logging.INFO, pathname, lineno, "", None, None)
-    console_handlers = [h for h in logger.handlers if hasattr(h, 'stream')]
-    ch = console_handlers[0]
-    prefix = ch.format(record).rstrip()
-    return prefix + " " + msg
+app = FastAPI(title="AutoScriptor WebUI")
 
-def _ws_log_emitter():
-    """
-    后台任务：从日志队列批量取出并通过 WebSocket 推送。
-    采用 socketio.start_background_task 启动，不阻塞主线程，每1秒查询一次，避免线程与 greenlet 混用带来的 greenlet.error。
-    """
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """WebUI 密码保护中间件 — 仅拦截 /api/ 请求，放行静态资源和首页"""
+    password = cfg._config.get("deploy", {}).get("password")
+    if password and request.url.path.startswith("/api/"):
+        exempt = ("/api/auth", "/api/deploy")
+        if not any(request.url.path.startswith(p) for p in exempt):
+            token = request.cookies.get("auth_token") or request.headers.get("X-Auth-Token")
+            if token != password:
+                return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    return await call_next(request)
+
+
+@app.post("/api/auth")
+async def auth_api(request: Request):
+    data = await request.json()
+    password = cfg._config.get("deploy", {}).get("password")
+    if data.get("password") == password:
+        resp = JSONResponse(content={"status": "ok"})
+        resp.set_cookie("auth_token", password, httponly=True)
+        return resp
+    return JSONResponse(status_code=401, content={"error": "密码错误"})
+
+
+# 编辑器 API 路由
+from services.webui.routes.editor import router as editor_router
+app.include_router(editor_router)
+
+# 开发环境：对 /static/ 下的 JS/CSS 禁用浏览器缓存，改文件后刷新即生效
+@app.middleware("http")
+async def no_cache_static_js_css(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/static/") and path.endswith((".js", ".css")):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
+
+# 静态文件挂载
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/vendor", StaticFiles(directory=VENDOR_DIR), name="vendor")
+app.mount("/fonts", StaticFiles(directory=os.path.join(VENDOR_DIR, 'fonts')), name="fonts")
+
+
+# ── WebSocket 日志广播 ──
+
+ws_clients: Set[WebSocket] = set()
+
+
+@app.websocket("/ws/logs")
+async def websocket_logs(websocket: WebSocket):
+    await websocket.accept()
+    ws_clients.add(websocket)
+    try:
+        await websocket.send_json({"data": "... Connection established ..."})
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        ws_clients.discard(websocket)
+
+
+async def _log_broadcaster():
+    """后台协程：从线程安全的日志队列取数据，广播给所有 WebSocket 客户端。"""
     while True:
         try:
-            # 等待最多1s取出日志
-            line = log_queue.get(timeout=1.0)
-            batch = [line]
-            # 快速排空缓冲，合并为一次消息
+            batch: list[str] = []
             while True:
                 try:
                     batch.append(log_queue.get_nowait())
                 except Empty:
                     break
-            socketio.emit('log_message', { 'data': "\n".join(batch) })
-        except Empty:
-            # 未有日志时，每1秒检查一次
-            socketio.sleep(1.0)
+            if batch:
+                payload = json.dumps({"data": "\n".join(batch)})
+                dead: set[WebSocket] = set()
+                for ws in ws_clients.copy():
+                    try:
+                        await ws.send_text(payload)
+                    except Exception:
+                        dead.add(ws)
+                ws_clients.difference_update(dead)
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
 
-@socketio.on('connect')
-def _on_connect():
-    emit('log_message', { 'data': '... Connection established ...' })
 
-# 服务 favicon
-@app.route('/favicon.ico')
-def favicon():
-    # 提供本地 favicon（若文件不存在则返回 404）
+@app.on_event("startup")
+async def _on_startup():
+    asyncio.create_task(_log_broadcaster())
+
+
+# ── 首页 ──
+
+@app.get("/")
+async def index():
+    return FileResponse(os.path.join(STATIC_DIR, 'index.html'))
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    path = os.path.join(STATIC_DIR, 'favicon.ico')
+    if os.path.exists(path):
+        return FileResponse(path)
+    return JSONResponse(status_code=404, content={})
+
+
+# ── API 路由 ──
+
+@app.get("/api/refresh")
+async def refresh_config_api():
     try:
-        return send_from_directory(app.static_folder, 'favicon.ico', mimetype='image/vnd.microsoft.icon')
-    except Exception:
-        return ("", 404)
-
-# 提供本地 vendor 静态资源
-@app.route('/vendor/<path:filename>')
-def vendor_static(filename: str):
-    return send_from_directory(VENDOR_DIR, filename)
-
-# 添加字体静态资源
-@app.route('/fonts/<path:filename>')
-def fonts_static(filename):
-    return send_from_directory(os.path.join(VENDOR_DIR, 'fonts'), filename)
-
-# 枚举可选项查询：输入枚举类路径列表，返回每个路径的成员名列表
-@app.route('/enum-options', methods=['POST'])
-def enum_options():
-    try:
-        data = request.get_json(silent=True) or {}
-        paths = data.get('paths', [])
-        if not isinstance(paths, list):
-            return jsonify({'error': 'paths must be a list'}), 400
-        result = {}
-        for p in paths:
-            try:
-                module_name, class_name = p.rsplit('.', 1)
-                mod = importlib.import_module(module_name)
-                EnumClass = getattr(mod, class_name)
-                # 取 name 列表
-                result[p] = [m.name for m in EnumClass]
-            except Exception as e:
-                result[p] = []
-        return jsonify(result)
+        TASK_MANAGER.reload_tasks()
+        read_config()
+        return make_public_config()
     except Exception as e:
-        logger.error("enum_options error: %s", e)
-        return jsonify({'error': str(e)}), 500
+        logger.error("refresh error: %s", e)
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
-@app.route('/config', methods=['POST'])
-def save_config():
-    data = request.get_json()
+
+@app.post("/api/config")
+async def save_config_api(request: Request):
+    data = await request.json()
     cfg["app"] = data["app"]
     cfg["emulator"] = data["emulator"]
     cfg["ocr"] = data["ocr"]
     cfg.save_config()
-    return '', 204
+    return JSONResponse(status_code=204, content=None)
 
-@app.route('/tasks', methods=['POST'])
-def save_tasks():
-    """保存前端提交的任务配置并重载任务注册。
-    前端通常提交精简后的 tasks（无 fn 等运行期字段），此处直接覆盖 cfg._config['tasks']，
-    写盘时会由 AutoConfig.save_config 清理不需要的键。随后重载任务以恢复 fn/order 等运行期信息。
-    返回最新可公开配置，便于前端同步。
-    """
+
+@app.post("/api/tasks")
+async def save_tasks_api(request: Request):
     try:
-        payload = request.get_json(silent=True) or {}
+        payload = await request.json()
         tasks = payload.get('tasks', payload)
         if not isinstance(tasks, dict):
-            return jsonify({"error": "invalid tasks payload"}), 400
-        # 原子化更新：在锁内写入磁盘并重载，避免并发读取到无 fn 的中间状态
+            return JSONResponse(status_code=400, content={"error": "invalid tasks payload"})
+        _strip_runtime_tasks_fields(tasks)
         try:
             TASK_MANAGER._cfg_lock.acquire()
             cfg._config.setdefault('tasks', {})
             cfg._config['tasks'] = tasks
             cfg.save_config()
-            # 重载任务注册，恢复运行期字段（fn/order 等）
             TASK_MANAGER.reload_tasks()
         finally:
             try:
                 TASK_MANAGER._cfg_lock.release()
             except Exception:
                 pass
-        # 同步排序映射
         read_config()
-        return jsonify(make_public_config()), 200
+        return make_public_config()
     except Exception as e:
         logger.error("save_tasks error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
-@app.route('/refresh', methods=['GET'])
-def refresh_config():
-    """返回最新清洗后配置"""
-    try:
-        TASK_MANAGER.reload_tasks()
-        logger.info("refresh config success")
-        # 同步更新排序映射，确保 /run 的排序与最新配置一致
-        read_config()
-        return jsonify(make_public_config()), 200
-    except Exception as e:
-        logger.error("refresh error: %s", e)
-        return jsonify({"error": str(e)}), 500
 
-# 线程优先级提升（委托给 perf 模块）
-from AutoScriptor.utils.perf import set_thread_high_priority as _set_thread_high_priority
+@app.post("/api/run")
+async def run_tasks_api(request: Request):
+    global RUN_THREAD
 
-@app.route('/run', methods=['POST'])
-def run_tasks():
-    global ORDER_MAP, RUN_THREAD
-
-    # 账密检验：未验证时拒绝执行
     character_name = cfg._config.get("game", {}).get("character_name", "")
     if not character_name:
-        return jsonify({'status': 'error', 'message': '请先验证账号密码后再执行任务'}), 403
+        return JSONResponse(status_code=403,
+                            content={'status': 'error', 'message': '请先验证账号密码后再执行任务'})
 
-    tasks = request.get_json()
-    logger.debug("Received tasks: %s", tasks)
+    body = await request.json()
+
+    if isinstance(body, dict):
+        tasks = body.get("tasks", [])
+        activate_sched = body.get("activate_scheduler", True)
+    else:
+        tasks = body
+        activate_sched = True
+
+    logger.debug("Received tasks: %s, activate_scheduler: %s", tasks, activate_sched)
     sorted_tasks = sorted(tasks, key=lambda x: ORDER_MAP.get(x, float('inf')))
 
-    # 后台线程执行，立即返回，避免阻塞请求线程
+    if activate_sched:
+        scheduler.activate()
+        scheduler.wake()
+        return {'status': 'ok', 'tasks': sorted_tasks, 'mode': 'scheduler'}
+
     def _run(ts):
-        from AutoScriptor.utils.perf import boost, unboost
-        boost()
-        try:
-            TASK_MANAGER.execute_tasks(ts)
-            logger.info("========== 所有任务执行完成 ==========")
-        except KeyboardInterrupt:
-            try:
-                bg.clear(clear_signals=True)
-            except Exception:
-                pass
-            logger.info("========== 任务执行已被中断 ==========")
-        except Exception as e:
-            logger.error("background run error: %s", e)
-            scheduler._consecutive_errors += 1
-            if scheduler._consecutive_errors >= 3:
-                scheduler.mark_error()
-        finally:
-            unboost()
-            # 执行后行为
-            scheduler._post_execution_action()
+        scheduler.run_direct(ts)
+        logger.info("========== 所有任务执行完成 ==========")
 
     RUN_THREAD = Thread(target=_run, args=(sorted_tasks,), daemon=True)
     RUN_THREAD.start()
-    # 启动后设置高优先级
     _set_thread_high_priority(RUN_THREAD)
-    # 激活调度器（标记为运行中）
-    scheduler.activate()
-    return jsonify({'status': 'ok', 'tasks': sorted_tasks}), 200
+    return {'status': 'ok', 'tasks': sorted_tasks, 'mode': 'direct'}
 
-@app.route('/stop', methods=['POST'])
-def stop_tasks():
-    """请求终止当前后台执行。尽量在任务边界生效。"""
+
+@app.post("/api/stop")
+async def stop_tasks_api():
     global RUN_THREAD
     try:
-        # 优先尝试异步抛出 KeyboardInterrupt 以“立即中断”
         def _async_raise(tid, exctype):
             if not isinstance(exctype, type):
                 raise TypeError("Only types can be raised (not instances)")
-            res = ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(tid), ctypes.py_object(exctype))
+            res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+                ctypes.c_long(tid), ctypes.py_object(exctype))
             if res == 0:
                 return False
             if res != 1:
-                # 清理异常注入状态
                 ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(tid), None)
                 return False
             return True
 
         alive = RUN_THREAD.is_alive() if RUN_THREAD else False
+        # 无论线程注入是否成功，都要设置取消事件 + 让调度器回到 PENDING
+        # （PyThreadState_SetAsyncExc 在 C 扩展阻塞时不可靠，必须双保险）
+        TASK_MANAGER.request_cancel()
+        scheduler.deactivate()
         if alive and RUN_THREAD.ident:
-            ok = _async_raise(RUN_THREAD.ident, KeyboardInterrupt)
-            if not ok:
-                # 回退到温和取消标记
-                TASK_MANAGER.request_cancel()
-        else:
-            TASK_MANAGER.request_cancel()
-        return jsonify({'status': 'stopping' if alive else 'idle'}), 200
+            _async_raise(RUN_THREAD.ident, KeyboardInterrupt)
+        logger.info("⏹ 已发送终止信号")
+        return {'status': 'stopping' if alive else 'idle'}
     except Exception as e:
         logger.error("stop error: %s", e)
-        return jsonify({'error': str(e)}), 500
+        return JSONResponse(status_code=500, content={'error': str(e)})
 
-@app.route('/verify', methods=['POST'])
-def verify_account():
-    data = request.get_json(silent=True) or {}
+
+@app.post("/api/verify")
+async def verify_account_api(request: Request):
+    data = await request.json()
     security_key = data.get('security_key', '')
-
     TASK_MANAGER.reload_tasks(security_key)
     cfg._config.setdefault('game', {})
     cfg._config['game']['character_name'] = cfg["game"].get("character_name", "")
-    return jsonify({"character_name": cfg["game"].get("character_name", "")})
+    return {"character_name": cfg["game"].get("character_name", "")}
 
-@app.route('/ocr-status', methods=['GET'])
-def ocr_status():
+
+@app.post("/api/account")
+async def add_account_api(request: Request):
+    data = await request.json()
+    account = data.get('account', '')
+    password = data.get('password', '')
+    character_name = data.get('character_name', '')
+    security_key = data.get('security_key', '')
+    confirmed = data.get('confirmed', False)
+
+    existing_name = cfg._config.get("game", {}).get("character_name", "")
+    if existing_name and not confirmed:
+        return {
+            "need_confirm": True,
+            "message": f"更新账密会覆盖当前已有的设置（当前角色: {existing_name}），是否继续？"
+        }
+    try:
+        from AutoScriptor.crypto.update_config import config_manager
+        config_manager.update_game_config(account, password, character_name, security_key)
+        TASK_MANAGER.reload_tasks(security_key)
+        character_name = cfg["game"].get("character_name", "")
+    except Exception as e:
+        logger.error("add_account error: %s", e)
+    return {"character_name": character_name}
+
+
+@app.post("/api/enum-options")
+async def enum_options_api(request: Request):
+    try:
+        data = await request.json()
+        paths = data.get('paths', [])
+        if not isinstance(paths, list):
+            return JSONResponse(status_code=400, content={'error': 'paths must be a list'})
+        result = {}
+        for p in paths:
+            try:
+                module_name, class_name = p.rsplit('.', 1)
+                mod = importlib.import_module(module_name)
+                EnumClass = getattr(mod, class_name)
+                opts = []
+                for m in EnumClass:
+                    label = m.value if isinstance(m.value, str) else m.name
+                    opts.append({"value": m.name, "label": label})
+                result[p] = opts
+            except Exception:
+                result[p] = []
+        return result
+    except Exception as e:
+        logger.error("enum_options error: %s", e)
+        return JSONResponse(status_code=500, content={'error': str(e)})
+
+
+@app.get("/api/ocr-status")
+async def ocr_status_api():
     try:
         import paddle
         try:
@@ -405,75 +537,324 @@ def ocr_status():
             pass
         cfg_use_gpu = False
         try:
-            # 兼容两种访问方式
             cfg_use_gpu = bool(cfg["ocr"].get("use_gpu", cfg.get("ocr.use_gpu", False)))
         except Exception:
-            try:
-                cfg_use_gpu = bool(cfg.get("ocr.use_gpu", False))
-            except Exception:
-                cfg_use_gpu = False
+            cfg_use_gpu = False
         engine_ready = False
         try:
             engine_ready = ocr_manager.is_ready() if ocr_manager else False
         except Exception:
-            engine_ready = False
-        return jsonify({
+            pass
+        return {
             "cfg_use_gpu": cfg_use_gpu,
             "compiled_with_cuda": compiled_with_cuda,
             "gpu_count": gpu_count,
             "current_device": current_device,
-            "engine_ready": engine_ready
-        }), 200
+            "engine_ready": engine_ready,
+        }
     except Exception as e:
         logger.error("ocr_status error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
-@app.route('/account', methods=['POST'])
-def add_account():
-    data = request.get_json(silent=True) or {}
-    account = data.get('account', '')
-    password = data.get('password', '')
-    character_name = data.get('character_name', '')
-    security_key = data.get('security_key', '')
-    confirmed = data.get('confirmed', False)
 
-    # 如果已有账密且未确认覆盖，返回需要确认
-    existing_name = cfg._config.get("game", {}).get("character_name", "")
-    if existing_name and not confirmed:
-        return jsonify({
-            "need_confirm": True,
-            "message": f"更新账密会覆盖当前已有的设置（当前角色: {existing_name}），是否继续？"
-        }), 200
+@app.get("/api/scheduler/status")
+async def scheduler_status_api():
+    return scheduler.status_dict()
 
-    # 将敏感数据按现有逻辑写入加密字段，保持 cfg 前后一致
-    try:
-        from AutoScriptor.crypto.update_config import config_manager
-        config_manager.update_game_config(account, password, character_name, security_key)
-        # 立即尝试用提供的 key 解密，回显角色名
-        TASK_MANAGER.reload_tasks(security_key)
-        character_name = cfg["game"].get("character_name", "")
-    except Exception as e:
-        logger.error("add_account error: %s", e)
-    return jsonify({"character_name": character_name})
 
-# 调度器状态查询
-@app.route('/scheduler/status', methods=['GET'])
-def scheduler_status():
-    return jsonify(scheduler.status_dict()), 200
-
-# 调度器手动恢复
-@app.route('/scheduler/reset', methods=['POST'])
-def scheduler_reset():
+@app.post("/api/scheduler/reset")
+async def scheduler_reset_api():
     scheduler.reset()
-    return jsonify(scheduler.status_dict()), 200
+    return scheduler.status_dict()
+
+
+@app.get("/api/overview")
+async def overview_data_api():
+    try:
+        from services.core.task_manager import parse_sched_window_hours, clamp_to_sched_window
+
+        now_ts = _time.time()
+        total = enabled = pending = completed = disabled = 0
+        upcoming = []
+
+        def _walk(node, prefix=''):
+            nonlocal total, enabled, pending, completed, disabled
+            for key, val in node.items():
+                if not isinstance(val, dict):
+                    continue
+                path = f"{prefix}/{key}" if prefix else key
+                if 'on' in val and 'next_exec_time' in val:
+                    total += 1
+                    if not val.get('on'):
+                        disabled += 1
+                    else:
+                        enabled += 1
+                        nxt = val.get('next_exec_time', 0)
+                        if nxt <= now_ts:
+                            pending += 1
+                        else:
+                            completed += 1
+                        sw = parse_sched_window_hours(val)
+                        nxt_show = clamp_to_sched_window(max(nxt, now_ts), sw[0], sw[1]) if sw else nxt
+                        upcoming.append({
+                            'path': path,
+                            'on': val.get('on', False),
+                            'next_exec_time': nxt_show,
+                            'status': 'pending' if nxt <= now_ts else 'completed',
+                        })
+                else:
+                    _walk(val, path)
+
+        _walk(cfg._config.get('tasks', {}))
+        upcoming.sort(key=lambda x: (0 if x['status'] == 'pending' else 1, x['next_exec_time']))
+
+        next_ts = scheduler.get_next_execution_timestamp()
+        sched = scheduler.status_dict()
+        sched['next_execution'] = next_ts
+
+        runtime_status = {}
+        try:
+            from services.core.runtime_context import runtime_ctx
+            runtime_status = runtime_ctx.status_dict()
+        except Exception:
+            pass
+
+        return {
+            'scheduler': sched,
+            'stats': {
+                'total': total, 'enabled': enabled, 'pending': pending,
+                'completed': completed, 'disabled': disabled,
+            },
+            'upcoming': upcoming[:30],
+            'runtime': runtime_status,
+        }
+    except Exception as e:
+        logger.error("overview error: %s", e)
+        return JSONResponse(status_code=500, content={'error': str(e)})
+
+
+# ── 通知 API ──
+
+@app.post("/api/notify/test")
+async def notify_test_api(request: Request):
+    try:
+        data = await request.json()
+        config_yaml = data.get("config_yaml", "")
+        from services.core.notify import handle_notify
+        ok = handle_notify(config_yaml, title="AutoScriptor 测试", content="通知推送测试成功")
+        return {"success": ok}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/notify/save")
+async def notify_save_api(request: Request):
+    data = await request.json()
+    cfg["notify.enabled"] = data.get("enabled", False)
+    cfg["notify.config_yaml"] = data.get("config_yaml", "provider: null")
+    cfg.save_config()
+    return {"status": "ok"}
+
+
+# ── 更新 API ──
+
+@app.get("/api/update/status")
+async def update_status_api():
+    from services.core.updater import updater
+    return updater.get_status()
+
+
+@app.post("/api/update/check")
+async def update_check_api():
+    from services.core.updater import updater
+    has_update = updater.check_update()
+    return {"has_update": has_update, **updater.get_status()}
+
+
+@app.post("/api/update/run")
+async def update_run_api():
+    from services.core.updater import updater
+    ok = updater.run_update()
+    return {"success": ok, **updater.get_status()}
+
+
+# ── 远程访问 API ──
+
+@app.get("/api/remote-access")
+async def remote_access_status_api():
+    from services.core.remote_access import RemoteAccess
+    return RemoteAccess.get_status()
+
+
+@app.post("/api/remote-access")
+async def remote_access_toggle_api(request: Request):
+    data = await request.json()
+    from services.core.remote_access import RemoteAccess
+    if data.get("enabled"):
+        RemoteAccess.start(
+            local_port=5000,
+            ssh_server=cfg.get("remote_access.ssh_server", ""),
+            ssh_user=cfg.get("remote_access.ssh_user", ""),
+            ssh_executable=cfg.get("remote_access.ssh_executable", "ssh"),
+        )
+    else:
+        RemoteAccess.stop()
+    return RemoteAccess.get_status()
+
+
+# ── 多账号档案 API ──
+
+@app.get("/api/profiles")
+async def profiles_list_api():
+    return {
+        "current": cfg.current_profile(),
+        "profiles": cfg.list_profiles(),
+    }
+
+
+@app.post("/api/profiles/switch")
+async def profiles_switch_api(request: Request):
+    data = await request.json()
+    name = data.get("name", "")
+    try:
+        cfg.switch_profile(name)
+        TASK_MANAGER.reload_tasks(cfg._config.get("profiles", {}).get("list", {}).get(name, {}).get("security_key", ""))
+        return {"current": name, "character_name": cfg._config.get("game", {}).get("character_name", "")}
+    except KeyError as e:
+        return JSONResponse(status_code=404, content={"error": str(e)})
+
+
+@app.post("/api/profiles/add")
+async def profiles_add_api(request: Request):
+    data = await request.json()
+    name = data.get("name", "")
+    if not name:
+        return JSONResponse(status_code=400, content={"error": "name is required"})
+    profile_data = {
+        "account": data.get("account", ""),
+        "password": data.get("password", ""),
+        "character_name": data.get("character_name", ""),
+        "character_index": data.get("character_index", 0),
+        "security_key": data.get("security_key", ""),
+    }
+    cfg.add_profile(name, profile_data)
+    return {"profiles": cfg.list_profiles()}
+
+
+@app.post("/api/profiles/delete")
+async def profiles_delete_api(request: Request):
+    data = await request.json()
+    name = data.get("name", "")
+    cfg.delete_profile(name)
+    return {"profiles": cfg.list_profiles(), "current": cfg.current_profile()}
+
+
+# ── 配置导入导出 API ──
+
+@app.get("/api/config/export")
+async def config_export_api():
+    from fastapi.responses import Response
+    safe = make_public_config()
+    content = json.dumps(safe, ensure_ascii=False, indent=4)
+    return Response(
+        content=content,
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=autoscriptor-config.json"},
+    )
+
+
+@app.post("/api/config/import")
+async def config_import_api(request: Request):
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            return JSONResponse(status_code=400, content={"error": "invalid JSON"})
+        for key in ("app", "emulator", "ocr", "llm", "tasks", "deploy", "notify", "update", "remote_access"):
+            if key in data:
+                val = data[key]
+                if key == "tasks" and isinstance(val, dict):
+                    _strip_runtime_tasks_fields(val)
+                cfg._config[key] = val
+        cfg.save_config()
+        TASK_MANAGER.reload_tasks()
+        read_config()
+        return {"status": "ok"}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ── 部署配置 API ──
+
+@app.get("/api/deploy")
+async def deploy_get_api():
+    return {
+        "deploy": cfg._config.get("deploy", {}),
+        "notify": cfg._config.get("notify", {}),
+        "update": cfg._config.get("update", {}),
+        "remote_access": cfg._config.get("remote_access", {}),
+    }
+
+
+@app.post("/api/deploy")
+async def deploy_save_api(request: Request):
+    data = await request.json()
+    for section in ("deploy", "notify", "update", "remote_access"):
+        if section in data:
+            cfg._config[section] = data[section]
+    cfg.save_config()
+    return {"status": "ok"}
+
+
+# ── 入口 ──
+
+_server = None
+
 
 def run_webui():
+    """阻塞式启动 uvicorn 服务。"""
+    global _server
+    import uvicorn
+
+    # ── 设备 / 运行时初始化（与 run.py CLI 入口对齐） ──
+    from AutoScriptor.core.api import init as _init_env
+    _init_env()
+
+    from services.core.runtime_context import runtime_ctx
+    from AutoScriptor.core.api import mixctrl, mumu
+    runtime_ctx.init(mixctrl, mumu)
+    runtime_ctx.init_bg()
+    runtime_ctx.init_vlm()
+
+    from ZmxyOL.task import load_tasks
+    load_tasks()
+
+    _ensure_vendor_files()
     read_config()
-    # 启动日志推送后台任务
-    socketio.start_background_task(target=_ws_log_emitter)
     _print_banner()
+
+    # 启动自动更新检查
+    try:
+        from services.core.updater import updater as _updater
+        interval = cfg.get("update.check_interval_minutes", 30)
+        if cfg.get("update.auto_check", True) and interval > 0:
+            _updater.start_scheduled_check(interval)
+    except Exception as e:
+        logger.debug("自动更新检查启动失败: %s", e)
+
     webbrowser.open("http://127.0.0.1:5000")
-    socketio.run(app, host='127.0.0.1', port=5000, debug=True, use_reloader=False)
+
+    # Allow Electron to request info-level logs so it can detect startup completion
+    log_level = os.environ.get('UVICORN_LOG_LEVEL', 'warning')
+    ssl_key = cfg.get("deploy.ssl_key")
+    ssl_cert = cfg.get("deploy.ssl_cert")
+    config = uvicorn.Config(
+        app, host="127.0.0.1", port=5000, log_level=log_level,
+        ssl_keyfile=ssl_key if ssl_key else None,
+        ssl_certfile=ssl_cert if ssl_cert else None,
+    )
+    _server = uvicorn.Server(config)
+    _server.run()
+
 
 def shutdown_webui():
     from AutoScriptor.utils.perf import unboost
@@ -482,10 +863,11 @@ def shutdown_webui():
         scheduler.stop()
         unboost()
         bg.stop()
-        # 在 Socket.IO 的 eventlet 上下文中触发停止，避免跨线程/绿线程停止失效
-        socketio.start_background_task(target=socketio.stop)
-    except Exception:
+        if _server:
+            _server.should_exit = True
+    except Exception as e:
         logger.error("shutdown_webui error: %s", e)
+
 
 if __name__ == '__main__':
     try:
@@ -495,7 +877,7 @@ if __name__ == '__main__':
         traceback.print_exc()
         logger.info("程序已退出")
     finally:
-        from AutoScriptor.utils.perf import unboost 
+        from AutoScriptor.utils.perf import unboost
         try:
             shutdown_webui()
             unboost()

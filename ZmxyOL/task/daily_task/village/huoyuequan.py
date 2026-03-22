@@ -2,7 +2,7 @@ import traceback
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 def buy_item(item_name: str):
     box = locate(T(item_name),timeout=10)
@@ -15,7 +15,8 @@ def buy_item(item_name: str):
 def task():
     logger.info("====活跃券====")
     ensure_in(["村庄"])
-    click(I("导航-菜单"))
+    click(I("导航-菜单")); sleep(1)
+    if ui_F(I("菜单-荣誉勋章")): click(I("导航-菜单")); sleep(1)
     click(I("菜单-荣誉勋章"))
     click(T("荣誉商店", box=Box(200,545,203,76).margin()))
     buy_item("至尊成长礼包")

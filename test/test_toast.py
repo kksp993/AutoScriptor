@@ -4,7 +4,7 @@ import sys
 import traceback  # 新增导入
 import time  # 新增导入倒计时
 import logging  # 新增导入 logging
-from logzero import logger  # 新增 logzero logger 导入
+from AutoScriptor.utils.logger import logger
 from AutoScriptor import *
 
 # def log_flush(msg):

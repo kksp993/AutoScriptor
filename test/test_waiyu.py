@@ -1,4 +1,5 @@
 from calendar import c
+import logging
 import time
 from AutoScriptor import *
 from ZmxyOL.nav import *
@@ -78,8 +79,10 @@ if __name__ == "__main__":
         )
 
         while not bg.signal("task_done"):
-            if ui_T(T("土行孙"),1): bonus_callback()
-            else: battle_callback()
+            if ui_T(I("规则", box=Box(551,43,144,56).margin()),2): bonus_callback()
+            else: 
+                logging.info("开始挑战")
+                battle_callback()
 
 
 

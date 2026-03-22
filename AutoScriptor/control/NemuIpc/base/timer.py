@@ -153,7 +153,7 @@ class Timer:
             time.sleep(diff)
 
     def show(self):
-        from logzero import logger
+        from AutoScriptor.utils.logger import logger
         logger.info(str(self))
 
     def __str__(self):

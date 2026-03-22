@@ -1,4 +1,4 @@
-from AutoScriptor.core.targets import Target,B,I,T
+from AutoScriptor.core.targets import Target,B,I,T,V
 from AutoScriptor.core.api import *
 
 __all__ = [
@@ -6,6 +6,8 @@ __all__ = [
  "B",
  "I",
  "T",
+ "V",
+ "init",
  "click",
  "locate",
  "wait_for_appear",

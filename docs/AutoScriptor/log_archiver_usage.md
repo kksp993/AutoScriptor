@@ -52,9 +52,9 @@
 1. `current_screenshot.png`: 异常捕获时的当前画面
 2. `timed_screenshot_1~3.png`: 后续每秒一张，共 3 张
 3. `click_screenshots/`
-4. `click_screenshots/c_*.png`: 成功点击截图
-5. `click_screenshots/s_*.png`: 搜索/点击失败时的即时截图
-6. `click_screenshots/e_*.png`: OCR/提取信息截图
+4. `click_screenshots/*_c.png`: 成功点击截图（旧版为 `c_*.png`）
+5. `click_screenshots/*_s.png`: 搜索/点击失败时的即时截图（旧版为 `s_*.png`）
+6. `click_screenshots/*_e.png`: OCR/提取信息截图（旧版为 `e_*.png`）
 
 ### 失败即时截图
 
@@ -69,9 +69,9 @@
 
 调试截图目录 `logs/debug_screenshot/` 会按类型保留最新截图：
 
-1. `c_` 保留 30 张
-2. `s_` 保留 10 张
-3. `e_` 保留 5 张
+1. 类型 `c`（文件名 `*_c.png`）保留 30 张
+2. 类型 `s`（`*_s.png`）保留 10 张
+3. 类型 `e`（`*_e.png`）保留 5 张
 
 总计最多约 45 张。
 
@@ -292,7 +292,7 @@ from AutoScriptor.utils.log_archiver import archive_error_with_log, dump_error_a
 1. 先看 `error.log` 的异常信息和最后 100 行日志
 2. 看 `bg_event_history` 是否有信号、回调或清理行为
 3. 看 `current_screenshot.png` 和 `timed_screenshot_1~3.png` 是否发生状态变化
-4. 看 `click_screenshots/s_*.png`，确认失败那一刻界面到底是什么
+4. 看 `click_screenshots/*_s.png`（或旧版 `s_*.png`），确认失败那一刻界面到底是什么
 5. 看堆栈中的局部变量，确认调用参数是否异常
 
-如果是定位类问题，`s_*.png` 往往是最关键的证据。
+如果是定位类问题，`*_s.png`（失败截图）往往是最关键的证据。

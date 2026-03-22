@@ -4,7 +4,7 @@ import getpass
 import os
 import json
 
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 from AutoScriptor.crypto.config_manager import ConfigManager
 
 class AutoConfig:
@@ -64,16 +64,10 @@ class AutoConfig:
             json.dump(safe_config, f, ensure_ascii=False, indent=4)
 
     def _clean_tasks_for_saving(self, data):
-        """
-        2. 新增的辅助方法：递归清理 tasks 字典。
-        它会遍历所有嵌套的字典，并从中删除 'fn' 键。
-        """
-        # 如果当前数据是字典
+        """递归清理 tasks 字典中残留的不可序列化字段（防御性）。"""
         if isinstance(data, dict):
-            # 关键：先删除当前层的 'fn'，因为它不会有子节点
             data.pop('fn', None)
             data.pop('order', None)
-            # 然后，对自己所有的子节点（value）递归调用此函数
             for key, value in data.items():
                 self._clean_tasks_for_saving(value)
 
@@ -120,6 +114,47 @@ class AutoConfig:
         self.save_config()
         logger.info(f"配置已更新: {key} = {value}")
             
+    # ── 多账号档案管理 ──
+
+    def list_profiles(self) -> list:
+        """返回所有档案名称列表"""
+        profiles = self._config.get("profiles", {})
+        return list(profiles.get("list", {}).keys())
+
+    def current_profile(self) -> str:
+        return self._config.get("profiles", {}).get("current", "default")
+
+    def switch_profile(self, name: str):
+        """切换当前档案，将档案字段写入 game 段"""
+        profiles = self._config.get("profiles", {}).get("list", {})
+        if name not in profiles:
+            raise KeyError(f"档案 '{name}' 不存在")
+        profile = profiles[name]
+        if "game" not in self._config:
+            self._config["game"] = {}
+        for k in ("account", "password", "character_name", "character_index"):
+            if k in profile:
+                self._config["game"][k] = profile[k]
+        self._config["profiles"]["current"] = name
+        self.save_config()
+        logger.info(f"已切换到档案: {name}")
+
+    def add_profile(self, name: str, data: dict):
+        """新建档案"""
+        if "profiles" not in self._config:
+            self._config["profiles"] = {"current": "default", "list": {}}
+        self._config["profiles"]["list"][name] = data
+        self.save_config()
+
+    def delete_profile(self, name: str):
+        """删除档案"""
+        profiles = self._config.get("profiles", {}).get("list", {})
+        if name in profiles:
+            del profiles[name]
+            if self._config.get("profiles", {}).get("current") == name:
+                self._config["profiles"]["current"] = next(iter(profiles), "default")
+            self.save_config()
+
     def __str__(self):
         return json.dumps(self._config, ensure_ascii=False, indent=4)
 
