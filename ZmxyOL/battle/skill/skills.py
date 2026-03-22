@@ -61,7 +61,8 @@ def battle_loop(
         Pause_battle 为 True 时，暂停战斗
         max_duration 为战斗最大持续时间，超过则抛出异常
     """
-    from logzero import logger as _logger
+    from AutoScriptor.utils.logger import logger as _logger
+    from AutoScriptor.utils.cancel import check_cancel_raise
     from time import time
     _logger.info('🔄 battle_loop 开始 (weight=%d, max=%ds, delay=%.1fs)', battle_weight, max_duration, delay)
     self.sleep(delay)
@@ -74,6 +75,7 @@ def battle_loop(
     bg.set_signal("try_exit", False)
     bg.set_signal("Pause_battle", False)
     while not bg.signal("try_exit", False):
+        check_cancel_raise()
         if not bg.signal("Pause_battle", False):
             if op_count == battle_weight:
                 self.travel()

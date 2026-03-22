@@ -16,13 +16,17 @@ from typing import List, Tuple
 from threading import Event, RLock
 
 import dpath
-from logzero import logger
+from AutoScriptor.utils.cancel import TaskCancelled, bind_cancel_event
+from AutoScriptor.utils.logger import logger
 
 from ZmxyOL import *
 from AutoScriptor import *
+import AutoScriptor.core.api as _core_api
 from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.task_registry import task_registry
 from AutoScriptor import TaskRequireReTry
 from AutoScriptor.utils.logger import set_current_task
+from services.core.runtime_context import runtime_ctx
 
 
 # ── 下次执行时间计算 ──
@@ -61,11 +65,35 @@ _CATEGORY_NEXT_DATE = {
 }
 
 
+def parse_sched_window_hours(task_data: dict) -> tuple[int, int] | None:
+    """解析 sched_window_hours: [start_h, end_h)，本地时间，左闭右开。"""
+    sw = task_data.get("sched_window_hours")
+    if sw is None or len(sw) != 2:
+        return None
+    try:
+        return int(sw[0]), int(sw[1])
+    except (TypeError, ValueError):
+        return None
+
+
+def clamp_to_sched_window(ts: float, start_h: int, end_h: int) -> float:
+    """将时间戳映射到最近的 [start_h, end_h) 窗口起点（本地时间）。若已在窗口内则原样返回。"""
+    t = datetime.datetime.fromtimestamp(ts)
+    m = t.hour * 60 + t.minute
+    if start_h * 60 <= m < end_h * 60:
+        return ts
+    if m < start_h * 60:
+        return t.replace(hour=start_h, minute=0, second=0, microsecond=0).timestamp()
+    next_day = t.date() + datetime.timedelta(days=1)
+    return datetime.datetime.combine(next_day, datetime.time(start_h, 0)).timestamp()
+
+
 class TaskManager:
     """管理任务执行、重试、错误恢复。"""
 
     def __init__(self):
         self._cancel_event = Event()
+        bind_cancel_event(self._cancel_event)
         self._cfg_lock = RLock()
 
     # ── 公共接口 ──
@@ -78,7 +106,9 @@ class TaskManager:
 
     def execute_tasks(self, tasks: List[str]) -> Tuple[int, int]:
         """执行一组任务。返回 (成功数, 失败数)。"""
-        self._reset_cancel()
+        if self._cancel_event.is_set():
+            logger.info("⏹ 检测到终止请求，跳过本批任务")
+            return 0, 0
         self._clean_debug_dir()
         success = failed = 0
         for task in tasks:
@@ -105,6 +135,9 @@ class TaskManager:
                     importlib.reload(ZmxyOL)
                 except Exception:
                     pass
+                # 重新发现并注册任务（不再由 import 自动触发）
+                from ZmxyOL.task import force_reload_tasks
+                force_reload_tasks()
                 if not security_key:
                     cfg._config['game'] = saved_game
                 logger.info("✅ 任务重新加载完成")
@@ -126,17 +159,19 @@ class TaskManager:
 
             set_current_task(task.rsplit("/", 1)[-1])
             try:
-                fn, kwargs = self._prepare_task(task)
-                mixctrl.release_all_keys()
+                try:
+                    fn, kwargs = self._prepare_task(task)
+                except KeyError:
+                    logger.error(f"❌ 任务函数未注册: {task}，跳过")
+                    return False
+
+                assert runtime_ctx.mixctrl is not None, "mixctrl 未初始化，请先调用 runtime_ctx.init()"
+                runtime_ctx.mixctrl.release_all_keys()
                 fn(**kwargs)
                 logger.info(f"▶️  执行成功: {task}")
                 with self._cfg_lock:
                     self._update_next_exec_time(task)
                 return True
-
-            except KeyError:
-                logger.error(f"❌ 任务函数未注册: {task}，跳过")
-                return False
 
             except TaskRequireReTry as e:
                 if attempt < max_retry:
@@ -154,6 +189,10 @@ class TaskManager:
 
             except KeyboardInterrupt:
                 raise
+
+            except TaskCancelled:
+                logger.info("⏹ 任务已终止: %s", task)
+                return False
 
             except Exception as e:
                 logger.error(f"❌ 执行失败: {task}，错误: {e}")
@@ -179,15 +218,15 @@ class TaskManager:
         with self._cfg_lock:
             task_data = dpath.get(cfg["tasks"], task)
             logger.info(f"▶️  正在执行: {task}")
-            fn = task_data.get("fn")
+            fn = task_registry.get_fn(task)
             if fn is None:
                 raise KeyError("fn")
-            return fn, self._resolve_params(task_data, fn)
+            return fn, self._resolve_params(task, task_data, fn)
 
-    def _resolve_params(self, task_data: dict, fn) -> dict:
+    def _resolve_params(self, task_path: str, task_data: dict, fn) -> dict:
         """解析任务参数（枚举恢复）。"""
         raw = task_data.get('params', {})
-        meta = task_data.get('param_meta', {})
+        meta = task_registry.get_param_meta(task_path)
         sig = inspect.signature(fn)
         params = {}
         for k, v in raw.items():
@@ -196,10 +235,19 @@ class TaskManager:
         return params
 
     @staticmethod
+    def _meta_enum_path(meta_val):
+        if isinstance(meta_val, dict):
+            return meta_val.get("enum") or meta_val.get("path")
+        return meta_val
+
+    @staticmethod
     def _get_enum_class(key: str, meta: dict, sig: inspect.Signature):
         """尝试获取参数对应的枚举类。"""
         if key in meta:
-            mod_name, cls_name = meta[key].rsplit('.', 1)
+            path = TaskManager._meta_enum_path(meta[key])
+            if not path:
+                return None
+            mod_name, cls_name = path.rsplit('.', 1)
             return getattr(importlib.import_module(mod_name), cls_name)
         ann = getattr(sig.parameters.get(key), 'annotation', None)
         if isinstance(ann, type) and issubclass(ann, enum.Enum):
@@ -231,6 +279,9 @@ class TaskManager:
             ts = self._calc_category_ts(task, now)
 
         if ts is not None:
+            sw = parse_sched_window_hours(task_data)
+            if sw is not None:
+                ts = clamp_to_sched_window(ts, sw[0], sw[1])
             dpath.set(cfg["tasks"], task + "/next_exec_time", ts)
             human = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M')
             logger.info(f"    - 下次执行: {human}")
@@ -256,8 +307,8 @@ class TaskManager:
             return False
         app_name = cfg["app"]["app_to_start"]
         try:
-            mixctrl.app.close(app_name)
-            sleep(1)
+            runtime_ctx.mixctrl.app.close(app_name)
+            self._wait_app_stopped(app_name)
             if retry_count >= 1:
                 self._restart_adb_and_wait()
             if not self._wait_app_running(app_name):
@@ -272,24 +323,47 @@ class TaskManager:
             logger.error(f"🔄 应用重启失败: {e}")
             return False
 
-    def _wait_app_running(self, app_name: str, max_attempts: int = 10) -> bool:
-        """启动应用并等待其运行。"""
-        for _ in range(max_attempts):
-            mixctrl.app.launch(app_name)
+    def _wait_app_stopped(self, app_name: str, timeout: int = 15):
+        """等待应用完全停止后再返回，防止 close 后立即 launch 被忽略。"""
+        import time as _time
+        deadline = _time.time() + timeout
+        while _time.time() < deadline:
+            state = runtime_ctx.mixctrl.app.state(app_name)
+            if state != "running":
+                logger.info("🔄 应用已停止 (state=%s)", state)
+                sleep(1)
+                return
             sleep(1)
-            if mixctrl.app.state(app_name) == "running":
+        logger.warning("🔄 等待应用停止超时 (%ds)，强制继续", timeout)
+
+    def _wait_app_running(self, app_name: str, timeout: int = 60) -> bool:
+        """启动应用并等待其进入 running 状态。"""
+        import time as _time
+        runtime_ctx.mixctrl.app.launch(app_name)
+        logger.info("🔄 已发送 launch，等待应用启动...")
+        deadline = _time.time() + timeout
+        retries = 0
+        while _time.time() < deadline:
+            sleep(2)
+            if runtime_ctx.mixctrl.app.state(app_name) == "running":
+                logger.info("🔄 应用已启动")
                 return True
-        logger.error("🔄 应用启动超时")
+            retries += 1
+            if retries % 5 == 0:
+                logger.info("🔄 应用尚未就绪，重试 launch (%ds/%ds)", retries * 2, timeout)
+                runtime_ctx.mixctrl.app.launch(app_name)
+        logger.error("🔄 应用启动超时 (%ds)", timeout)
         return False
 
     def _full_emulator_restart(self, app_name: str) -> bool:
         """完全重启模拟器（最后手段）。"""
         try:
-            mixctrl.app.close(app_name)
+            if runtime_ctx.mixctrl is not None:
+                runtime_ctx.mixctrl.app.close(app_name)
             from AutoScriptor.control.MumuAdaptor.mumu import Mumu
             Mumu().select(cfg["emulator"]["index"]).power.shutdown()
-            sleep(3)
-            ensure_app_running(cfg["emulator"]["index"], cfg["emulator"]["adb_addr"], app_name)
+            sleep(10)
+            runtime_ctx.refresh()
             sleep(5)
             mm.set_region("登录")
             return True
@@ -308,12 +382,12 @@ class TaskManager:
         subprocess.run([adb, "start-server"], capture_output=True, text=True)
         if addr:
             subprocess.run([adb, "connect", addr], capture_output=True, text=True)
-        mixctrl.switch_to_mumu()
+        runtime_ctx.mixctrl.switch_to_mumu()
         for i, interval in enumerate([1, 2, 3, 4, 5, 5, 5], 1):
             result = {}
             def _test():
                 try:
-                    mixctrl.click(2000, 0)
+                    runtime_ctx.mixctrl.click(2000, 0)
                     result["ok"] = True
                 except Exception as e:
                     result["error"] = e
@@ -331,7 +405,7 @@ class TaskManager:
     def _archive_error(self, task: str, exc: Exception):
         from AutoScriptor.utils.log_archiver import archive_error
         try:
-            archive_error(task, exc, mixctrl=mixctrl, include_click_screenshots=True)
+            archive_error(task, exc, mixctrl=runtime_ctx.mixctrl, include_click_screenshots=True)
         except Exception as e:
             logger.error(f"归档错误失败: {e}")
 
@@ -350,6 +424,10 @@ class TaskManager:
 
 
 if __name__ == "__main__":
+    from AutoScriptor.core.api import init as _init_env
+    _init_env()
+    from ZmxyOL.task import load_tasks
+    load_tasks()
     from AutoScriptor.utils.perf import boost, unboost
     try:
         boost()

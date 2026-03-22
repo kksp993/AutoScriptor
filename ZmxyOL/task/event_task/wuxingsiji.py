@@ -3,7 +3,7 @@ from ZmxyOL.task.task_register import register_task
 from AutoScriptor import *
 from ZmxyOL import *
 
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 @register_task
 def task(battle_loop: int = 1000):

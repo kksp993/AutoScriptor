@@ -1,43 +1,68 @@
-from typing import Dict, List, Any
-from agno.tools import tool
+"""
+VLM Tool Registry — OpenAI function-calling schema format
+=========================================================
+Tools are registered via ``@register_tool`` and stored in ``TOOL_REGISTRY``.
+Each entry contains an OpenAI-compatible function schema and a handler callable.
+"""
 
-_TOOL_REGISTRY: Dict[str, Any] = {}
+from typing import Any, Callable, Dict
 
-def register_tool(*, name: str, description: str):
+TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {}
+
+
+def register_tool(*, name: str, description: str,
+                  parameters: dict | None = None) -> Callable:
+    """Decorator that registers a tool with an OpenAI function-calling schema.
+
+    Usage::
+
+        @register_tool(
+            name="click",
+            description="Click at normalised coordinates (0-1000).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "coordinates": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "Normalised (x, y) in 0-1000 range",
+                    }
+                },
+                "required": ["coordinates"],
+            },
+        )
+        def click_tool(coordinates):
+            ...
     """
-    只支持 @register_tool(name="my_tool", description="...") 这一种用法，
-    直接用 Agno 原生 tool 装饰器，并自动加入注册表。
-    """
-    def decorator(func):
-        registered_tool = tool(name=name, description=description)(func)
-        _TOOL_REGISTRY[name] = registered_tool
-        return registered_tool
+    def decorator(func: Callable) -> Callable:
+        TOOL_REGISTRY[name] = {
+            "schema": {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": parameters or {"type": "object", "properties": {}},
+                },
+            },
+            "handler": func,
+        }
+        return func
     return decorator
 
-def load_toolkits() -> List[Any]:
-    """
-    返回所有已注册的工具。
-    """
-    # 如果注册表为空，则动态导入本目录下所有以"_tools.py"结尾的工具模块
-    if not _TOOL_REGISTRY:
-        import os
+
+def load_toolkits() -> Dict[str, Dict[str, Any]]:
+    """Return the full tool registry (auto-imports ``*_tools.py`` siblings)."""
+    if not TOOL_REGISTRY:
         import importlib
+        import os
 
         tools_dir = os.path.dirname(__file__)
         for fname in os.listdir(tools_dir):
-            if fname.endswith("_tools.py") and fname != os.path.basename(__file__):
+            if fname.endswith("_tools.py"):
                 mod_name = f"{__package__}.{fname[:-3]}" if __package__ else fname[:-3]
                 importlib.import_module(mod_name)
-    return _TOOL_REGISTRY
+    return TOOL_REGISTRY
 
-def get_tool(name: str) -> Any:
-    """
-    获取已注册的工具。
-    """
-    return _TOOL_REGISTRY.get(name)
 
-def get_tools(names:List[str]) -> List[Any]:
-    """
-    获取已注册的工具列表。
-    """
-    return [_TOOL_REGISTRY.get(name) for name in names]
+def get_tool(name: str) -> Dict[str, Any] | None:
+    return TOOL_REGISTRY.get(name)

@@ -2,7 +2,7 @@ from calendar import weekday
 import datetime
 import traceback
 
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 from ZmxyOL.nav.api import locate_region
 from ZmxyOL.task.task_register import register_task

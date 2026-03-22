@@ -9,10 +9,11 @@ import importlib
 import questionary
 from questionary import Choice
 from typing import Dict, Any, List, Optional
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 from pypinyin import lazy_pinyin
 
 from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.task_registry import task_registry
 from AutoScriptor.crypto.update_config import set_config, verify_config
 from AutoScriptor import edit_img
 
@@ -28,9 +29,9 @@ class ActionHandler:
 
     # ── 公共动作 ──
 
-    def do_param_edit(self, node: Dict[str, Any]):
+    def do_param_edit(self, node: Dict[str, Any], task_path: str = ""):
         """叶子任务参数编辑。"""
-        meta = node.get('param_meta', {})
+        meta = task_registry.get_param_meta(task_path) if task_path else {}
         for param, val in node['params'].items():
             new_val = self._edit_single_param(param, val, meta)
             if new_val is not None:
@@ -176,7 +177,9 @@ class ActionHandler:
         """编辑单个参数。返回新值或 None。"""
         # 枚举参数（有 meta 标注）
         if param in meta:
-            mod_name, cls_name = meta[param].rsplit('.', 1)
+            raw = meta[param]
+            path = (raw.get("enum") or raw.get("path")) if isinstance(raw, dict) else raw
+            mod_name, cls_name = path.rsplit('.', 1)
             enum_cls = getattr(importlib.import_module(mod_name), cls_name)
             return self._edit_enum_param(param, val, enum_cls)
         # 布尔

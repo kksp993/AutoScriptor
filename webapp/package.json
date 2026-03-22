@@ -1,0 +1,19 @@
+{
+  "name": "autoscriptor",
+  "version": "1.0.0",
+  "description": "AutoScriptor Desktop App",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder build --win --config electron-builder.config.js",
+    "build:portable": "electron-builder build --win portable --config electron-builder.config.js"
+  },
+  "dependencies": {
+    "tree-kill": "^1.2.2"
+  },
+  "devDependencies": {
+    "electron": "^28.3.3",
+    "electron-builder": "^24.9.4"
+  }
+}

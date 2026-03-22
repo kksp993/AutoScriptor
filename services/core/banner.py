@@ -1,12 +1,4 @@
-# ANSI 颜色（在 Windows 上通过 colorama 启用）
 import shutil
-
-
-try:
-    import colorama  # type: ignore
-    colorama.just_fix_windows_console()
-except Exception:
-    pass
 
 BOLD = "\033[1m"
 DIM = "\033[2m"

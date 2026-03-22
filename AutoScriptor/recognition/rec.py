@@ -1,9 +1,12 @@
 
 import collections
+import os
+import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import cv2
+from AutoScriptor.utils.logger import logger
 
 from AutoScriptor.recognition.img_rec import imgOnScreen
 from AutoScriptor.recognition.ocr_rec import ocr
@@ -77,7 +80,12 @@ def locate_on_screen(haystack_frame, targets, confidence=0.8, pf_boxes=None, col
         roi = haystack_frame
     # 3. 全图或ROI识别
     if isinstance(targets[0], str):
-        res = ocr(roi, targets, confidence, None)
+        from AutoScriptor.utils.constant import cfg as _cfg
+        try:
+            _scale = float(_cfg["ocr.scale"])
+        except (KeyError, TypeError, ValueError):
+            _scale = 1.0
+        res = ocr(roi, targets, confidence, None, scale=_scale)
         assert res is not None, "ocr omit None！"
     else:
         res = imgOnScreen(roi, targets, confidence=confidence)
@@ -172,3 +180,61 @@ def get_box_color(haystack_frame, box):
 
     color_name = get_hsv_color_name(h_main, s_main, v_main)
     return color_name
+
+
+def vlm_locate(haystack_frame, description: str, roi_box: Box = None) -> list[Box] | None:
+    """
+    VLM grounding: use a vision-language model to locate a UI element by description.
+
+    Args:
+        haystack_frame: full screenshot (BGR ndarray)
+        description: natural-language description of the element to find
+        roi_box: optional ROI to crop before sending to VLM
+
+    Returns:
+        list containing one Box on success, or None if not found
+    """
+    if roi_box and roi_box != Box(0, 0, 1280, 720):
+        roi = haystack_frame[roi_box.top:roi_box.top + roi_box.height,
+                             roi_box.left:roi_box.left + roi_box.width]
+        offset_x, offset_y = roi_box.left, roi_box.top
+    else:
+        roi = haystack_frame
+        offset_x, offset_y = 0, 0
+
+    tmp_path = os.path.join(tempfile.gettempdir(), "_vlm_locate.png")
+    cv2.imwrite(tmp_path, roi)
+
+    try:
+        from AutoScriptor.vlm.vlm import VLMClient
+
+        _vlm_locate._agent = getattr(_vlm_locate, "_agent", None)
+        if _vlm_locate._agent is None:
+            _vlm_locate._agent = VLMClient()
+
+        h, w = roi.shape[:2]
+        result = _vlm_locate._agent.ground(description, tmp_path, width=w, height=h)
+        if result is None:
+            logger.warning("VLM grounding '%s' returned no result", description)
+            return None
+        px, py = result
+        abs_x, abs_y = px + offset_x, py + offset_y
+        half = 15
+        box = Box(max(abs_x - half, 0), max(abs_y - half, 0), half * 2, half * 2)
+        logger.info("VLM grounding '%s' → (%d, %d)", description, abs_x, abs_y)
+        return [box]
+    except Exception as e:
+        logger.warning("VLM grounding '%s' failed: %s", description, e)
+        return None
+
+
+# ── register-dispatch: 挂载 VLMTarget locate handler ──
+
+from AutoScriptor.core.locate_dispatch import register_locator
+from AutoScriptor.core.targets import VLMTarget
+
+
+@register_locator(VLMTarget)
+def _locate_vlm(target: VLMTarget, frame, **_kw):
+    """VLMTarget dispatch handler — 转发到 vlm_locate。"""
+    return vlm_locate(frame, target.description, target.box)

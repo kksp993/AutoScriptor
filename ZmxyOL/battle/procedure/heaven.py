@@ -61,13 +61,13 @@ def battle_task(
             logger.info("到达最右侧")
             switch_base("nemu")
             if not has_loading_after_battle:
-                self.way_to_exit(until=lambda:ui_T((T("回家",box=Box(18,607,87,109)), T("还有"))), exit_loc=exit_loc)
+                self.way_to_exit(until=lambda:ui_T((T("回家", box=Box(29,613,77,88).margin()), T("还有"))), exit_loc=exit_loc)
             else:
                 self.way_to_exit(until=lambda:ui_T((I("加载中"), I("极北-加载中"), T("还有"))), exit_loc=exit_loc)
         else:
-            wait_for_appear((I("返回地图"), T("回家", box=Box(18,607,87,109))))
+            wait_for_appear((I("返回地图"), T("回家", box=Box(29,613,77,88).margin())))
             if ui_T((I("返回地图"),T("返回地图"))): click((I("返回地图"),T("返回地图")), until=lambda:ui_F((I("返回地图"),T("返回地图"))))
-    wait_for_appear(T("回家", box=Box(18,607,87,109)))
+    wait_for_appear(T("回家", box=Box(29,613,77,88).margin()))
     switch_base("mumu")
 
 @combo
@@ -79,7 +79,7 @@ def heaven_draw_card_exit(self:Hero):
     sleep(1)
     click(B(Box(10,10,0,0)))
     click(T("返回"),repeat=2)
-    wait_for_appear((T("我的队伍"), T("回家", box=Box(18,607,87,109))))
+    wait_for_appear((T("我的队伍"), T("回家", box=Box(29,613,77,88).margin())))
 
 
 

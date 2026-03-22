@@ -7,6 +7,7 @@ if __name__ == "__main__":
     try:
         thread = Thread(target=run_webui, daemon=True)
         thread.start()
+        thread.join()
     except Exception as e:
         traceback.print_exc()
     finally:

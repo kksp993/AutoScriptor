@@ -19,10 +19,11 @@ import time
 import tempfile
 from typing import Dict, Any
 from unittest.mock import MagicMock
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 from services.testing.mock_tasks import (
     MOCK_TASK_REGISTRY,
+    MOCK_REGISTRY_ENTRIES,
     MockTaskRequireReTry,
     MockRequestHumanTakeover,
 )
@@ -47,37 +48,31 @@ def build_test_config(
         "每日任务": {
             "测试村庄": {
                 "立即成功": {
-                    "fn": MOCK_TASK_REGISTRY["task_instant_success"],
                     "on": True,
                     "next_exec_time": 0,
                     "params": {},
                 },
                 "慢速成功": {
-                    "fn": MOCK_TASK_REGISTRY["task_slow_success"],
                     "on": True,
                     "next_exec_time": 0,
                     "params": {},
                 },
                 "总是失败": {
-                    "fn": MOCK_TASK_REGISTRY["task_always_fail"],
                     "on": True,
                     "next_exec_time": 0,
                     "params": {},
                 },
                 "重试后成功": {
-                    "fn": MOCK_TASK_REGISTRY["task_retry_then_succeed"],
                     "on": True,
                     "next_exec_time": 0,
                     "params": {},
                 },
                 "重试耗尽": {
-                    "fn": MOCK_TASK_REGISTRY["task_retry_exhaust"],
                     "on": True,
                     "next_exec_time": 0,
                     "params": {},
                 },
                 "人工接管": {
-                    "fn": MOCK_TASK_REGISTRY["task_human_takeover"],
                     "on": True,
                     "next_exec_time": 0,
                     "params": {},
@@ -85,7 +80,6 @@ def build_test_config(
             },
             "测试参数": {
                 "带参数任务": {
-                    "fn": MOCK_TASK_REGISTRY["task_with_params"],
                     "on": True,
                     "next_exec_time": 0,
                     "params": {
@@ -93,16 +87,11 @@ def build_test_config(
                         "region": "village",
                         "loops": 5,
                     },
-                    "param_meta": {
-                        "difficulty": "services.testing.mock_tasks.MockDifficulty",
-                        "region": "services.testing.mock_tasks.MockRegion",
-                    },
                 },
             },
         },
         "一般任务": {
             "一次性任务": {
-                "fn": MOCK_TASK_REGISTRY["task_instant_success"],
                 "on": True,
                 "next_exec_time": 0,
                 "params": {},
@@ -110,7 +99,6 @@ def build_test_config(
         },
         "每周任务": {
             "随机结果": {
-                "fn": MOCK_TASK_REGISTRY["task_random_outcome"],
                 "on": False,
                 "next_exec_time": 0,
                 "params": {},
@@ -266,6 +254,7 @@ class TestHarness:
     def __init__(self, **config_kwargs):
         self._config_kwargs = config_kwargs
         self._original_cfg_config = None
+        self._original_registry = None
         self._temp_dir = None
         self._patches = {}
 
@@ -292,6 +281,13 @@ class TestHarness:
         self._original_cfg_config = copy.deepcopy(cfg._config)
         cfg._config = test_config
         cfg.CONFIG_PATH = config_path
+
+        # 3.5 注入 TaskRegistry
+        from AutoScriptor.utils.task_registry import task_registry
+        self._original_registry = dict(task_registry._tasks)
+        task_registry.clear()
+        for path, entry in MOCK_REGISTRY_ENTRIES.items():
+            task_registry.register(path, entry["fn"], entry["order"], entry.get("param_meta", {}))
 
         # 4. 注入 mock 对象到 task_manager 模块的全局命名空间
         import services.core.task_manager as tm_mod
@@ -323,6 +319,11 @@ class TestHarness:
 
     def teardown(self):
         """恢复原始状态。"""
+        # 恢复 TaskRegistry
+        if self._original_registry is not None:
+            from AutoScriptor.utils.task_registry import task_registry
+            task_registry._tasks = self._original_registry
+
         # 恢复 cfg
         if self._original_cfg_config is not None:
             from AutoScriptor.utils.constant import cfg

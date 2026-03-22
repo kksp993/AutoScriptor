@@ -6,7 +6,55 @@
 # @Software: PyCharm
 import json
 import os.path
-from logzero import logger
+import subprocess
+from AutoScriptor.utils.logger import logger
+
+
+def _is_not_handle_cmd(retval) -> bool:
+    """MuMu 6 的 MuMuManager 不支持 control app 命令时会返回 not handle cmd"""
+    if not retval:
+        return False
+    s = retval if isinstance(retval, str) else str(retval)
+    return "not handle cmd" in s
+
+
+def _adb_app_close(package: str) -> bool:
+    """ADB 回退：强制关闭应用（MuMu 6 等不支持 MuMuManager app close 时使用）"""
+    from AutoScriptor.utils.constant import cfg
+    adb = cfg["emulator"]["adb_path"]
+    addr = str(cfg["emulator"].get("adb_addr", ""))
+    args = [adb]
+    if addr:
+        args.extend(["-s", addr])
+    args.extend(["shell", "am", "force-stop", package])
+    r = subprocess.run(args, capture_output=True, text=True, timeout=10)
+    return r.returncode == 0
+
+
+def _adb_app_launch(package: str) -> bool:
+    """ADB 回退：通过 monkey 启动应用（MuMu 6 等不支持 MuMuManager app launch 时使用）"""
+    from AutoScriptor.utils.constant import cfg
+    adb = cfg["emulator"]["adb_path"]
+    addr = str(cfg["emulator"].get("adb_addr", ""))
+    args = [adb]
+    if addr:
+        args.extend(["-s", addr])
+    args.extend(["shell", "monkey", "-p", package, "-c", "android.intent.category.LAUNCHER", "1"])
+    r = subprocess.run(args, capture_output=True, text=True, timeout=15)
+    return r.returncode == 0
+
+
+def _adb_app_state(package: str) -> str:
+    """ADB 回退：通过 pidof 判断应用是否在运行"""
+    from AutoScriptor.utils.constant import cfg
+    adb = cfg["emulator"]["adb_path"]
+    addr = str(cfg["emulator"].get("adb_addr", ""))
+    args = [adb]
+    if addr:
+        args.extend(["-s", addr])
+    args.extend(["shell", "pidof", package])
+    r = subprocess.run(args, capture_output=True, text=True, timeout=5)
+    return "running" if (r.returncode == 0 and r.stdout.strip()) else "stopped"
 
 
 class App:
@@ -66,7 +114,9 @@ class App:
 
         if ret_code == 0:
             return True
-
+        if _is_not_handle_cmd(retval):
+            logger.debug("MuMuManager app launch 不支持，回退至 ADB monkey")
+            return _adb_app_launch(package)
         raise RuntimeError(retval)
 
     def close(self, package: str) -> bool:
@@ -80,7 +130,9 @@ class App:
 
         if ret_code == 0:
             return True
-
+        if _is_not_handle_cmd(retval):
+            logger.debug("MuMuManager app close 不支持，回退至 ADB force-stop")
+            return _adb_app_close(package)
         raise RuntimeError(retval)
 
     def get_installed(self):
@@ -140,9 +192,10 @@ class App:
         self.utils.set_operate('control')
         ret_code, retval = self.utils.run_command(['app', 'info', '-pkg', package])
 
-        if ret_code != 0:
-            raise RuntimeError(retval)
-
-        data = json.loads(retval)
-
-        return data['state']
+        if ret_code == 0:
+            data = json.loads(retval)
+            return data['state']
+        if _is_not_handle_cmd(retval):
+            logger.debug("MuMuManager app info 不支持，回退至 ADB pidof")
+            return _adb_app_state(package)
+        raise RuntimeError(retval)

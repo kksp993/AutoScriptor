@@ -4,7 +4,7 @@ from AutoScriptor import *
 from ZmxyOL import *
 from ZmxyOL.battle.character.hero import h, combo
 from ZmxyOL.nav.api import ensure_in
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 def back_to_map():
     click(I("导航-菜单"), delay=1)

@@ -45,6 +45,8 @@ def way():
     click(B(896,42,64,56))
     sleep(0.5)
     click(B(1123,54,66,58))
+    sleep(1)
+    click(B(0,0))
 
 @path(LOC_ENV, "炼器师")
 def way():

@@ -3,10 +3,10 @@ from datetime import datetime
 from threading import Thread, RLock, Event
 import time
 from typing import Any, Callable, List
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 from AutoScriptor.core.targets import Target
 
-DEFAULT_INTERVAL = 0.2
+DEFAULT_INTERVAL = 1.0
 
 class BackgroundMonitor(Thread):
     def __init__(self):
@@ -30,41 +30,71 @@ class BackgroundMonitor(Thread):
         return list(self._event_history)
 
     def run(self):
-        from AutoScriptor.core.api import ui_T
+        from AutoScriptor.core.api import _locate_all, first as _first
+        import AutoScriptor.core.api as _core_api
         while not self._stop_event.is_set():
-            # 1. 扫描常规（非 allow_concurrent）的 callback
-            for name, info in list(self._callbacks.items()):
+            try:
+                mc = _core_api.mixctrl
+                screenshot = mc.screenshot() if mc is not None else None
+            except Exception:
+                screenshot = None
+                time.sleep(self._interval)
+                continue
+
+            # Build a batch of (name, info, flat_targets) for ONE shared locate call
+            pending: list[tuple[str, dict, list[Target]]] = []
+            all_targets: list[Target] = []
+            offsets: list[tuple[int, int]] = []  # (start, end) in all_targets
+
+            with self._lock:
+                snapshot = list(self._callbacks.items())
+
+            for name, info in snapshot:
                 if info.get('allow_concurrent'):
-                    continue  # concurrent 的在下面统一处理
-                idf = info['idf']
-                if not ui_T(idf):
                     continue
                 now = time.time()
                 if now - info.get('last', 0) < info.get('throttle', 0):
                     continue
-                info['last'] = now
-                # 执行常规 callback，同时启动子线程扫描 concurrent callback
-                checker = None
-                logger.info('🔔 bg回调触发: %s', name)
-                self._record_event(f"回调触发: {name} (identifier: {info['idf']})")
+                idf = info['idf']
+                targets = list(idf) if isinstance(idf, (list, tuple)) else [idf]
+                start = len(all_targets)
+                all_targets.extend(targets)
+                offsets.append((start, len(all_targets)))
+                pending.append((name, info, targets))
+
+            # One batch locate call for ALL callback identifiers
+            if pending and all_targets and screenshot is not None:
                 try:
-                    self._in_callback = True
-                    checker = Thread(target=self._concurrent_loop, daemon=True, name="BG-Concurrent")
-                    checker.start()
-                    info['cb']()
-                    logger.info('✅ bg回调完成: %s', name)
-                    self._record_event(f"回调完成: {name}")
+                    boxes = _locate_all(tuple(all_targets), screenshot=screenshot, image_first=True)
                 except Exception:
-                    logger.exception('bg cb error %s', name)
-                    self._record_event(f"回调异常: {name}")
-                finally:
-                    self._in_callback = False
-                    if checker is not None and checker.is_alive():
-                        checker.join(timeout=2)
-                if info.get('once', True):
-                    self.remove(name)
-            # 2. 空闲时也扫描一轮 concurrent callback
-            self._check_concurrent()
+                    boxes = [None] * len(all_targets)
+
+                for (name, info, _targets), (start, end) in zip(pending, offsets):
+                    segment = boxes[start:end]
+                    if not _first(segment):
+                        continue
+                    info['last'] = time.time()
+                    checker = None
+                    logger.info('🔔 bg回调触发: %s', name)
+                    self._record_event(f"回调触发: {name} (identifier: {info['idf']})")
+                    try:
+                        self._in_callback = True
+                        checker = Thread(target=self._concurrent_loop, daemon=True, name="BG-Concurrent")
+                        checker.start()
+                        info['cb']()
+                        logger.info('✅ bg回调完成: %s', name)
+                        self._record_event(f"回调完成: {name}")
+                    except Exception:
+                        logger.exception('bg cb error %s', name)
+                        self._record_event(f"回调异常: {name}")
+                    finally:
+                        self._in_callback = False
+                        if checker is not None and checker.is_alive():
+                            checker.join(timeout=2)
+                    if info.get('once', True):
+                        self.remove(name)
+
+            self._check_concurrent(screenshot=screenshot)
             time.sleep(self._interval)
 
     # ── allow_concurrent 支持 ──
@@ -75,19 +105,51 @@ class BackgroundMonitor(Thread):
             self._check_concurrent()
             time.sleep(self._interval)
 
-    def _check_concurrent(self):
-        """扫描并执行所有 allow_concurrent=True 的 callback（一轮）。"""
-        from AutoScriptor.core.api import ui_T
-        for name, info in list(self._callbacks.items()):
+    def _check_concurrent(self, screenshot=None):
+        """Batch-scan all allow_concurrent=True callbacks in one locate call."""
+        from AutoScriptor.core.api import _locate_all, first as _first
+        import AutoScriptor.core.api as _core_api
+
+        pending: list[tuple[str, dict, list[Target]]] = []
+        all_targets: list[Target] = []
+        offsets: list[tuple[int, int]] = []
+
+        with self._lock:
+            snapshot = list(self._callbacks.items())
+
+        for name, info in snapshot:
             if not info.get('allow_concurrent'):
-                continue
-            idf = info['idf']
-            if not ui_T(idf):
                 continue
             now = time.time()
             if now - info.get('last', 0) < info.get('throttle', 0):
                 continue
-            info['last'] = now
+            idf = info['idf']
+            targets = list(idf) if isinstance(idf, (list, tuple)) else [idf]
+            start = len(all_targets)
+            all_targets.extend(targets)
+            offsets.append((start, len(all_targets)))
+            pending.append((name, info, targets))
+
+        if not pending or not all_targets:
+            return
+
+        if screenshot is None:
+            try:
+                mc = _core_api.mixctrl
+                screenshot = mc.screenshot() if mc is not None else None
+            except Exception:
+                return
+
+        try:
+            boxes = _locate_all(tuple(all_targets), screenshot=screenshot, image_first=True)
+        except Exception:
+            return
+
+        for (name, info, _), (start, end) in zip(pending, offsets):
+            segment = boxes[start:end]
+            if not _first(segment):
+                continue
+            info['last'] = time.time()
             logger.info('🔔 bg并发回调触发: %s', name)
             self._record_event(f"并发回调触发: {name} (identifier: {info['idf']})")
             try:

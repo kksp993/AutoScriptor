@@ -2,7 +2,7 @@ from AutoScriptor.utils.constant import cfg
 
 
 def _is_leaf(node: object) -> bool:
-    return isinstance(node, dict) and ("fn" in node or "on" in node)
+    return isinstance(node, dict) and "on" in node
 
 
 def _print_tree(node: dict, prefix: str = "") -> None:

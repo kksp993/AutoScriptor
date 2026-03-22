@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AutoScriptor</title>
+  <script src="/vendor/tailwind.css"></script>
+  <link href="/vendor/font-awesome.min.css" rel="stylesheet" />
+  <script src="/vendor/vue.global.prod.js"></script>
+  <link rel="stylesheet" href="/vendor/element-plus.css" />
+  <script src="/vendor/element-plus.full.js"></script>
+  <script src="/vendor/ansi_up.min.js"></script>
+  <script>
+    (function(){
+      if (typeof window.AnsiUp === 'undefined') {
+        class SimpleAnsiUp { ansi_to_html(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); } }
+        window.AnsiUp = SimpleAnsiUp;
+      }
+    })();
+  </script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: { primary:'#22c55e', secondary:'#64748b', dark:'#1e293b', light:'#f8fafc' },
+          fontFamily: { sans: ['Inter','system-ui','sans-serif'] },
+        },
+      },
+    };
+  </script>
+  <style type="text/tailwindcss">
+    @layer utilities {
+      .content-auto { content-visibility: auto; }
+      .task-tree-item { @apply py-2.5 px-3.5 hover:bg-primary/10 transition-colors cursor-pointer; }
+      .log-container { @apply bg-dark/5 rounded-lg p-5 overflow-auto text-sm; }
+      .log-line { font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; white-space: pre-wrap; }
+      .stat-card { @apply bg-white rounded-xl shadow-md p-6 flex flex-col items-center justify-center transition-all duration-300 hover:shadow-lg; }
+      .stat-value { @apply text-3xl font-bold; }
+      .stat-label { @apply text-base text-gray-500 mt-1.5; }
+    }
+  </style>
+  <link rel="stylesheet" href="/static/css/style.css?v=11" />
+</head>
+<body class="bg-gray-100 overflow-hidden" style="height:100vh;">
+  <div id="app" class="flex h-screen overflow-hidden">
+
+    <!-- 侧边栏 -->
+    <app-sidebar
+      :active-tab="activeTab"
+      :scheduler-status="schedulerStatus"
+      :character-name="characterName"
+      @navigate="activeTab=$event">
+    </app-sidebar>
+
+    <!-- 右侧主区域 -->
+    <div class="flex flex-col flex-1 min-w-0 overflow-hidden">
+
+      <!-- 顶栏 -->
+      <header class="topbar flex-shrink-0">
+        <span class="topbar-title">{{ pageTitle }}</span>
+        <div class="flex items-center gap-3">
+
+          <!-- 最小化到托盘（仅 Electron 模式显示） -->
+          <button v-if="isElectron"
+                  class="inline-flex items-center justify-center w-7 h-7 rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                  title="最小化到系统托盘"
+                  @click="minimizeToTray">
+            <i class="fa fa-arrow-down text-sm"></i>
+          </button>
+
+          <!-- 档案切换下拉 -->
+          <el-dropdown v-if="profiles.length > 0" trigger="click" @command="switchProfile">
+            <span class="profile-dropdown text-sm font-medium text-gray-600">
+              <i class="fa fa-id-card-o"></i>
+              {{ currentProfile }}
+              <i class="fa fa-caret-down" style="margin-left:3px"></i>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item v-for="p in profiles" :key="p" :command="p"
+                  :class="{ 'font-bold': p === currentProfile }">
+                  <i class="fa fa-check" v-if="p === currentProfile" style="margin-right:6px;color:#22c55e"></i>
+                  {{ p }}
+                  <el-button v-if="p !== 'default'" type="danger" link size="small"
+                    style="margin-left:12px" @click.stop="deleteProfile(p)">
+                    <i class="fa fa-trash-o"></i>
+                  </el-button>
+                </el-dropdown-item>
+                <el-dropdown-item divided :command="'__new__'" @click="profileDialogVisible=true">
+                  <i class="fa fa-plus" style="margin-right:6px"></i>新建档案
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+
+          <span v-if="characterName"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 rounded-full text-sm font-medium">
+            <i class="fa fa-user text-sm"></i>{{ characterName }}
+          </span>
+          <button v-if="!characterName"
+                  class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-700 rounded-full text-sm font-medium hover:bg-amber-100 transition-colors"
+                  @click="verifyAccount">
+            <i class="fa fa-key text-sm"></i>验证账号
+          </button>
+          <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium"
+                :style="{ background: schedulerStatus.color==='green'?'#dcfce7':schedulerStatus.color==='orange'?'#fef3c7':'#fecaca',
+                          color:      schedulerStatus.color==='green'?'#166534':schedulerStatus.color==='orange'?'#92400e':'#991b1b' }">
+            <span class="w-1.5 h-1.5 rounded-full inline-block"
+                  :style="{ background: schedulerStatus.color==='green'?'#22c55e':schedulerStatus.color==='orange'?'#f59e0b':'#ef4444' }"></span>
+            {{ schedulerStatus.label || '未知' }}
+          </span>
+        </div>
+      </header>
+
+      <!-- 内容区 -->
+      <main class="flex-1 overflow-hidden p-5 flex flex-col min-h-0">
+
+        <overview-panel v-if="activeTab==='overview'"
+          :overview-data="overviewData" :character-name="characterName"
+          @verify-account="verifyAccount"></overview-panel>
+
+        <scheduler-panel v-if="activeTab==='scheduler'"
+          :overview-data="overviewData" :logs="logs" :character-name="characterName"
+          :scheduler-status="schedulerStatus"
+          @start-run="startRun" @stop-run="stopRun" @verify-account="verifyAccount"
+          @open-add-account="openAddAccountDialog" @reset-scheduler="resetScheduler"
+          @clear-logs="clearLogs"></scheduler-panel>
+
+        <editor-panel v-if="activeTab==='editor'"></editor-panel>
+
+        <settings-panel v-if="activeTab==='settings'"
+          :filtered-config="filteredConfig"
+          @save-settings="saveSettings"></settings-panel>
+
+        <task-panel v-if="activeTab==='daily' || activeTab==='weekly' || activeTab==='general' || activeTab==='event'"
+          :current-tasks="currentTasks" :logs="logs" :character-name="characterName"
+          :scheduler-status="schedulerStatus"
+          @edit-task="openEditModal" @expanded-change="setActiveGroup"
+          @start-run="startRun" @stop-run="stopRun" @verify-account="verifyAccount"
+          @open-add-account="openAddAccountDialog" @save-tasks="saveTasks"
+          @clear-logs="clearLogs" @refresh-config="refreshConfig" @reset-scheduler="resetScheduler"
+          @run-task="runSingleTask"></task-panel>
+
+      </main>
+    </div>
+
+    <!-- 编辑任务对话框 -->
+    <teleport to="body">
+      <el-dialog v-model="editModalVisible" :title="'编辑任务: '+editTaskPath" width="600px" destroy-on-close>
+        <el-form :model="editTaskData" label-width="100px">
+          <el-form-item label="启用状态"><el-switch v-model="editTaskData.on"></el-switch></el-form-item>
+          <template v-for="(val, key) in editTaskData.params" :key="key">
+            <el-form-item :label="paramLabel(key)" v-if="paramEnumOptions[key] && !enumParamIsMultiple(key)">
+              <el-select v-model="editTaskData.params[key]" placeholder="请选择">
+                <el-option v-for="o in paramEnumOptions[key]" :key="o.value || o" :label="o.label || o" :value="o.value || o"></el-option>
+              </el-select>
+            </el-form-item>
+            <el-form-item :label="paramLabel(key)" v-else-if="paramEnumOptions[key] && enumParamIsMultiple(key)">
+              <el-select v-model="editTaskData.params[key]" multiple placeholder="请选择">
+                <el-option v-for="o in paramEnumOptions[key]" :key="o.value || o" :label="o.label || o" :value="o.value || o"></el-option>
+              </el-select>
+            </el-form-item>
+            <el-form-item :label="paramLabel(key)" v-else-if="typeof val==='boolean'"><el-switch v-model="editTaskData.params[key]"></el-switch></el-form-item>
+            <el-form-item :label="paramLabel(key)" v-else-if="typeof val==='number'"><el-input-number v-model="editTaskData.params[key]" :min="0"></el-input-number></el-form-item>
+            <el-form-item :label="paramLabel(key)" v-else-if="typeof val==='string'"><el-input v-model="editTaskData.params[key]"></el-input></el-form-item>
+            <el-form-item :label="paramLabel(key)" v-else-if="Array.isArray(val)">
+              <div class="w-full space-y-2">
+                <div v-for="(item, idx) in editTaskData.params[key]" :key="idx" class="flex items-center gap-2">
+                  <el-input-number v-if="typeof item==='number'" v-model="editTaskData.params[key][idx]"></el-input-number>
+                  <el-switch v-else-if="typeof item==='boolean'" v-model="editTaskData.params[key][idx]"></el-switch>
+                  <el-input v-else v-model="editTaskData.params[key][idx]"></el-input>
+                  <el-button type="danger" size="small" @click="removeListItem(key, idx)">删除</el-button>
+                </div>
+                <el-button size="small" @click="addListItem(key)">新增一项</el-button>
+              </div>
+            </el-form-item>
+          </template>
+        </el-form>
+        <template #footer>
+          <el-button @click="editModalVisible=false">取 消</el-button>
+          <el-button type="primary" @click="saveTask">保 存</el-button>
+        </template>
+      </el-dialog>
+    </teleport>
+
+    <!-- 新增账号对话框 -->
+    <teleport to="body">
+      <el-dialog v-model="addDialogVisible" title="添加账号" width="500px">
+        <el-form :model="addForm" label-width="90px">
+          <el-form-item label="账号"><el-input v-model="addForm.account" placeholder="请输入账号"></el-input></el-form-item>
+          <el-form-item label="密码"><el-input v-model="addForm.password" type="password" placeholder="请输入密码"></el-input></el-form-item>
+          <el-form-item label="角色名"><el-input v-model="addForm.character_name" placeholder="请输入角色名/ID"></el-input></el-form-item>
+          <el-form-item label="安全密码"><el-input v-model="addForm.security_key" type="password" placeholder="用于加密保存"></el-input></el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="addDialogVisible=false">取 消</el-button>
+          <el-button type="primary" @click="submitAddAccount">确 定</el-button>
+        </template>
+      </el-dialog>
+    </teleport>
+
+    <!-- 新建档案对话框 -->
+    <teleport to="body">
+      <el-dialog v-model="profileDialogVisible" title="新建档案" width="500px">
+        <el-form :model="newProfileForm" label-width="90px">
+          <el-form-item label="档案名称">
+            <el-input v-model="newProfileForm.name" placeholder="如: 小号、大号"></el-input>
+          </el-form-item>
+          <el-form-item label="账号">
+            <el-input v-model="newProfileForm.account" placeholder="游戏账号"></el-input>
+          </el-form-item>
+          <el-form-item label="密码">
+            <el-input v-model="newProfileForm.password" type="password" placeholder="游戏密码" show-password></el-input>
+          </el-form-item>
+          <el-form-item label="角色名">
+            <el-input v-model="newProfileForm.character_name" placeholder="角色名/ID"></el-input>
+          </el-form-item>
+          <el-form-item label="安全密码">
+            <el-input v-model="newProfileForm.security_key" type="password" placeholder="用于加密保存" show-password></el-input>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="profileDialogVisible=false">取 消</el-button>
+          <el-button type="primary" @click="addProfile">创 建</el-button>
+        </template>
+      </el-dialog>
+    </teleport>
+
+    <!-- 密码登录对话框 -->
+    <teleport to="body">
+      <el-dialog v-model="authRequired" title="WebUI 密码保护" width="380px"
+                 :close-on-click-modal="false" :close-on-press-escape="false" :show-close="false">
+        <div style="text-align:center;margin-bottom:16px">
+          <i class="fa fa-lock" style="font-size:36px;color:#22c55e"></i>
+          <p style="margin-top:8px;color:#64748b;font-size:14px">请输入访问密码</p>
+        </div>
+        <el-input v-model="loginPassword" type="password" placeholder="输入密码"
+                  show-password size="large"
+                  @keyup.enter="submitLogin"
+                  style="margin-bottom:16px"></el-input>
+        <div style="text-align:center">
+          <el-button type="primary" size="large" style="width:100%" @click="submitLogin">登 录</el-button>
+        </div>
+      </el-dialog>
+    </teleport>
+
+  </div>
+
+  <!-- Vue 组件 -->
+  <script src="/static/js/components/AppSidebar.js?v=10"></script>
+  <script src="/static/js/components/TaskTree.js?v=8"></script>
+  <script src="/static/js/components/Overview.js?v=8"></script>
+  <script src="/static/js/components/SchedulerPanel.js?v=9"></script>
+  <script src="/static/js/components/TaskPanel.js?v=9"></script>
+  <script src="/static/js/components/Settings.js?v=8"></script>
+  <script src="/static/js/components/editor/EditorCanvas.js?v=8"></script>
+  <script src="/static/js/components/editor/EditorControls.js?v=9"></script>
+  <script src="/static/js/components/editor/EditorPanel.js?v=9"></script>
+  <script src="/static/js/app.js?v=9"></script>
+</body>
+</html>

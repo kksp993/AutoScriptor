@@ -3,14 +3,12 @@ from enum import Enum
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 
 class Method(Enum):
-    """消费点券的方法"""
-    # 符印之匙
-    YAOSHI = "符印之匙"
-    # 唤灵之心
-    QILING = "唤灵之心"
+    """消费点券的完成方式（WebUI 下拉展示为 value，配置中仍保存成员名）"""
+    YAOSHI = "购买符印之匙"
+    QILING = "购买唤灵之心"
 
 @register_task
 def task(method:Method=Method.YAOSHI):

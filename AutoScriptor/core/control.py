@@ -1,5 +1,5 @@
 import time
-from logzero import logger
+from AutoScriptor.utils.logger import logger
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import NemuIpc
 from AutoScriptor.recognition.rec import locate_on_screen

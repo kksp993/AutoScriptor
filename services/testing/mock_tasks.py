@@ -8,7 +8,8 @@ Mock 任务函数
 import time
 import enum
 import random
-from logzero import logger
+from AutoScriptor.utils.logger import logger
+from AutoScriptor.utils.cancel import cancellable_sleep
 
 
 # ── 模拟异常类（与真实异常接口一致） ──
@@ -46,7 +47,7 @@ def task_instant_success():
 
 def task_slow_success():
     """耗时任务（模拟 0.2s 执行时间）。"""
-    time.sleep(0.2)
+    cancellable_sleep(0.2)
     logger.info("    [mock] 慢任务执行完毕")
 
 
@@ -103,7 +104,7 @@ def task_keyboard_interrupt():
 def task_cancel_aware():
     """模拟一个会检查取消标记的长任务。"""
     for i in range(5):
-        time.sleep(0.05)
+        cancellable_sleep(0.05)
         logger.info(f"    [mock] 步骤 {i+1}/5")
     logger.info("    [mock] 取消感知任务完成")
 
@@ -114,7 +115,7 @@ def reset_counters():
         task_retry_then_succeed._counter = 0
 
 
-# ── 任务注册表 ──
+# ── 任务注册表（按函数名索引） ──
 
 MOCK_TASK_REGISTRY = {
     "task_instant_success": task_instant_success,
@@ -127,4 +128,25 @@ MOCK_TASK_REGISTRY = {
     "task_with_params": task_with_params,
     "task_keyboard_interrupt": task_keyboard_interrupt,
     "task_cancel_aware": task_cancel_aware,
+}
+
+# ── TaskRegistry 条目（按任务路径索引，供 TestHarness 注入） ──
+
+MOCK_REGISTRY_ENTRIES = {
+    "每日任务/测试村庄/立即成功": {"fn": task_instant_success, "order": 1},
+    "每日任务/测试村庄/慢速成功": {"fn": task_slow_success, "order": 2},
+    "每日任务/测试村庄/总是失败": {"fn": task_always_fail, "order": 3},
+    "每日任务/测试村庄/重试后成功": {"fn": task_retry_then_succeed, "order": 4},
+    "每日任务/测试村庄/重试耗尽": {"fn": task_retry_exhaust, "order": 5},
+    "每日任务/测试村庄/人工接管": {"fn": task_human_takeover, "order": 6},
+    "每日任务/测试参数/带参数任务": {
+        "fn": task_with_params,
+        "order": 7,
+        "param_meta": {
+            "difficulty": "services.testing.mock_tasks.MockDifficulty",
+            "region": "services.testing.mock_tasks.MockRegion",
+        },
+    },
+    "一般任务/一次性任务": {"fn": task_instant_success, "order": 8},
+    "每周任务/随机结果": {"fn": task_random_outcome, "order": 9},
 }

@@ -7,30 +7,30 @@ import getpass
 import cv2
 from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
 from AutoScriptor.core.control import MixControl
-from AutoScriptor.core.targets import Target, B,I,T
-from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget
+from AutoScriptor.core.targets import Target, B,I,T,V
+from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget,VLMTarget
+from AutoScriptor.core.locate_dispatch import has_handler, dispatch_locate
 from AutoScriptor.recognition.ocr_rec import ocr_for_box
 from AutoScriptor.recognition.rec import get_box_color
 from AutoScriptor.utils.box import Box, b2p
 from AutoScriptor.utils.logger import log_flush, setup_task_aware_logging
 from AutoScriptor.utils.tracer import save_debug_screenshot
-from logzero import logger,logfile
+from AutoScriptor.utils.logger import logger, setup_logfile
 from AutoScriptor.utils.constant import cfg
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
 from AutoScriptor.utils.edit_img import launch_editor
+from AutoScriptor.utils.cancel import check_cancel_raise, cancellable_sleep
 
 def ensure_all_environment_ready():
     # 初始化编排器
     logger.info("编排器初始化开始...")
-    # 初始化 logzero 全量日志文件（UTF-8 编码）
     import os
     from datetime import datetime
     log_dir = os.path.join(os.getcwd(), 'logs', 'log')
     os.makedirs(log_dir, exist_ok=True)
     timestamp = datetime.now().strftime('%y%m%d_%H%M%S')
-    # 指定 encoding='utf-8' 确保中文正常写入
-    logfile(os.path.join(log_dir, f"[{timestamp}].log"), encoding='utf-8')
-    setup_task_aware_logging()  # logfile 之后应用任务感知格式
+    setup_logfile(os.path.join(log_dir, f"[{timestamp}].log"))
+    setup_task_aware_logging()
     selected_emulator_index = cfg["emulator"]["index"]
     adb_addr = cfg["emulator"]["adb_addr"]
     app_to_start = cfg["app"]["app_to_start"]
@@ -86,8 +86,38 @@ def ensure_app_running(selected_emulator_index, adb_addr, app_to_start):
     return mixctrl, mumu
 
 
-selected_emulator_index, adb_addr, app_to_start = ensure_all_environment_ready()
-mixctrl, mumu = ensure_app_running(selected_emulator_index, adb_addr, app_to_start)
+mixctrl = None
+mumu = None
+_box_click_trace: list[tuple[int, int]] = []
+
+
+def _diag_info(**extra) -> dict:
+    """构建诊断信息 dict，供 save_debug_screenshot 的 extra_info 参数使用。
+    自动附加 click mode 与 screenshot source，在两者不一致时信息条会红色高亮。"""
+    info = {}
+    if mixctrl is not None and hasattr(mixctrl, 'mode'):
+        info["click"] = mixctrl.mode
+        info["src"] = "nemu"
+    info.update(extra)
+    return info
+
+
+def init():
+    """Explicitly initialize environment and device controls.
+
+    Must be called once before any API function (click, locate, ...) is used.
+    """
+    global mixctrl, mumu
+    idx, addr, app = ensure_all_environment_ready()
+    mixctrl, mumu = ensure_app_running(idx, addr, app)
+    # Propagate live references to package-level namespaces so that
+    # ``from AutoScriptor import mixctrl`` picks up the real object
+    # when the import happens *after* init().
+    import AutoScriptor as _pkg
+    import AutoScriptor.core as _core_pkg
+    _pkg.mixctrl = mixctrl
+    _pkg.mumu = mumu
+    _core_pkg.mixctrl = mixctrl
 
 
 def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->int:
@@ -97,8 +127,8 @@ def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->in
     return index(boxes)
 
 
-def ui_T(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->bool:
-    boxes = locate(target, timeout, assure_stable=False)
+def ui_T(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, *, screenshot=None)->bool:
+    boxes = locate(target, timeout, assure_stable=False, screenshot=screenshot)
     if isinstance(target, list):
         return full(boxes)
     else:
@@ -160,22 +190,67 @@ def switch_base(base: str):
         raise ValueError(f"Invalid base: {base}")
 
 
-def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=None)->list[list[Box]]:
-    # log_flush(f"locate {target}")
+def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=None, image_first: bool = False)->list[list[Box]]:
+    """Locate all targets on the current screen.
+
+    When *image_first* is True, template-matched (ImageTarget) targets are
+    resolved before OCR (TextTarget) ones.  If any image target already yields
+    a match, text targets are skipped — significantly reducing latency for
+    "any-match" (tuple) queries that mix I() and T() targets.
+    """
     def genertate_source(target):
         if isinstance(target, ImageTarget|TextTarget):
             return target.get_source(),target.ui.box,target.ui.color
         elif isinstance(target, BoxTarget):
-            # 支持 BoxTarget 带 color 时的颜色筛选
             return target.box, target.box, target.color
         else:
             raise ValueError(f"Unsupported target type: {type(target)}")
-    tgt_triples = [genertate_source(tgt) for tgt in target]
-    boxes = mixctrl.locate(tgt_triples, screenshot=screenshot)
-    # log_flush(f"locate {target} boxes: {boxes}")
+
+    dispatched: dict[int, Target] = {}
+    batch: list[tuple[int, Target]] = []
+    for i, tgt in enumerate(target):
+        if has_handler(type(tgt)):
+            dispatched[i] = tgt
+        else:
+            batch.append((i, tgt))
+
+    boxes: list[list[Box] | None] = [None] * len(target)
+
+    if batch:
+        if image_first:
+            img_items = [(idx, t) for idx, t in batch if isinstance(t, ImageTarget)]
+            rest_items = [(idx, t) for idx, t in batch if not isinstance(t, ImageTarget)]
+
+            if img_items:
+                img_triples = [genertate_source(t) for _, t in img_items]
+                frame = screenshot if screenshot is not None else mixctrl.screenshot()
+                img_boxes = mixctrl.locate(img_triples, screenshot=frame)
+                for j, (orig_idx, _) in enumerate(img_items):
+                    boxes[orig_idx] = img_boxes[j]
+                if first(boxes):
+                    return boxes
+                screenshot = frame
+
+            if rest_items:
+                rest_triples = [genertate_source(t) for _, t in rest_items]
+                rest_boxes = mixctrl.locate(rest_triples, screenshot=screenshot)
+                for j, (orig_idx, _) in enumerate(rest_items):
+                    boxes[orig_idx] = rest_boxes[j]
+        else:
+            ordered_targets = [t for _, t in batch]
+            tgt_triples = [genertate_source(t) for t in ordered_targets]
+            batch_boxes = mixctrl.locate(tgt_triples, screenshot=screenshot)
+            for j, (orig_idx, _) in enumerate(batch):
+                boxes[orig_idx] = batch_boxes[j]
+
+    if dispatched:
+        frame = screenshot if screenshot is not None else mixctrl.screenshot()
+        for idx, tgt in dispatched.items():
+            boxes[idx] = dispatch_locate(tgt, frame)
+
     return boxes
 
-def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, assure_stable: bool = True, is_simplify: bool = True)->Box|None|list[Box]:
+def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, assure_stable: bool = True, is_simplify: bool = True, screenshot=None)->Box|None|list[Box]:
     """
     在屏幕上查找文本或图片目标，返回第一个匹配的 Box 或 False
     支持多目标等待：列表需全满足，元组任一满足
@@ -185,21 +260,33 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
         assure_stable: 是否保证稳定,如果为True，则每次定位都会保证稳定，直到找到目标或超时
     """
     _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
+    check_cancel_raise()
     first_attempt = True
+    _stable_retry = False
     t = time.time()
     # 元组任一满足
     if isinstance(target, tuple):
         logger.info(f"Locate: {target}")
-        while first_attempt or (delta := time.time() - t) < timeout:
+        # Use image-first short circuit when tuple contains both I() and T() targets
+        _has_img = any(isinstance(t, ImageTarget) for t in target)
+        _has_txt = any(isinstance(t, TextTarget) for t in target)
+        _img_first = _has_img and _has_txt
+        while first_attempt or _stable_retry or (delta := time.time() - t) < timeout:
+            check_cancel_raise()
             first_attempt = False
-            boxes = _locate_all(target)
-            if assure_stable and not stable(boxes, _locate_all(target)): continue
+            was_retry = _stable_retry
+            _stable_retry = False
+            boxes = _locate_all(target, screenshot=screenshot, image_first=_img_first)
+            if assure_stable and not stable(boxes, _locate_all(target, image_first=_img_first)):
+                if first(boxes) and not was_retry:
+                    _stable_retry = True
+                continue
             if first(boxes): return first(boxes) if is_simplify else boxes  # 确保返回单个Box或None
             # if delta > 5 and cfg["llm"]["use_agent"]:
         # 超时未找到目标时，保存搜索失败截图
         if timeout >= 5:
             try:
-                save_debug_screenshot(target, mixctrl.screenshot(), prefix="s")
+                save_debug_screenshot(target, mixctrl.screenshot(), prefix="s", extra_info=_diag_info())
             except Exception:
                 pass
         return None if is_simplify else boxes
@@ -207,33 +294,47 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
     # 列表需全满足
     if isinstance(target, list):
         logger.info(f"Locate: {target}")
-        while first_attempt or (delta := time.time() - t) < timeout:
+        _stable_retry = False
+        while first_attempt or _stable_retry or (delta := time.time() - t) < timeout:
+            check_cancel_raise()
             first_attempt = False
-            boxes = _locate_all(target)
-            if assure_stable and not stable(boxes, _locate_all(target)): continue
+            was_retry = _stable_retry
+            _stable_retry = False
+            boxes = _locate_all(target, screenshot=screenshot)
+            if assure_stable and not stable(boxes, _locate_all(target)):
+                if full(boxes) and not was_retry:
+                    _stable_retry = True
+                continue
             if full(boxes): return simple(boxes) if is_simplify else boxes
         # 超时未全部找到目标时，保存搜索失败截图
         if timeout >= 5:
             try:
-                save_debug_screenshot(target, mixctrl.screenshot(), prefix="s")
+                save_debug_screenshot(target, mixctrl.screenshot(), prefix="s", extra_info=_diag_info())
             except Exception:
                 pass
         return boxes if not is_simplify else simple(boxes)
     
     # 单个Target对象，转换为元组处理
     if isinstance(target, Target):
-        return locate((target,), timeout, assure_stable=assure_stable)
+        return locate((target,), timeout, assure_stable=assure_stable, screenshot=screenshot)
     
-def wait_for_appear(target: Target|tuple[Target, ...], timeout: float=30)->Target|None:
-    return locate(target, timeout, assure_stable=False)
+def wait_for_appear(target: Target|tuple[Target, ...], timeout: float=30) -> Box:
+    """等待目标出现并返回 Box。超时抛 TimeoutError（与 wait_for_disappear 对称）。"""
+    if not isinstance(target, (Target, tuple, list)):
+        raise TypeError(f"wait_for_appear 期望 Target/tuple/list，收到 {type(target).__name__!r}: {target!r}")
+    result = locate(target, timeout, assure_stable=False)
+    if result is None:
+        raise TimeoutError(f"wait_for_appear({target}) 超时 ({timeout}s)")
+    return result
 
 def wait_for_disappear(target: Target|tuple[Target, ...], timeout: float=30)->bool:
-    wait_for_appear(target, timeout=5)
+    locate(target, timeout=5, assure_stable=False)
     t = time.time()
     while locate(target, timeout=0, assure_stable=False) is not None:
+        check_cancel_raise()
         if time.time() - t > timeout:
             raise RuntimeError(f"Wait for disappear {target} timeout, for failed to locate target in {timeout} seconds")
-        time.sleep(0.5)
+        cancellable_sleep(0.5)
     return True
 
 def click(
@@ -316,13 +417,20 @@ def click(
         # 点击直到条件满足
         click(T("确定"), until=lambda: ui_F(T("确定")))
     """
+    check_cancel_raise()
     if until:
         t = time.time()
-        # 如果until函数返回True，则必须至少要点一次，确保能够定位到目标，否则直接跳过了while循环，容易出错。
         click(target, long_click_duration_s, timeout=timeout, if_exist=False, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize,assure_stable=assure_stable)
         while not until():
+            check_cancel_raise()
             click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize,assure_stable=assure_stable)
             if time.time() - t > timeout:
+                try:
+                    save_debug_screenshot(
+                        target, mixctrl.screenshot(), prefix="s",
+                        extra_info=_diag_info(until=until.__name__, elapsed=f"{time.time()-t:.1f}s"))
+                except Exception:
+                    pass
                 raise RuntimeError(f"Click {target} until {until.__name__} failed, for until function not satisfied in {timeout} seconds")
         return True
     if isinstance(target, list): target = tuple(target)
@@ -331,22 +439,29 @@ def click(
         box = locate(target, timeout if not if_exist else max(2, timeout) if timeout != 30 else 2, assure_stable)    # 至少2s
     if if_exist and first(box) is None: return False
     if first(box) is None:
-        # 保存失败时的即时截图，便于定位问题
         try:
-            save_debug_screenshot(target, mixctrl.screenshot(), prefix="s")
+            save_debug_screenshot(target, mixctrl.screenshot(), prefix="s", extra_info=_diag_info())
         except Exception:
             pass
         raise RuntimeError(f"Click {target} failed, for failed to locate target in {timeout} seconds")
-    time.sleep(delay)
+    cancellable_sleep(delay)
+    pre_click_frame = mixctrl.screenshot() if save_screenshot and not isinstance(target, BoxTarget) else None
+    pt = None
     for i in range(repeat):
         pt=b2p(box, offset, resize)
         if long_click_duration_s:
             mixctrl.long_click(*pt, duration=long_click_duration_s)
         else:
             mixctrl.click(*pt)
-        time.sleep(interval)
-    if not isinstance(target, BoxTarget) and save_screenshot:
-        save_debug_screenshot(target, mixctrl.screenshot(), box, pt, prefix="c")
+        cancellable_sleep(interval)
+    if pt is None:
+        return True
+    if isinstance(target, BoxTarget):
+        _box_click_trace.append(pt)
+    elif pre_click_frame is not None:
+        prior = list(_box_click_trace)
+        _box_click_trace.clear()
+        save_debug_screenshot(target, pre_click_frame, box, pt, prefix="c", prior_clicks=prior)
     return True  
 
 
@@ -359,30 +474,48 @@ def swipe(
         ensure_stable_after_swipe: bool = True,
     ):
     _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
+    check_cancel_raise()
     start_box = locate(start_target, 3) if not isinstance(start_target, BoxTarget) else start_target.box
     end_box = locate(end_target, 3, assure_stable=False) if not isinstance(end_target, BoxTarget) else end_target.box
     if start_box is None or end_box is None: raise RuntimeError(f"Swipe {start_target} to {end_target} failed, for failed to locate target")
-    time.sleep(delay)
+    cancellable_sleep(delay)
     mixctrl.swipe(*b2p(start_box), *b2p(end_box), duration_s)
-    if ensure_stable_after_swipe: time.sleep(duration_s)
+    if ensure_stable_after_swipe:
+        cancellable_sleep(duration_s)
     return True
 
 def input(text: str, target_field: Target|tuple[Target, ...] = None):
     _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
+    check_cancel_raise()
     if target_field:
         click(target_field)
-        time.sleep(0.5)
+        cancellable_sleep(0.5)
     mixctrl.input_text(text)
 
 def key_event(key_code: int):
     logger.info("Key event: {}".format(next((attr for attr in dir(AndroidKey) if attr.startswith("KEYCODE_") and getattr(AndroidKey, attr) == key_code), key_code)))
     mixctrl.key_event(key_code)
 
-def extract_info(target: BoxTarget, post_process: callable = None, ensure_not_empty: bool = True, save_screenshot: bool = True)->str|None:
+def extract_info(
+    target: BoxTarget,
+    post_process: callable = None,
+    ensure_not_empty: bool = True,
+    save_screenshot: bool = True,
+    *,
+    ocr_ttl: float = 0.5,
+    max_retries: int = 10,
+)->str|None:
     res = None
-    for _ in range(40):
+    last_ocr_at: float | None = None
+    for _ in range(max_retries):
+        check_cancel_raise()
+        if last_ocr_at is not None:
+            wait = ocr_ttl - (time.monotonic() - last_ocr_at)
+            if wait > 0:
+                cancellable_sleep(wait)
         screenshot = mixctrl.screenshot()
-        res = ocr_for_box(screenshot, target.box)
+        res = ocr_for_box(screenshot, target.box, ttl=ocr_ttl)
+        last_ocr_at = time.monotonic()
         logger.debug(f"Extract info {target} raw_res: {res}")
         if post_process:
             try:
@@ -430,7 +563,7 @@ def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), re
     return colors
 
 def sleep(seconds: float):
-    time.sleep(seconds)
+    cancellable_sleep(seconds)
 
 def edit_img():
     launch_editor(mixctrl,is_screenshot=True) 
@@ -461,10 +594,11 @@ def dismiss_floating_window(max_retries: int = 3, debug: bool = False) -> bool:
     from AutoScriptor.recognition.floating_window import detect_floating_window as _detect
 
     for attempt in range(max_retries):
+        check_cancel_raise()
         screenshot = mixctrl.screenshot()
         result = _detect(screenshot, debug=debug)
         if not result["found"]:
-            time.sleep(0.3)
+            cancellable_sleep(0.3)
             continue
 
         logger.info(f"🔍 检测到悬浮窗: {result['edge']}边 {result['box']} (第{attempt+1}次)")
@@ -472,9 +606,9 @@ def dismiss_floating_window(max_retries: int = 3, debug: bool = False) -> bool:
         # 从悬浮窗位置滑到屏幕中央，触发悬浮窗设置面板
         cx, cy = result["center"]
         swipe(B(cx, cy, 10, 10), B(640, 650, 10, 10), duration_s=1)
-        time.sleep(1)
+        cancellable_sleep(1)
         click(B(740, 555, 10, 10))
-        time.sleep(0.5)
+        cancellable_sleep(0.5)
 
         verify = _detect(mixctrl.screenshot(), debug=debug)
         if not verify["found"]:
