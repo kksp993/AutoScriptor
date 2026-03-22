@@ -2,10 +2,21 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-// Expose only what the renderer pages need
 contextBridge.exposeInMainWorld('electron', {
+  // Loading page APIs
   onLog:       (cb) => ipcRenderer.on('log',    (_e, msg)    => cb(msg)),
   onStatus:    (cb) => ipcRenderer.on('status', (_e, status) => cb(status)),
-  windowTray:  () => ipcRenderer.send('window-tray'),
-  windowClose: () => ipcRenderer.send('window-close'),
+
+  // Window controls
+  windowTray:     () => ipcRenderer.send('window-tray'),
+  windowMinimize: () => ipcRenderer.send('window-minimize'),
+  windowClose:    () => ipcRenderer.send('window-close'),
+
+  // Installer APIs
+  installer: {
+    getProjectRoot: () => ipcRenderer.invoke('installer:get-project-root'),
+    startInstall:   (config) => ipcRenderer.send('installer:start', config),
+    onProgress:     (cb) => ipcRenderer.on('installer:progress', (_e, data) => cb(data)),
+    launch:         () => ipcRenderer.send('installer:launch'),
+  },
 });

@@ -43,7 +43,7 @@ class TestConfigTemplate(unittest.TestCase):
         path = ROOT / "config template.json"
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        for section in ("deploy", "notify", "update", "remote_access", "profiles"):
+        for section in ("deploy", "notify", "update", "remote_access", "current_profile"):
             self.assertIn(section, data, f"缺少 config 段: {section}")
 
     def test_deploy_fields(self):
@@ -54,17 +54,12 @@ class TestConfigTemplate(unittest.TestCase):
         for key in ("theme", "password", "ssl_key", "ssl_cert", "language", "cdn"):
             self.assertIn(key, deploy, f"deploy 缺少字段: {key}")
 
-    def test_profiles_structure(self):
+    def test_current_profile_field(self):
         path = ROOT / "config template.json"
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        profiles = data["profiles"]
-        self.assertIn("current", profiles)
-        self.assertIn("list", profiles)
-        self.assertIn("default", profiles["list"])
-        default = profiles["list"]["default"]
-        for key in ("account", "password", "character_name", "character_index"):
-            self.assertIn(key, default)
+        self.assertIn("current_profile", data)
+        self.assertEqual(data["current_profile"], "default")
 
     def test_post_execution_is_lowercase(self):
         path = ROOT / "config template.json"
@@ -79,114 +74,140 @@ class TestConfigTemplate(unittest.TestCase):
 # ═══════════════════════════════════════════════
 
 class TestAutoConfigProfiles(unittest.TestCase):
-    """测试 constant.py 的多档案 API（跳过 load_config 的加密依赖）"""
+    """测试文件级多档案管理（跳过 load_config 的加密依赖）"""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.config_path = os.path.join(self.tmpdir, "config.json")
+        self._write_json(self.config_path, {
+            "current_profile": "default",
+            "encryption": {},
+            "game": {},
+            "tasks": {},
+        })
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_json(self, path, data):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+
+    def _read_json(self, path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
 
     def _make_config(self):
-        """构造一个独立的 AutoConfig 实例（绕过 __init__ 中的 load_config 和导入链）"""
-        tmpdir = tempfile.mkdtemp()
-        config_path = os.path.join(tmpdir, "config.json")
+        """构造一个可测试的配置对象，绑定文件级档案方法"""
+        import types, glob, shutil, copy
 
         class _TestConfig:
-            CONFIG_PATH = config_path
-            _config = {
-                "profiles": {
-                    "current": "default",
-                    "list": {
-                        "default": {"account": "a1", "password": "p1", "character_name": "c1", "character_index": 0},
-                    }
-                },
-                "game": {},
-            }
-
+            CONFIG_PATH = self.config_path
+            _config = self._read_json(self.config_path)
             def save_config(self):
+                import copy as cp
+                safe = cp.deepcopy(self._config)
+                for key in ("game", "year", "month", "day", "weekday", "profiles"):
+                    safe.pop(key, None)
                 with open(self.CONFIG_PATH, "w", encoding="utf-8") as f:
-                    json.dump(self._config, f, ensure_ascii=False, indent=4)
+                    json.dump(safe, f, ensure_ascii=False, indent=4)
+            def load_config(self, pwd=""):
+                with open(self.CONFIG_PATH, "r", encoding="utf-8") as f:
+                    self._config = json.load(f)
+                self._config.setdefault("game", {})
+            def _clean_tasks_for_saving(self, data):
+                if isinstance(data, dict):
+                    data.pop("fn", None)
+                    data.pop("order", None)
+                    for v in data.values():
+                        self._clean_tasks_for_saving(v)
 
-        # 动态注入 AutoConfig 的档案方法
-        sys.path.insert(0, str(ROOT))
-        import importlib
-        spec = importlib.util.spec_from_file_location(
-            "constant_src", str(ROOT / "AutoScriptor" / "utils" / "constant.py"))
-        mod_src = spec.loader.get_source("constant_src")
-        # 提取方法体
         cfg = _TestConfig()
-        # 手动绑定方法
-        import types
-        def list_profiles(self) -> list:
-            profiles = self._config.get("profiles", {})
-            return list(profiles.get("list", {}).keys())
-        def current_profile(self) -> str:
-            return self._config.get("profiles", {}).get("current", "default")
-        def switch_profile(self, name: str):
-            profiles = self._config.get("profiles", {}).get("list", {})
-            if name not in profiles:
-                raise KeyError(f"档案 '{name}' 不存在")
-            profile = profiles[name]
-            if "game" not in self._config:
-                self._config["game"] = {}
-            for k in ("account", "password", "character_name", "character_index"):
-                if k in profile:
-                    self._config["game"][k] = profile[k]
-            self._config["profiles"]["current"] = name
+
+        def _profile_path(self, name):
+            return os.path.join(os.path.dirname(self.CONFIG_PATH), f"config_{name}.json")
+        def list_profiles(self):
+            pattern = os.path.join(os.path.dirname(self.CONFIG_PATH), "config_*.json")
+            return sorted(os.path.basename(f)[7:-5] for f in glob.glob(pattern) if os.path.basename(f)[7:-5])
+        def current_profile(self):
+            return self._config.get("current_profile", "default")
+        def switch_profile(self, target, security_key=""):
+            tp = self._profile_path(target)
+            if not os.path.exists(tp):
+                raise KeyError(f"档案 '{target}' 不存在")
+            current = self.current_profile()
             self.save_config()
-        def add_profile(self, name: str, data: dict):
-            if "profiles" not in self._config:
-                self._config["profiles"] = {"current": "default", "list": {}}
-            self._config["profiles"]["list"][name] = data
+            shutil.copy2(self.CONFIG_PATH, self._profile_path(current))
+            shutil.copy2(tp, self.CONFIG_PATH)
+            self.load_config(security_key)
+            self._config["current_profile"] = target
             self.save_config()
-        def delete_profile(self, name: str):
-            profiles = self._config.get("profiles", {}).get("list", {})
-            if name in profiles:
-                del profiles[name]
-                if self._config.get("profiles", {}).get("current") == name:
-                    self._config["profiles"]["current"] = next(iter(profiles), "default")
-                self.save_config()
-        cfg.list_profiles = types.MethodType(list_profiles, cfg)
-        cfg.current_profile = types.MethodType(current_profile, cfg)
-        cfg.switch_profile = types.MethodType(switch_profile, cfg)
-        cfg.add_profile = types.MethodType(add_profile, cfg)
-        cfg.delete_profile = types.MethodType(delete_profile, cfg)
+        def add_profile(self, name, account="", password="", character_name="", security_key=""):
+            safe = copy.deepcopy(self._config)
+            for k in ("game", "year", "month", "day", "weekday", "profiles"):
+                safe.pop(k, None)
+            safe["encryption"] = {"test_account": account, "test_password": password}
+            safe["current_profile"] = name
+            with open(self._profile_path(name), "w", encoding="utf-8") as f:
+                json.dump(safe, f, ensure_ascii=False, indent=4)
+        def delete_profile(self, name):
+            if name == self.current_profile():
+                raise ValueError("不能删除当前正在使用的档案")
+            tp = self._profile_path(name)
+            if os.path.exists(tp):
+                os.remove(tp)
+
+        for fn in (_profile_path, list_profiles, current_profile, switch_profile, add_profile, delete_profile):
+            setattr(cfg, fn.__name__, types.MethodType(fn, cfg))
         return cfg
 
-    def test_list_profiles(self):
+    def test_list_profiles_empty(self):
         cfg = self._make_config()
-        self.assertEqual(cfg.list_profiles(), ["default"])
+        self.assertEqual(cfg.list_profiles(), [])
 
     def test_current_profile(self):
         cfg = self._make_config()
         self.assertEqual(cfg.current_profile(), "default")
 
-    def test_add_and_list(self):
+    def test_add_creates_file(self):
         cfg = self._make_config()
-        cfg.add_profile("alt", {"account": "a2", "password": "p2", "character_name": "c2", "character_index": 1})
+        cfg.add_profile("alt", account="a2", password="p2", character_name="c2")
+        self.assertTrue(os.path.exists(os.path.join(self.tmpdir, "config_alt.json")))
         self.assertIn("alt", cfg.list_profiles())
-        self.assertEqual(len(cfg.list_profiles()), 2)
 
-    def test_switch_profile_copies_to_game(self):
+    def test_add_and_list_multiple(self):
         cfg = self._make_config()
-        cfg.add_profile("alt", {"account": "a2", "password": "p2", "character_name": "c2", "character_index": 1})
+        cfg.add_profile("alt1")
+        cfg.add_profile("alt2")
+        profiles = cfg.list_profiles()
+        self.assertEqual(len(profiles), 2)
+        self.assertIn("alt1", profiles)
+        self.assertIn("alt2", profiles)
+
+    def test_switch_profile_swaps_files(self):
+        cfg = self._make_config()
+        cfg.add_profile("alt")
         cfg.switch_profile("alt")
-        self.assertEqual(cfg._config["game"]["account"], "a2")
-        self.assertEqual(cfg._config["game"]["character_name"], "c2")
         self.assertEqual(cfg.current_profile(), "alt")
+        self.assertTrue(os.path.exists(os.path.join(self.tmpdir, "config_default.json")))
 
     def test_switch_nonexistent_raises(self):
         cfg = self._make_config()
         with self.assertRaises(KeyError):
             cfg.switch_profile("no_such_profile")
 
-    def test_delete_profile(self):
+    def test_delete_profile_removes_file(self):
         cfg = self._make_config()
-        cfg.add_profile("alt", {"account": "a2"})
+        cfg.add_profile("alt")
         cfg.delete_profile("alt")
         self.assertNotIn("alt", cfg.list_profiles())
+        self.assertFalse(os.path.exists(os.path.join(self.tmpdir, "config_alt.json")))
 
-    def test_delete_current_switches_to_first(self):
+    def test_delete_current_raises(self):
         cfg = self._make_config()
-        cfg.add_profile("alt", {"account": "a2"})
-        cfg._config["profiles"]["current"] = "alt"
-        cfg.delete_profile("alt")
-        self.assertEqual(cfg.current_profile(), "default")
+        with self.assertRaises(ValueError):
+            cfg.delete_profile("default")
 
 
 # ═══════════════════════════════════════════════

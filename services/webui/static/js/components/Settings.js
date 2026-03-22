@@ -6,7 +6,7 @@ const SettingsPanel = {
   emits: ['save-settings'],
   data() {
     return {
-      hiddenSections: ['game', 'status', 'encryption', 'profiles', 'deploy', 'notify', 'update', 'remote_access'],
+      hiddenSections: ['game', 'status', 'encryption', 'profiles', 'deploy', 'notify', 'update', 'remote_access', 'llm'],
       sectionLabels: { app: '应用设置', ocr: 'OCR 设置', emulator: '模拟器设置', llm: '智能体' },
       keyLabels: {
         name: '应用名称', app_to_start: '启动包名', restart_on_error: '出错重启',
@@ -18,14 +18,6 @@ const SettingsPanel = {
         use_agent: '启用智能体', url: '智能体路径', model: '模型名称',
       },
       urlPlaceholder: '使用本机路径',
-      // deploy
-      deployConfig: {},
-      notifyConfig: {},
-      updateConfig: {},
-      remoteConfig: {},
-      remoteStatus: { state: 'stopped', address: null },
-      updateStatus: { state: 'idle' },
-      notifyTestLoading: false,
     };
   },
   computed: {
@@ -37,106 +29,9 @@ const SettingsPanel = {
       return result;
     },
   },
-  async mounted() {
-    await this.loadDeploy();
-    this.loadRemoteStatus();
-    this.loadUpdateStatus();
-  },
   methods: {
-    async loadDeploy() {
-      try {
-        const data = await (await fetch('/api/deploy')).json();
-        this.deployConfig = data.deploy || {};
-        this.notifyConfig = data.notify || {};
-        this.updateConfig = data.update || {};
-        this.remoteConfig = data.remote_access || {};
-      } catch (e) { console.error('loadDeploy', e); }
-    },
-    async _persistDeploy() {
-      await fetch('/api/deploy', { method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ deploy: this.deployConfig, notify: this.notifyConfig, update: this.updateConfig, remote_access: this.remoteConfig })
-      });
-      if (this.deployConfig.theme === 'light') {
-        document.documentElement.classList.add('light');
-      } else {
-        document.documentElement.classList.remove('light');
-      }
-    },
-    /** 先保存部署/通知/更新/远程，再交给父组件保存 app/emulator/ocr/llm */
-    async saveAllSettings() {
-      try {
-        await this._persistDeploy();
-        this.$emit('save-settings');
-      } catch (e) {
-        ElementPlus.ElMessage.error('保存失败（部署类配置）');
-      }
-    },
-    async testNotify() {
-      this.notifyTestLoading = true;
-      try {
-        const res = await fetch('/api/notify/test', { method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ config_yaml: this.notifyConfig.config_yaml || '' })
-        });
-        const data = await res.json();
-        if (data.success) ElementPlus.ElMessage.success('通知发送成功');
-        else ElementPlus.ElMessage.warning('通知发送失败，请检查配置');
-      } catch (e) { ElementPlus.ElMessage.error('测试失败: ' + e); }
-      this.notifyTestLoading = false;
-    },
-    async loadRemoteStatus() {
-      try { this.remoteStatus = await (await fetch('/api/remote-access')).json(); } catch(e) {}
-    },
-    async toggleRemote(enabled) {
-      try {
-        const res = await fetch('/api/remote-access', { method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ enabled })
-        });
-        this.remoteStatus = await res.json();
-      } catch(e) { ElementPlus.ElMessage.error('操作失败'); }
-    },
-    async loadUpdateStatus() {
-      try { this.updateStatus = await (await fetch('/api/update/status')).json(); } catch(e) {}
-    },
-    async checkUpdate() {
-      try {
-        const res = await fetch('/api/update/check', { method: 'POST' });
-        this.updateStatus = await res.json();
-        if (this.updateStatus.has_update) ElementPlus.ElMessage.info('发现新版本');
-        else ElementPlus.ElMessage.success('已是最新版本');
-      } catch(e) { ElementPlus.ElMessage.error('检查失败'); }
-    },
-    async runUpdate() {
-      try {
-        const res = await fetch('/api/update/run', { method: 'POST' });
-        this.updateStatus = await res.json();
-        if (this.updateStatus.success) ElementPlus.ElMessage.success('更新完成，请重启应用');
-        else ElementPlus.ElMessage.error('更新失败');
-      } catch(e) { ElementPlus.ElMessage.error('更新失败'); }
-    },
-    async exportConfig() {
-      try {
-        const res = await fetch('/api/config/export');
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = 'autoscriptor-config.json'; a.click();
-        URL.revokeObjectURL(url);
-      } catch(e) { ElementPlus.ElMessage.error('导出失败'); }
-    },
-    async importConfig() {
-      const input = document.createElement('input');
-      input.type = 'file'; input.accept = '.json';
-      input.onchange = async (e) => {
-        const file = e.target.files[0]; if (!file) return;
-        const text = await file.text();
-        try {
-          const data = JSON.parse(text);
-          await fetch('/api/config/import', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
-          ElementPlus.ElMessage.success('导入成功，请刷新页面');
-          setTimeout(() => location.reload(), 1000);
-        } catch(e) { ElementPlus.ElMessage.error('导入失败: ' + e); }
-      };
-      input.click();
+    saveAllSettings() {
+      this.$emit('save-settings');
     },
   },
   template: `
@@ -165,7 +60,7 @@ const SettingsPanel = {
       </el-card>
     </div>
 
-    <!-- 通知推送 -->
+    <!-- 以下区块暂不支持，已整体注释保留；恢复时取消注释并同步取消下方「注释保留的 data / mounted / methods」
     <el-card shadow="hover" class="mb-6">
       <template #header><div class="text-lg font-semibold">通知推送</div></template>
       <el-form-item label="启用通知">
@@ -180,7 +75,6 @@ const SettingsPanel = {
       </el-form-item>
     </el-card>
 
-    <!-- 自动更新 -->
     <el-card shadow="hover" class="mb-6">
       <template #header><div class="text-lg font-semibold">自动更新</div></template>
       <el-row :gutter="20">
@@ -210,7 +104,6 @@ const SettingsPanel = {
       </el-form-item>
     </el-card>
 
-    <!-- 远程访问 -->
     <el-card shadow="hover" class="mb-6">
       <template #header><div class="text-lg font-semibold">远程访问 (SSH 隧道)</div></template>
       <el-row :gutter="20">
@@ -237,7 +130,6 @@ const SettingsPanel = {
       </el-form-item>
     </el-card>
 
-    <!-- 部署设置 -->
     <el-card shadow="hover" class="mb-6">
       <template #header><div class="text-lg font-semibold">部署设置</div></template>
       <el-row :gutter="20">
@@ -251,13 +143,16 @@ const SettingsPanel = {
         </el-col>
         <el-col :span="12">
           <el-form-item label="访问密码">
-            <el-input v-model="deployConfig.password" placeholder="留空不设密码" show-password />
+            <div style="display:flex;align-items:center;gap:8px;width:100%">
+              <el-input v-model="deployConfig.password" :placeholder="passwordProtected ? '留空不修改' : '留空不设密码'" show-password style="flex:1" />
+              <el-tag v-if="passwordProtected" type="success" size="small">已设置</el-tag>
+              <el-button v-if="passwordProtected" size="small" type="danger" plain @click="clearDeployPassword">清除</el-button>
+            </div>
           </el-form-item>
         </el-col>
       </el-row>
     </el-card>
 
-    <!-- 配置导入导出 -->
     <el-card shadow="hover" class="mb-6">
       <template #header><div class="text-lg font-semibold">配置管理</div></template>
       <el-form-item>
@@ -265,6 +160,7 @@ const SettingsPanel = {
         <el-button @click="importConfig"><i class="fa fa-upload"></i> 导入配置</el-button>
       </el-form-item>
     </el-card>
+    -->
 
   </el-form>
 
@@ -275,3 +171,152 @@ const SettingsPanel = {
   </div>
 </div>`,
 };
+
+/*
+ * ── 以下为先前实现，功能未开放时从模板中 HTML 注释掉；恢复 UI 时请取消模板注释，并把下列字段/钩子/方法合并回组件（勿重复定义）──
+ *
+ * data() 追加：
+ *   passwordProtected: false,
+ *   deployConfig: {},
+ *   notifyConfig: {},
+ *   updateConfig: {},
+ *   remoteConfig: {},
+ *   remoteStatus: { state: 'stopped', address: null },
+ *   updateStatus: { state: 'idle' },
+ *   notifyTestLoading: false,
+ *
+ * async mounted() {
+ *   await this.loadDeploy();
+ *   this.loadRemoteStatus();
+ *   this.loadUpdateStatus();
+ * },
+ *
+ * methods 追加：
+ *   async loadDeploy() {
+ *     try {
+ *       const data = await (await fetch('/api/deploy')).json();
+ *       this.deployConfig = data.deploy || {};
+ *       this.passwordProtected = data.password_protected || false;
+ *       this.notifyConfig = data.notify || {};
+ *       this.updateConfig = data.update || {};
+ *       this.remoteConfig = data.remote_access || {};
+ *     } catch (e) { console.error('loadDeploy', e); }
+ *   },
+ *   async clearDeployPassword() {
+ *     try {
+ *       const { value } = await ElementPlus.ElMessageBox.prompt(
+ *         '清除访问密码需要验证当前密码', '安全验证',
+ *         { inputType: 'password', confirmButtonText: '验证', cancelButtonText: '取消' });
+ *       this.deployConfig.password = null;
+ *       await this._persistDeploy({ current_password: value });
+ *       this.passwordProtected = false;
+ *       this.deployConfig.password = '';
+ *       ElementPlus.ElMessage.success('访问密码已清除');
+ *     } catch (e) {
+ *       if (e !== 'cancel' && e !== 'close') {
+ *         ElementPlus.ElMessage.error(e.message || '清除失败');
+ *       }
+ *     }
+ *   },
+ *   async _persistDeploy(extraDeployFields) {
+ *     const deployPayload = { ...this.deployConfig, ...(extraDeployFields || {}) };
+ *     const res = await fetch('/api/deploy', { method: 'POST', headers: {'Content-Type':'application/json'},
+ *       body: JSON.stringify({ deploy: deployPayload, notify: this.notifyConfig, update: this.updateConfig, remote_access: this.remoteConfig })
+ *     });
+ *     if (!res.ok) {
+ *       const data = await res.json().catch(() => ({}));
+ *       throw new Error(data.error || '保存失败');
+ *     }
+ *     if (this.deployConfig.theme === 'light') {
+ *       document.documentElement.classList.add('light');
+ *     } else {
+ *       document.documentElement.classList.remove('light');
+ *     }
+ *   },
+ *   async saveAllSettings() {
+ *     try {
+ *       let extra = {};
+ *       const hasNewPwd = this.deployConfig.password && this.deployConfig.password.length > 0;
+ *       if (hasNewPwd && this.passwordProtected) {
+ *         try {
+ *           const { value } = await ElementPlus.ElMessageBox.prompt(
+ *             '修改访问密码需要验证当前密码', '安全验证',
+ *             { inputType: 'password', confirmButtonText: '验证', cancelButtonText: '取消' });
+ *           extra.current_password = value;
+ *         } catch { return; }
+ *       }
+ *       await this._persistDeploy(extra);
+ *       if (hasNewPwd) this.passwordProtected = true;
+ *       this.$emit('save-settings');
+ *     } catch (e) {
+ *       ElementPlus.ElMessage.error(e.message || '保存失败（部署类配置）');
+ *     }
+ *   },
+ *   async testNotify() {
+ *     this.notifyTestLoading = true;
+ *     try {
+ *       const res = await fetch('/api/notify/test', { method: 'POST', headers: {'Content-Type':'application/json'},
+ *         body: JSON.stringify({ config_yaml: this.notifyConfig.config_yaml || '' })
+ *       });
+ *       const data = await res.json();
+ *       if (data.success) ElementPlus.ElMessage.success('通知发送成功');
+ *       else ElementPlus.ElMessage.warning('通知发送失败，请检查配置');
+ *     } catch (e) { ElementPlus.ElMessage.error('测试失败: ' + e); }
+ *     this.notifyTestLoading = false;
+ *   },
+ *   async loadRemoteStatus() {
+ *     try { this.remoteStatus = await (await fetch('/api/remote-access')).json(); } catch(e) {}
+ *   },
+ *   async toggleRemote(enabled) {
+ *     try {
+ *       const res = await fetch('/api/remote-access', { method: 'POST', headers: {'Content-Type':'application/json'},
+ *         body: JSON.stringify({ enabled })
+ *       });
+ *       this.remoteStatus = await res.json();
+ *     } catch(e) { ElementPlus.ElMessage.error('操作失败'); }
+ *   },
+ *   async loadUpdateStatus() {
+ *     try { this.updateStatus = await (await fetch('/api/update/status')).json(); } catch(e) {}
+ *   },
+ *   async checkUpdate() {
+ *     try {
+ *       const res = await fetch('/api/update/check', { method: 'POST' });
+ *       this.updateStatus = await res.json();
+ *       if (this.updateStatus.has_update) ElementPlus.ElMessage.info('发现新版本');
+ *       else ElementPlus.ElMessage.success('已是最新版本');
+ *     } catch(e) { ElementPlus.ElMessage.error('检查失败'); }
+ *   },
+ *   async runUpdate() {
+ *     try {
+ *       const res = await fetch('/api/update/run', { method: 'POST' });
+ *       this.updateStatus = await res.json();
+ *       if (this.updateStatus.success) ElementPlus.ElMessage.success('更新完成，请重启应用');
+ *       else ElementPlus.ElMessage.error('更新失败');
+ *     } catch(e) { ElementPlus.ElMessage.error('更新失败'); }
+ *   },
+ *   async exportConfig() {
+ *     try {
+ *       const res = await fetch('/api/config/export');
+ *       const blob = await res.blob();
+ *       const url = URL.createObjectURL(blob);
+ *       const a = document.createElement('a');
+ *       a.href = url; a.download = 'autoscriptor-config.json'; a.click();
+ *       URL.revokeObjectURL(url);
+ *     } catch(e) { ElementPlus.ElMessage.error('导出失败'); }
+ *   },
+ *   async importConfig() {
+ *     const input = document.createElement('input');
+ *     input.type = 'file'; input.accept = '.json';
+ *     input.onchange = async (e) => {
+ *       const file = e.target.files[0]; if (!file) return;
+ *       const text = await file.text();
+ *       try {
+ *         const data = JSON.parse(text);
+ *         await fetch('/api/config/import', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
+ *         ElementPlus.ElMessage.success('导入成功，请刷新页面');
+ *         setTimeout(() => location.reload(), 1000);
+ *       } catch(e) { ElementPlus.ElMessage.error('导入失败: ' + e); }
+ *     };
+ *     input.click();
+ *   },
+ */
