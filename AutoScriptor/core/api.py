@@ -7,13 +7,13 @@ import getpass
 import cv2
 from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
 from AutoScriptor.core.control import MixControl
-from AutoScriptor.core.targets import Target, B,I,T,V
+from AutoScriptor.core.targets import Target, B
 from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget,VLMTarget
 from AutoScriptor.core.locate_dispatch import has_handler, dispatch_locate
 from AutoScriptor.recognition.ocr_rec import ocr_for_box
 from AutoScriptor.recognition.rec import get_box_color
 from AutoScriptor.utils.box import Box, b2p
-from AutoScriptor.utils.logger import log_flush, setup_task_aware_logging
+from AutoScriptor.utils.logger import setup_task_aware_logging
 from AutoScriptor.utils.tracer import save_debug_screenshot
 from AutoScriptor.utils.logger import logger, setup_logfile
 from AutoScriptor.utils.constant import cfg

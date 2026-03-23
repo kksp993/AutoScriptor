@@ -260,6 +260,76 @@ html.light .app-body {
   justify-content: center;
   align-items: center;
 }
+.editor-controls-compact .el-form-item {
+  margin-bottom: 8px;
+}
+.editor-controls-compact .el-form-item__label {
+  font-size: 13px;
+  padding-right: 6px;
+}
+.editor-panel-remote {
+  flex-shrink: 0;
+}
+.remote-dir-group .el-radio-button__inner {
+  padding: 5px 10px !important;
+  font-size: 12px;
+}
+.editor-remote-click-btn.el-button--primary,
+.editor-remote-click-btn.el-button--primary span,
+.editor-remote-click-btn.el-button--primary i {
+  color: #ffffff !important;
+}
+
+/* 右侧布局过渡动画 */
+.editor-right-zone,
+.editor-canvas-cell,
+.editor-recorder-zone {
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 操作录制 textarea 填满容器 */
+.editor-code-textarea {
+  height: 100% !important;
+}
+.editor-code-textarea .el-textarea__inner {
+  height: 100% !important;
+  min-height: 80px !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: none !important;
+}
+
+/* 录制区按钮面板 */
+.editor-recorder-actions .el-button {
+  width: 100%;
+  min-width: 0 !important;
+}
+
+.editor-custom-exec-input .el-textarea__inner {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  min-height: 120px !important;
+}
+
+/* 自定义代码「执行」：白底绿边，易辨认 */
+.editor-custom-exec-run-btn.el-button {
+  background: #ffffff !important;
+  border: 1px solid #22c55e !important;
+  color: #15803d !important;
+}
+.editor-custom-exec-run-btn.el-button:hover,
+.editor-custom-exec-run-btn.el-button:focus {
+  background: #f0fdf4 !important;
+  border-color: #16a34a !important;
+  color: #166534 !important;
+}
+.editor-custom-exec-run-btn.el-button.is-disabled {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  color: #94a3b8 !important;
+}
 
 /* ── 浅色主题：左侧呼吸绿 + 粒子层，右侧白 ── */
 html.light body {
