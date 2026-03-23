@@ -17,11 +17,15 @@ import numpy as np
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from AutoScriptor.utils.logger import logger
+from AutoScriptor.core.api import swipe
+from AutoScriptor.core.targets import B
 
 router = APIRouter(prefix="/api/editor", tags=["editor"])
 
 # 缓存最近一次截图的 BGR ndarray，供 OCR / color / locate 复用
 _last_screenshot: np.ndarray | None = None
+# 缓存最近一次选区裁剪的模板图（用于图像匹配 locate）
+_last_template: np.ndarray | None = None
 
 _LOCATE_SCALES = [0.5, 0.75, 1.0]
 
@@ -186,6 +190,77 @@ async def editor_locate(request: Request):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+# ── POST /api/editor/store-template ──
+
+@router.post("/store-template")
+async def editor_store_template(request: Request):
+    """从 _last_screenshot 裁剪选区并缓存为模板，用于后续图像匹配。无需前端传图。"""
+    global _last_template
+    try:
+        data = await request.json()
+        left, top, right, bottom = int(data["left"]), int(data["top"]), int(data["right"]), int(data["bottom"])
+        if _last_screenshot is None:
+            return JSONResponse(status_code=400, content={"error": "请先获取截图"})
+        cropped = _last_screenshot[top:bottom, left:right]
+        if cropped.size == 0:
+            return JSONResponse(status_code=400, content={"error": "选区为空"})
+        _last_template = cropped.copy()
+        return {"ok": True}
+    except Exception as e:
+        logger.error("editor/store-template error: %s", e)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ── POST /api/editor/locate-image ──
+
+@router.post("/locate-image")
+async def editor_locate_image(request: Request):
+    """用缓存的模板图在截图的指定 box（含 margin）内做多尺度模板匹配，返回与 /locate 结构一致的结果。"""
+    global _last_screenshot, _last_template
+    try:
+        data = await request.json()
+        left, top = int(data["left"]), int(data["top"])
+        width, height = int(data["width"]), int(data["height"])
+
+        if _last_screenshot is None:
+            return JSONResponse(status_code=400, content={"error": "请先获取截图"})
+        if _last_template is None:
+            return JSONResponse(status_code=400, content={"error": "请先框选区域以生成模板"})
+
+        from AutoScriptor.utils.box import Box
+        from AutoScriptor.recognition.img_rec import _locateAll_opencv
+
+        tgt_box = Box(left, top, width, height).margin()
+        region = (tgt_box.left, tgt_box.top, tgt_box.width, tgt_box.height)
+        screenshot = _last_screenshot
+        template = _last_template
+
+        scale_cfgs = {
+            "0.5":  (0.4, 0.6),
+            "0.75": (0.65, 0.85),
+            "1.0":  (0.9, 1.1),
+        }
+        scale_results = {}
+        all_boxes = []
+        for label, (mn, mx) in scale_cfgs.items():
+            boxes = _locateAll_opencv(template, screenshot, confidence=0.8,
+                                     region=region, min_scale=mn, max_scale=mx)
+            filtered = [b for b in boxes if b.is_in(tgt_box)]
+            scale_results[label] = {
+                "found": bool(filtered),
+                "boxes": [{"left": b.left, "top": b.top, "width": b.width, "height": b.height} for b in filtered],
+            }
+            all_boxes.extend(filtered)
+
+        deduped = Box.merge_overlapping_boxes(all_boxes) if all_boxes else []
+        box_dicts = [{"left": b.left, "top": b.top, "width": b.width, "height": b.height} for b in deduped]
+        any_found = any(r["found"] for r in scale_results.values())
+        return {"found": any_found, "boxes": box_dicts, "scale_results": scale_results}
+    except Exception as e:
+        logger.error("editor/locate-image error: %s\n%s", e, traceback.format_exc())
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 # ── POST /api/editor/optimize-rect ──
 
 @router.post("/optimize-rect")
@@ -302,3 +377,192 @@ async def editor_save(request: Request):
     except Exception as e:
         logger.error("editor/save error: %s\n%s", e, traceback.format_exc())
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ── POST /api/editor/remote/click ──
+
+@router.post("/remote/click")
+async def editor_remote_click(request: Request):
+    """在模拟器中点击指定坐标。"""
+    try:
+        data = await request.json()
+        x, y = int(data["x"]), int(data["y"])
+        ctx = _get_runtime()
+        if ctx.mixctrl is None:
+            return JSONResponse(status_code=503, content={"error": "mixctrl 未初始化"})
+        ctx.mixctrl.click(x, y)
+        return {"ok": True}
+    except Exception as e:
+        logger.error("editor/remote/click error: %s", e)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ── POST /api/editor/remote/swipe ──
+
+@router.post("/remote/swipe")
+async def editor_remote_swipe(request: Request):
+    """在模拟器中执行滑动，与 AutoScriptor.core.api.swipe 一致（b2p、boost、滑动后稳定等）。"""
+    try:
+        data = await request.json()
+        x1, y1 = int(data["x1"]), int(data["y1"])
+        x2, y2 = int(data["x2"]), int(data["y2"])
+        duration_s = int(round(float(data.get("duration_s", 1))))
+        ctx = _get_runtime()
+        if ctx.mixctrl is None:
+            return JSONResponse(status_code=503, content={"error": "mixctrl 未初始化"})
+        # 起点/终点用 1×1 BoxTarget，与脚本层 swipe(start, end) 语义一致
+        swipe(
+            B(x1, y1, 1, 1),
+            B(x2, y2, 1, 1),
+            duration_s=duration_s,
+            delay=0,
+            ensure_stable_after_swipe=True,
+        )
+        return {"ok": True}
+    except Exception as e:
+        logger.error("editor/remote/swipe error: %s", e)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ── POST /api/editor/execute-code ──
+
+_MAX_SNIPPET_LEN = 16000
+
+
+def _run_editor_snippet(code: str) -> dict:
+    """在受限命名空间中执行用户代码，捕获所有异常，不向外抛出。"""
+    import contextlib
+    import io
+    import time as time_mod
+    import traceback as tb_mod
+
+    from AutoScriptor.core import api as api_mod
+    from AutoScriptor.core.targets import B, I, T, V
+    from AutoScriptor.utils.box import Box
+
+    safe_builtins = {
+        "len": len,
+        "str": str,
+        "int": int,
+        "float": float,
+        "bool": bool,
+        "range": range,
+        "min": min,
+        "max": max,
+        "sum": sum,
+        "abs": abs,
+        "round": round,
+        "enumerate": enumerate,
+        "zip": zip,
+        "list": list,
+        "tuple": tuple,
+        "dict": dict,
+        "set": set,
+        "True": True,
+        "False": False,
+        "None": None,
+        "isinstance": isinstance,
+        "type": type,
+        "repr": repr,
+        "print": print,
+    }
+
+    ns: dict = {
+        "__builtins__": safe_builtins,
+        "time": time_mod,
+        "Box": Box,
+        "B": B,
+        "T": T,
+        "I": I,
+        "V": V,
+        "click": api_mod.click,
+        "swipe": api_mod.swipe,
+        "input": api_mod.input,
+        "locate": api_mod.locate,
+        "ui_T": api_mod.ui_T,
+        "ui_F": api_mod.ui_F,
+        "wait_for_appear": api_mod.wait_for_appear,
+        "wait_for_disappear": api_mod.wait_for_disappear,
+        "extract_info": api_mod.extract_info,
+        "sleep": getattr(api_mod, "sleep", time_mod.sleep),
+    }
+
+    code = (code or "").strip()
+    if not code:
+        return {"ok": False, "error": "代码为空"}
+    if len(code) > _MAX_SNIPPET_LEN:
+        return {"ok": False, "error": f"代码过长（上限 {_MAX_SNIPPET_LEN} 字符）"}
+
+    stdout_buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(stdout_buf):
+            try:
+                compiled = compile(code, "<editor>", "eval")
+            except SyntaxError:
+                compiled = None
+            if compiled is not None:
+                result = eval(compiled, ns, ns)
+                out = stdout_buf.getvalue().strip()
+                payload = {
+                    "ok": True,
+                    "result": None if result is None else repr(result),
+                    "stdout": out or None,
+                }
+                return payload
+            exec(compile(code, "<editor>", "exec"), ns, ns)
+            out = stdout_buf.getvalue().strip()
+            ret = ns.get("__result__", None)
+            return {
+                "ok": True,
+                "result": None if ret is None else repr(ret),
+                "stdout": out or None,
+            }
+    except BaseException as e:
+        logger.warning("editor/execute-code snippet error: %s\n%s", e, tb_mod.format_exc())
+        return {
+            "ok": False,
+            "error": str(e),
+            "traceback": tb_mod.format_exc(),
+        }
+
+
+@router.post("/execute-code")
+async def editor_execute_code(request: Request):
+    """执行自定义 Python 片段（与脚本相同的 API 命名空间），永不抛未捕获异常。"""
+    try:
+        ctx = _get_runtime()
+        if ctx.mixctrl is None:
+            return {"ok": False, "error": "mixctrl 未初始化"}
+        data = await request.json()
+        code = data.get("code", "")
+        return _run_editor_snippet(code)
+    except Exception as e:
+        logger.error("editor/execute-code error: %s\n%s", e, traceback.format_exc())
+        return {"ok": False, "error": str(e)}
+
+
+# ── POST /api/editor/preview-extract ──
+
+@router.post("/preview-extract")
+async def editor_preview_extract(request: Request):
+    """对当前选区执行 extract_info 预览（与录制区生成代码一致），仅用于提示，不崩溃。"""
+    try:
+        ctx = _get_runtime()
+        if ctx.mixctrl is None:
+            return {"ok": False, "error": "mixctrl 未初始化"}
+        data = await request.json()
+        left, top = int(data["left"]), int(data["top"])
+        width, height = int(data["width"]), int(data["height"])
+        from AutoScriptor.core.api import extract_info
+        from AutoScriptor.core.targets import B
+
+        def _pp(s):
+            if isinstance(s, str):
+                return s.strip()
+            return s
+
+        info = extract_info(B(left, top, width, height), post_process=_pp, ensure_not_empty=True)
+        return {"ok": True, "info": info}
+    except Exception as e:
+        logger.warning("editor/preview-extract: %s", e)
+        return {"ok": False, "error": str(e)}

@@ -18,39 +18,41 @@ def bonus_callback():
         box = locate(I("地鼠", color="蓝色"), timeout=0, assure_stable=False)
         if box: click(B(box), save_screenshot=False)
 
-def battle_callback(cancel_on_failed:bool=True):
-    from ZmxyOL.battle.character.hero import h
-    def failed_callback():
-        bg.clear()
-        bg.set_signal("try_exit", True)
-        bg.set_signal("bonus_x", 0)
-        bg.set_signal("failed", True)
-    bg.add(
-        name="战斗失败",
-        identifier=((T("198点券"),T("159点券"),T("复活"))),
-        callback=lambda : [
-            switch_base("mumu"),
-            logger.info("战斗结束"),
-            bg.set_signal("failed", True),
-            switch_base("mumu"),
-            click(T("取消" if cancel_on_failed else "确定"),delay=4,repeat=3),
-            failed_callback() if cancel_on_failed else None,
-        ]
-    )
-    bg.add(
-        name="通关失败",
-        identifier=(T("重新挑战")),
-        callback=lambda : [
-            switch_base("mumu"),
-            logger.info("战斗结束"),
-            bg.set_signal("Failed", True),
-            switch_base("mumu"),
-            click(T("重新挑战")),
-            failed_callback(),
-        ]
-    )
-    wait_for_disappear(I("加载中"))
-    h.set(True,3).battle_loop()
+_SETTLE_IDF = (
+    T("继续挑战"),
+    T("通关成功", box=Box(275, 114, 733, 490).margin()),
+    T("今日还可购买"),
+)
+_FAIL_IDF = (T("198点券"), T("159点券"), T("复活"), T("重新挑战"))
+
+def _stop_battle():
+    bg.set_signal("Pause_battle", True)
+    bg.set_signal("try_exit", True)
+
+def _handle_settlement() -> str:
+    """主线程顺序处理结算/失败界面。返回 'done'（任务结束）或 'continue'（继续下一波）。"""
+    switch_base("mumu")
+    if ui_T(T("重新挑战"), 1):
+        click(T("重新挑战"))
+        if ui_T(I("加载中"), 0.5):
+            wait_for_disappear(I("加载中"))
+        return "continue"
+    if ui_T((T("198点券"), T("159点券"), T("复活")), 1):
+        click(T("取消"), delay=4, repeat=3)
+        return "done"
+    if ui_T((T("通关成功", box=Box(275, 114, 733, 490).margin()), T("继续挑战")), 1):
+        click(T("继续挑战"), if_exist=True, timeout=5)
+        if ui_T(T("购买"), 2):
+            click(T("取消"), if_exist=True)
+            sleep(0.5)
+            click(T("确认", color="蓝色"))
+            return "done"
+        else:
+            click(T("确定"), if_exist=True)
+            if ui_T(I("加载中"), 0.5):
+                wait_for_disappear(I("加载中"))
+            return "continue"
+    return "continue"
 
 
 # tasks=[
@@ -98,35 +100,30 @@ def task():
     if ui_T(I("加载中"), timeout=0.5):
         wait_for_disappear(I("加载中"))
     
-    bg.set_signal("task_done", False)
-    def callback():
-        bg.set_signal("Pause_battle", True)
-        bg.set_signal("try_exit", True)
-        click(T("继续挑战"),delay=1)
-        if ui_T(T("购买"),2):
-            click(T("取消"),if_exist=True)
-            sleep(0.5)
-            click(T("确认",color="蓝色"))
-            bg.set_signal("task_done", True)
-            bg.remove("try_pause")
-            bg.set_signal("Pause_battle", True)
-            bg.set_signal("try_exit", True)
-        else:
-            click(T("确定"),if_exist=True)
-            if ui_T(I("加载中"), timeout=0.5):
-                wait_for_disappear(I("加载中"))
-            bg.set_signal("Pause_battle", False)
+    while True:
+        bg.set_signal("try_exit", False)
+        bg.set_signal("Pause_battle", False)
+        bg.add(name="hgwj_settle", identifier=_SETTLE_IDF, callback=_stop_battle)
+        bg.add(name="hgwj_fail", identifier=_FAIL_IDF, callback=_stop_battle)
 
+        if ui_T(T("规则", box=Box(551,43,144,56).margin()), 2):
+            bonus_callback()
+            bg.remove("hgwj_settle")
+            bg.remove("hgwj_fail")
+            continue
 
-    while not bg.signal("task_done"):
-        bg.add(
-            name="try_pause",
-            identifier=(T("继续挑战"), T("通关成功", box=Box(275,114,733,490).margin()), T("付费"), T("购买3次", box=Box(284,148,706,396).margin())),
-            callback=callback,
-        )# 在2000点券购买处不奏效
-        if ui_T(T("规则", box=Box(551,43,144,56).margin()),2): bonus_callback()
-        elif bg.signal("Pause_battle"): sleep(1);continue
-        else: battle_callback()
+        if ui_T(I("加载中"), 0.5):
+            wait_for_disappear(I("加载中"))
+        try:
+            h.set(True, 3).battle_loop()
+        except RuntimeError:
+            logger.warning("battle_loop 超时，尝试处理当前界面")
+        finally:
+            bg.remove("hgwj_settle")
+            bg.remove("hgwj_fail")
+
+        if _handle_settlement() == "done":
+            break
     click(B(30,30,30,30),until=lambda: ui_T((T("荒古万界"),I("导航-菜单"),T("世界地图"))))
     click(B(1200,30,30,30))
     bg.clear(clear_signals=True)
