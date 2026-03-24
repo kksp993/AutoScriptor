@@ -38,3 +38,4 @@ pywebio
 inflection
 onepush>=1.3.0
 setuptools<82
+tkinter-embed>=3.10.0

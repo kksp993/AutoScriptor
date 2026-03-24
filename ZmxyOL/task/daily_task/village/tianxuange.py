@@ -1,6 +1,5 @@
 import traceback
 
-from fsspec.spec import reopen
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import RequestHumanTakeover
 from AutoScriptor.core.api import _locate_all
 from ZmxyOL.task.task_register import register_task

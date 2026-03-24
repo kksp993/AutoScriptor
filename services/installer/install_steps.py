@@ -15,6 +15,7 @@ Electron 图形安装器的后端安装步骤脚本。
 import sys
 import os
 import json
+import time
 import subprocess
 import argparse
 import urllib.request
@@ -23,6 +24,20 @@ from pathlib import Path
 REQUIRED_PYTHON = (3, 10)
 BOOTSTRAP_PY_VERSION = "3.10.11"
 BOOTSTRAP_PY_DIR_NAME = ".python310"
+
+
+def _python_exe_in_dir(py_dir: Path) -> Path | None:
+    """在本地引导目录中定位 python.exe（根目录或 Python310 子目录，与官方安装布局一致）。"""
+    if not py_dir.is_dir():
+        return None
+    direct = py_dir / "python.exe"
+    if direct.is_file():
+        return direct
+    for sub in ("Python310", "Python311"):
+        p = py_dir / sub / "python.exe"
+        if p.is_file():
+            return p
+    return None
 
 
 def _emit(data: dict):
@@ -136,57 +151,72 @@ def _count_requirements(req_path: Path) -> int:
 
 
 def _bootstrap_python(project_root: Path, fresh: bool = False) -> Path:
-    """Download and install Python 3.10 into project-local directory. Returns python.exe path."""
+    """Download Python 3.10 embeddable zip, extract, enable pip + virtualenv. Returns python.exe path."""
     py_dir = project_root / BOOTSTRAP_PY_DIR_NAME
-    py_exe = py_dir / "python.exe"
-    if py_exe.exists():
-        _log(f"已存在本地 Python: {py_exe}")
-        return py_exe
+    existing = _python_exe_in_dir(py_dir)
+    if existing:
+        _log(f"已存在本地 Python: {existing}")
+        return existing
 
     cache_dir = project_root / "wheelhouse" / "python"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    installer_name = f"python-{BOOTSTRAP_PY_VERSION}-amd64.exe"
+    zip_name = f"python-{BOOTSTRAP_PY_VERSION}-embed-amd64.zip"
     url = os.environ.get(
         "AUTOSCRIPTOR_PYTHON_URL",
-        f"https://www.python.org/ftp/python/{BOOTSTRAP_PY_VERSION}/{installer_name}",
+        f"https://www.python.org/ftp/python/{BOOTSTRAP_PY_VERSION}/{zip_name}",
     )
-    installer_path = cache_dir / installer_name
+    zip_path = cache_dir / zip_name
 
-    if fresh and installer_path.exists():
-        installer_path.unlink(missing_ok=True)
+    if fresh and zip_path.exists():
+        zip_path.unlink(missing_ok=True)
         _log("已清除 Python 安装包缓存，将重新下载")
 
-    if not installer_path.exists():
-        _log(f"下载 Python {BOOTSTRAP_PY_VERSION}...")
+    if not zip_path.exists():
+        _log(f"下载 Python {BOOTSTRAP_PY_VERSION} embeddable zip...")
         _progress(6, f"下载 Python {BOOTSTRAP_PY_VERSION}...")
-        urllib.request.urlretrieve(url, str(installer_path))
+        urllib.request.urlretrieve(url, str(zip_path))
         _log("下载完成")
 
-    py_dir.mkdir(parents=True, exist_ok=True)
-    _log(f"安装 Python {BOOTSTRAP_PY_VERSION} 到 {py_dir}...")
+    _log(f"解压 Python {BOOTSTRAP_PY_VERSION} 到 {py_dir}...")
     _progress(7, f"安装 Python {BOOTSTRAP_PY_VERSION}...")
 
-    args = [
-        str(installer_path), "/quiet",
-        "SimpleInstall=1", "InstallAllUsers=0",
-        "Include_pip=1", "Include_launcher=0",
-        "PrependPath=0", "Shortcuts=0", "Include_test=0",
-        f"TargetDir={py_dir}",
-    ]
-    ret = subprocess.call(args)
-    if ret not in (0, 3010):
-        _log(f"安装退出码: {ret}，尝试重新下载...")
-        installer_path.unlink(missing_ok=True)
-        urllib.request.urlretrieve(url, str(installer_path))
-        ret = subprocess.call(args)
-        if ret not in (0, 3010):
-            raise RuntimeError(f"Python {BOOTSTRAP_PY_VERSION} 安装失败 (exit {ret})")
+    import zipfile
+    import shutil
+    if py_dir.exists():
+        shutil.rmtree(py_dir, ignore_errors=True)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(py_dir)
 
+    py_exe = py_dir / "python.exe"
     if not py_exe.exists():
-        raise FileNotFoundError(f"安装后未找到 {py_exe}")
+        raise FileNotFoundError(f"解压后未找到 {py_exe}")
 
-    _log(f"Python {BOOTSTRAP_PY_VERSION} 安装成功")
+    # 启用 import site（._pth 文件中默认被注释）
+    for pth in py_dir.glob("python*._pth"):
+        text = pth.read_text(encoding="utf-8")
+        text = text.replace("#import site", "import site")
+        pth.write_text(text, encoding="utf-8")
+        _log(f"已启用 import site: {pth.name}")
+        break
+
+    # 安装 pip（embeddable zip 默认不含 pip）
+    get_pip = project_root / "services" / "installer" / "get-pip.py"
+    if not get_pip.exists():
+        get_pip = cache_dir / "get-pip.py"
+        if not get_pip.exists():
+            _log("下载 get-pip.py...")
+            urllib.request.urlretrieve("https://bootstrap.pypa.io/get-pip.py", str(get_pip))
+    _log("安装 pip...")
+    ret = subprocess.call([str(py_exe), str(get_pip), "--no-warn-script-location"])
+    if ret != 0:
+        raise RuntimeError(f"pip 安装失败 (exit {ret})")
+
+    # 安装 virtualenv + tkinter（embeddable zip 缺少 venv 和 tkinter）
+    _log("安装 virtualenv 和 tkinter-embed...")
+    subprocess.call([str(py_exe), "-m", "pip", "install", "virtualenv", "tkinter-embed", "--no-warn-script-location"])
+
+    _log(f"Python {BOOTSTRAP_PY_VERSION} 就绪: {py_exe}")
     return py_exe
 
 
@@ -196,8 +226,8 @@ def _resolve_python(project_root: Path, fresh: bool = False) -> str:
     if sys.version_info[:2] == REQUIRED_PYTHON:
         return sys.executable
 
-    local_py = project_root / BOOTSTRAP_PY_DIR_NAME / "python.exe"
-    if local_py.exists():
+    local_py = _python_exe_in_dir(project_root / BOOTSTRAP_PY_DIR_NAME)
+    if local_py:
         return str(local_py)
 
     return str(_bootstrap_python(project_root, fresh=fresh))
@@ -248,10 +278,17 @@ def run_install(project_root: Path, pip_source: str | None = None, fresh: bool =
         _progress(12, "正在创建虚拟环境 (.venv)...")
         _log(f"目标: {venv_dir}")
         try:
-            subprocess.check_call(
-                [target_python, "-m", "venv", str(venv_dir)],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            )
+            # 优先用 virtualenv（embeddable zip 的 venv 缺少 ensurepip）；回退 venv
+            try:
+                subprocess.check_call(
+                    [target_python, "-m", "virtualenv", str(venv_dir)],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                subprocess.check_call(
+                    [target_python, "-m", "venv", str(venv_dir)],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
             _log("虚拟环境创建成功")
         except subprocess.CalledProcessError as e:
             _error(f"创建虚拟环境失败 (exit {e.returncode})")

@@ -6,8 +6,8 @@ huoyuequan
 jjc_task
 pet_upgrade
 qujing
-tianxuange
 xianbao_dig
 xianqi_consume
 yaoshou
 zhanling
+tianxuange

@@ -5,6 +5,7 @@
   "main": "main.js",
   "private": true,
   "scripts": {
+    "postinstall": "node ../scripts/npm-postinstall.js",
     "start": "electron .",
     "build": "electron-builder build --win --config electron-builder.config.js",
     "build:portable": "electron-builder build --win portable --config electron-builder.config.js"
