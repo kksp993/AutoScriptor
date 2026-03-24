@@ -359,10 +359,22 @@ class TaskManager:
         """完全重启模拟器（最后手段）。"""
         try:
             if runtime_ctx.mixctrl is not None:
-                runtime_ctx.mixctrl.app.close(app_name)
+                try:
+                    runtime_ctx.mixctrl.app.close(app_name)
+                    sleep(2)
+                except Exception as e:
+                    logger.debug("🔄 关闭应用失败(可忽略): %s", e)
+
+            runtime_ctx._release_nemu_ipc()
+
             from AutoScriptor.control.MumuAdaptor.mumu import Mumu
-            Mumu().select(cfg["emulator"]["index"]).power.shutdown()
-            sleep(10)
+            mumu = Mumu().select(cfg["emulator"]["index"])
+            mumu.power.shutdown(wait=True, timeout=30)
+
+            runtime_ctx.mixctrl = None
+            runtime_ctx.mumu = None
+
+            sleep(3)
             runtime_ctx.refresh()
             sleep(5)
             mm.set_region("登录")

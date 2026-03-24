@@ -181,6 +181,50 @@ def stable(boxes1: list[list[Box]], boxes2: list[list[Box]])->bool:
         if len(list1) != len(list2): return False
     return True
 
+
+def _format_match_path(path: tuple[int, ...]) -> str:
+    """嵌套索引路径格式化为 [1.0]、[2] 等（与 locate 目标树结构一致）。"""
+    if not path:
+        return "[?]"
+    return "[" + ".".join(str(p) for p in path) + "]"
+
+
+def _flatten_target_paths(target: Target|list[Target]|tuple[Target, ...]) -> list[tuple[tuple[int, ...], Target]]:
+    """将嵌套 tuple/list of Target 展平为 (从根到叶的索引路径, 叶子 Target)。
+
+    例：(A, (B, C), D) -> [((0,), A), ((1, 0), B), ((1, 1), C), ((2,), D)]，
+    对应标注 [0]、[1.0]、[1.1]、[2]。
+    """
+    if isinstance(target, Target):
+        return [((), target)]
+    if isinstance(target, (tuple, list)):
+        out: list[tuple[tuple[int, ...], Target]] = []
+        for i, child in enumerate(target):
+            if isinstance(child, Target):
+                out.append(((i,), child))
+            elif isinstance(child, (tuple, list)):
+                for subpath, t in _flatten_target_paths(child):
+                    out.append(((i,) + subpath, t))
+            else:
+                raise TypeError(f"locate 目标必须是 Target 或嵌套序列，收到 {type(child)!r}: {child!r}")
+        return out
+    raise TypeError(f"locate 目标类型不支持: {type(target)!r}")
+
+
+def _first_hit_path(boxes: list, target: Target|list[Target]|tuple[Target, ...]) -> str | None:
+    """与 first(boxes) 顺序一致：第一个有命中的槽位在 target 树中的路径（[x.x.x]）。"""
+    paths = _flatten_target_paths(target)
+    if len(paths) != len(boxes):
+        for i, b in enumerate(boxes):
+            if b and first([b]) is not None:
+                return _format_match_path((i,))
+        return None
+    for i, b in enumerate(boxes):
+        if b and first([b]) is not None:
+            return _format_match_path(paths[i][0])
+    return None
+
+
 def switch_base(base: str):
     if base == "mumu":
         mixctrl.switch_to_mumu()
@@ -277,10 +321,17 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
             was_retry = _stable_retry
             _stable_retry = False
             boxes = _locate_all(target, screenshot=screenshot, image_first=_img_first)
-            if assure_stable and not stable(boxes, _locate_all(target, image_first=_img_first)):
-                if first(boxes) and not was_retry:
-                    _stable_retry = True
-                continue
+            if assure_stable:
+                boxes2 = _locate_all(target, screenshot=screenshot, image_first=_img_first)
+                if not stable(boxes, boxes2):
+                    p1 = _first_hit_path(boxes, target)
+                    p2 = _first_hit_path(boxes2, target)
+                    logger.debug(
+                        f"[locate assure_stable] {p1 or '[?]'} / {p2 or '[?]'} 两次定位不一致，重试"
+                    )
+                    if first(boxes) and not was_retry:
+                        _stable_retry = True
+                    continue
             if first(boxes): return first(boxes) if is_simplify else boxes  # 确保返回单个Box或None
             # if delta > 5 and cfg["llm"]["use_agent"]:
         # 超时未找到目标时，保存搜索失败截图
@@ -301,10 +352,17 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
             was_retry = _stable_retry
             _stable_retry = False
             boxes = _locate_all(target, screenshot=screenshot)
-            if assure_stable and not stable(boxes, _locate_all(target)):
-                if full(boxes) and not was_retry:
-                    _stable_retry = True
-                continue
+            if assure_stable:
+                boxes2 = _locate_all(target, screenshot=screenshot)
+                if not stable(boxes, boxes2):
+                    p1 = _first_hit_path(boxes, target)
+                    p2 = _first_hit_path(boxes2, target)
+                    logger.debug(
+                        f"[locate assure_stable] {p1 or '[?]'} / {p2 or '[?]'} 两次定位不一致，重试"
+                    )
+                    if full(boxes) and not was_retry:
+                        _stable_retry = True
+                    continue
             if full(boxes): return simple(boxes) if is_simplify else boxes
         # 超时未全部找到目标时，保存搜索失败截图
         if timeout >= 5:

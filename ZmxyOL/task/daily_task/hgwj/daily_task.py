@@ -116,8 +116,6 @@ def task():
             wait_for_disappear(I("加载中"))
         try:
             h.set(True, 3).battle_loop()
-        except RuntimeError:
-            logger.warning("battle_loop 超时，尝试处理当前界面")
         finally:
             bg.remove("hgwj_settle")
             bg.remove("hgwj_fail")

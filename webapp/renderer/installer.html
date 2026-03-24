@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
-  <title>AutoScriptor 安装向导</title>
+  <title>造笔 安装向导</title>
   <style>
     :root {
       --bg-body: #f0f4f8;
@@ -109,25 +109,34 @@
       background: linear-gradient(135deg, #22c55e, #16a34a);
       border-radius: 20px;
       display: flex; align-items: center; justify-content: center;
-      font-size: 36px;
       box-shadow: 0 8px 28px rgba(22,163,74,0.22), 0 2px 8px rgba(0,0,0,0.08);
       animation: logoPulse 3s ease-in-out infinite;
+    }
+    .logo-icon svg {
+      width: 44px;
+      height: 44px;
     }
     @keyframes logoPulse {
       0%, 100% { box-shadow: 0 8px 28px rgba(22,163,74,0.22), 0 2px 8px rgba(0,0,0,0.08); }
       50% { box-shadow: 0 8px 40px rgba(22,163,74,0.32), 0 2px 12px rgba(0,0,0,0.10); }
     }
-    .logo-title {
-      font-size: 28px;
+    .logo-cn {
+      font-size: 32px;
       font-weight: 700;
-      letter-spacing: -0.5px;
       color: #1e293b;
+      letter-spacing: 6px;
+      line-height: 1.2;
     }
-    .logo-title span { color: var(--accent); }
-    .logo-subtitle {
-      font-size: 13px;
-      color: var(--text-muted);
+    .logo-en {
+      font-size: 15px;
+      font-weight: 500;
       letter-spacing: 1px;
+      color: var(--text-secondary);
+    }
+    .logo-subtitle {
+      font-size: 12px;
+      color: var(--text-muted);
+      letter-spacing: 1.5px;
     }
     .left-version {
       position: absolute;
@@ -494,6 +503,129 @@
     .log-line.error { color: #dc2626; }
     .log-line.success { color: var(--accent); }
 
+    /* ── Path Verification ────────────────────────────────── */
+    .path-verify-list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+    .path-verify-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      transition: border-color .3s, background .3s;
+    }
+    .path-verify-item.valid {
+      border-color: rgba(22,163,74,0.3);
+      background: rgba(22,163,74,0.03);
+    }
+    .path-verify-item.invalid {
+      border-color: rgba(239,68,68,0.35);
+      background: rgba(239,68,68,0.03);
+    }
+    .pv-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .pv-status {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      flex-shrink: 0;
+      transition: all .3s;
+      border: 2px solid #cbd5e1;
+      color: #cbd5e1;
+      background: transparent;
+    }
+    .pv-status.ok {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    .pv-status.fail {
+      background: #ef4444;
+      color: #fff;
+      border-color: #ef4444;
+    }
+    .pv-info { flex: 1; min-width: 0; }
+    .pv-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 2px;
+    }
+    .pv-desc {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+    .pv-path-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .pv-input {
+      flex: 1;
+      height: 36px;
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0 12px;
+      color: var(--text-primary);
+      font-size: 11.5px;
+      font-family: 'Consolas', 'Courier New', monospace;
+      outline: none;
+      transition: border-color .2s;
+      text-overflow: ellipsis;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    .pv-input:focus { border-color: var(--accent); }
+    .pv-input.invalid-input { border-color: #ef4444; background: #fef2f2; }
+    .btn-browse {
+      height: 36px;
+      padding: 0 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--text-secondary);
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color .2s, background .2s, color .2s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .btn-browse:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .pv-validation-bar {
+      margin-top: 8px;
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 12.5px;
+      line-height: 1.6;
+      display: none;
+    }
+    .pv-validation-bar.show { display: block; }
+    .pv-validation-bar.success {
+      background: rgba(22,163,74,0.08);
+      border: 1px solid rgba(22,163,74,0.25);
+      color: #166534;
+    }
+    .pv-validation-bar.error {
+      background: #fef2f2;
+      border: 1px solid rgba(239,68,68,0.25);
+      color: #991b1b;
+    }
+
     /* ── Complete ──────────────────────────────────────────── */
     .complete-center {
       flex: 1;
@@ -634,7 +766,7 @@
 
   <!-- ── Titlebar ──────────────────────────────────────────── -->
   <div class="titlebar">
-    <span class="titlebar-text">AutoScriptor 安装向导</span>
+    <span class="titlebar-text">造笔 安装向导</span>
     <div class="titlebar-btns">
       <button class="titlebar-btn" id="btnMin" title="最小化">─</button>
       <button class="titlebar-btn close" id="btnClose" title="关闭">✕</button>
@@ -649,8 +781,19 @@
       <canvas id="particleCanvas"></canvas>
       <div class="left-overlay"></div>
       <div class="left-content">
-        <div class="logo-icon">⚡</div>
-        <div class="logo-title">Auto<span>Scriptor</span></div>
+        <div class="logo-icon">
+          <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M27 5L31.5 9.5L16 27.5L11.5 23Z" fill="white" opacity="0.95"/>
+            <path d="M16 27.5L11.5 23L8.5 33.5Z" fill="white" opacity="0.8"/>
+            <circle cx="8" cy="35" r="2" fill="white" opacity="0.9"/>
+            <line x1="8" y1="31" x2="8" y2="29.5" stroke="white" opacity="0.55" stroke-width="1.2" stroke-linecap="round"/>
+            <line x1="4" y1="35" x2="2.5" y2="35" stroke="white" opacity="0.55" stroke-width="1.2" stroke-linecap="round"/>
+            <line x1="5.2" y1="32.2" x2="4" y2="31" stroke="white" opacity="0.45" stroke-width="1.2" stroke-linecap="round"/>
+            <line x1="5.2" y1="37.8" x2="4" y2="39" stroke="white" opacity="0.45" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="logo-cn">造笔</div>
+        <div class="logo-en">AutoScriptor</div>
         <div class="logo-subtitle">AUTOMATION FRAMEWORK</div>
       </div>
       <div class="left-version">v1.0.0</div>
@@ -662,7 +805,7 @@
 
         <!-- Step 0: Welcome -->
         <div class="step active" id="step0">
-          <h2>欢迎安装 AutoScriptor</h2>
+          <h2>欢迎安装 造笔</h2>
           <p class="subtitle">安装向导将引导您完成环境配置。首次安装需下载约 500MB 依赖包，预计耗时 3-10 分钟（取决于网络速度）。</p>
           <div class="features">
             <div class="feature-card">
@@ -782,8 +925,60 @@
           <div class="log-box" id="logBox"></div>
         </div>
 
-        <!-- Step 3: Complete -->
+        <!-- Step 3: Path Verification -->
         <div class="step" id="step3">
+          <h2>环境验证</h2>
+          <p class="subtitle">安装程序已尝试自动检测模拟器路径。请确认以下配置正确，否则程序将无法正常运行。</p>
+
+          <div class="path-verify-list" id="pathVerifyList">
+            <div class="path-verify-item" id="pv-mumu_folder">
+              <div class="pv-header">
+                <span class="pv-status" id="pvs-mumu_folder">?</span>
+                <div class="pv-info">
+                  <div class="pv-label">MuMu 安装目录</div>
+                  <div class="pv-desc">MuMu 模拟器的安装根目录（包含 shell 或 nx_main 子文件夹）</div>
+                </div>
+              </div>
+              <div class="pv-path-row">
+                <input class="pv-input" id="pvi-mumu_folder" readonly placeholder="未检测到，请手动选择..." />
+                <button class="btn-browse" data-key="mumu_folder" data-dir="true">浏览…</button>
+              </div>
+            </div>
+
+            <div class="path-verify-item" id="pv-emu_path">
+              <div class="pv-header">
+                <span class="pv-status" id="pvs-emu_path">?</span>
+                <div class="pv-info">
+                  <div class="pv-label">模拟器可执行文件</div>
+                  <div class="pv-desc">MuMuPlayer.exe 或 MuMuManager.exe 的完整路径</div>
+                </div>
+              </div>
+              <div class="pv-path-row">
+                <input class="pv-input" id="pvi-emu_path" readonly placeholder="未检测到，请手动选择..." />
+                <button class="btn-browse" data-key="emu_path">浏览…</button>
+              </div>
+            </div>
+
+            <div class="path-verify-item" id="pv-adb_path">
+              <div class="pv-header">
+                <span class="pv-status" id="pvs-adb_path">?</span>
+                <div class="pv-info">
+                  <div class="pv-label">ADB 可执行文件</div>
+                  <div class="pv-desc">adb.exe 的完整路径（通常在模拟器安装目录的 shell 子文件夹中）</div>
+                </div>
+              </div>
+              <div class="pv-path-row">
+                <input class="pv-input" id="pvi-adb_path" readonly placeholder="未检测到，请手动选择..." />
+                <button class="btn-browse" data-key="adb_path">浏览…</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="pv-validation-bar" id="pvValidationBar"></div>
+        </div>
+
+        <!-- Step 4: Complete -->
+        <div class="step" id="step4">
           <div class="complete-center">
             <div class="success-ring">
               <svg class="success-check" viewBox="0 0 36 36">
@@ -792,7 +987,7 @@
             </div>
             <div class="complete-title">安装完成</div>
             <div class="complete-desc">
-              AutoScriptor 已准备就绪。<br>
+              造笔已准备就绪。<br>
               点击下方按钮启动应用程序。
             </div>
             <div class="complete-summary">
@@ -812,6 +1007,7 @@
           <div class="dot" data-dot="1"></div>
           <div class="dot" data-dot="2"></div>
           <div class="dot" data-dot="3"></div>
+          <div class="dot" data-dot="4"></div>
         </div>
         <div class="btn-row">
           <button class="btn-primary" id="btnNext">开始配置 →</button>
@@ -901,15 +1097,18 @@
        Step Navigation
        ═══════════════════════════════════════════════════════ */
     let currentStep = 0;
-    const totalSteps = 4;
+    const totalSteps = 5;
     const steps = [
       document.getElementById('step0'),
       document.getElementById('step1'),
       document.getElementById('step2'),
       document.getElementById('step3'),
+      document.getElementById('step4'),
     ];
     const dots = document.querySelectorAll('.dot');
     const btnNext = document.getElementById('btnNext');
+
+    let pathsAllValid = false;
 
     function goToStep(n) {
       if (n < 0 || n >= totalSteps) return;
@@ -926,6 +1125,8 @@
         if (i < n) d.classList.add('done');
         else if (i === n) d.classList.add('active');
       });
+
+      if (n === 3) loadAndVerifyPaths();
 
       updateButton();
     }
@@ -948,7 +1149,12 @@
           btnNext.onclick = null;
           break;
         case 3:
-          btnNext.textContent = '启动 AutoScriptor';
+          btnNext.textContent = pathsAllValid ? '完成安装 →' : '验证中...';
+          btnNext.disabled = !pathsAllValid;
+          btnNext.onclick = pathsAllValid ? confirmAndFinish : null;
+          break;
+        case 4:
+          btnNext.textContent = '启动 造笔';
           btnNext.disabled = false;
           btnNext.onclick = launchApp;
           break;
@@ -1056,6 +1262,166 @@
       }
     }
 
+    let installElapsedTotal = '';
+
+    /* ═══════════════════════════════════════════════════════
+       Path Verification
+       ═══════════════════════════════════════════════════════ */
+    const PATH_KEYS = ['mumu_folder', 'emu_path', 'adb_path'];
+    const PATH_META = {
+      mumu_folder: { label: 'MuMu 安装目录', isDir: true },
+      emu_path:    { label: '模拟器可执行文件', isDir: false, filters: [{ name: '可执行文件', extensions: ['exe'] }] },
+      adb_path:    { label: 'ADB 可执行文件', isDir: false, filters: [{ name: '可执行文件', extensions: ['exe'] }] },
+    };
+    let currentPaths = {};
+
+    async function loadAndVerifyPaths() {
+      pathsAllValid = false;
+      updateButton();
+      const bar = document.getElementById('pvValidationBar');
+      bar.className = 'pv-validation-bar';
+      bar.textContent = '';
+
+      if (!window.electron?.installer?.readConfigPaths) {
+        showValidationBar('error', '无法读取配置（Electron API 不可用）');
+        return;
+      }
+
+      try {
+        const emu = await window.electron.installer.readConfigPaths();
+        currentPaths = {};
+        for (const key of PATH_KEYS) {
+          const val = (emu[key] || '').trim();
+          currentPaths[key] = (!val || val.startsWith('YOUR_')) ? '' : val;
+        }
+      } catch {
+        currentPaths = { mumu_folder: '', emu_path: '', adb_path: '' };
+      }
+
+      for (const key of PATH_KEYS) {
+        document.getElementById('pvi-' + key).value = currentPaths[key] || '';
+      }
+
+      await validateAllPaths();
+    }
+
+    async function validateAllPaths() {
+      let allOk = true;
+
+      for (const key of PATH_KEYS) {
+        const val = currentPaths[key] || '';
+        const item = document.getElementById('pv-' + key);
+        const status = document.getElementById('pvs-' + key);
+        const input = document.getElementById('pvi-' + key);
+
+        if (!val) {
+          item.className = 'path-verify-item invalid';
+          status.className = 'pv-status fail';
+          status.textContent = '✕';
+          input.classList.add('invalid-input');
+          allOk = false;
+          continue;
+        }
+
+        let exists = false;
+        try {
+          exists = await window.electron.installer.validatePath(val);
+        } catch { /* ignore */ }
+
+        if (exists) {
+          item.className = 'path-verify-item valid';
+          status.className = 'pv-status ok';
+          status.textContent = '✓';
+          input.classList.remove('invalid-input');
+        } else {
+          item.className = 'path-verify-item invalid';
+          status.className = 'pv-status fail';
+          status.textContent = '✕';
+          input.classList.add('invalid-input');
+          allOk = false;
+        }
+      }
+
+      pathsAllValid = allOk;
+      updateButton();
+
+      if (allOk) {
+        showValidationBar('success', '✓ 所有路径验证通过，可以继续完成安装。');
+      } else {
+        showValidationBar('error', '部分路径未找到或无效，请使用「浏览…」按钮手动选择正确路径。');
+      }
+    }
+
+    function showValidationBar(type, msg) {
+      const bar = document.getElementById('pvValidationBar');
+      bar.className = 'pv-validation-bar show ' + type;
+      bar.textContent = msg;
+    }
+
+    async function confirmAndFinish() {
+      if (!pathsAllValid) return;
+      try {
+        await window.electron.installer.savePaths(currentPaths);
+      } catch { /* ignore */ }
+
+      if (installElapsedTotal) {
+        const descEl = document.querySelector('.complete-desc');
+        if (descEl) descEl.innerHTML =
+          `造笔已准备就绪。<br>安装耗时 <strong>${installElapsedTotal}</strong>，点击下方按钮启动应用程序。`;
+      }
+      goToStep(4);
+    }
+
+    document.querySelectorAll('.btn-browse').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const key = btn.dataset.key;
+        const meta = PATH_META[key];
+        if (!meta || !window.electron?.installer?.browsePath) return;
+
+        const chosen = await window.electron.installer.browsePath({
+          title: '选择 ' + meta.label,
+          isDirectory: !!meta.isDir,
+          filters: meta.filters || [],
+        });
+        if (!chosen) return;
+
+        currentPaths[key] = chosen;
+        document.getElementById('pvi-' + key).value = chosen;
+
+        if (key === 'mumu_folder') {
+          await tryDeriveFromFolder(chosen);
+        }
+
+        await validateAllPaths();
+      });
+    });
+
+    async function tryDeriveFromFolder(folder) {
+      if (!window.electron?.installer?.validatePath) return;
+      const shellDir = folder + '\\shell\\';
+      const nxDir = folder + '\\nx_main\\';
+      const candidates = [
+        { dir: nxDir, emu: 'MuMuManager.exe', adb: 'adb.exe' },
+        { dir: shellDir, emu: 'MuMuPlayer.exe', adb: 'adb.exe' },
+      ];
+      for (const c of candidates) {
+        const emuFull = c.dir + c.emu;
+        const adbFull = c.dir + c.adb;
+        const [emuOk, adbOk] = await Promise.all([
+          window.electron.installer.validatePath(emuFull),
+          window.electron.installer.validatePath(adbFull),
+        ]);
+        if (emuOk && (!currentPaths.emu_path || !(await window.electron.installer.validatePath(currentPaths.emu_path)))) {
+          currentPaths.emu_path = emuFull;
+          document.getElementById('pvi-emu_path').value = emuFull;
+        }
+        if (adbOk && (!currentPaths.adb_path || !(await window.electron.installer.validatePath(currentPaths.adb_path)))) {
+          currentPaths.adb_path = adbFull;
+          document.getElementById('pvi-adb_path').value = adbFull;
+        }
+      }
+    }
+
     /* ═══════════════════════════════════════════════════════
        Electron IPC
        ═══════════════════════════════════════════════════════ */
@@ -1103,12 +1469,8 @@
             case 'complete': {
               stopElapsedTimer();
               const total = installStartTime ? formatElapsed(Date.now() - installStartTime) : '';
-              addLog('✅ 安装完成！' + (total ? ` (耗时 ${total})` : ''), 'success');
-              if (total) {
-                const descEl = document.querySelector('.complete-desc');
-                if (descEl) descEl.innerHTML =
-                  `AutoScriptor 已准备就绪。<br>安装耗时 <strong>${total}</strong>，点击下方按钮启动应用程序。`;
-              }
+              addLog('✅ 依赖安装完成，正在验证环境配置...' + (total ? ` (耗时 ${total})` : ''), 'success');
+              installElapsedTotal = total;
               setTimeout(() => goToStep(3), 600);
               break;
             }

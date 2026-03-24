@@ -193,8 +193,21 @@ const AppSidebar = {
 
   <div class="sidebar-inner flex flex-col flex-1 min-h-0">
     <div class="sidebar-logo">
-      <i class="fa fa-bolt text-primary text-2xl sidebar-logo-icon"></i>
-      <span class="sidebar-brand-text font-bold text-xl tracking-wide ml-2">AutoScriptor</span>
+      <div class="sidebar-logo-mark">
+        <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M27 5L31.5 9.5L16 27.5L11.5 23Z" fill="white" opacity="0.95"/>
+          <path d="M16 27.5L11.5 23L8.5 33.5Z" fill="white" opacity="0.8"/>
+          <circle cx="8" cy="35" r="2" fill="white" opacity="0.9"/>
+          <line x1="8" y1="31" x2="8" y2="29.5" stroke="white" opacity="0.55" stroke-width="1.2" stroke-linecap="round"/>
+          <line x1="4" y1="35" x2="2.5" y2="35" stroke="white" opacity="0.55" stroke-width="1.2" stroke-linecap="round"/>
+          <line x1="5.2" y1="32.2" x2="4" y2="31" stroke="white" opacity="0.45" stroke-width="1.2" stroke-linecap="round"/>
+          <line x1="5.2" y1="37.8" x2="4" y2="39" stroke="white" opacity="0.45" stroke-width="1.2" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="sidebar-brand">
+        <span class="sidebar-brand-cn">造笔</span>
+        <span class="sidebar-brand-en">AutoScriptor</span>
+      </div>
     </div>
 
     <nav class="flex-1 overflow-y-auto py-2">

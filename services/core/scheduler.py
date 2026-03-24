@@ -359,6 +359,34 @@ class Scheduler:
 
     # ── 辅助 ──
 
+    def _safe_shutdown_emulator(self, cfg, reason: str = ""):
+        """
+        安全关闭模拟器：释放 IPC → 关闭应用 → shutdown 并等待验证 → 清理 runtime。
+        供 _maybe_daily_restart / _post_execution_action 等统一调用。
+        """
+        tag = f"📅 [{reason}]" if reason else "📅"
+        try:
+            if runtime_ctx.mixctrl is not None:
+                try:
+                    runtime_ctx.mixctrl.app.close(cfg["app"]["app_to_start"])
+                    time.sleep(2)
+                except Exception as e:
+                    logger.debug("%s 关闭应用失败(可忽略): %s", tag, e)
+
+            runtime_ctx._release_nemu_ipc()
+
+            from AutoScriptor.control.MumuAdaptor.mumu import Mumu
+            mumu = Mumu().select(cfg["emulator"]["index"])
+            mumu.power.shutdown(wait=True, timeout=30)
+
+            runtime_ctx.mixctrl = None
+            runtime_ctx.mumu = None
+            logger.info("%s 模拟器已安全关闭", tag)
+            return True
+        except Exception as e:
+            logger.warning("%s 模拟器安全关闭失败: %s", tag, e)
+            return False
+
     def _maybe_daily_restart(self, cfg):
         """每日 5:00 首次执行前重启模拟器（一天只触发一次）。"""
         next_ts = self._earliest_future_active_time()
@@ -373,16 +401,7 @@ class Scheduler:
         if cfg.get("status.last_login_time.time", 0) >= today_5am_ts or datetime.now().hour < 5:
             return
         logger.info("📅 检测到今日5:00首次执行，先关闭模拟器以清理状态")
-        try:
-            if runtime_ctx.mixctrl is not None:
-                runtime_ctx.mixctrl.app.close(cfg["app"]["app_to_start"])
-            time.sleep(2)
-            from AutoScriptor.control.MumuAdaptor.mumu import Mumu
-            Mumu().select(cfg["emulator"]["index"]).power.shutdown()
-            time.sleep(10)
-            runtime_ctx.refresh()
-        except Exception as e:
-            logger.warning("📅 模拟器每日重启失败: %s", e)
+        self._safe_shutdown_emulator(cfg, reason="每日重启")
         cfg.set("status.last_login_time.time", time.time())
         cfg.save_config()
 
@@ -407,13 +426,13 @@ class Scheduler:
             return
         if action == "close_mumu":
             logger.info("📅 执行后: 关闭模拟器")
-            runtime_ctx.mixctrl.app.close(app_name)
-            time.sleep(2)
-            from AutoScriptor.control.MumuAdaptor.mumu import Mumu
-            Mumu().select(cfg["emulator"]["index"]).power.shutdown()
+            self._safe_shutdown_emulator(cfg, reason="执行后关闭模拟器")
         elif action == "close_game_only":
             logger.info("📅 执行后: 仅关闭游戏")
-            runtime_ctx.mixctrl.app.close(app_name)
+            try:
+                runtime_ctx.mixctrl.app.close(app_name)
+            except Exception as e:
+                logger.warning("📅 关闭游戏失败: %s", e)
         elif action == "goto_main":
             logger.info("📅 执行后: 回到主界面")
             try:

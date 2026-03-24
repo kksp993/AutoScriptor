@@ -73,12 +73,19 @@ class utils:
                 command_extend = command
             result = None
             for _ in range(repeat):
-                result = subprocess.run(command_extend, shell=True, check=False, stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE,
-                                        encoding='utf-8')
+                result = subprocess.run(
+                    command_extend,
+                    shell=False,
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    encoding='utf-8',
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0,
+                )
             ret_code = result.returncode
             retval = result.stdout
-
+            if ret_code != 0 and result.stderr:
+                retval = f"{retval}\n{result.stderr}".strip()
 
             return ret_code, retval
 
