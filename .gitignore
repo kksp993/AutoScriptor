@@ -31,7 +31,6 @@
 /logs/
 /config.json
 /config_*.json
-/wheelhouse/
 /.python*
 /.gitadd*
 /docs/refs/

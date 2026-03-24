@@ -34,7 +34,7 @@ if (Test-Path -Path $VenvPy -PathType Leaf) {
 } else {
     Write-Host "No venv detected, searching for Python 3.10..."
 
-    # Check local .python310 first (official 3.10.11 embed from bootstrap)
+    # Check local .python310 first (embeddable zip extracted by bootstrap)
     $LocalPy310 = Join-Path $Root ".python310\python.exe"
     if (Test-Path -Path $LocalPy310 -PathType Leaf) {
         Write-Host "Found local Python 3.10 at $LocalPy310"
@@ -64,63 +64,14 @@ if (Test-Path -Path $VenvPy -PathType Leaf) {
 
     Write-Host "Python 3.10 not found. Bootstrap installing Python 3.10.11 locally..."
 
-    $PyVersion = "3.10.11"
-    $CacheDir = Join-Path $Root "wheelhouse\python"
-    $InstallerFile = "python-$PyVersion-amd64.exe"
-    $PyUrl = "https://www.python.org/ftp/python/$PyVersion/$InstallerFile"
-    if ($env:AUTOSCRIPTOR_PYTHON_URL) {
-        $PyUrl = $env:AUTOSCRIPTOR_PYTHON_URL
-        $InstallerFile = Split-Path -Path $PyUrl -Leaf
-    }
-    $InstallerPath = Join-Path $CacheDir $InstallerFile
-
-    if (-not (Test-Path -Path $CacheDir -PathType Container)) {
-        New-Item -ItemType Directory -Force -Path $CacheDir | Out-Null
-    }
-    $FreshInstall = $env:AUTOSCRIPTOR_FRESH_INSTALL -match '^(1|true|yes|on)$'
-    if ($FreshInstall -and (Test-Path -Path $InstallerPath -PathType Leaf)) {
-        Write-Host "AUTOSCRIPTOR_FRESH_INSTALL: removing cached Python installer: $InstallerPath"
-        Remove-Item -Force -ErrorAction Stop $InstallerPath
-    }
-    if (-not (Test-Path -Path $InstallerPath -PathType Leaf)) {
-        Write-Host "Downloading Python $PyVersion ..."
-        Invoke-WebRequest -Uri $PyUrl -OutFile $InstallerPath -UseBasicParsing
-    } else {
-        Write-Host "Using cached installer: $InstallerPath"
+    $BootstrapScript = Join-Path $Root "scripts\bootstrap-python310.ps1"
+    & $BootstrapScript -Root $Root
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Python 3.10 bootstrap failed with exit code $LASTEXITCODE"
+        exit $LASTEXITCODE
     }
 
-    $RepoPyDir = Join-Path $Root ".python310"
-    if (-not (Test-Path -Path $RepoPyDir -PathType Container)) {
-        New-Item -ItemType Directory -Force -Path $RepoPyDir | Out-Null
-    }
-
-    $silentArgs = @(
-        "/quiet",
-        "SimpleInstall=1",
-        "InstallAllUsers=0",
-        "Include_pip=1",
-        "Include_launcher=1",
-        "PrependPath=0",
-        "Shortcuts=0",
-        "Include_test=0",
-        "TargetDir=$RepoPyDir"
-    )
-
-    Write-Host "Installing Python $PyVersion into $RepoPyDir ..."
-    $proc = Start-Process -FilePath $InstallerPath -ArgumentList $silentArgs -Wait -PassThru
-    if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
-        Write-Warning "Python 3.10 安装失败（退出码: $($proc.ExitCode)）。尝试重新下载安装器并重试..."
-        try { Remove-Item -Force -ErrorAction SilentlyContinue $InstallerPath } catch {}
-        Write-Host "Re-downloading Python $PyVersion ..."
-        Invoke-WebRequest -Uri $PyUrl -OutFile $InstallerPath -UseBasicParsing
-        $proc = Start-Process -FilePath $InstallerPath -ArgumentList $silentArgs -Wait -PassThru
-        if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
-            Write-Error "Python 3.10 安装失败，退出码: $($proc.ExitCode)"
-            exit $proc.ExitCode
-        }
-    }
-
-    $RepoPyExe = Join-Path $RepoPyDir "python.exe"
+    $RepoPyExe = Join-Path $Root ".python310\python.exe"
     if (-not (Test-Path -Path $RepoPyExe -PathType Leaf)) {
         Write-Error "未找到安装后的 python.exe: $RepoPyExe"
         exit 1
