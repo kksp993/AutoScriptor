@@ -200,7 +200,7 @@ function pollServer(retries = 0) {
     let body = '';
     res.on('data', d => { body += d; });
     res.on('end', () => {
-      if (res.statusCode === 200 && body.includes('AutoScriptor')) {
+      if (res.statusCode === 200 && (body.includes('AutoScriptor') || body.includes('造笔'))) {
         console.log('[main] Server ready, loading app...');
         sendToRenderer('status', 'ready');
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -228,7 +228,7 @@ function createMainWindow() {
     minHeight: 600,
     show: false,
     icon,
-    title: 'AutoScriptor',
+    title: '造笔 - AutoScriptor',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -279,7 +279,7 @@ function createTray() {
     { label: '退出',        click: () => quitApp() },
   ]);
 
-  tray.setToolTip('AutoScriptor');
+  tray.setToolTip('造笔 - AutoScriptor');
   tray.setContextMenu(menu);
   tray.on('click', () => {
     if (mainWindow?.isVisible()) {
@@ -303,7 +303,7 @@ function createInstallerWindow() {
     resizable: false,
     show: false,
     icon,
-    title: 'AutoScriptor 安装向导',
+    title: '造笔 安装向导',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -427,6 +427,49 @@ ipcMain.on('installer:launch', () => {
     installerProc = null;
   }
   transitionToApp();
+});
+
+// ── Installer path-verification IPC ─────────────────────────────────────────
+ipcMain.handle('installer:read-config-paths', () => {
+  const cfgPath = path.join(ROOT, 'config.json');
+  try {
+    const data = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    return data.emulator || {};
+  } catch {
+    return {};
+  }
+});
+
+ipcMain.handle('installer:browse-path', async (_event, opts) => {
+  if (!mainWindow) return null;
+  const props = opts && opts.isDirectory ? ['openDirectory'] : ['openFile'];
+  const filters = (!opts?.isDirectory && opts?.filters) ? opts.filters : undefined;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: (opts && opts.title) || '选择路径',
+    properties: props,
+    filters: filters,
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle('installer:validate-path', (_event, p) => {
+  try { return fs.existsSync(p); } catch { return false; }
+});
+
+ipcMain.handle('installer:save-paths', (_event, paths) => {
+  const cfgPath = path.join(ROOT, 'config.json');
+  try {
+    const data = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    if (!data.emulator) data.emulator = {};
+    for (const [k, v] of Object.entries(paths)) {
+      data.emulator[k] = v;
+    }
+    fs.writeFileSync(cfgPath, JSON.stringify(data, null, 2), 'utf-8');
+    return true;
+  } catch {
+    return false;
+  }
 });
 
 // ── IPC handlers (window controls from renderer) ──────────────────────────────

@@ -5,8 +5,8 @@
 
 const config = {
   appId: 'com.autoscriptor.app',
-  productName: 'AutoScriptor',
-  copyright: 'AutoScriptor',
+  productName: '造笔',
+  copyright: '造笔 AutoScriptor',
 
   directories: {
     output: '../dist_electron',
@@ -64,7 +64,7 @@ const config = {
     allowToChangeInstallationDirectory: true,
     createDesktopShortcut: true,
     createStartMenuShortcut: true,
-    shortcutName: 'AutoScriptor',
+    shortcutName: '造笔',
     installerIcon: 'buildResources/icon.ico',
     uninstallerIcon: 'buildResources/icon.ico',
   },

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';" />
-  <title>AutoScriptor</title>
+  <title>造笔 - AutoScriptor</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -71,29 +71,43 @@
 
     .logo {
       display: flex;
+      flex-direction: column;
       align-items: center;
-      gap: 14px;
+      gap: 12px;
       margin-bottom: 48px;
     }
     .logo-icon {
-      width: 56px;
-      height: 56px;
+      width: 64px;
+      height: 64px;
       background: linear-gradient(135deg, #22c55e, #16a34a);
-      border-radius: 16px;
+      border-radius: 18px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 28px;
       animation: logoPulse 3s ease-in-out infinite;
     }
-    .logo-text {
-      font-size: 32px;
-      font-weight: 700;
-      letter-spacing: -0.5px;
-      color: #1e293b;
+    .logo-icon svg {
+      width: 38px;
+      height: 38px;
     }
-    .logo-text span {
-      color: #16a34a;
+    .logo-brand {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+    .logo-cn {
+      font-size: 36px;
+      font-weight: 700;
+      color: #1e293b;
+      letter-spacing: 8px;
+      line-height: 1.2;
+    }
+    .logo-en {
+      font-size: 13px;
+      color: #64748b;
+      letter-spacing: 2px;
+      font-weight: 400;
     }
 
     .status-area {
@@ -257,8 +271,21 @@
     </div>
 
     <div class="logo">
-      <div class="logo-icon">⚡</div>
-      <div class="logo-text">Auto<span>Scriptor</span></div>
+      <div class="logo-icon">
+        <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M27 5L31.5 9.5L16 27.5L11.5 23Z" fill="white" opacity="0.95"/>
+          <path d="M16 27.5L11.5 23L8.5 33.5Z" fill="white" opacity="0.8"/>
+          <circle cx="8" cy="35" r="2" fill="white" opacity="0.9"/>
+          <line x1="8" y1="31" x2="8" y2="29.5" stroke="white" opacity="0.55" stroke-width="1.2" stroke-linecap="round"/>
+          <line x1="4" y1="35" x2="2.5" y2="35" stroke="white" opacity="0.55" stroke-width="1.2" stroke-linecap="round"/>
+          <line x1="5.2" y1="32.2" x2="4" y2="31" stroke="white" opacity="0.45" stroke-width="1.2" stroke-linecap="round"/>
+          <line x1="5.2" y1="37.8" x2="4" y2="39" stroke="white" opacity="0.45" stroke-width="1.2" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="logo-brand">
+        <div class="logo-cn">造笔</div>
+        <div class="logo-en">AutoScriptor</div>
+      </div>
     </div>
 
     <div class="status-area">
@@ -272,7 +299,7 @@
 
     <div class="log-box" id="logBox"></div>
 
-    <div class="version">AutoScriptor v1.0</div>
+    <div class="version">造笔 AutoScriptor v1.0</div>
   </div>
 
   <script>
@@ -409,7 +436,7 @@
           progressFill.style.width = '100%';
           spinner.style.display = 'none';
           readyBadge.classList.add('show');
-          addLog('✅ 服务就绪，正在加载 AutoScriptor...', 'highlight');
+          addLog('✅ 服务就绪，正在加载造笔...', 'highlight');
         }
       });
     } else {

@@ -18,5 +18,9 @@ contextBridge.exposeInMainWorld('electron', {
     startInstall:   (config) => ipcRenderer.send('installer:start', config),
     onProgress:     (cb) => ipcRenderer.on('installer:progress', (_e, data) => cb(data)),
     launch:         () => ipcRenderer.send('installer:launch'),
+    readConfigPaths: () => ipcRenderer.invoke('installer:read-config-paths'),
+    browsePath:      (opts) => ipcRenderer.invoke('installer:browse-path', opts),
+    validatePath:    (p) => ipcRenderer.invoke('installer:validate-path', p),
+    savePaths:       (paths) => ipcRenderer.invoke('installer:save-paths', paths),
   },
 });
