@@ -46,7 +46,7 @@ const TaskPanel = {
         <button class="px-4 py-2.5 bg-secondary/20 text-dark rounded-lg hover:bg-secondary/30 transition-colors text-sm font-medium shrink-0" @click="$emit('open-add-account')">
           <i class="fa fa-plus mr-1.5"></i>添加账号
         </button>
-        <button class="px-4 py-2.5 bg-secondary/20 text-dark rounded-lg hover:bg-secondary/30 transition-colors text-sm font-medium shrink-0" @click="$emit('save-tasks')">
+        <button class="px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium shrink-0" @click="$emit('save-tasks')">
           <i class="fa fa-save mr-1.5"></i>保存任务
         </button>
         <span v-if="characterName" class="px-3 py-1.5 bg-secondary/10 text-secondary rounded text-sm shrink-0">角色ID：{{ characterName }}</span>

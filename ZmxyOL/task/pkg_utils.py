@@ -128,6 +128,29 @@ def import_modules(py_files):
             print(f"Error importing {absolute_module_path}: {e}")
 
 
+def migrate_hgwj_daily_task_leaf_to_wanjiefuben(tasks: dict) -> None:
+    """旧版 hgwj/daily_task.py 在「荒古万界」下注册为中文键「每日任务」，与分类重名。
+    现改为 wanjiefuben.py → 「万界副本」。将旧叶节点配置合并到新键下。
+    """
+    root = tasks.get("每日任务")
+    if not isinstance(root, dict):
+        return
+    hgwj = root.get("荒古万界")
+    if not isinstance(hgwj, dict):
+        return
+    old = hgwj.pop("每日任务", None)
+    if not isinstance(old, dict):
+        return
+    if "on" not in old and "next_exec_time" not in old:
+        hgwj["每日任务"] = old
+        return
+    new_key = "万界副本"
+    if new_key in hgwj and isinstance(hgwj[new_key], dict):
+        hgwj[new_key] = {**hgwj[new_key], **old}
+    else:
+        hgwj[new_key] = old
+
+
 def normalize_cfg_tasks_to_cn():
     """将 cfg['tasks'] 的所有键统一为中文，并合并重复分支。
     - 兼容中文/英文（新旧）键，统一映射为中文键

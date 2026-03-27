@@ -13,8 +13,7 @@ def task(clear_all=False, lianbao=False):
     while ui_F(T("仙盟",box=Box(16,30,924,400)), 3):
         click(I("导航-按钮收缩"))
         sleep(4)
-    click(B(640,440,10,10))
-    click(T("本命空间", box=Box(4,239,942,256).margin()))
+    click(T("本命空间", box=Box(25,15,882,328).margin()))
     wait_for_appear(T("升级"))
     click(T("空间任务"))
     click(B(860,250,60,60),repeat=3)

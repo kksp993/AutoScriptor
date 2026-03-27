@@ -1,5 +1,5 @@
 /**
- * EditorControls – 选项开关、阈值滑块、坐标/代码信息面板
+ * EditorControls – 选项开关、边缘阈值滑块、坐标/代码信息面板
  *
  * Props: name, freezeName, freeX, freeY, useImage, onlyOcr, lockColor, threshold,
  *        centerText, boxText, tCode, iCode, colorText, nameOk, imageOk
@@ -80,10 +80,10 @@ const EditorControls = {
     <el-checkbox size="small" :model-value="onlyOcr" @update:model-value="$emit('update:onlyOcr', $event)">仅OCR</el-checkbox>
   </div>
 
-  <!-- 阈值 -->
-  <el-form-item class="mb-3">
+  <!-- 边缘阈值：色差边缘收缩选区（optimize-rect） -->
+  <el-form-item class="mb-3" label-width="80px">
     <template #label>
-      <span class="text-sm text-gray-700">阈值</span>
+      <span class="text-sm text-gray-700" title="按色差收缩选区边缘，松手后重算">边缘阈值</span>
     </template>
     <div class="flex items-center gap-2 w-full min-w-0">
       <span class="text-xs font-medium text-gray-700 tabular-nums w-7 shrink-0 text-right leading-none">{{ threshold }}</span>

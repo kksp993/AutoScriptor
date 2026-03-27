@@ -1,8 +1,8 @@
 """
-OCR 帧级缓存 + scale fallback 移除 单元测试
+OCR 帧级缓存 + scale 失败回退 1.0 单元测试
 =============================================
 覆盖：_frame_fingerprint 指纹一致性、_raw_ocr_cached 缓存命中/过期/
-      失效、ocr() 默认 scale=1.0、无 fallback 递归。
+      失效、ocr() 默认 scale=1.0、scale≠1.0 且无匹配时回退 1.0 一次。
 """
 
 import sys
@@ -75,7 +75,7 @@ class TestRawOcrCached(unittest.TestCase):
     """_raw_ocr_cached 缓存行为"""
 
     def setUp(self):
-        ocr_rec._frame_cache = None
+        ocr_rec._frame_cache = {}
 
     @patch("AutoScriptor.recognition.ocr_rec.get_ocr_engine")
     def test_first_call_invokes_engine(self, mock_get):
@@ -136,7 +136,7 @@ class TestRawOcrCached(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# ocr() 函数签名与 fallback 移除
+# ocr() 函数签名与 scale 回退
 # ---------------------------------------------------------------------------
 
 class TestOcrFunctionSignature(unittest.TestCase):
@@ -157,18 +157,26 @@ class TestOcrFunctionSignature(unittest.TestCase):
         mock_cached.assert_called_once()
 
     @patch("AutoScriptor.recognition.ocr_rec._raw_ocr_cached")
-    def test_no_recursive_fallback(self, mock_cached):
-        """scale=0.5 找不到时不再递归 scale=1.0"""
+    def test_scale_fallback_when_no_match(self, mock_cached):
+        """scale≠1.0 且未匹配时以 scale=1.0 再跑一次 _raw_ocr_cached"""
         mock_cached.return_value = [[]]
         img = np.zeros((100, 200, 3), dtype=np.uint8)
         ocr_rec.ocr(img, ["不存在的文字"], scale=0.5)
-        self.assertEqual(mock_cached.call_count, 1)
+        self.assertEqual(mock_cached.call_count, 2)
 
     @patch("AutoScriptor.recognition.ocr_rec._raw_ocr_cached")
     def test_returns_empty_when_cached_returns_none(self, mock_cached):
         mock_cached.return_value = None
         img = np.zeros((100, 200, 3), dtype=np.uint8)
         self.assertEqual(ocr_rec.ocr(img, ["test"]), [])
+
+    @patch("AutoScriptor.recognition.ocr_rec._raw_ocr_cached")
+    def test_fallback_when_first_engine_returns_none(self, mock_cached):
+        """scale≠1.0 且首轮 None 时回退 1.0 再试"""
+        mock_cached.return_value = None
+        img = np.zeros((100, 200, 3), dtype=np.uint8)
+        ocr_rec.ocr(img, ["x"], scale=0.75)
+        self.assertEqual(mock_cached.call_count, 2)
 
     @patch("AutoScriptor.recognition.ocr_rec._raw_ocr_cached")
     def test_multiple_targets_single_ocr(self, mock_cached):

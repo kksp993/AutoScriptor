@@ -111,6 +111,8 @@ def register_task(func=None, *, default_offset_hours=None, **task_kwargs):
         defaults = {}
         param_meta = {}
         for name, param in sig.parameters.items():
+            if param.kind in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL):
+                continue
             default = param.default if param.default is not inspect._empty else None
             if isinstance(default, enum.Enum):
                 defaults[name] = default.name

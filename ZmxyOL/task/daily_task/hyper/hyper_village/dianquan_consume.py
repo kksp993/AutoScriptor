@@ -38,7 +38,6 @@ def task(method:Method=Method.YAOSHI):
     elif method == Method.JINFAYIN or method == Method.MUFAYIN:
         target_item = "金法印制作书" if method == Method.JINFAYIN else "木法印制作书"
         ensure_in("法相")
-        click(T("法相", box=Box(312,11,95,49).margin()))
         click(T("法宝", box=Box(76,238,78,72).margin()))
         click(T("获取仙宝", box=Box(894,525,202,77).margin()))
         click(T("冶炼", box=Box(116,16,95,67).margin()))
@@ -46,13 +45,13 @@ def task(method:Method=Method.YAOSHI):
         wait_for_appear(T("荒古商店", box=Box(553,0,251,102).margin()))
         swipe(B(637,605,1,1), B(637,210,1,1))
         swipe(B(637,605,1,1), B(637,210,1,1))
-        click(T(target_item, box=Box(286,238,185,42).margin()), offset=(30,230))
+        click(T(target_item, box=Box(0,238,1280,42).margin()), offset=(37,250), resize=(74,40))
         wait_for_appear(T(target_item, box=Box(516,107,269,39).margin()))
         click(B(820,383,67,69), repeat=3)
         click(T("确定", box=Box(713,514,158,75).margin()))
+        click(T("点击空白处关闭", box=Box(528,583,241,54).margin()))
         wait_for_appear(T("荒古商店", box=Box(553,0,251,102).margin()))
-        click(B(1044,52,97,78))
-        wait_for_appear(T("冶炼", box=Box(116,16,95,67).margin()))
+        click(B(1070,81,1,1), until=lambda: ui_T(T("冶炼", box=Box(116,16,95,67).margin())))
         click(B(1199,25,58,49))
     else:   
         raise ValueError(f"不支持的方法: {method}") 

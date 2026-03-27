@@ -7,7 +7,7 @@ from AutoScriptor.utils.logger import logger
 @register_task(next_exec_offset_hours=10)
 def task():
     ensure_in("村庄")
-    click(I("导航-战令"))   # 概率失败 （T也有概率）
+    click((I("导航-战令"),T("战令", box=Box(806,31,86,110).margin())))   # 概率失败 （T仅0.75缩放可成）
     wait_for_appear(T("购买等级"))
     click(B(105,244,34,124))
     sleep(1)
