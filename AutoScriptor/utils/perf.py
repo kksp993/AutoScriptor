@@ -174,6 +174,26 @@ def unboost():
     logger.info("⚡ 已恢复默认优先级与电源策略")
 
 
+@contextlib.contextmanager
+def mumu_safe_subprocess():
+    """
+    在调用 MuMu 官方 API（subprocess 拉起 MuMuManager）时临时取消 boost。
+
+    任务执行期间若已 boost，错误恢复里的 close/launch/shutdown 会继承
+    HIGH_PRIORITY_CLASS，MuMu 可能返回 errcode=-201（unknown error）或
+    导致 ADB/Nemu 连接异常；与 ensure_app_running 前的 unboost 同理。
+    """
+    with _boost_lock:
+        was_boosted = _boosted
+    if was_boosted:
+        unboost()
+    try:
+        yield
+    finally:
+        if was_boosted:
+            boost()
+
+
 # ==================== 底层工具函数 ====================
 
 def _apply_cpu_affinity():

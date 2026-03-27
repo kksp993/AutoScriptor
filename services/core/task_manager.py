@@ -181,8 +181,8 @@ class TaskManager:
                 return False
 
             except RequestHumanTakeover as e:
-                logger.error(f"❌ 需要人工操作: {task}")
-                self._archive_error(task, e)
+                logger.error(f"❌ 需要人工操作: {task}，原因: {e}")
+                # 人工接管属预期分支，不写入 logs/errors，避免与真实异常混淆
                 with self._cfg_lock:
                     self._update_next_exec_time(task)
                 return False
@@ -195,7 +195,7 @@ class TaskManager:
                 return False
 
             except Exception as e:
-                logger.error(f"❌ 执行失败: {task}，错误: {e}")
+                logger.error("❌ 执行失败: %s，错误: %r", task, e)
                 self._archive_error(task, e)
                 traceback.print_exc()
                 if not self._try_recover_app(attempt):
@@ -306,22 +306,24 @@ class TaskManager:
         if not cfg["app"].get("restart_on_error"):
             return False
         app_name = cfg["app"]["app_to_start"]
-        try:
-            runtime_ctx.mixctrl.app.close(app_name)
-            self._wait_app_stopped(app_name)
-            if retry_count >= 1:
-                self._restart_adb_and_wait()
-            if not self._wait_app_running(app_name):
+        from AutoScriptor.utils.perf import mumu_safe_subprocess
+        with mumu_safe_subprocess():
+            try:
+                runtime_ctx.mixctrl.app.close(app_name)
+                self._wait_app_stopped(app_name)
+                if retry_count >= 1:
+                    self._restart_adb_and_wait()
+                if not self._wait_app_running(app_name):
+                    return False
+                # if not dismiss_floating_window(max_retries=40, debug=False):
+                #     logger.warning("🔄 悬浮窗关闭失败，尝试完全重启模拟器")
+                #     return self._full_emulator_restart(app_name)
+                sleep(5)
+                mm.set_region("登录")
+                return True
+            except Exception as e:
+                logger.error("🔄 应用重启失败: %r", e)
                 return False
-            if not dismiss_floating_window(max_retries=40, debug=False):
-                logger.warning("🔄 悬浮窗关闭失败，尝试完全重启模拟器")
-                return self._full_emulator_restart(app_name)
-            sleep(5)
-            mm.set_region("登录")
-            return True
-        except Exception as e:
-            logger.error(f"🔄 应用重启失败: {e}")
-            return False
 
     def _wait_app_stopped(self, app_name: str, timeout: int = 15):
         """等待应用完全停止后再返回，防止 close 后立即 launch 被忽略。"""
@@ -435,42 +437,3 @@ class TaskManager:
                     pass
 
 
-if __name__ == "__main__":
-    from AutoScriptor.core.api import init as _init_env
-    _init_env()
-    from ZmxyOL.task import load_tasks
-    load_tasks()
-    from AutoScriptor.utils.perf import boost, unboost
-    try:
-        boost()
-        task_manager = TaskManager()
-        task_manager.execute_tasks([
-            '每日任务/天庭/地狱混沌',
-            '每日任务/天庭/天庭混沌',
-            '每日任务/天庭/组队任务',
-            '每日任务/村庄/仙宝挖掘',
-            '每日任务/村庄/仙气消耗',
-            '每日任务/村庄/仙盟建设',
-            '每日任务/村庄/取经',
-            '每日任务/村庄/天选阁',
-            '每日任务/村庄/妖兽',
-            '每日任务/村庄/宠物培养',
-            '每日任务/村庄/强化装备',
-            '每日任务/村庄/战令领取',
-            '每日任务/村庄/活跃券',
-            '每日任务/村庄/竞技场',
-            '每日任务/极北/极北地区/一键碾压',
-            '每日任务/极北/极北地区/冰窟探险',
-            '每日任务/极北/极北地区/厄难副本',
-            '每日任务/极北/极北地区/极北混沌',
-            '每日任务/极北/极北地区/梵天塔',
-            '每日任务/极北/极北地区/混沌蛋',
-            '每日任务/极北/极北村庄/仙宝炼化',
-            '每日任务/极北/极北村庄/极光天诏',
-            '每日任务/极北/极北村庄/消费点券',
-            '每日任务/极北/极寒深渊/极渊副本',
-            '每日任务/登录/登录其他角色'
-        ])
-    finally:
-        unboost()
-        bg.stop()

@@ -253,7 +253,6 @@ class Scheduler:
             logger.warning("⚠️ 账号未验证，跳过执行")
             return
 
-        boost()
         total_success = total_failed = 0
         attempted: set[str] = set()
 
@@ -277,6 +276,10 @@ class Scheduler:
                 logger.info("📅 发现 %d 个待执行任务: %s", len(due), due)
                 self._maybe_daily_restart(cfg)
 
+                # 必须先让模拟器在正常优先级下启动，启动完成后再 boost。
+                # 如果先 boost 再启动，MuMu 子进程会继承 HIGH_PRIORITY_CLASS，
+                # 导致虚拟化引擎误判权限状态 → "安卓设备无法启动"。
+                unboost()
                 try:
                     ensure_app_running(
                         cfg["emulator"]["index"],
@@ -289,6 +292,7 @@ class Scheduler:
                     if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
                         self.mark_error()
                     break
+                boost()
 
                 task_key = due[0]
                 attempted.add(task_key)
@@ -375,6 +379,9 @@ class Scheduler:
 
             runtime_ctx._release_nemu_ipc()
 
+            # 关闭模拟器前恢复正常优先级，防止 MuMu 子进程继承 HIGH_PRIORITY_CLASS
+            from AutoScriptor.utils.perf import unboost as _unboost
+            _unboost()
             from AutoScriptor.control.MumuAdaptor.mumu import Mumu
             mumu = Mumu().select(cfg["emulator"]["index"])
             mumu.power.shutdown(wait=True, timeout=30)

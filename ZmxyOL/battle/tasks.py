@@ -80,6 +80,7 @@ JIBEI_CHAOS_TABLE=[
     "猴王星宫",
 ]
 
+# 顺序与各关卡任务参数（YanHao、QuanShen…TuShen）一致，见 polar_abyss/hyper_abyss_task.py
 JHSY_CHAOS_TABLE=[
     "岩貉星宫",
     "犬神星宫",
@@ -87,7 +88,7 @@ JHSY_CHAOS_TABLE=[
     "虎王星宫",
     "獐王星宫",
     "犴神星宫",
-    # "兔神星宫"    #打不过，能打过的自己解开注释
+    "兔神星宫"    #打不过，能打过的自己解开注释
 ]
 
 

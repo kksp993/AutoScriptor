@@ -86,6 +86,41 @@ async def editor_screenshot():
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+def _decode_image_bytes(raw: bytes) -> np.ndarray | None:
+    """将 PNG/JPEG/WebP 等字节解码为 BGR ndarray；失败返回 None。"""
+    if not raw:
+        return None
+    arr = np.frombuffer(raw, dtype=np.uint8)
+    return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+
+
+# ── POST /api/editor/ingest-image ──
+
+@router.post("/ingest-image")
+async def editor_ingest_image(request: Request):
+    """从客户端上传的 base64 图片更新 _last_screenshot，供 OCR / 选区 / 保存等与实时截图一致。
+    切换图片时清空模板缓存。不要求 mixctrl。"""
+    global _last_screenshot, _last_template
+    try:
+        data = await request.json()
+        b64 = (data.get("image") or "").strip()
+        if not b64:
+            return JSONResponse(status_code=400, content={"error": "缺少 image"})
+        if "," in b64 and b64.startswith("data:"):
+            b64 = b64.split(",", 1)[1]
+        raw = base64.b64decode(b64, validate=False)
+        img = _decode_image_bytes(raw)
+        if img is None:
+            return JSONResponse(status_code=400, content={"error": "无法解码图片（支持常见位图格式）"})
+        _last_screenshot = img
+        _last_template = None
+        h, w = img.shape[:2]
+        return {"image": _screenshot_to_base64(img), "width": w, "height": h}
+    except Exception as e:
+        logger.error("editor/ingest-image error: %s", e)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 # ── POST /api/editor/ocr ──
 
 @router.post("/ocr")

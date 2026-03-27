@@ -52,6 +52,11 @@ def ensure_app_running(selected_emulator_index, adb_addr, app_to_start):
     print(f"adb_addr: {adb_addr}")
     print(f"app_to_start: {app_to_start}")
     print(f"mumu_manager_path: {mumu_manager_path}")
+    # 启动模拟器前必须恢复正常进程优先级。
+    # boost() 会将 Python 设为 HIGH_PRIORITY_CLASS，subprocess 子进程默认继承，
+    # MuMu Hypervisor 在高优先级下启动会误判权限 → "安卓设备无法启动"。
+    from AutoScriptor.utils.perf import unboost as _unboost
+    _unboost()
     mumu = Mumu().select(selected_emulator_index)
     mumu.power.start(app_to_start) if cfg["app"]["auto_start"] else None
     logger.info("模拟器启动完成")
@@ -638,7 +643,7 @@ def detect_floating_window(debug: bool = False) -> dict:
     return _detect(screenshot, debug=debug)
 
 
-def dismiss_floating_window(max_retries: int = 3, debug: bool = False) -> bool:
+def dismiss_floating_window(max_retries: int = 1, debug: bool = False) -> bool:
     """
     检测并移除 4399 悬浮窗：检测到后将其滑动到屏幕中央触发设置面板，然后隐藏。
     

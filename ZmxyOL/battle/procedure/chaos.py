@@ -1,5 +1,30 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
+
 from AutoScriptor import *
 from ZmxyOL.battle.character.hero import *
+
+# 灵气优先级默认顺序（与 LingQi 枚举一致）；fallback 选关时序号越小越优先
+DEFAULT_LINGQI_PRIORITY_VALUES: tuple[str, ...] = ("金", "木", "水", "火", "土", "雷", "月", "时", "天")
+
+
+def sort_stage_lingqi_pairs(
+    pairs: list[tuple[str, str]],
+    *,
+    priority: Sequence[str] | None = None,
+) -> list[tuple[str, str]]:
+    """按灵气优先级排序 (关卡名, 关卡灵气)，未知灵气排在末尾。"""
+    order = list(priority) if priority is not None else list(DEFAULT_LINGQI_PRIORITY_VALUES)
+
+    def _key(item: tuple[str, str]) -> int:
+        lg = item[1]
+        try:
+            return order.index(lg)
+        except ValueError:
+            return len(order)
+
+    return sorted(pairs, key=_key)
 
 @combo
 def check_linggen(self:Hero):
@@ -45,16 +70,28 @@ def task_way_to_diff(self:Hero, task: str, expect_difficulty: str, task_type: st
     return remains
 
 @combo
-def chaos_select(self:Hero, task_list:list[str], Weather:str, task_type: str)->str|None:
-    same_linggen_chaos = None
+def chaos_select(
+    self: Hero,
+    task_list: list[str],
+    Weather: str,
+    task_type: str,
+) -> tuple[str | None, list[tuple[str, str]]]:
+    """遍历 task_list，建立 (关卡名, 关卡灵气) 列表；返回 (与 Weather 匹配的首个关卡, 全表映射)。
+
+    映射按 task_list 顺序累积；若某关 remains==0 则提前返回已收集的映射。
+    """
+    pairs: list[tuple[str, str]] = []
+    same_linggen_chaos: str | None = None
     for name in task_list:
-        if not same_linggen_chaos:
-            remains = self.task_way_to_diff(task=name, expect_difficulty="灵狱", task_type=task_type)
-            if remains == 0: return
-            cur_linggen = extract_info(B(260,440,80,50), lambda x: x.strip()[0])
-            logger.info(f"{name} -> {cur_linggen}")
-            if cur_linggen in Weather: same_linggen_chaos = name
-            sleep(1)
-            click(B(1200,30,30,30))
-            wait_for_appear(T("回家", box=Box(29,613,77,88).margin()))
-    return same_linggen_chaos
+        remains = self.task_way_to_diff(task=name, expect_difficulty="灵狱", task_type=task_type)
+        if remains == 0:
+            return same_linggen_chaos, pairs
+        cur_linggen = extract_info(B(260, 440, 80, 50), lambda x: x.strip()[0])
+        logger.info(f"{name} -> {cur_linggen}")
+        pairs.append((name, cur_linggen))
+        if same_linggen_chaos is None and cur_linggen in Weather:
+            same_linggen_chaos = name
+        sleep(1)
+        click(B(1200, 30, 30, 30))
+        wait_for_appear(T("回家", box=Box(29, 613, 77, 88).margin()))
+    return same_linggen_chaos, pairs

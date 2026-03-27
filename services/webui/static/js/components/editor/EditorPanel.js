@@ -21,10 +21,15 @@ const EditorPanel = {
         <el-button type="primary" size="default" @click="refreshScreenshot" :loading="loadingScreenshot">
           <i class="fa fa-camera mr-1"></i>刷新截图
         </el-button>
+        <el-button size="default" @click="triggerImportImage" :loading="loadingImport" :disabled="loadingScreenshot">
+          <i class="fa fa-picture-o mr-1"></i>导入图片
+        </el-button>
+        <input ref="importFileInput" type="file" accept="image/*" class="hidden" @change="onImportFileChange" />
         <el-button size="default" @click="saveSelection" :disabled="!selection">
           <i class="fa fa-save mr-1"></i>保存选区
         </el-button>
       </div>
+      <p class="text-xs text-gray-400 mb-2">可将图片拖入右侧画布加载，或点击「导入图片」选择文件（离线标注 / 调试图）。</p>
       <div class="flex-1 overflow-y-auto pr-1">
         <editor-controls
           v-model:name="name"
@@ -99,10 +104,13 @@ const EditorPanel = {
   <!-- 右侧：Canvas + 操作录制 -->
   <div class="lg:w-3/4 flex min-h-0 gap-3 editor-right-zone" :class="isLandscape ? 'flex-col' : 'flex-row'">
 
-    <!-- Canvas 画布 -->
-    <div class="bg-white rounded-xl shadow-md p-3 overflow-hidden flex items-center justify-center min-h-0 min-w-0 editor-canvas-cell"
-         :class="isLandscape ? 'shrink-0' : 'order-2 flex-1'"
-         :style="canvasCellStyle">
+    <!-- Canvas 画布（拖放图片至此区域以导入） -->
+    <div class="bg-white rounded-xl shadow-md p-3 overflow-hidden flex items-center justify-center min-h-0 min-w-0 editor-canvas-cell transition-shadow"
+         :class="[isLandscape ? 'shrink-0' : 'order-2 flex-1', canvasDropActive ? 'ring-2 ring-primary ring-inset' : '']"
+         :style="canvasCellStyle"
+         @dragover.prevent="onCanvasDragOver"
+         @dragleave="onCanvasDragLeave"
+         @drop.prevent="onCanvasDrop">
       <editor-canvas
         :image-src="imageSrc"
         :selection="optimizedSel"
@@ -164,6 +172,9 @@ const EditorPanel = {
     const imgWidth = ref(1280);
     const imgHeight = ref(720);
     const loadingScreenshot = ref(false);
+    const loadingImport = ref(false);
+    const importFileInput = ref(null);
+    const canvasDropActive = ref(false);
 
     const selection = ref(null);
     const optimizedSel = ref(null);
@@ -355,23 +366,100 @@ const EditorPanel = {
     }
 
     // ── actions ──
+    /** 与 GET /screenshot、POST /ingest-image 返回结构一致时更新画布与校验状态 */
+    async function applyEditorImageData(data) {
+      if (data.error) { ElementPlus.ElMessage.error(data.error); return false; }
+      imageSrc.value = 'data:image/jpeg;base64,' + data.image;
+      imgWidth.value = data.width || 1280;
+      imgHeight.value = data.height || 720;
+      locateBoxes.value = [];
+      nameOk.value = {};
+      imageOk.value = {};
+      await validateAll();
+      return true;
+    }
+
     async function refreshScreenshot() {
       loadingScreenshot.value = true;
       try {
         const data = await apiGet('/screenshot');
-        if (data.error) { ElementPlus.ElMessage.error(data.error); return; }
-        imageSrc.value = 'data:image/jpeg;base64,' + data.image;
-        imgWidth.value = data.width || 1280;
-        imgHeight.value = data.height || 720;
-        locateBoxes.value = [];
-        nameOk.value = {};
-        imageOk.value = {};
-        await validateAll();
+        await applyEditorImageData(data);
       } catch (e) {
         ElementPlus.ElMessage.error('截图失败: ' + e);
       } finally {
         loadingScreenshot.value = false;
       }
+    }
+
+    async function ingestFromDataUrl(dataUrl) {
+      loadingImport.value = true;
+      try {
+        const data = await apiPost('/ingest-image', { image: dataUrl });
+        const ok = await applyEditorImageData(data);
+        if (ok) ElementPlus.ElMessage.success('已导入图片');
+      } catch (e) {
+        ElementPlus.ElMessage.error('导入失败: ' + e);
+      } finally {
+        loadingImport.value = false;
+      }
+    }
+
+    function triggerImportImage() {
+      importFileInput.value && importFileInput.value.click();
+    }
+
+    function loadImageFile(f) {
+      if (!f || !f.type || !f.type.startsWith('image/')) {
+        ElementPlus.ElMessage.warning('请选择图片文件');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const url = reader.result;
+        if (typeof url === 'string') ingestFromDataUrl(url);
+      };
+      reader.onerror = () => ElementPlus.ElMessage.error('读取文件失败');
+      reader.readAsDataURL(f);
+    }
+
+    function onImportFileChange(e) {
+      const input = e.target;
+      const f = input.files && input.files[0];
+      input.value = '';
+      if (!f) return;
+      loadImageFile(f);
+    }
+
+    function onCanvasDragOver(e) {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      canvasDropActive.value = true;
+    }
+
+    function onCanvasDragLeave(e) {
+      if (e.currentTarget.contains(e.relatedTarget)) return;
+      canvasDropActive.value = false;
+    }
+
+    function onCanvasDrop(e) {
+      canvasDropActive.value = false;
+      const dt = e.dataTransfer;
+      if (!dt) return;
+      const files = dt.files;
+      if (files && files.length) {
+        const f = Array.from(files).find((x) => x.type && x.type.startsWith('image/'));
+        if (f) {
+          loadImageFile(f);
+          return;
+        }
+      }
+      ElementPlus.ElMessage.warning('请拖入图片文件');
+    }
+
+    /** 遥控器/画布远程操作后：等待 0.5s 再刷新，避免截到过渡态 */
+    async function refreshScreenshotAfterRemote() {
+      await new Promise((r) => setTimeout(r, 500));
+      await refreshScreenshot();
     }
 
     async function onSelectionChange(sel) {
@@ -520,7 +608,7 @@ const EditorPanel = {
         ElementPlus.ElMessage.error('点击失败: ' + e);
       } finally {
         try {
-          await refreshScreenshot();
+          await refreshScreenshotAfterRemote();
         } catch (_) { /* ignore */ }
         remoteLoading.value = false;
       }
@@ -537,7 +625,7 @@ const EditorPanel = {
       } catch (e) {
         ElementPlus.ElMessage.error('点击失败: ' + e);
       } finally {
-        try { await refreshScreenshot(); } catch (_) { /* ignore */ }
+        try { await refreshScreenshotAfterRemote(); } catch (_) { /* ignore */ }
         remoteLoading.value = false;
       }
     }
@@ -553,7 +641,7 @@ const EditorPanel = {
       } catch (e) {
         ElementPlus.ElMessage.error('滑动失败: ' + e);
       } finally {
-        try { await refreshScreenshot(); } catch (_) { /* ignore */ }
+        try { await refreshScreenshotAfterRemote(); } catch (_) { /* ignore */ }
         remoteLoading.value = false;
       }
     }
@@ -587,7 +675,7 @@ const EditorPanel = {
         ElementPlus.ElMessage.error('滑动失败: ' + e);
       } finally {
         try {
-          await refreshScreenshot();
+          await refreshScreenshotAfterRemote();
         } catch (_) { /* ignore */ }
         remoteLoading.value = false;
       }
@@ -651,13 +739,16 @@ const EditorPanel = {
     }
 
     return {
-      imageSrc, imgWidth, imgHeight, loadingScreenshot,
+      imageSrc, imgWidth, imgHeight, loadingScreenshot, loadingImport, importFileInput,
       selection, optimizedSel, locateBoxes,
       name, freezeName, freeX, freeY, useImage, onlyOcr, lockColor, threshold,
       centerText, boxText, tCode, iCode, colorText, nameOk, imageOk,
       swipeDir, remoteLoading, customExecCode, execCustomLoading, extractPreviewLoading,
       recordedCode, recordedLines, isLandscape, canvasCellStyle,
-      refreshScreenshot, onSelectionChange, onThresholdRelease,
+      canvasDropActive,
+      refreshScreenshot, triggerImportImage, onImportFileChange,
+      onCanvasDragOver, onCanvasDragLeave, onCanvasDrop,
+      onSelectionChange, onThresholdRelease,
       saveSelection, onCopy, remoteClick, remoteSwipe,
       onCanvasRemoteClick, onCanvasRemoteSwipe,
       copyRecordedCode, executeCustomCode,

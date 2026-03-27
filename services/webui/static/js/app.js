@@ -39,6 +39,18 @@ const app = createApp({
       Changgui_WuQi: '常规武器',
       Changgui_YiFu: '常规防具',
       Changgui_ChiBang: '常规翅膀',
+      HuShenZhiYa: '虎神之崖',
+      CangLongYouGu: '苍龙幽谷',
+      lingqi: '灵气',
+      lingqi_priority: '灵气优先级',
+      YanHao: '岩貉星宫',
+      QuanShen: '犬神星宫',
+      LangWang: '狼王星宫',
+      HuWang: '虎王星宫',
+      ZhangWang: '獐王星宫',
+      AnShen: '犴神星宫',
+      TuShen: '兔神星宫',
+      cancel_on_failed: '不用点券复活',
     };
     function paramLabel(key) {
       return PARAM_KEY_LABELS[key] || key;
