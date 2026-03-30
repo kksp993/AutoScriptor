@@ -26,6 +26,7 @@
         "model": "hf.co/bartowski/UI-TARS-2B-SFT-GGUF"
     },
     "deploy": {
+        "log_level": "info",
         "theme": "dark",
         "password": null,
         "ssl_key": null,

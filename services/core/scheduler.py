@@ -130,7 +130,13 @@ class Scheduler:
         """收集所有 on=True 的叶子任务的「有效」下次执行时间（含 sched_window 映射）。"""
         from AutoScriptor.utils.constant import cfg
         from AutoScriptor.utils.task_registry import task_registry
-        from services.core.task_manager import parse_sched_window_hours, clamp_to_sched_window
+        from services.core.task_manager import (
+            parse_sched_window_hours,
+            clamp_to_sched_window,
+            parse_allowed_weekdays,
+            calc_next_allowed_weekday_ts,
+        )
+        import datetime as _dt
 
         now_ts = time.time()
         result = []
@@ -145,6 +151,16 @@ class Scheduler:
                         raw = float(val.get('next_exec_time', 0) or 0)
                         sw = parse_sched_window_hours(val)
                         effective = clamp_to_sched_window(max(raw, now_ts), sw[0], sw[1]) if sw else (raw or now_ts)
+                        aw = parse_allowed_weekdays(val)
+                        if aw is not None:
+                            now_dt = _dt.datetime.fromtimestamp(now_ts)
+                            wd = now_dt.weekday() + 1
+                            if effective <= now_ts and wd not in set(aw):
+                                effective = calc_next_allowed_weekday_ts(now_dt, aw)
+                            elif effective > now_ts:
+                                tdt = _dt.datetime.fromtimestamp(effective)
+                                if (tdt.weekday() + 1) not in set(aw):
+                                    effective = calc_next_allowed_weekday_ts(tdt, aw)
                         result.append(effective)
                 else:
                     _walk(val, path)
@@ -208,7 +224,12 @@ class Scheduler:
     def _collect_due(self, node: dict, prefix: str, now_ts: float) -> list[str]:
         from AutoScriptor.utils.task_registry import task_registry
         from AutoScriptor.utils.constant import cfg
-        from services.core.task_manager import parse_sched_window_hours, clamp_to_sched_window
+        from services.core.task_manager import (
+            parse_sched_window_hours,
+            clamp_to_sched_window,
+            parse_allowed_weekdays,
+            calc_next_allowed_weekday_ts,
+        )
         import datetime as _dt
 
         tasks = []
@@ -228,6 +249,20 @@ class Scheduler:
                             logger.info(
                                 "📅 任务 %s 不在开放时段 [%02d:00,%02d:00)，已推迟至 %s",
                                 path, sw[0], sw[1],
+                                _dt.datetime.fromtimestamp(deferred).strftime("%Y-%m-%d %H:%M"),
+                            )
+                            cfg.save_config()
+                            continue
+                    aw = parse_allowed_weekdays(val)
+                    if aw is not None:
+                        now_dt = _dt.datetime.fromtimestamp(now_ts)
+                        wd = now_dt.weekday() + 1
+                        if wd not in set(aw):
+                            deferred = calc_next_allowed_weekday_ts(now_dt, aw)
+                            val["next_exec_time"] = deferred
+                            logger.info(
+                                "📅 任务 %s 仅允许星期 %s（当前周%d），已推迟至 %s",
+                                path, aw, wd,
                                 _dt.datetime.fromtimestamp(deferred).strftime("%Y-%m-%d %H:%M"),
                             )
                             cfg.save_config()

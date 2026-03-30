@@ -6,6 +6,7 @@ _way_to_exit_lock = RLock()
 
 @combo
 def travel(self: Hero):
+    self.prop(True, True, True)
     if self.has_cd:
         self.sleep(0.03)
         self.jump(2).move_right(125, directly=True)
@@ -20,9 +21,9 @@ def travel(self: Hero):
 
 @combo
 def battle(self: Hero):
+    self.prop(True, True, True)
     if self.has_cd:
         if self.speed_x == 1:
-            self.prop(True, True, True)
             self.move_right()
             self.skill(1)
             self.sleep(0.5).move_left()
@@ -31,7 +32,6 @@ def battle(self: Hero):
             self.skill(6)
             self.move_right()
         else:
-            self.prop(True, True, True)
             self.move_right()
             self.skill(1)
             self.sleep(0.2).move_left()

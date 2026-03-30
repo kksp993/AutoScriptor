@@ -30,7 +30,7 @@ const EditorControls = {
     'copy', 'threshold-release',
   ],
   template: `
-<el-form label-width="56px" label-position="left" size="small" class="editor-controls editor-controls-compact">
+<el-form label-width="72px" label-position="left" size="small" class="editor-controls editor-controls-compact">
   <!-- 名称 -->
   <el-form-item class="editor-controls-name-item mb-3">
     <template #label>
@@ -81,9 +81,20 @@ const EditorControls = {
   </div>
 
   <!-- 边缘阈值：色差边缘收缩选区（optimize-rect） -->
-  <el-form-item class="mb-3" label-width="80px">
+  <el-form-item class="mb-3">
     <template #label>
-      <span class="text-sm text-gray-700" title="按色差收缩选区边缘，松手后重算">边缘阈值</span>
+      <span class="inline-flex items-center gap-0.5">
+        <span>边缘阈值</span>
+        <el-tooltip placement="top" :show-after="0">
+          <template #content>
+            <div class="max-w-[260px] text-xs leading-relaxed text-left space-y-2">
+              <p>根据<strong>相邻像素色差</strong>收缩框选边缘，对应后端的选区优化；<strong>松开滑块</strong>后会按新选区重算 OCR、颜色与 T/I 校验。</p>
+              <p>阈值越大，只保留与周围差异更明显的边界，矩形通常更<strong>贴边、更小</strong>；过小则框变化不明显。</p>
+            </div>
+          </template>
+          <i class="fa fa-info-circle editor-help-icon editor-help-icon--inline" tabindex="0" aria-label="边缘阈值说明" role="img"></i>
+        </el-tooltip>
+      </span>
     </template>
     <div class="flex items-center gap-2 w-full min-w-0">
       <span class="text-xs font-medium text-gray-700 tabular-nums w-7 shrink-0 text-right leading-none">{{ threshold }}</span>
@@ -117,13 +128,41 @@ const EditorControls = {
 
   <!-- 代码输出 -->
   <div class="space-y-2">
-    <el-form-item label="T代码" class="mb-0">
+    <el-form-item class="mb-0">
+      <template #label>
+        <span class="inline-flex items-center gap-0.5">
+          <span>T代码</span>
+          <el-tooltip placement="top" :show-after="0">
+            <template #content>
+              <div class="max-w-[280px] text-xs leading-relaxed text-left space-y-2">
+                <p>由「名称」和选区生成的<strong>文字目标</strong>预览。上方 <strong>T</strong> 旁 0.5 / 0.75 / 1.0 表示不同缩放下去找「名称」里的字是否能在<strong>当前画面</strong>里命中（√ 表示能定位）。</p>
+                <p class="font-mono text-[11px] opacity-90">脚本中常用 T("…")、locate / click 等</p>
+              </div>
+            </template>
+            <i class="fa fa-info-circle editor-help-icon editor-help-icon--inline" tabindex="0" aria-label="T代码说明" role="img"></i>
+          </el-tooltip>
+        </span>
+      </template>
       <div class="flex items-center gap-1 w-full min-w-0">
         <el-input class="flex-1 min-w-0" size="small" :model-value="tCode" readonly />
         <el-button size="small" @click="$emit('copy','t')" circle><i class="fa fa-copy"></i></el-button>
       </div>
     </el-form-item>
-    <el-form-item label="I代码" class="mb-0">
+    <el-form-item class="mb-0">
+      <template #label>
+        <span class="inline-flex items-center gap-0.5">
+          <span>I代码</span>
+          <el-tooltip placement="top" :show-after="0">
+            <template #content>
+              <div class="max-w-[280px] text-xs leading-relaxed text-left space-y-2">
+                <p>由「名称」和选区生成的<strong>图像模板目标</strong>；需勾选「图像匹配」。上方 <strong>I</strong> 旁刻度表示模板在画面中的匹配情况（√ 表示能搜到）。</p>
+                <p class="font-mono text-[11px] opacity-90">脚本中常用 I("…")、图像 locate / click 等</p>
+              </div>
+            </template>
+            <i class="fa fa-info-circle editor-help-icon editor-help-icon--inline" tabindex="0" aria-label="I代码说明" role="img"></i>
+          </el-tooltip>
+        </span>
+      </template>
       <div class="flex items-center gap-1 w-full min-w-0">
         <el-input class="flex-1 min-w-0" size="small" :model-value="iCode" readonly />
         <el-button size="small" @click="$emit('copy','i')" circle><i class="fa fa-copy"></i></el-button>

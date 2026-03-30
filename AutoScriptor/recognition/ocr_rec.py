@@ -257,7 +257,7 @@ def ocr(frame,
             global _fallback_log_ts
             _now = time.time()
             if _now - _fallback_log_ts >= _FALLBACK_LOG_INTERVAL:
-                logger.info("OCR scale=%s 未匹配任何目标，回退 scale=1.0 重试", scale)
+                logger.debug("OCR scale=%s 未匹配任何目标，回退 scale=1.0 重试", scale)
                 _fallback_log_ts = _now
             return ocr(
                 frame,

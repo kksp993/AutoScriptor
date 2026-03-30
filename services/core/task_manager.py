@@ -76,6 +76,28 @@ def parse_sched_window_hours(task_data: dict) -> tuple[int, int] | None:
         return None
 
 
+def parse_allowed_weekdays(task_data: dict) -> list[int] | None:
+    """解析 allowed_weekdays: [1..7] 表示周一至周日（与 cfg['weekday'] 一致）。"""
+    aw = task_data.get("allowed_weekdays")
+    if aw is None or not isinstance(aw, list) or not aw:
+        return None
+    try:
+        return [int(x) for x in aw]
+    except (TypeError, ValueError):
+        return None
+
+
+def calc_next_allowed_weekday_ts(now: datetime.datetime, allowed: list[int]) -> float:
+    """当前不在允许日时，返回「下一个允许日」本地 5:00 的时间戳（从次日开始找）。"""
+    allowed_set = set(allowed)
+    for i in range(1, 15):
+        d = now.date() + datetime.timedelta(days=i)
+        wd = d.weekday() + 1
+        if wd in allowed_set:
+            return datetime.datetime.combine(d, datetime.time(5, 0)).timestamp()
+    return (now + datetime.timedelta(days=7)).timestamp()
+
+
 def clamp_to_sched_window(ts: float, start_h: int, end_h: int) -> float:
     """将时间戳映射到最近的 [start_h, end_h) 窗口起点（本地时间）。若已在窗口内则原样返回。"""
     t = datetime.datetime.fromtimestamp(ts)

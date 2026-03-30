@@ -2,10 +2,10 @@
 自动更新检查器
 ==============
 后台定时检查 Git 仓库更新，提供检查/执行更新的 API。
+借鉴 StarRailCopilot 的 fetch → stash → pull --ff-only → stash pop 流程。
 """
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import threading
@@ -18,11 +18,11 @@ from AutoScriptor.utils.logger import logger
 class Updater:
     """管理 Git 仓库的更新检查与执行。"""
 
-    # 状态: idle / checking / available / updating / done / failed
     state: str = "idle"
     changelog: str = ""
     current_version: str = ""
     remote_version: str = ""
+    last_error: str = ""
 
     _check_thread: Optional[threading.Thread] = None
     _stop_event = threading.Event()
@@ -43,7 +43,7 @@ class Updater:
                 continue
         return "git"
 
-    def _run_git(self, *args, timeout: int = 30) -> str:
+    def _run_git(self, *args, timeout: int = 30, allow_failure: bool = False) -> str:
         cmd = [self._git] + list(args)
         try:
             result = subprocess.run(
@@ -51,10 +51,24 @@ class Updater:
                 encoding="utf-8", errors="replace",
                 cwd=self._root, timeout=timeout
             )
+            if result.returncode != 0 and not allow_failure:
+                logger.debug(f"Git 命令非零退出: {cmd} -> {result.stderr.strip()}")
             return result.stdout.strip()
         except Exception as e:
             logger.debug(f"Git 命令失败: {cmd} -> {e}")
             return ""
+
+    def _run_git_ok(self, *args, timeout: int = 30) -> bool:
+        cmd = [self._git] + list(args)
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
+                cwd=self._root, timeout=timeout
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
 
     def get_current_commit(self) -> str:
         return self._run_git("rev-parse", "--short", "HEAD")
@@ -62,26 +76,37 @@ class Updater:
     def get_current_branch(self) -> str:
         return self._run_git("rev-parse", "--abbrev-ref", "HEAD")
 
-    def check_update(self) -> bool:
-        """
-        检查远程是否有更新。
+    def _get_remote_branch(self) -> str:
+        branch = self.get_current_branch()
+        return branch if branch else "feat/launcher"
 
-        Returns:
-            bool: True 表示有更新可用
-        """
+    # ── 检查更新 ──
+
+    def check_update(self) -> bool:
         if self.state == "checking":
             return False
 
         self.state = "checking"
+        self.last_error = ""
         try:
-            self._run_git("fetch", "--quiet", timeout=60)
+            branch = self._get_remote_branch()
 
-            branch = self.get_current_branch() or "master"
+            for attempt in range(3):
+                if self._run_git_ok("fetch", "origin", branch, timeout=60):
+                    break
+                logger.warning(f"git fetch 失败 (第 {attempt + 1} 次)")
+                time.sleep(2)
+            else:
+                self.state = "failed"
+                self.last_error = "git fetch 连续失败"
+                return False
+
             local = self._run_git("rev-parse", "HEAD")
             remote = self._run_git("rev-parse", f"origin/{branch}")
 
             if not local or not remote:
                 self.state = "failed"
+                self.last_error = "无法获取 commit"
                 return False
 
             if local == remote:
@@ -89,10 +114,21 @@ class Updater:
                 self.changelog = ""
                 return False
 
+            # 检查本地是否有远程不存在的提交（开发分支保护）
+            local_only = self._run_git(
+                "log", "--not", f"--remotes=origin/*",
+                "-1", "--oneline", allow_failure=True
+            )
+            if local_only:
+                logger.info(f"本地有未推送提交 {local_only.split()[0]}，跳过更新")
+                self.state = "idle"
+                return False
+
             self.current_version = local[:8]
             self.remote_version = remote[:8]
             self.changelog = self._run_git(
-                "log", "--oneline", f"HEAD..origin/{branch}", "--max-count=20"
+                "log", "--oneline", "--no-merges",
+                f"HEAD..origin/{branch}", "--max-count=20"
             )
             self.state = "available"
             logger.info(f"发现更新: {self.current_version} -> {self.remote_version}")
@@ -101,34 +137,62 @@ class Updater:
         except Exception as e:
             logger.error(f"检查更新失败: {e}")
             self.state = "failed"
+            self.last_error = str(e)
             return False
 
+    # ── 执行更新 ──
+
     def run_update(self) -> bool:
-        """执行 git pull 更新"""
+        if self.state not in ("available", "failed", "idle"):
+            return False
+
         self.state = "updating"
+        self.last_error = ""
         try:
-            branch = self.get_current_branch() or "master"
-            output = self._run_git("pull", "origin", branch, timeout=120)
-            if "Already up to date" in output or "Fast-forward" in output or output:
-                logger.info(f"更新完成: {output[:200]}")
-                self._pip_install()
-                self.state = "done"
-                return True
-            else:
-                self.state = "failed"
-                return False
+            branch = self._get_remote_branch()
+
+            self._run_git_ok("fetch", "origin", branch, timeout=60)
+
+            # 清除 git 锁文件
+            for lock in [".git/index.lock", ".git/HEAD.lock"]:
+                lock_path = os.path.join(self._root, lock)
+                if os.path.exists(lock_path):
+                    logger.info(f"移除锁文件: {lock}")
+                    os.remove(lock_path)
+
+            # stash 保护本地修改
+            stashed = self._run_git_ok("stash", "--quiet")
+
+            # 先尝试 fast-forward pull
+            if not self._run_git_ok("pull", "--ff-only", "origin", branch, timeout=120):
+                logger.warning("pull --ff-only 失败，尝试 reset --hard")
+                self._run_git_ok("reset", "--hard", f"origin/{branch}")
+
+            # 恢复本地修改
+            if stashed:
+                self._run_git_ok("stash", "pop", "--quiet", timeout=10)
+
+            # 更新依赖
+            self._pip_install()
+
+            self.current_version = self.get_current_commit()
+            self.state = "done"
+            logger.info(f"更新完成: {self.current_version}")
+            return True
+
         except Exception as e:
             logger.error(f"更新执行失败: {e}")
             self.state = "failed"
+            self.last_error = str(e)
             return False
 
     def _pip_install(self):
-        """更新后自动安装新依赖"""
         req_file = os.path.join(self._root, "requirements.txt")
         if not os.path.exists(req_file):
             return
         try:
             import sys
+            logger.info("更新 Python 依赖...")
             subprocess.run(
                 [sys.executable, "-m", "pip", "install", "-r", req_file, "--quiet"],
                 cwd=self._root, timeout=300,
@@ -137,8 +201,9 @@ class Updater:
         except Exception as e:
             logger.warning(f"依赖安装失败: {e}")
 
+    # ── 定时检查 ──
+
     def start_scheduled_check(self, interval_minutes: int = 30):
-        """启动后台定时检查线程"""
         if self._check_thread and self._check_thread.is_alive():
             return
 
@@ -168,6 +233,7 @@ class Updater:
             "branch": self.get_current_branch(),
             "remote_version": self.remote_version,
             "changelog": self.changelog,
+            "last_error": self.last_error,
         }
 
 

@@ -14,22 +14,27 @@ const EditorPanel = {
 
     <!-- 上：图片编辑器 -->
     <div class="bg-white rounded-xl shadow-md p-4 flex flex-col overflow-hidden min-h-0 flex-1 editor-panel-sidebar">
-      <div class="flex justify-between items-center mb-3">
-        <h2 class="text-base font-semibold text-dark">图片编辑器</h2>
+      <div class="flex justify-between items-center mb-2">
+        <div class="flex items-center gap-1.5 min-w-0">
+          <h2 class="text-base font-semibold text-dark shrink-0">图片编辑器</h2>
+          <el-tooltip placement="top" :show-after="0">
+            <template #content>
+              <div class="max-w-[280px] text-xs leading-relaxed text-left">
+                可将图片<strong>拖入右侧画布</strong>加载，用于离线标注与调试图；也可使用「刷新截图」获取当前模拟器画面。
+              </div>
+            </template>
+            <i class="fa fa-info-circle editor-help-icon shrink-0" tabindex="0" aria-label="说明" role="img"></i>
+          </el-tooltip>
+        </div>
       </div>
-      <div class="flex flex-wrap gap-2 mb-3">
-        <el-button type="primary" size="default" @click="refreshScreenshot" :loading="loadingScreenshot">
-          <i class="fa fa-camera mr-1"></i>刷新截图
+      <div class="flex flex-nowrap gap-1.5 mb-2">
+        <el-button type="primary" size="small" class="!flex-1 min-w-0" @click="refreshScreenshot" :loading="loadingScreenshot">
+          <i class="fa fa-camera mr-0.5"></i><span class="truncate">刷新截图</span>
         </el-button>
-        <el-button size="default" @click="triggerImportImage" :loading="loadingImport" :disabled="loadingScreenshot">
-          <i class="fa fa-picture-o mr-1"></i>导入图片
-        </el-button>
-        <input ref="importFileInput" type="file" accept="image/*" class="hidden" @change="onImportFileChange" />
-        <el-button size="default" @click="saveSelection" :disabled="!selection">
-          <i class="fa fa-save mr-1"></i>保存选区
+        <el-button size="small" class="!flex-1 min-w-0" @click="saveSelection" :disabled="!selection">
+          <i class="fa fa-save mr-0.5"></i><span class="truncate">保存选区</span>
         </el-button>
       </div>
-      <p class="text-xs text-gray-400 mb-2">可将图片拖入右侧画布加载，或点击「导入图片」选择文件（离线标注 / 调试图）。</p>
       <div class="flex-1 overflow-y-auto pr-1">
         <editor-controls
           v-model:name="name"
@@ -66,28 +71,73 @@ const EditorPanel = {
         </button>
       </div>
       <div class="flex flex-col gap-2">
-        <el-button type="primary" size="small"
-                   @click="remoteClick" :disabled="!optimizedSel" :loading="remoteLoading"
-                   class="w-full editor-remote-click-btn">
-          <i class="fa fa-mouse-pointer mr-1"></i>点击
-        </el-button>
         <div class="flex items-center gap-2">
-          <el-radio-group v-model="swipeDir" size="small" class="remote-dir-group">
-            <el-radio-button label="up"><i class="fa fa-arrow-up"></i></el-radio-button>
-            <el-radio-button label="down"><i class="fa fa-arrow-down"></i></el-radio-button>
-            <el-radio-button label="left"><i class="fa fa-arrow-left"></i></el-radio-button>
-            <el-radio-button label="right"><i class="fa fa-arrow-right"></i></el-radio-button>
-          </el-radio-group>
-          <el-button size="small" plain :disabled="!optimizedSel" :loading="remoteLoading"
-                     @click="remoteSwipe" class="flex-1">
-            <i class="fa fa-hand-pointer-o mr-1"></i>滑动
+          <el-button type="primary" size="small"
+                     @click="remoteClick" :disabled="!optimizedSel" :loading="remoteLoading"
+                     class="flex-1 min-w-0 editor-remote-click-btn">
+            <i class="fa fa-mouse-pointer mr-1"></i>点击
+          </el-button>
+          <el-tooltip placement="top" :show-after="0">
+            <template #content>
+              <div class="max-w-[268px] text-xs leading-relaxed text-left space-y-2">
+                <p>在<strong>当前选区</strong>（边缘优化后矩形）的<strong>中心</strong>点一下；与左侧「名称」及 <strong>T / I 校验</strong>（绿勾表示在当前画面上能定位到）对应同一块区域。</p>
+                <p>操作会<strong>追加到下方录制区</strong>。<strong>模拟模式</strong>下只在画布上标红点，不下发模拟器。</p>
+              </div>
+            </template>
+            <i class="fa fa-info-circle editor-help-icon shrink-0" tabindex="0" aria-label="点击说明" role="img"></i>
+          </el-tooltip>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="flex flex-1 min-w-0 items-center gap-1.5">
+            <el-radio-group v-model="swipeDir" size="small" class="remote-dir-group flex-1 min-w-0">
+              <el-radio-button label="up"><i class="fa fa-arrow-up"></i></el-radio-button>
+              <el-radio-button label="down"><i class="fa fa-arrow-down"></i></el-radio-button>
+              <el-radio-button label="left"><i class="fa fa-arrow-left"></i></el-radio-button>
+              <el-radio-button label="right"><i class="fa fa-arrow-right"></i></el-radio-button>
+            </el-radio-group>
+            <el-button size="small" plain :disabled="!optimizedSel" :loading="remoteLoading"
+                       @click="remoteSwipe" class="shrink-0">
+              <i class="fa fa-hand-pointer-o mr-1"></i>滑动
+            </el-button>
+          </div>
+          <el-tooltip placement="top" :show-after="0">
+            <template #content>
+              <div class="max-w-[280px] text-xs leading-relaxed text-left space-y-2">
+                <p>在选区<strong>内部</strong>沿箭头方向滑动；箭头表示<strong>手指在屏幕上的移动方向</strong>（如「→」= 从左向右滑）。</p>
+                <p>会写入录制区。<strong>模拟模式</strong>下只在画布上画蓝线，不下发模拟器。</p>
+              </div>
+            </template>
+            <i class="fa fa-info-circle editor-help-icon shrink-0" tabindex="0" aria-label="滑动说明" role="img"></i>
+          </el-tooltip>
+        </div>
+        <div class="mt-2 pt-2 border-t border-slate-200 flex flex-col gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-xs text-gray-500 shrink-0">遥控模式</span>
+            <el-tooltip placement="top" :show-after="0">
+              <template #content>
+                <div class="max-w-[300px] text-xs leading-relaxed text-left space-y-2">
+                  <p><strong>执行</strong>：遥控器、画布右键与「自定义代码」里的触控会<strong>发到模拟器</strong>。</p>
+                  <p><strong>模拟</strong>：只在右侧画布上画红点/滑动线，<strong>不触控真机</strong>；导入图片后默认模拟。</p>
+                  <p class="opacity-90">自定义代码在模拟模式下不触发真实点击。</p>
+                </div>
+              </template>
+              <i class="fa fa-info-circle editor-help-icon shrink-0" tabindex="0" aria-label="说明" role="img"></i>
+            </el-tooltip>
+            <el-switch v-model="virtualRemoteOnly" size="small"
+              active-text="模拟"
+              inactive-text="执行"
+              class="ml-auto shrink-0" />
+          </div>
+          <el-button v-if="virtualClickMarkers.length || virtualSwipeLines.length" size="small" plain
+            @click="clearVirtualOverlays" class="self-start">
+            清除虚拟标注
           </el-button>
         </div>
         <div class="mt-2 pt-2 border-t border-slate-200 flex flex-col gap-1.5">
           <span class="text-xs text-gray-500">自定义代码执行</span>
           <el-input type="textarea" v-model="customExecCode" size="small"
             :autosize="{ minRows: 6, maxRows: 18 }"
-            placeholder="如 click(B(100,200,10,10))；多行末尾可写 __result__ = 值 作为返回值"
+            placeholder="如 locate(T(&quot;确定&quot;))；最后一行若为表达式会作为返回值。纯语句可写 __result__ = ..."
             class="editor-custom-exec-input" />
           <el-button size="small"
             @click="executeCustomCode" :loading="execCustomLoading"
@@ -105,8 +155,8 @@ const EditorPanel = {
   <div class="lg:w-3/4 flex min-h-0 gap-3 editor-right-zone" :class="isLandscape ? 'flex-col' : 'flex-row'">
 
     <!-- Canvas 画布（拖放图片至此区域以导入） -->
-    <div class="bg-white rounded-xl shadow-md p-3 overflow-hidden flex items-center justify-center min-h-0 min-w-0 editor-canvas-cell transition-shadow"
-         :class="[isLandscape ? 'shrink-0' : 'order-2 flex-1', canvasDropActive ? 'ring-2 ring-primary ring-inset' : '']"
+    <div class="bg-white rounded-xl shadow-md p-3 overflow-hidden flex items-center justify-center min-h-0 min-w-0 editor-canvas-cell transition-shadow relative"
+         :class="[isLandscape ? 'shrink-0' : 'order-2 flex-1', canvasDropActive ? 'ring-2 ring-primary ring-inset' : '', loadingImport ? 'opacity-80' : '']"
          :style="canvasCellStyle"
          @dragover.prevent="onCanvasDragOver"
          @dragleave="onCanvasDragLeave"
@@ -115,6 +165,8 @@ const EditorPanel = {
         :image-src="imageSrc"
         :selection="optimizedSel"
         :locate-boxes="locateBoxes"
+        :virtual-click-markers="virtualClickMarkers"
+        :virtual-swipe-lines="virtualSwipeLines"
         :img-width="imgWidth"
         :img-height="imgHeight"
         @selection-change="onSelectionChange"
@@ -140,24 +192,69 @@ const EditorPanel = {
       <div class="flex shrink-0 editor-recorder-actions"
            :class="isLandscape ? 'flex-col gap-2 justify-start' : 'flex-row flex-wrap gap-2 justify-end items-center'"
            :style="isLandscape ? 'width:120px' : ''">
-        <el-button size="small" @click="copyRecordedCode" :disabled="!recordedCode.trim()">
-          <i class="fa fa-copy mr-1"></i>复制代码
-        </el-button>
-        <el-button size="small" type="danger" plain @click="recordedCode=''" :disabled="!recordedCode.trim()">
-          <i class="fa fa-trash-o mr-1"></i>清空
-        </el-button>
-        <el-button size="small" plain @click="appendWaitAppear" :disabled="!optimizedSel">
-          等待出现
-        </el-button>
-        <el-button size="small" plain @click="appendWaitDisappear" :disabled="!optimizedSel">
-          等待消失
-        </el-button>
-        <el-button size="small" plain @click="appendExtractInfo" :disabled="!optimizedSel" :loading="extractPreviewLoading">
-          提取信息
-        </el-button>
-        <el-button size="small" plain @click="appendSleepWait">
-          阻塞等待
-        </el-button>
+        <el-tooltip placement="top" :show-after="0">
+          <template #content>
+            <div class="max-w-[260px] text-xs leading-relaxed text-left">将录制区<strong>全部代码</strong>复制到剪贴板，便于粘贴到任务脚本。</div>
+          </template>
+          <span class="inline-flex"><el-button size="small" @click="copyRecordedCode" :disabled="!recordedCode.trim()">
+            <i class="fa fa-copy mr-1"></i>复制代码
+          </el-button></span>
+        </el-tooltip>
+        <el-tooltip placement="top" :show-after="0">
+          <template #content>
+            <div class="max-w-[260px] text-xs leading-relaxed text-left">清空录制区文本，不影响画布与左侧选区。</div>
+          </template>
+          <span class="inline-flex"><el-button size="small" type="danger" plain @click="recordedCode=''" :disabled="!recordedCode.trim()">
+            <i class="fa fa-trash-o mr-1"></i>清空
+          </el-button></span>
+        </el-tooltip>
+        <el-tooltip placement="top" :show-after="0">
+          <template #content>
+            <div class="max-w-[260px] text-xs leading-relaxed text-left space-y-1">
+              <p>阻塞直到左侧名称对应的 <strong>T / I 目标</strong>在画面上出现（依赖当前选区与名称）。</p>
+              <p class="font-mono text-[11px] opacity-90">wait_for_appear(目标)</p>
+            </div>
+          </template>
+          <span class="inline-flex"><el-button size="small" plain @click="appendWaitAppear" :disabled="!optimizedSel">
+            等待出现
+          </el-button></span>
+        </el-tooltip>
+        <el-tooltip placement="top" :show-after="0">
+          <template #content>
+            <div class="max-w-[260px] text-xs leading-relaxed text-left space-y-1">
+              <p>阻塞直到该目标从画面上消失。</p>
+              <p class="font-mono text-[11px] opacity-90">wait_for_disappear(目标)</p>
+            </div>
+          </template>
+          <span class="inline-flex"><el-button size="small" plain @click="appendWaitDisappear" :disabled="!optimizedSel">
+            等待消失
+          </el-button></span>
+        </el-tooltip>
+        <el-tooltip placement="top" :show-after="0">
+          <template #content>
+            <div class="max-w-[288px] text-xs leading-relaxed text-left space-y-2">
+              <p class="font-mono text-[11px] opacity-90 leading-snug">extract_info(B(…), post_process=…, ensure_not_empty=…)</p>
+              <ul class="list-disc pl-4 space-y-1.5 text-[11px]">
+                <li><strong>post_process</strong>：对识别出的<strong>字符串</strong>使用Python语法再加工；<code class="bg-slate-700 px-0.5 rounded">strip</code> </li>
+                <li><strong>ensure_not_empty</strong>：为真时若结果是空串/发生错误会重试截图识别，直到有字或达到重试上限。</li>
+              </ul>
+            </div>
+          </template>
+          <span class="inline-flex"><el-button size="small" plain @click="appendExtractInfo" :disabled="!optimizedSel" :loading="extractPreviewLoading">
+            提取信息
+          </el-button></span>
+        </el-tooltip>
+        <el-tooltip placement="top" :show-after="0">
+          <template #content>
+            <div class="max-w-[260px] text-xs leading-relaxed text-left space-y-1">
+              <p>暂停脚本执行约 1 秒</p>
+              <p class="font-mono text-[11px] opacity-90">sleep(1)</p>
+            </div>
+          </template>
+          <span class="inline-flex"><el-button size="small" plain @click="appendSleepWait">
+            阻塞等待
+          </el-button></span>
+        </el-tooltip>
       </div>
     </div>
 
@@ -173,8 +270,14 @@ const EditorPanel = {
     const imgHeight = ref(720);
     const loadingScreenshot = ref(false);
     const loadingImport = ref(false);
-    const importFileInput = ref(null);
     const canvasDropActive = ref(false);
+
+    /** 当前画面是否来自导入图片（离线标注）；刷新截图为 false */
+    const imageFromImport = ref(false);
+    /** true：遥控操作仅在 canvas 上画红点/线，不 POST /remote/* */
+    const virtualRemoteOnly = ref(false);
+    const virtualClickMarkers = ref([]);
+    const virtualSwipeLines = ref([]);
 
     const selection = ref(null);
     const optimizedSel = ref(null);
@@ -367,12 +470,16 @@ const EditorPanel = {
 
     // ── actions ──
     /** 与 GET /screenshot、POST /ingest-image 返回结构一致时更新画布与校验状态 */
-    async function applyEditorImageData(data) {
+    async function applyEditorImageData(data, fromImport = false) {
       if (data.error) { ElementPlus.ElMessage.error(data.error); return false; }
       imageSrc.value = 'data:image/jpeg;base64,' + data.image;
       imgWidth.value = data.width || 1280;
       imgHeight.value = data.height || 720;
       locateBoxes.value = [];
+      virtualClickMarkers.value = [];
+      virtualSwipeLines.value = [];
+      imageFromImport.value = fromImport;
+      virtualRemoteOnly.value = fromImport;
       nameOk.value = {};
       imageOk.value = {};
       await validateAll();
@@ -383,7 +490,7 @@ const EditorPanel = {
       loadingScreenshot.value = true;
       try {
         const data = await apiGet('/screenshot');
-        await applyEditorImageData(data);
+        await applyEditorImageData(data, false);
       } catch (e) {
         ElementPlus.ElMessage.error('截图失败: ' + e);
       } finally {
@@ -395,17 +502,13 @@ const EditorPanel = {
       loadingImport.value = true;
       try {
         const data = await apiPost('/ingest-image', { image: dataUrl });
-        const ok = await applyEditorImageData(data);
+        const ok = await applyEditorImageData(data, true);
         if (ok) ElementPlus.ElMessage.success('已导入图片');
       } catch (e) {
         ElementPlus.ElMessage.error('导入失败: ' + e);
       } finally {
         loadingImport.value = false;
       }
-    }
-
-    function triggerImportImage() {
-      importFileInput.value && importFileInput.value.click();
     }
 
     function loadImageFile(f) {
@@ -420,14 +523,6 @@ const EditorPanel = {
       };
       reader.onerror = () => ElementPlus.ElMessage.error('读取文件失败');
       reader.readAsDataURL(f);
-    }
-
-    function onImportFileChange(e) {
-      const input = e.target;
-      const f = input.files && input.files[0];
-      input.value = '';
-      if (!f) return;
-      loadImageFile(f);
     }
 
     function onCanvasDragOver(e) {
@@ -460,6 +555,11 @@ const EditorPanel = {
     async function refreshScreenshotAfterRemote() {
       await new Promise((r) => setTimeout(r, 500));
       await refreshScreenshot();
+    }
+
+    function clearVirtualOverlays() {
+      virtualClickMarkers.value = [];
+      virtualSwipeLines.value = [];
     }
 
     async function onSelectionChange(sel) {
@@ -599,6 +699,12 @@ const EditorPanel = {
       const tgt = buildTarget();
       if (tgt) appendCode(`click(${tgt})`);
 
+      if (virtualRemoteOnly.value) {
+        virtualClickMarkers.value = [...virtualClickMarkers.value, { x: cx, y: cy }];
+        ElementPlus.ElMessage.success(`虚拟点击 (${cx}, ${cy})（未下发模拟器）`);
+        return;
+      }
+
       remoteLoading.value = true;
       try {
         const res = await apiPost('/remote/click', { x: cx, y: cy });
@@ -617,6 +723,11 @@ const EditorPanel = {
     /** 画布右键单击：同遥控器点击，坐标为像素点 */
     async function onCanvasRemoteClick({ x, y }) {
       appendCode(`click(B(${x},${y},1,1))`);
+      if (virtualRemoteOnly.value) {
+        virtualClickMarkers.value = [...virtualClickMarkers.value, { x, y }];
+        ElementPlus.ElMessage.success(`虚拟点击 (${x}, ${y})（未下发模拟器）`);
+        return;
+      }
       remoteLoading.value = true;
       try {
         const res = await apiPost('/remote/click', { x, y });
@@ -633,6 +744,11 @@ const EditorPanel = {
     /** 画布右键拖拽滑动：起止点与遥控器 swipe API 一致 */
     async function onCanvasRemoteSwipe({ x1, y1, x2, y2 }) {
       appendCode(`swipe(B(${x1},${y1},1,1), B(${x2},${y2},1,1))`);
+      if (virtualRemoteOnly.value) {
+        virtualSwipeLines.value = [...virtualSwipeLines.value, { x1, y1, x2, y2 }];
+        ElementPlus.ElMessage.success('虚拟滑动（未下发模拟器）');
+        return;
+      }
       remoteLoading.value = true;
       try {
         const res = await apiPost('/remote/swipe', { x1, y1, x2, y2, duration_s: 1 });
@@ -651,17 +767,26 @@ const EditorPanel = {
       if (!s) { ElementPlus.ElMessage.warning('请先框选区域'); return; }
       const cx = Math.floor((s.left + s.right) / 2);
       const cy = Math.floor((s.top + s.bottom) / 2);
-      // 与「手指在屏幕上的划动方向」对齐：↑=从上往下划、↓=从下往上划；←→ 同理对调
+      // 方向 = 手指移动方向：上=从下往上、下=从上往下、左=从右往左、右=从左往右
       const dirMap = {
-        up:    { x1: cx, y1: s.top,    x2: cx, y2: s.bottom },
-        down:  { x1: cx, y1: s.bottom, x2: cx, y2: s.top },
-        left:  { x1: s.left,  y1: cy,  x2: s.right, y2: cy },
-        right: { x1: s.right, y1: cy,  x2: s.left, y2: cy },
+        up:    { x1: cx, y1: s.bottom, x2: cx, y2: s.top },
+        down:  { x1: cx, y1: s.top,    x2: cx, y2: s.bottom },
+        left:  { x1: s.right, y1: cy,  x2: s.left, y2: cy },
+        right: { x1: s.left,  y1: cy,  x2: s.right, y2: cy },
       };
       const pts = dirMap[swipeDir.value];
 
       // generate code in parallel
       appendCode(`swipe(B(${pts.x1},${pts.y1},1,1), B(${pts.x2},${pts.y2},1,1))`);
+
+      if (virtualRemoteOnly.value) {
+        virtualSwipeLines.value = [...virtualSwipeLines.value, {
+          x1: pts.x1, y1: pts.y1, x2: pts.x2, y2: pts.y2,
+        }];
+        const arrow = { up: '↑', down: '↓', left: '←', right: '→' }[swipeDir.value];
+        ElementPlus.ElMessage.success(`虚拟滑动 ${arrow}（未下发模拟器）`);
+        return;
+      }
 
       remoteLoading.value = true;
       try {
@@ -713,24 +838,59 @@ const EditorPanel = {
       );
     }
 
-    /** 自定义代码：不写入操作录制区；成功/失败/返回值均用消息提示 */
+    /** 自定义代码：不写入操作录制区；以返回值 repr 为主展示，失败才提示错误 */
     async function executeCustomCode() {
       const code = (customExecCode.value || '').trim();
       if (!code) { ElementPlus.ElMessage.warning('请输入代码'); return; }
       execCustomLoading.value = true;
       try {
-        const res = await apiPost('/execute-code', { code });
+        const res = await apiPost('/execute-code', {
+          code,
+          virtual_only: virtualRemoteOnly.value,
+        });
         if (!res || res.ok === false) {
           const err = (res && res.error) ? String(res.error) : '执行失败';
           ElementPlus.ElMessage.error(err.length > 800 ? err.slice(0, 800) + '…' : err);
           return;
         }
-        const parts = ['执行成功'];
-        if (res.result != null && res.result !== '') parts.push(`返回值: ${res.result}`);
-        if (res.stdout) parts.push(`输出: ${res.stdout}`);
-        let msg = parts.join(' · ');
-        if (msg.length > 600) msg = msg.slice(0, 600) + '…';
-        ElementPlus.ElMessage({ message: msg, type: 'success', duration: 8000, showClose: true });
+        if (virtualRemoteOnly.value) {
+          let added = false;
+          if (res.virtual_clicks && res.virtual_clicks.length) {
+            virtualClickMarkers.value = [...virtualClickMarkers.value, ...res.virtual_clicks];
+            added = true;
+          }
+          if (res.virtual_swipes && res.virtual_swipes.length) {
+            virtualSwipeLines.value = [...virtualSwipeLines.value, ...res.virtual_swipes];
+            added = true;
+          }
+          if (added) {
+            ElementPlus.ElMessage.success('已在画布标注虚拟点击/滑动（未下发模拟器）');
+          }
+        }
+        const hasResult = Object.prototype.hasOwnProperty.call(res, 'result');
+        const stdout = res.stdout ? String(res.stdout).trim() : '';
+        if (!hasResult && !stdout) {
+          ElementPlus.ElMessage({
+            message: '执行完成（无表达式返回值）。把要查看的表达式放在最后一行，或使用 __result__ = …',
+            type: 'info',
+            duration: 9000,
+            showClose: true,
+          });
+          return;
+        }
+        let body = '';
+        if (hasResult) body += String(res.result);
+        if (stdout) body += (body ? '\n\n' : '') + '【标准输出】\n' + stdout;
+        const tb = res.traceback ? String(res.traceback) : '';
+        ElementPlus.ElNotification({
+          title: hasResult ? '返回值 (repr)' : '输出',
+          message: body.length > 12000 ? body.slice(0, 12000) + '\n…（已截断）' : body,
+          type: 'success',
+          duration: 0,
+          position: 'bottom-right',
+          showClose: true,
+          customClass: 'editor-exec-result-notification',
+        });
       } catch (e) {
         ElementPlus.ElMessage.error('请求失败: ' + e);
       } finally {
@@ -739,14 +899,15 @@ const EditorPanel = {
     }
 
     return {
-      imageSrc, imgWidth, imgHeight, loadingScreenshot, loadingImport, importFileInput,
+      imageSrc, imgWidth, imgHeight, loadingScreenshot, loadingImport,
       selection, optimizedSel, locateBoxes,
       name, freezeName, freeX, freeY, useImage, onlyOcr, lockColor, threshold,
       centerText, boxText, tCode, iCode, colorText, nameOk, imageOk,
       swipeDir, remoteLoading, customExecCode, execCustomLoading, extractPreviewLoading,
+      virtualRemoteOnly, virtualClickMarkers, virtualSwipeLines,
       recordedCode, recordedLines, isLandscape, canvasCellStyle,
-      canvasDropActive,
-      refreshScreenshot, triggerImportImage, onImportFileChange,
+      canvasDropActive, clearVirtualOverlays,
+      refreshScreenshot,
       onCanvasDragOver, onCanvasDragLeave, onCanvasDrop,
       onSelectionChange, onThresholdRelease,
       saveSelection, onCopy, remoteClick, remoteSwipe,

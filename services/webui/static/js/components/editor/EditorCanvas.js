@@ -1,5 +1,5 @@
 /**
- * EditorCanvas – 截图显示 + 左键框选 + 绿色 locate 框
+ * EditorCanvas – 截图显示 + 左键框选 + 绿色 locate 框 + 虚拟遥控红点/滑动线（canvas 叠加，不写入底图）
  *
  * 左键拖拽：框选，触发 selection-change
  * 右键单击：canvas-remote-click { x, y }
@@ -16,6 +16,10 @@ const EditorCanvas = {
     imageSrc: { type: String, default: '' },
     selection: { type: Object, default: null },
     locateBoxes: { type: Array, default: () => [] },
+    /** 虚拟点击位置（逻辑像素），画红点 */
+    virtualClickMarkers: { type: Array, default: () => [] },
+    /** 虚拟滑动线段（逻辑像素） */
+    virtualSwipeLines: { type: Array, default: () => [] },
     imgWidth: { type: Number, default: 1280 },
     imgHeight: { type: Number, default: 720 },
   },
@@ -78,9 +82,14 @@ const EditorCanvas = {
         ctx.fillStyle = '#1e293b';
         ctx.fillRect(0, 0, sw, sh);
         ctx.fillStyle = '#94a3b8';
-        ctx.font = '16px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('点击「刷新截图」获取画面', sw / 2, sh / 2);
+        const cx = sw / 2;
+        const cy = sh / 2;
+        ctx.font = '14px sans-serif';
+        ctx.fillText('拖入图片到此处可导入（离线标注 / 调试图）', cx, cy - 10);
+        ctx.font = '13px sans-serif';
+        ctx.fillStyle = '#64748b';
+        ctx.fillText('或点击左侧「刷新截图」获取模拟器画面', cx, cy + 12);
       }
 
       const s = scale.value;
@@ -90,6 +99,38 @@ const EditorCanvas = {
         ctx.lineWidth = 2;
         for (const b of props.locateBoxes) {
           ctx.strokeRect(b.left * s, b.top * s, b.width * s, b.height * s);
+        }
+      }
+
+      if (props.virtualSwipeLines.length) {
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 5]);
+        for (const ln of props.virtualSwipeLines) {
+          ctx.beginPath();
+          ctx.moveTo(ln.x1 * s, ln.y1 * s);
+          ctx.lineTo(ln.x2 * s, ln.y2 * s);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+      }
+
+      if (props.virtualClickMarkers.length) {
+        for (const m of props.virtualClickMarkers) {
+          const px = m.x * s;
+          const py = m.y * s;
+          const r = 5;
+          ctx.beginPath();
+          ctx.arc(px, py, r + 2, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(255,51,51,0.35)';
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(px, py, r, 0, Math.PI * 2);
+          ctx.fillStyle = '#ff3333';
+          ctx.fill();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2;
+          ctx.stroke();
         }
       }
 
@@ -208,6 +249,8 @@ const EditorCanvas = {
     watch(() => props.imageSrc, (v) => loadImage(v));
     watch(() => props.selection, () => { if (!drawing) redraw(); }, { deep: true });
     watch(() => props.locateBoxes, () => redraw(), { deep: true });
+    watch(() => props.virtualClickMarkers, () => redraw(), { deep: true });
+    watch(() => props.virtualSwipeLines, () => redraw(), { deep: true });
     watch(canvasStyleW, () => nextTick(redraw));
     watch(canvasStyleH, () => nextTick(redraw));
 
