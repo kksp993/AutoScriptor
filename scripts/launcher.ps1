@@ -10,7 +10,7 @@ $ErrorActionPreference = "Stop"
 # $PSScriptRoot 是一个自动变量，表示当前脚本所在的目录
 $ScriptDir = $PSScriptRoot
 # Parse the absolute path of the project root directory
-$Root = Resolve-Path -Path (Join-Path $ScriptDir ".")
+$Root = Resolve-Path -Path (Join-Path $ScriptDir "..")
 
 # 2. Use existing .venv if exists, otherwise create it by installer
 # Use Join-Path to reliably build the path

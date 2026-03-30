@@ -110,6 +110,22 @@ queue_handler.setFormatter(_colored_fmt)
 queue_handler.addFilter(_LogTaskFilter())
 logger.addHandler(queue_handler)
 
+
+def _apply_webui_log_level_from_config():
+    """按 config deploy.log_level 限制推送到 WebUI 的日志级别（与模板默认 info 一致）。"""
+    raw = (cfg._config.get("deploy") or {}).get("log_level", "debug")
+    if isinstance(raw, str):
+        name = raw.strip().upper()
+    else:
+        name = "INFO"
+    level = getattr(logging, name, None)
+    if not isinstance(level, int):
+        level = logging.INFO
+    queue_handler.setLevel(level)
+
+
+_apply_webui_log_level_from_config()
+
 # ── 全局状态 ──
 
 CONFIG = cfg
@@ -307,6 +323,10 @@ async def auth_api(request: Request):
 from services.webui.routes.editor import router as editor_router
 app.include_router(editor_router)
 
+# 资讯 API 路由
+from services.webui.routes.news import router as news_router
+app.include_router(news_router)
+
 # 开发环境：对 /static/ 下的 JS/CSS 禁用浏览器缓存，改文件后刷新即生效
 @app.middleware("http")
 async def no_cache_static_js_css(request: Request, call_next):
@@ -398,6 +418,7 @@ async def refresh_config_api():
     try:
         TASK_MANAGER.reload_tasks()
         read_config()
+        _apply_webui_log_level_from_config()
         return make_public_config()
     except Exception as e:
         logger.error("refresh error: %s", e)
@@ -591,7 +612,12 @@ async def enum_options_api(request: Request):
                 EnumClass = getattr(mod, class_name)
                 opts = []
                 for m in EnumClass:
-                    label = m.value if isinstance(m.value, str) else m.name
+                    if isinstance(m.value, str):
+                        label = m.value
+                    elif isinstance(m.value, int):
+                        label = str(m.value)
+                    else:
+                        label = m.name
                     opts.append({"value": m.name, "label": label})
                 result[p] = opts
             except Exception:
@@ -661,7 +687,12 @@ async def scheduler_reset_api():
 @app.get("/api/overview")
 async def overview_data_api():
     try:
-        from services.core.task_manager import parse_sched_window_hours, clamp_to_sched_window
+        from services.core.task_manager import (
+            parse_sched_window_hours,
+            clamp_to_sched_window,
+            parse_allowed_weekdays,
+            calc_next_allowed_weekday_ts,
+        )
 
         now_ts = _time.time()
         total = enabled = pending = completed = disabled = 0
@@ -686,6 +717,17 @@ async def overview_data_api():
                             completed += 1
                         sw = parse_sched_window_hours(val)
                         nxt_show = clamp_to_sched_window(max(nxt, now_ts), sw[0], sw[1]) if sw else nxt
+                        aw = parse_allowed_weekdays(val)
+                        if aw is not None:
+                            import datetime as _dt
+                            now_dt = _dt.datetime.fromtimestamp(now_ts)
+                            wd = now_dt.weekday() + 1
+                            if nxt_show <= now_ts and wd not in set(aw):
+                                nxt_show = calc_next_allowed_weekday_ts(now_dt, aw)
+                            elif nxt_show > now_ts:
+                                tdt = _dt.datetime.fromtimestamp(nxt_show)
+                                if (tdt.weekday() + 1) not in set(aw):
+                                    nxt_show = calc_next_allowed_weekday_ts(tdt, aw)
                         upcoming.append({
                             'path': path,
                             'on': val.get('on', False),
@@ -942,6 +984,7 @@ async def deploy_save_api(request: Request):
                     incoming["password"] = _hash_deploy_password(incoming_pwd)
             cfg._config[section] = data[section]
     cfg.save_config()
+    _apply_webui_log_level_from_config()
     return {"status": "ok"}
 
 
@@ -970,6 +1013,7 @@ def run_webui():
 
     _ensure_vendor_files()
     read_config()
+    _apply_webui_log_level_from_config()
     _print_banner()
 
     # 启动自动更新检查

@@ -64,6 +64,11 @@ def task():
         logger.info(f"准备开始第{task_idx}关")
         swipe(B(800,300,),B(200,300)) if task_idx>3 else None
         sleep(2)
+        # 第四关会卡，这造梦无敌了
+        if task_idx==4:
+            click(T("得分记录", box=Box(145,664,113,33).margin()))
+            wait_for_appear(T("得分记录", box=Box(493,29,292,73).margin()))
+            click(B(1028,39,38,45))
         click(T(f"第{task_idx}关"), offset=(120, 120), resize=(80, 80))
         if task_idx==5 and ui_F(I("加载中"),2):
             if not reset_task(): break

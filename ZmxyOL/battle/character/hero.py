@@ -40,7 +40,7 @@ class Hero:
         return self
     
     def huashen(self):
-        click(B("战斗-化身"), repeat=2)
+        click(B("战斗-化身"), repeat=1)
         return self
 
     def jump(self, times: int = 1):

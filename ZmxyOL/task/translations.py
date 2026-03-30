@@ -49,6 +49,7 @@ TRANSLATION_MAP = {
     '冰窟商店': 'bingku_shop',
     '幽冥冰窟': 'youming_bingku',
     '荣耀之战': 'rongyao_battle',
+    '狮驼岭': 'shituoling',
     '五光十色': 'wuguangshise',
     '昆仑山爬山': 'kunlunshan_task',
     '昆仑山': 'kunlunshan',

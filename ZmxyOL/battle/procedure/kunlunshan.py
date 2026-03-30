@@ -10,7 +10,7 @@ def back_to_map():
     click(I("导航-菜单"), delay=1)
     click(I("菜单-设置"))
     click(T("地图"), delay=1)
-    click(T("确定"))
+    click(T("确定", box=Box(522,367,232,97).margin()))
     wait_for_disappear(I("加载中"))
     return
 

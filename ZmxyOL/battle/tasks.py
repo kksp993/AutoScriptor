@@ -30,13 +30,13 @@ TASK_TABLE = {
     "豹王星宫":{"location":("极北",-1),"target":B(480,320,30,30),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "灵狱"],"crash_suddenly":False},
     "猴王星宫":{"location":("极北",-1),"target":B(290,480,30,30),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "灵狱"],"crash_suddenly":False},
     # 极寒深渊
-    "岩貉星宫":{"location":("极寒深渊",0),"target":B(1000,630,30,30),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
-    "犬神星宫":{"location":("极寒深渊",0),"target":B(850,470,30,30),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
-    "狼王星宫":{"location":("极寒深渊",0),"target":B(520,270,30,30),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},   
-    "虎王星宫":{"location":("极寒深渊",0),"target":B(760,310,30,30),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
-    "獐王星宫":{"location":("极寒深渊",0),"target":B(620,580,30,30),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
+    "岩貉星宫":{"location":("极寒深渊",0),"target":T("岩络星宫", box=Box(0,662,1280,35).margin()),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
+    "犬神星宫":{"location":("极寒深渊",0),"target":T("犬神星宫", box=Box(0,519,1280,34).margin()),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
+    "狼王星宫":{"location":("极寒深渊",0),"target":T("狼王星宫", box=Box(0,319,1280,39).margin()),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},   
+    "虎王星宫":{"location":("极寒深渊",0),"target":T("虎王星宫", box=Box(0,340,1280,33).margin()),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
+    "獐王星宫":{"location":("极寒深渊",0),"target":T("獐王星宫", box=Box(0,620,1280,51).margin()),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
     "犴神星宫":{"location":("极寒深渊",1),"target":B(970,610,30,30),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":True},
-    "兔神星宫":{"location":("极寒深渊",0),"target":B(480,100,30,30),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
+    "兔神星宫":{"location":("极寒深渊",0),"target":T("兔神星宫", box=Box(0,136,1280,28).margin()),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
 }
 
 TASK_TABLE_LIST = [

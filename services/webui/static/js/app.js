@@ -1,10 +1,10 @@
 const { createApp, ref, reactive, computed, nextTick } = Vue;
 
 const app = createApp({
-  components: { AppSidebar, OverviewPanel, SchedulerPanel, TaskPanel, SettingsPanel, EditorPanel },
+  components: { AppSidebar, NewsPanel, OverviewPanel, SchedulerPanel, TaskPanel, SettingsPanel, EditorPanel, UpdatePanel },
   setup() {
     const configData = reactive({});
-    const activeTab = ref('overview');
+    const activeTab = ref('news');
     const logs = ref([]);
     const characterName = ref('');
     const schedulerStatus = reactive({ state: 'pending', label: '待运行', color: 'green', consecutive_errors: 0 });
@@ -30,6 +30,7 @@ const app = createApp({
       has_cd: '关卡有CD',
       battle_weight: '战斗配比',
       difficulty: '难度选择',
+      diff: '难度',
       preference: '关卡偏好',
       conquer_TianMo: '天魔挑战',
       method: '完成方式',
@@ -41,6 +42,7 @@ const app = createApp({
       Changgui_ChiBang: '常规翅膀',
       HuShenZhiYa: '虎神之崖',
       CangLongYouGu: '苍龙幽谷',
+      MingHaiZhiYuan: '溟海之渊',
       lingqi: '灵气',
       lingqi_priority: '灵气优先级',
       YanHao: '岩貉星宫',
@@ -85,7 +87,7 @@ const app = createApp({
 
     const pageTitle = computed(() => {
       const map = {
-        overview: '总览', scheduler: '调度', editor: '编辑器', settings: '设置',
+        news: '资讯', overview: '总览', scheduler: '调度', editor: '编辑器', updater: '检查更新', settings: '设置',
         daily: '每日任务', weekly: '每周任务', general: '一般任务', event: '活动任务',
       };
       return map[activeTab.value] || '';
@@ -168,12 +170,44 @@ const app = createApp({
       const ansi_up = new AnsiUp();
       let buffer = [];
       let scheduled = false;
-      let refreshScheduled = null;
+      /** 任务状态写入配置后需拉取 /api/refresh；与调度总览分开防抖，避免刷屏 */
+      let taskConfigRefreshTimer = null;
+      const TASK_CONFIG_REFRESH_DEBOUNCE_MS = 400;
 
-      const scheduleRefresh = () => {
-        if (refreshScheduled) return;
-        refreshScheduled = setTimeout(() => { refreshScheduled = null; refreshConfig(true); }, 5000);
+      const scheduleTaskConfigRefresh = () => {
+        if (taskConfigRefreshTimer) clearTimeout(taskConfigRefreshTimer);
+        taskConfigRefreshTimer = setTimeout(() => {
+          taskConfigRefreshTimer = null;
+          refreshConfig(true);
+        }, TASK_CONFIG_REFRESH_DEBOUNCE_MS);
       };
+
+      /** 单任务结束、整批结束、用户中断等 — 与 task_manager / scheduler 日志保持一致 */
+      const LOG_NEEDS_TASK_REFRESH =
+        /(所有任务执行完成|任务执行被中断|任务执行已被中断|Task \[END\])/;
+
+      /** 与 deploy.log_level 一致，仅向日志区展示不低于该级别的行（无级别标记的行如连接提示仍展示） */
+      const ANSI_STRIP = /\x1b\[[0-9;]*m/g;
+      const LOG_LEVEL_ORDER = { DEBUG: 10, INFO: 20, WARNING: 30, ERROR: 40, CRITICAL: 50 };
+      function stripAnsi(s) {
+        return String(s).replace(ANSI_STRIP, '');
+      }
+      function lineLogLevel(line) {
+        const m = stripAnsi(line).match(/\|\s*([A-Z]{4,9})\s*\|/);
+        return m ? m[1] : null;
+      }
+      function webuiMinLogLevel() {
+        const raw = (configData.deploy && configData.deploy.log_level) || 'debug';
+        const name = String(raw).trim().toUpperCase();
+        return LOG_LEVEL_ORDER[name] != null ? LOG_LEVEL_ORDER[name] : LOG_LEVEL_ORDER.INFO;
+      }
+      function shouldShowLogLine(line) {
+        const lv = lineLogLevel(line);
+        if (lv === null) return true;
+        const n = LOG_LEVEL_ORDER[lv];
+        if (n == null) return true;
+        return n >= webuiMinLogLevel();
+      }
 
       const flush = () => {
         if (buffer.length) {
@@ -189,13 +223,14 @@ const app = createApp({
         let data;
         try { data = JSON.parse(event.data).data || ''; } catch { data = event.data; }
         const lines = String(data).split('\n');
-        let needRefresh = false;
+        let needTaskConfigRefresh = false;
         for (const line of lines) {
-          if (/(所有任务执行完成|任务执行已被中断)/.test(line)) needRefresh = true;
+          if (!shouldShowLogLine(line)) continue;
+          if (LOG_NEEDS_TASK_REFRESH.test(line)) needTaskConfigRefresh = true;
           buffer.push({ html: ansi_up.ansi_to_html(line) });
         }
-        if (needRefresh) {
-          scheduleRefresh();
+        if (needTaskConfigRefresh) {
+          scheduleTaskConfigRefresh();
           fetchOverview();
         }
         if (!scheduled) {

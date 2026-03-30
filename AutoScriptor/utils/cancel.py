@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import threading
 import time
+from contextlib import contextmanager
 from typing import Optional
 
 _ev: Optional[threading.Event] = None
+_tls = threading.local()
 
 
 class TaskCancelled(Exception):
@@ -24,8 +26,29 @@ def bind_cancel_event(ev: Optional[threading.Event]) -> None:
     _ev = ev
 
 
+def _cancel_checks_suppressed() -> bool:
+    """当前线程是否临时忽略终止检查（如 WebUI 编辑器遥控 / 手动片段）。"""
+    return getattr(_tls, "suppress", 0) > 0
+
+
+@contextmanager
+def suppress_cancel_checks():
+    """在本线程内暂时不响应终止标记，用于任务已停止后仍允许手动遥控或调试代码。"""
+    old = getattr(_tls, "suppress", 0)
+    _tls.suppress = old + 1
+    try:
+        yield
+    finally:
+        if old:
+            _tls.suppress = old
+        else:
+            delattr(_tls, "suppress")
+
+
 def check_cancel_raise() -> None:
     """若已请求取消则抛出 TaskCancelled。"""
+    if _cancel_checks_suppressed():
+        return
     if _ev is not None and _ev.is_set():
         raise TaskCancelled("任务已终止")
 

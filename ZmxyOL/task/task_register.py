@@ -28,6 +28,8 @@ def register_task(func=None, *, default_offset_hours=None, **task_kwargs):
       - default_offset_hours (int): 任务执行后延迟 N 小时再调度
       - sched_window_hours (tuple[int,int]): 本地时间可执行时段 [start, end)，如 (10, 22)；
         调度器在时段外不会执行该任务，执行后 next_exec_time 也会落在时段内
+      - allowed_weekdays (list[int]): 仅在这些星期可执行，cfg 约定 1=周一 … 7=周日（如 [6,7] 为周六日）；
+        到期但不在允许日时，调度器会推迟 next_exec_time 至下一允许日的 5:00
       - 其他任意元数据参数 (key=value): 写入 cfg 配置节点
 
     用法示例：

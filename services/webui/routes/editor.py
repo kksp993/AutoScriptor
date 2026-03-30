@@ -7,17 +7,20 @@ Editor API routes – WebUI 版图片编辑器后端
 
 from __future__ import annotations
 
+import ast
 import base64
 import os
 import time
 import traceback
+import types
 
 import cv2
 import numpy as np
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from AutoScriptor.utils.logger import logger
-from AutoScriptor.core.api import swipe
+from AutoScriptor.utils.box import b2p
+from AutoScriptor.utils.cancel import suppress_cancel_checks
 from AutoScriptor.core.targets import B
 
 router = APIRouter(prefix="/api/editor", tags=["editor"])
@@ -445,14 +448,14 @@ async def editor_remote_swipe(request: Request):
         ctx = _get_runtime()
         if ctx.mixctrl is None:
             return JSONResponse(status_code=503, content={"error": "mixctrl 未初始化"})
-        # 起点/终点用 1×1 BoxTarget，与脚本层 swipe(start, end) 语义一致
-        swipe(
-            B(x1, y1, 1, 1),
-            B(x2, y2, 1, 1),
-            duration_s=duration_s,
-            delay=0,
-            ensure_stable_after_swipe=True,
-        )
+        # 直接走 mixctrl，避免 api.swipe 开头的 check_cancel_raise 在「已停止」后仍拦截遥控
+        from AutoScriptor.core import api as core_api
+
+        core_api._ensure_boosted()
+        start_b = B(x1, y1, 1, 1).box
+        end_b = B(x2, y2, 1, 1).box
+        ctx.mixctrl.swipe(*b2p(start_b), *b2p(end_b), duration_s)
+        time.sleep(duration_s)
         return {"ok": True}
     except Exception as e:
         logger.error("editor/remote/swipe error: %s", e)
@@ -464,8 +467,16 @@ async def editor_remote_swipe(request: Request):
 _MAX_SNIPPET_LEN = 16000
 
 
-def _run_editor_snippet(code: str) -> dict:
-    """在受限命名空间中执行用户代码，捕获所有异常，不向外抛出。"""
+def _run_editor_snippet(code: str, *, virtual_only: bool = False) -> dict:
+    """在受限命名空间中执行用户代码，捕获所有异常，不向外抛出。
+
+    返回值通过 JSON 的 ``result`` 字段给出，始终为 ``repr(值)`` 的字符串（含 ``None`` → ``\"None\"``）。
+    多行代码时若最后一行是表达式（如 ``locate(...)``），会对其求值并返回，避免 ``exec`` 丢弃结果。
+    纯语句块可在末尾写 ``__result__ = ...`` 指定要展示的值。
+
+    ``virtual_only=True`` 时临时替换 ``mixctrl`` 的 click/long_click/swipe，不下发模拟器，
+    并在成功响应中附带 ``virtual_clicks`` / ``virtual_swipes`` 供前端画布标注。
+    """
     import contextlib
     import io
     import time as time_mod
@@ -528,30 +539,71 @@ def _run_editor_snippet(code: str) -> dict:
     if len(code) > _MAX_SNIPPET_LEN:
         return {"ok": False, "error": f"代码过长（上限 {_MAX_SNIPPET_LEN} 字符）"}
 
-    stdout_buf = io.StringIO()
     try:
-        with contextlib.redirect_stdout(stdout_buf):
-            try:
-                compiled = compile(code, "<editor>", "eval")
-            except SyntaxError:
-                compiled = None
-            if compiled is not None:
-                result = eval(compiled, ns, ns)
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        return {"ok": False, "error": f"语法错误: {e}"}
+
+    stdout_buf = io.StringIO()
+    _MISSING = object()
+
+    virtual_clicks: list[dict] = []
+    virtual_swipes: list[dict] = []
+    backup: dict | None = None
+    patched_mc = None
+    if virtual_only:
+        mc = api_mod.mixctrl
+        if mc is None:
+            return {"ok": False, "error": "mixctrl 未初始化"}
+
+        def _v_click(self, x, y):
+            virtual_clicks.append({"x": int(x), "y": int(y)})
+
+        def _v_long_click(self, x, y, duration=1.0):
+            virtual_clicks.append({"x": int(x), "y": int(y)})
+
+        def _v_swipe(self, x1, y1, x2, y2, duration_s=1):
+            virtual_swipes.append({
+                "x1": int(x1), "y1": int(y1), "x2": int(x2), "y2": int(y2),
+            })
+
+        backup = {
+            "click": mc.click,
+            "long_click": mc.long_click,
+            "swipe": mc.swipe,
+        }
+        patched_mc = mc
+        mc.click = types.MethodType(_v_click, mc)
+        mc.long_click = types.MethodType(_v_long_click, mc)
+        mc.swipe = types.MethodType(_v_swipe, mc)
+
+    try:
+        with suppress_cancel_checks():
+            with contextlib.redirect_stdout(stdout_buf):
+                body = tree.body
+                if not body:
+                    return {"ok": False, "error": "代码为空"}
+
+                value = _MISSING
+                if len(body) == 1 and isinstance(body[0], ast.Expr):
+                    value = eval(compile(ast.Expression(body[0].value), "<editor>", "eval"), ns, ns)
+                elif isinstance(body[-1], ast.Expr):
+                    head = ast.Module(body[:-1], type_ignores=[])
+                    exec(compile(head, "<editor>", "exec"), ns, ns)
+                    value = eval(compile(ast.Expression(body[-1].value), "<editor>", "eval"), ns, ns)
+                else:
+                    exec(compile(tree, "<editor>", "exec"), ns, ns)
+                    if "__result__" in ns:
+                        value = ns["__result__"]
+
                 out = stdout_buf.getvalue().strip()
-                payload = {
-                    "ok": True,
-                    "result": None if result is None else repr(result),
-                    "stdout": out or None,
-                }
+                payload: dict = {"ok": True, "stdout": out or None}
+                if value is not _MISSING:
+                    payload["result"] = repr(value)
+                if virtual_only:
+                    payload["virtual_clicks"] = virtual_clicks
+                    payload["virtual_swipes"] = virtual_swipes
                 return payload
-            exec(compile(code, "<editor>", "exec"), ns, ns)
-            out = stdout_buf.getvalue().strip()
-            ret = ns.get("__result__", None)
-            return {
-                "ok": True,
-                "result": None if ret is None else repr(ret),
-                "stdout": out or None,
-            }
     except BaseException as e:
         logger.warning("editor/execute-code snippet error: %s\n%s", e, tb_mod.format_exc())
         return {
@@ -559,6 +611,11 @@ def _run_editor_snippet(code: str) -> dict:
             "error": str(e),
             "traceback": tb_mod.format_exc(),
         }
+    finally:
+        if backup is not None and patched_mc is not None:
+            patched_mc.click = backup["click"]
+            patched_mc.long_click = backup["long_click"]
+            patched_mc.swipe = backup["swipe"]
 
 
 @router.post("/execute-code")
@@ -570,7 +627,8 @@ async def editor_execute_code(request: Request):
             return {"ok": False, "error": "mixctrl 未初始化"}
         data = await request.json()
         code = data.get("code", "")
-        return _run_editor_snippet(code)
+        virtual_only = bool(data.get("virtual_only", False))
+        return _run_editor_snippet(code, virtual_only=virtual_only)
     except Exception as e:
         logger.error("editor/execute-code error: %s\n%s", e, traceback.format_exc())
         return {"ok": False, "error": str(e)}
@@ -596,7 +654,8 @@ async def editor_preview_extract(request: Request):
                 return s.strip()
             return s
 
-        info = extract_info(B(left, top, width, height), post_process=_pp, ensure_not_empty=True)
+        with suppress_cancel_checks():
+            info = extract_info(B(left, top, width, height), post_process=_pp, ensure_not_empty=True)
         return {"ok": True, "info": info}
     except Exception as e:
         logger.warning("editor/preview-extract: %s", e)
