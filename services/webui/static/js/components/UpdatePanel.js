@@ -17,12 +17,13 @@ const UpdatePanel = {
   computed: {
     stateTag() {
       const map = {
-        idle:      { label: '已是最新',  type: 'success' },
-        checking:  { label: '检查中…',   type: 'warning' },
-        available: { label: '有新版本',  type: 'danger'  },
-        updating:  { label: '更新中…',   type: 'warning' },
-        done:      { label: '更新完成',  type: 'success' },
-        failed:    { label: '操作失败',  type: 'danger'  },
+        idle:       { label: '已是最新',     type: 'success' },
+        checking:   { label: '检查中…',      type: 'warning' },
+        available:  { label: '有新版本',     type: 'danger'  },
+        updating:   { label: '更新中…',      type: 'warning' },
+        done:       { label: '更新完成',     type: 'success' },
+        restarting: { label: '正在重启…',    type: 'warning' },
+        failed:     { label: '操作失败',     type: 'danger'  },
       };
       return map[this.status.state] || { label: this.status.state, type: 'info' };
     },
@@ -61,7 +62,7 @@ const UpdatePanel = {
     async runUpdate() {
       try {
         await ElementPlus.ElMessageBox.confirm(
-          '更新将拉取远程代码并安装依赖，过程中请勿关闭应用。',
+          '更新将拉取远程代码并安装依赖，完成后自动重启后端。',
           '确认更新',
           { confirmButtonText: '立即更新', cancelButtonText: '取消', type: 'warning' }
         );
@@ -72,7 +73,10 @@ const UpdatePanel = {
       try {
         const res = await fetch('/api/update/run', { method: 'POST' });
         this.status = await res.json();
-        if (this.status.success) {
+        if (this.status.state === 'restarting') {
+          ElementPlus.ElMessage.success('更新完成，后端正在重启…');
+          this._waitForRestart();
+        } else if (this.status.success) {
           ElementPlus.ElMessage.success('更新完成，建议重启应用以加载新版本');
         } else {
           ElementPlus.ElMessage.error('更新失败: ' + (this.status.last_error || '未知错误'));
@@ -81,6 +85,27 @@ const UpdatePanel = {
         ElementPlus.ElMessage.error('更新请求失败');
       }
       this.updating = false;
+    },
+    _waitForRestart() {
+      let attempts = 0;
+      const maxAttempts = 30;
+      const poll = setInterval(async () => {
+        attempts++;
+        try {
+          const res = await fetch('/api/update/status', { signal: AbortSignal.timeout(3000) });
+          if (res.ok) {
+            clearInterval(poll);
+            ElementPlus.ElMessage.success('后端已重启完成');
+            setTimeout(() => location.reload(), 500);
+          }
+        } catch {
+          // 服务尚未恢复，继续等待
+        }
+        if (attempts >= maxAttempts) {
+          clearInterval(poll);
+          ElementPlus.ElMessage.warning('重启超时，请手动刷新页面');
+        }
+      }, 3000);
     },
   },
   template: `
@@ -137,7 +162,7 @@ const UpdatePanel = {
       <li>点击「检查更新」将从远程仓库 fetch 最新代码并比较版本差异</li>
       <li>「立即更新」会通过 git pull 拉取代码，并自动安装新增的 Python 依赖</li>
       <li>更新过程中会自动 stash 保护本地修改，更新完成后恢复</li>
-      <li>更新完成后建议重启应用以加载新版本</li>
+      <li>更新完成后将自动重启后端以加载新版本</li>
     </ul>
   </el-card>
 

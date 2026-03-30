@@ -31,7 +31,7 @@ def task():
         click(T("确定"), if_exist=True)
         click(B(1090,25,30,30))
     sleep(2)
-    click(B(1200,30,30,30))
+    click(B(1200,30,30,30),until=lambda: ui_T(I("加载中")))
     wait_for_appear(I("挑战-取经"))
     sleep(1)
     click(B(1200,30,30,30))

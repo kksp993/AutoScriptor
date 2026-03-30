@@ -6,7 +6,7 @@ const SettingsPanel = {
   emits: ['save-settings'],
   data() {
     return {
-      hiddenSections: ['game', 'status', 'encryption', 'profiles', 'deploy', 'notify', 'update', 'remote_access', 'llm'],
+      hiddenSections: ['game', 'status', 'encryption', 'profiles', 'current_account', 'active_character', 'characters_summary', 'deploy', 'notify', 'update', 'remote_access', 'llm'],
       sectionLabels: { app: '应用设置', ocr: 'OCR 设置', emulator: '模拟器设置', llm: '智能体' },
       keyLabels: {
         name: '应用名称', app_to_start: '启动包名', restart_on_error: '出错重启',

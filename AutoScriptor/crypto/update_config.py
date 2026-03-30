@@ -5,54 +5,57 @@ from getpass import getpass
 from AutoScriptor.utils.logger import logger
 
 def mask_string(text: str, show_first: int = 1, show_last: int = 1) -> str:
-    """
-    对字符串进行掩码处理
-    :param text: 原始字符串
-    :param show_first: 显示前几位
-    :param show_last: 显示后几位
-    :return: 掩码后的字符串
-    """
     if not text:
         return ""
     length = len(text)
     if length <= (show_first + show_last):
         return "*" * length
-    
     return text[:show_first] + "*" * (length - show_first - show_last) + text[-show_last:]
-# 获取配置文件路径
-config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),"config.json")
-# 创建配置管理器实例
-config_manager = ConfigManager(config_path)
+
+
 def set_config():
-    # 获取用户输入
+    from AutoScriptor.utils.constant import cfg
+    if not cfg.current_account():
+        logger.info("当前没有加载任何账号，请先通过 WebUI 创建账号")
+        return
+
     logger.info("请输入游戏配置信息：")
     os.system('cls' if os.name == 'nt' else 'clear')
     account = input("账号: ")
     password = getpass("密码: ")
-    character_name = input("角色名称: ")
     security_key = getpass("安全密钥: ")
-    
-    # 更新配置
-    config_manager.update_game_config(account, password, character_name, security_key)
-    # 清屏
+
+    sensitive = {"account": account, "password": password}
+    cfg._account_data["encryption"] = ConfigManager.encrypt_data(sensitive, security_key)
+    cfg._save_account_file()
+
     os.system('cls' if os.name == 'nt' else 'clear')
     logger.info("配置已更新并加密！")
-    
+
+
 def verify_config() -> dict | None:
     """验证并返回解密后的配置，失败返回 None"""
+    from AutoScriptor.utils.constant import cfg
+
     os.system('cls' if os.name == 'nt' else 'clear')
     logger.info("\n验证解密：")
     verify_key = getpass("请输入安全密钥进行解密: ")
-    decrypted_data = config_manager.decrypt_config(verify_key)
-    if decrypted_data:
-        logger.info("解密成功！")
-        logger.info(f"账号: {mask_string(decrypted_data['account'], 3, 4)}")
-        logger.info(f"密码: {'*' * 8}")
-        logger.info(f"角色名称: {mask_string(decrypted_data['character_name'], 2, 1)}")
-        return decrypted_data
-    else:
-        logger.info("解密失败！")
+
+    enc = cfg._account_data.get("encryption", {})
+    if not enc.get("encrypted_data"):
+        logger.info("当前账号没有加密数据")
         return None
+
+    try:
+        decrypted_data = ConfigManager.decrypt_data(enc, verify_key)
+        logger.info("解密成功！")
+        logger.info(f"账号: {mask_string(decrypted_data.get('account', ''), 3, 4)}")
+        logger.info(f"密码: {'*' * 8}")
+        return decrypted_data
+    except Exception as e:
+        logger.info(f"解密失败: {e}")
+        return None
+
 
 if __name__ == "__main__":
     res = get_selected_columns(avail_cols=["更新账号信息","验证账号配置"],prompt="请选择操作")[0]

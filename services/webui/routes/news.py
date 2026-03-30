@@ -43,6 +43,39 @@ _cache: dict[str, Any] = {}
 _NAV_INTERCEPTOR_JS = r"""
 <script data-proxy-interceptor>
 (function(){
+  /* ── A. 干掉 4399 登录弹窗 / 遮罩 ── */
+  function killLogin(){
+    /* UniLogin 初始化可能在 DOMContentLoaded 之后弹窗，定时清除 */
+    var sels = [
+      '.thread_login','.m-btn_login','.cn_login','.loginbtns',
+      '.j-login_dailog','.u_logform','.u_container','.m-dialog',
+      '#j-unlogin','.my_ftop'
+    ];
+    sels.forEach(function(s){
+      document.querySelectorAll(s).forEach(function(el){ el.remove(); });
+    });
+    /* 登录弹窗可能用 fixed/absolute 定位 + 高 z-index 覆盖 */
+    document.querySelectorAll('[class*="mask"],[class*="cover"],[class*="overlay"]').forEach(function(el){
+      var st = getComputedStyle(el);
+      if (st.position === 'fixed' || st.position === 'absolute') el.remove();
+    });
+    /* 恢复被 overflow:hidden 锁死的 body 滚动 */
+    document.body.style.overflow = 'auto';
+    document.documentElement.style.overflow = 'auto';
+  }
+  /* 页面加载时立即清一次，再延迟清几次（有些弹窗是异步渲染的） */
+  killLogin();
+  document.addEventListener('DOMContentLoaded', killLogin);
+  setTimeout(killLogin, 300);
+  setTimeout(killLogin, 800);
+  setTimeout(killLogin, 2000);
+  /* 阻止 UniLogin 弹出：把它替换成空函数 */
+  window.UniLogin = window.UniLogin || {};
+  window.UniLogin.showPopupLogin = function(){};
+  window.UniLogin.setUnionLoginProps = function(){};
+  window.UniLoginInit = function(){};
+
+  /* ── B. 站内链接走代理 ── */
   var ALLOWED = /^https?:\/\/(""" + _ALLOWED_DOMAINS_JS + r""")(\/|$|\?)/i;
   var PROXY   = '/api/news/proxy?url=';
   function toProxy(u){
@@ -53,7 +86,6 @@ _NAV_INTERCEPTOR_JS = r"""
       return PROXY + encodeURIComponent(a.origin + a.pathname + a.search);
     } catch(e){ return ''; }
   }
-  /* 1. 拦截所有点击 */
   document.addEventListener('click', function(e){
     var el = e.target;
     while(el && el.tagName !== 'A') el = el.parentElement;
@@ -62,10 +94,8 @@ _NAV_INTERCEPTOR_JS = r"""
     if (!p) return;
     e.preventDefault();
     e.stopPropagation();
-    /* 始终在当前 iframe 内导航 */
     location.href = p;
   }, true);
-  /* 2. 拦截 window.open */
   var _open = window.open;
   window.open = function(u){
     if (!u) return _open.apply(this, arguments);
@@ -73,7 +103,6 @@ _NAV_INTERCEPTOR_JS = r"""
     if (p){ location.href = p; return null; }
     return _open.apply(this, arguments);
   };
-  /* 3. 移除所有 target="_blank" 以防漏网 */
   document.querySelectorAll('a[target]').forEach(function(a){ a.removeAttribute('target'); });
 })();
 </script>
@@ -193,6 +222,13 @@ async def proxy_page(url: str = Query(..., description="要代理的 4399 帖子
     if parsed.hostname not in _ALLOWED_DOMAINS:
         return HTMLResponse("<h3>不允许的域名</h3>", status_code=403)
 
+    # 提前注入到 <head> 最前面：在 4399 自身脚本运行前就把 UniLogin 拦截掉
+    _HEAD_EARLY_BLOCK = (
+        '<script>window.UniLogin={showPopupLogin:function(){},setUnionLoginProps:function(){}};'
+        'window.UniLoginInit=function(){};'
+        '</script>'
+    )
+
     try:
         resp = requests.get(url, headers=_BROWSER_HEADERS, timeout=20)
         resp.encoding = "utf-8"
@@ -200,9 +236,12 @@ async def proxy_page(url: str = Query(..., description="要代理的 4399 帖子
         if "<base" not in content[:2000].lower():
             content = content.replace(
                 "<head>",
-                '<head><base href="https://bbs.4399.cn/">',
+                "<head>" + _HEAD_EARLY_BLOCK
+                + '<base href="https://bbs.4399.cn/">',
                 1,
             )
+        else:
+            content = content.replace("<head>", "<head>" + _HEAD_EARLY_BLOCK, 1)
         content = content.replace("</body>", _NAV_INTERCEPTOR_JS + "</body>", 1)
         return HTMLResponse(content)
     except Exception as e:

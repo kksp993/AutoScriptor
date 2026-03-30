@@ -97,9 +97,10 @@ def register_task(func=None, *, default_offset_hours=None, **task_kwargs):
             current_level = current_level.setdefault(key, {})
 
         # 7. cfg["tasks"] 只存用户配置（on、next_exec_time、params 等）
+        # 首次写入某任务叶节点时默认关闭，避免新建账号/角色时空任务树被全部点亮
         last_key = keys[-1]
         if last_key not in current_level:
-            current_level[last_key] = {'on': True, 'next_exec_time': 0}
+            current_level[last_key] = {'on': False, 'next_exec_time': 0}
         else:
             current_level[last_key].setdefault('on', True)
             current_level[last_key].setdefault('next_exec_time', 0)

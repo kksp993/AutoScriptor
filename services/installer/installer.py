@@ -332,13 +332,11 @@ def ensure_config_with_mumu(project_root: Path) -> None:
         if cfg_tmpl.exists():
             cfg_path.write_text(cfg_tmpl.read_text(encoding="utf-8"), encoding="utf-8")
         else:
-            # 最小结构
             cfg_path.write_text(json.dumps({
                 "app": {"name": "ZmxyOL","max_retry": 3,"app_to_start": "org.yjmobile.zmxy", "restart_on_error": True, "run_in_background": True, "auto_start": True},
                 "emulator": {"index": 1, "adb_addr": "127.0.0.1:16416", "max_retry": 3,"mumu_folder": "", "emu_path": "", "adb_path": ""},
-                "encryption": {},
                 "ocr": {"use_gpu": False},
-                "tasks": {}
+                "current_account": "default"
             }, ensure_ascii=False, indent=2), encoding="utf-8")
 
     try:

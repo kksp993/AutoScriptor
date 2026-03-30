@@ -1,10 +1,20 @@
 .el-button--primary {
   background-color: #22c55e !important;
   border-color: #22c55e !important;
+  color: #ffffff !important;
+}
+.el-button--primary span,
+.el-button--primary i {
+  color: #ffffff !important;
 }
 .el-button--primary:hover {
   background-color: #16a34a !important;
   border-color: #16a34a !important;
+  color: #ffffff !important;
+}
+.el-button--primary:hover span,
+.el-button--primary:hover i {
+  color: #ffffff !important;
 }
 
 /* 任务树折叠/展开过渡 */
@@ -780,4 +790,593 @@ html.light .bg-white {
   border-radius: 6px;
   overflow: hidden;
   background: #f8fafc;
+}
+
+/* ── 总览页面：登录 + 仪表盘 ── */
+
+.ov-root {
+  position: relative;
+  width: 100%;
+}
+
+/* 登录视图 */
+.ov-login-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  background: linear-gradient(145deg, #f0fdf4 0%, #f8fafc 40%, #ecfeff 100%);
+  border-radius: 12px;
+}
+
+.ov-login-card {
+  background: #ffffff;
+  border-radius: 20px;
+  box-shadow: 0 8px 40px rgba(15, 23, 42, 0.08), 0 2px 8px rgba(15, 23, 42, 0.04);
+  padding: 48px 40px 40px;
+  width: 100%;
+  max-width: 400px;
+  text-align: center;
+}
+
+.ov-login-avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  margin: 0 auto 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 24px rgba(34, 197, 94, 0.25);
+}
+.ov-login-avatar i {
+  font-size: 32px;
+  color: #ffffff;
+}
+
+.ov-login-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0 0 6px;
+}
+
+.ov-login-subtitle {
+  font-size: 16px;
+  color: #94a3b8;
+  margin: 0 0 28px;
+}
+
+.ov-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ov-login-select,
+.ov-login-input {
+  width: 100%;
+}
+
+.ov-login-btn {
+  width: 100%;
+  height: 48px !important;
+  font-size: 18px !important;
+}
+
+/* 仪表盘视图 */
+.ov-dashboard {
+  display: flex;
+  gap: 16px;
+  height: 100%;
+  min-height: 0;
+}
+
+.ov-left {
+  width: 35%;
+  min-width: 260px;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.ov-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+/* 头像区 */
+.ov-avatar-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: #ffffff;
+  border-radius: 14px;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+  flex-shrink: 0;
+}
+
+.ov-avatar-badge {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.ov-avatar-badge i {
+  font-size: 20px;
+  color: #ffffff;
+}
+
+.ov-avatar-info {
+  min-width: 0;
+}
+
+.ov-avatar-name {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ov-avatar-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 16px;
+  color: #22c55e;
+  margin-top: 2px;
+}
+
+.ov-relock-btn {
+  display: block;
+  margin-top: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 14px;
+  color: #94a3b8;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.ov-relock-btn:hover {
+  color: #22c55e;
+}
+
+.ov-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+/* 角色列表 */
+.ov-char-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border-radius: 14px;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+}
+
+.ov-char-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 12px;
+  flex-shrink: 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.ov-section-label {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1e293b;
+}
+.ov-section-label i {
+  color: #22c55e;
+}
+
+.ov-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #22c55e;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.ov-refresh-btn:hover {
+  background: rgba(34, 197, 94, 0.1);
+}
+.ov-refresh-btn .fa {
+  font-size: 15px;
+}
+
+.ov-char-list-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 8px;
+}
+
+.ov-server-group {
+  margin-bottom: 2px;
+}
+
+.ov-server-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.15s;
+  user-select: none;
+}
+.ov-server-header:hover {
+  background: #f8fafc;
+}
+.ov-server-header i.ov-server-chevron {
+  color: #22c55e;
+  width: 18px;
+  text-align: center;
+  font-size: 16px;
+}
+
+.ov-server-name {
+  font-size: 17px;
+  font-weight: 700;
+  color: #1e293b;
+  flex: 1;
+}
+
+.ov-server-count {
+  font-size: 13px;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 2px 9px;
+  border-radius: 10px;
+}
+
+.ov-char-items {
+  padding-left: 8px;
+}
+
+.ov-char-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: 10px;
+  transition: background 0.15s;
+}
+.ov-char-item:hover {
+  background: #f0fdf4;
+}
+
+.ov-char-active {
+  background: rgba(34, 197, 94, 0.08) !important;
+}
+
+.ov-char-item-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.ov-char-name {
+  font-size: 17px;
+  font-weight: 600;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ov-char-pending-badge {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #92400e;
+  background: #fef3c7;
+  padding: 2px 8px;
+  border-radius: 10px;
+  line-height: 20px;
+}
+
+.ov-char-item-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.ov-char-item-actions .el-button {
+  font-size: 15px !important;
+  font-weight: 600;
+}
+
+.ov-empty-hint {
+  text-align: center;
+  padding: 24px 0;
+  color: #94a3b8;
+  font-size: 16px;
+}
+
+/* 右侧：调度控制区 */
+.ov-dispatch-control {
+  background: #ffffff;
+  border-radius: 14px;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+  padding: 18px 22px;
+  flex-shrink: 0;
+}
+
+.ov-dispatch-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.ov-dispatch-progress {
+  font-size: 15px;
+  color: #22c55e;
+  font-weight: 600;
+}
+
+.ov-dispatch-sched-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 10px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border-radius: 10px;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.ov-dispatch-meta-label {
+  color: #94a3b8;
+  font-size: 15px;
+}
+
+.ov-dispatch-meta-value {
+  font-weight: 600;
+  color: #334155;
+  font-size: 16px;
+}
+
+.ov-dispatch-meta-time {
+  color: #1e293b;
+}
+
+.ov-dispatch-meta-sep {
+  color: #cbd5e1;
+  margin: 0 4px;
+}
+
+.ov-dispatch-meta-countdown {
+  font-size: 14px;
+  color: #94a3b8;
+  margin-left: 0;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.ov-dispatch-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ov-dispatch-queue-count {
+  font-size: 16px;
+  color: #64748b;
+  margin-left: auto;
+}
+.ov-dispatch-queue-count strong {
+  font-size: 17px;
+  color: #334155;
+}
+
+.ov-dispatch-progress-bar {
+  margin-top: 12px;
+}
+
+/* 右侧：角色任务状态区 */
+.ov-dispatch-status {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ov-empty-dispatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #94a3b8;
+  gap: 12px;
+}
+.ov-empty-dispatch i {
+  font-size: 40px;
+  color: #cbd5e1;
+}
+.ov-empty-dispatch p {
+  font-size: 17px;
+  text-align: center;
+  margin: 0;
+}
+
+.ov-dispatch-card {
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 1px 6px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+  border: 1px solid #f1f5f9;
+  transition: border-color 0.15s;
+}
+.ov-dispatch-card:hover {
+  border-color: #e2e8f0;
+}
+
+.ov-dispatch-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+.ov-dispatch-card-header:hover {
+  background: #fafafa;
+}
+
+.ov-dispatch-card-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ov-dispatch-card-left i {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.ov-dispatch-card-name {
+  font-size: 17px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.ov-dispatch-running-tag {
+  font-size: 14px;
+  color: #22c55e;
+  font-weight: 600;
+}
+
+.ov-dispatch-card-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 任务状态：实心 ●（与任务列表页一致，全部任务均有色点，不省略） */
+.ov-task-dots {
+  display: flex;
+  gap: 1px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  max-width: none;
+  min-width: 0;
+  flex: 1;
+}
+
+.ov-task-dot-char {
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+  cursor: default;
+  user-select: none;
+  font-family: "Segoe UI Symbol", "Apple SD Gothic Neo", sans-serif;
+  transition: transform 0.12s;
+}
+.ov-task-dot-char:hover {
+  transform: scale(1.35);
+}
+
+.ov-task-dot-char--row {
+  font-size: 18px;
+  width: 1.1em;
+  text-align: center;
+}
+
+.ov-dispatch-card-body {
+  border-top: 1px solid #f1f5f9;
+  padding: 8px 14px 12px;
+}
+
+.ov-dispatch-task-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid #fafafa;
+}
+.ov-dispatch-task-row:last-child {
+  border-bottom: none;
+}
+
+.ov-dispatch-task-name {
+  flex: 1;
+  font-size: 17px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.ov-dispatch-task-status {
+  font-size: 15px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.ov-dispatch-no-tasks {
+  text-align: center;
+  padding: 12px 0;
+  color: #94a3b8;
+  font-size: 16px;
+}
+
+/* 过渡动画 */
+.ov-fade-enter-active, .ov-fade-leave-active {
+  transition: opacity 0.35s ease;
+}
+.ov-fade-enter-from, .ov-fade-leave-to {
+  opacity: 0;
+}
+
+.ov-collapse-enter-active, .ov-collapse-leave-active {
+  transition: all 0.25s ease;
+  overflow: hidden;
+}
+.ov-collapse-enter-from, .ov-collapse-leave-to {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+}
+.ov-collapse-enter-to, .ov-collapse-leave-from {
+  max-height: 800px;
+  opacity: 1;
 }
