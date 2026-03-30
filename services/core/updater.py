@@ -26,6 +26,7 @@ class Updater:
 
     _check_thread: Optional[threading.Thread] = None
     _stop_event = threading.Event()
+    _restart_event = None  # multiprocessing.Event, 由 gui.py 传入
 
     def __init__(self):
         self._root = os.getcwd()
@@ -176,8 +177,14 @@ class Updater:
             self._pip_install()
 
             self.current_version = self.get_current_commit()
-            self.state = "done"
-            logger.info(f"更新完成: {self.current_version}")
+
+            if self._restart_event is not None:
+                self.state = "restarting"
+                logger.info(f"更新完成: {self.current_version}，即将重启后端")
+                self._trigger_restart()
+            else:
+                self.state = "done"
+                logger.info(f"更新完成: {self.current_version}")
             return True
 
         except Exception as e:
@@ -222,6 +229,20 @@ class Updater:
         self._check_thread = threading.Thread(target=_loop, daemon=True, name="updater")
         self._check_thread.start()
         logger.info(f"自动更新检查已启动，间隔 {interval_minutes} 分钟")
+
+    def set_restart_event(self, event):
+        """设置重启事件（multiprocessing.Event），由 gui.py 子进程传入。"""
+        self._restart_event = event
+
+    def _trigger_restart(self, delay: float = 2.0):
+        """延迟触发后端重启，给 API 响应留出返回时间。"""
+        def _fire():
+            logger.info("触发后端重启...")
+            self._restart_event.set()
+
+        timer = threading.Timer(delay, _fire)
+        timer.daemon = True
+        timer.start()
 
     def stop(self):
         self._stop_event.set()

@@ -76,6 +76,9 @@ def get_env_name(env_id: int)->str:
     return list(mm.envs.values())[env_id].name
 
 
+# 从登录环境切入游戏后，首屏（如村庄）加载往往明显长于普通场景切换，需单独放宽等待
+POST_LOGIN_ENV_IDENTIFIER_TIMEOUT = 60
+
 class MapManager:
     """地图管理器"""
     def __init__(self):
@@ -226,7 +229,10 @@ class MapManager:
 
         for from_env, to_env in route:
             self.paths[(from_env, to_env)]()
-            wait_for_appear(mm.locs[to_env].identifier, timeout=10)
+            wait_timeout = (
+                POST_LOGIN_ENV_IDENTIFIER_TIMEOUT if from_env == "登录" else 10
+            )
+            wait_for_appear(mm.locs[to_env].identifier, timeout=wait_timeout)
 
         self.set_region(tar_env, tar_loc)
         return

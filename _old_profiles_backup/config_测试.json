@@ -1,0 +1,354 @@
+{
+    "app": {
+        "app_to_start": "org.yjmobile.zmxy",
+        "auto_start": true,
+        "max_retry": 2,
+        "name": "ZmxyOL",
+        "restart_on_error": true,
+        "run_in_background": false,
+        "debug_mode": true,
+        "cpu_cores": 8
+    },
+    "ocr": {
+        "use_gpu": false,
+        "scale": 0.75
+    },
+    "emulator": {
+        "index": 1,
+        "adb_addr": "127.0.0.1:16416",
+        "mumu_folder": "C:\\Program Files\\Netease\\MuMu",
+        "emu_path": "C:\\Program Files\\Netease\\MuMu\\nx_main\\MuMuManager.exe",
+        "adb_path": "C:\\Program Files\\Netease\\MuMu\\nx_main\\adb.exe",
+        "post_execution": "NULL"
+    },
+    "encryption": {
+        "version": "1.0",
+        "salt": "AEo0Lxu4ZofaWSilT5DnTQ==",
+        "nonce": "GvCBShJ/1RX52j73",
+        "tag": "haOiQJVGHp41TTFbQg7gFg==",
+        "hmac": "Vt/BjL63szAkfzBukBA+j9Qrvt7qQDxXr7UC7mpeH6c=",
+        "encrypted_data": "Hp8XDizhOVPr//LJWTEgrTBml96XGTn3AiYXPi4A8Q8UYqp0b5FX6ssdx6uzQ9hG1FKCKAiboPzG6zlEaTZ3"
+    },
+    "llm": {
+        "use_agent": true,
+        "url": "http://211.87.232.112:8000"
+    },
+    "tasks": {
+        "每日任务": {
+            "村庄": {
+                "混沌炼狱塔": {
+                    "on": true,
+                    "next_exec_time": 1774299600.0,
+                    "params": {},
+                    "last_buy_time": 0
+                },
+                "联盟悬赏": {
+                    "on": false,
+                    "next_exec_time": 1765054800,
+                    "params": {}
+                },
+                "仙盟建设": {
+                    "next_exec_time": 1773090000,
+                    "on": false,
+                    "params": {}
+                },
+                "强化装备": {
+                    "next_exec_time": 1762376400,
+                    "on": false,
+                    "params": {}
+                },
+                "活跃券": {
+                    "next_exec_time": 1774299600.0,
+                    "on": true,
+                    "params": {}
+                },
+                "竞技场": {
+                    "next_exec_time": 1762376400,
+                    "on": false,
+                    "params": {}
+                },
+                "宠物培养": {
+                    "next_exec_time": 1762376400,
+                    "on": false,
+                    "params": {}
+                },
+                "取经": {
+                    "next_exec_time": 1762376400,
+                    "on": false,
+                    "params": {}
+                },
+                "天选阁": {
+                    "next_exec_time": 1774299600.0,
+                    "on": true,
+                    "params": {}
+                },
+                "仙宝挖掘": {
+                    "next_exec_time": 1774299600.0,
+                    "on": true,
+                    "params": {}
+                },
+                "仙气消耗": {
+                    "next_exec_time": 1762117200,
+                    "on": false,
+                    "params": {}
+                },
+                "妖兽": {
+                    "next_exec_time": 1774317600.0,
+                    "on": true,
+                    "params": {},
+                    "sched_window_hours": [
+                        10,
+                        22
+                    ]
+                },
+                "战令领取": {
+                    "next_exec_time": 1774299894.635225,
+                    "on": true,
+                    "params": {},
+                    "next_exec_offset_hours": 10
+                }
+            },
+            "天庭": {
+                "天庭混沌": {
+                    "next_exec_time": 1762376400,
+                    "on": false,
+                    "params": {}
+                },
+                "地狱混沌": {
+                    "next_exec_time": 1762376400,
+                    "on": false,
+                    "params": {}
+                },
+                "昆仑山": {
+                    "next_exec_time": 0,
+                    "on": false,
+                    "params": {
+                        "battle_loop": 7
+                    }
+                },
+                "组队任务": {
+                    "next_exec_time": 1773349200,
+                    "on": false,
+                    "params": {}
+                }
+            },
+            "极北": {
+                "极北地区": {
+                    "冰窟探险": {
+                        "next_exec_time": 1774299600.0,
+                        "on": true,
+                        "params": {}
+                    },
+                    "梵天塔": {
+                        "next_exec_time": 1774299600.0,
+                        "on": true,
+                        "params": {
+                            "battle_times": 1
+                        }
+                    },
+                    "混沌蛋": {
+                        "next_exec_time": 1774299600.0,
+                        "on": true,
+                        "params": {}
+                    },
+                    "厄难副本": {
+                        "next_exec_time": 1774319683.634893,
+                        "on": true,
+                        "params": {},
+                        "next_exec_offset_hours": 12
+                    },
+                    "极北混沌": {
+                        "next_exec_time": 1774299600.0,
+                        "on": true,
+                        "params": {}
+                    },
+                    "一键碾压": {
+                        "next_exec_time": 1774299600.0,
+                        "on": true,
+                        "params": {}
+                    }
+                },
+                "极寒深渊": {
+                    "极渊副本": {
+                        "next_exec_time": 1774299600.0,
+                        "on": true,
+                        "params": {
+                            "cancel_on_failed": false
+                        }
+                    }
+                },
+                "极北村庄": {
+                    "消费点券": {
+                        "next_exec_time": 1760734800,
+                        "on": false,
+                        "params": {
+                            "method": "YAOSHI"
+                        }
+                    },
+                    "极光天诏": {
+                        "next_exec_time": 1774299600.0,
+                        "on": true,
+                        "params": {}
+                    },
+                    "仙宝炼化": {
+                        "next_exec_time": 1774299600.0,
+                        "on": true,
+                        "params": {}
+                    }
+                }
+            },
+            "荒古万界": {
+                "万界副本": {
+                    "on": true,
+                    "next_exec_time": 1774299600.0,
+                    "params": {}
+                },
+                "荒古巨兽": {
+                    "on": true,
+                    "next_exec_time": 1774299600.0,
+                    "params": {}
+                }
+            },
+            "本命空间": {
+                "本命空间": {
+                    "on": true,
+                    "next_exec_time": 1774299600.0,
+                    "params": {
+                        "clear_all": true,
+                        "lianbao": true
+                    }
+                }
+            },
+            "登录": {
+                "登录其他角色": {
+                    "next_exec_time": 1774299600.0,
+                    "on": true,
+                    "params": {
+                        "character_index": 0,
+                        "character_name": "青颖飞帆",
+                        "clear_all": false,
+                        "lianbao": false
+                    }
+                }
+            }
+        },
+        "每周任务": {
+            "冰窟商店": {
+                "next_exec_time": 1774818000.0,
+                "on": true,
+                "params": {}
+            },
+            "幽冥冰窟": {
+                "next_exec_time": 1774818000.0,
+                "on": true,
+                "params": {
+                    "Bingku_WuQi": "仲夏裁决",
+                    "Bingku_YiFu": "风虎潮流",
+                    "Bingku_ChiBang": "风虎背饰",
+                    "Changgui_WuQi": "星轨裁决",
+                    "Changgui_YiFu": "天律华装",
+                    "Changgui_ChiBang": "命定光轮"
+                }
+            },
+            "荣耀之战": {
+                "next_exec_time": 1774818000.0,
+                "on": true,
+                "params": {}
+            }
+        },
+        "活动任务": {
+            "五光十色": {
+                "next_exec_time": 0,
+                "on": false,
+                "params": {}
+            },
+            "五行四季": {
+                "next_exec_time": 0,
+                "on": false,
+                "params": {
+                    "battle_loop": "100"
+                }
+            },
+            "腾蛇飞升": {
+                "on": false,
+                "next_exec_time": 0,
+                "params": {}
+            },
+            "活动": {
+                "on": false,
+                "next_exec_time": 0,
+                "params": {}
+            },
+            "造化烘炉": {
+                "on": false,
+                "next_exec_time": 0,
+                "params": {
+                    "battle_loop": 1000
+                }
+            },
+            "机缘大集副本": {
+                "on": false,
+                "next_exec_time": 0,
+                "params": {}
+            },
+            "烘炉+机缘": {
+                "on": false,
+                "next_exec_time": 1771880400,
+                "params": {}
+            }
+        },
+        "一般任务": {
+            "自动战斗": {
+                "next_exec_time": 0,
+                "on": false,
+                "params": {
+                    "speed_x": 3,
+                    "has_cd": true,
+                    "battle_weight": 2
+                }
+            },
+            "梵天塔": {
+                "next_exec_time": 0,
+                "on": false,
+                "params": {
+                    "battle_times": 50,
+                    "difficulty": "past",
+                    "preference": [
+                        "purple",
+                        "yellow"
+                    ],
+                    "conquer_TianMo": false
+                }
+            },
+            "登录": {
+                "next_exec_time": 0,
+                "on": false,
+                "params": {}
+            },
+            "返回开始": {
+                "next_exec_time": 0,
+                "on": false,
+                "params": {}
+            }
+        }
+    },
+    "status": {
+        "kunlunshan": {
+            "has_YuxuDian_ticket": false
+        },
+        "last_login_time": {
+            "time": 0.6741986
+        }
+    },
+    "deploy": {
+        "theme": "light",
+        "password": null
+    },
+    "notify": {
+        "enabled": false,
+        "config_yaml": ""
+    },
+    "update": {},
+    "remote_access": {},
+    "current_profile": "测试"
+}

@@ -22,7 +22,6 @@ const app = createApp({
     const editTaskKey = ref('');
     const activeGroupPath = ref('');
     const paramEnumOptions = reactive({});
-    /** 任务参数字段名 -> 表单标签（其余键保持英文原名） */
     const PARAM_KEY_LABELS = {
       battle_loop:'战斗循环次数',
       battle_times: '战斗轮数',
@@ -58,17 +57,60 @@ const app = createApp({
       return PARAM_KEY_LABELS[key] || key;
     }
     const addDialogVisible = ref(false);
-    const addForm = reactive({ account: '', password: '', character_name: '', security_key: '' });
+    const addForm = reactive({ account: '', password: '', security_key: '' });
 
-    // ── 档案管理 ──
-    const profiles = ref([]);
-    const currentProfile = ref('default');
-    const profileDialogVisible = ref(false);
-    const newProfileForm = reactive({ name: '', account: '', password: '', character_name: '', security_key: '' });
+    // ── 账号管理 ──
+    const accounts = ref([]);
+    const currentAccount = ref('');
+    const accountDialogVisible = ref(false);
+    const newAccountForm = reactive({ name: '', account: '', password: '', server: '', character_name: '', security_key: '' });
+
+    // ── 角色管理 ──
+    const activeCharacter = reactive({ server: '', name: '' });
+    /** 与后端同步当前 UI 选中角色，供 /api/run 在执行前写入 config */
+    function runCharacterPayload() {
+      const s = activeCharacter.server;
+      const n = activeCharacter.name;
+      if (s && n) return { server: s, character: n };
+      return {};
+    }
+    const charactersTree = reactive({});
+    const characterDialogVisible = ref(false);
+    const newCharacterForm = reactive({ server: '', character: '' });
+
+    // ── 调度队列 ──
+    const dispatchQueue = ref([]);
+    const allTasksSummary = reactive({});
+    const isDispatchRunning = ref(false);
+    const dispatchProgress = reactive({ current: 0, total: 0, currentChar: '' });
+    const _dispatchAbort = ref(false);
 
     // ── 密码保护 ──
     const authRequired = ref(false);
     const loginPassword = ref('');
+
+    // 总览「安全密码」与角色名解耦：characterName 来自账号 JSON，刷新后即有，不代表已验证。
+    const OVERVIEW_SECURITY_SESSION_KEY = 'webui_overview_security_ok';
+    function _readOverviewSecuritySession() {
+      try {
+        return typeof sessionStorage !== 'undefined' && sessionStorage.getItem(OVERVIEW_SECURITY_SESSION_KEY) === '1';
+      } catch (e) {
+        return false;
+      }
+    }
+    function markOverviewSecurityUnlocked() {
+      overviewSecurityUnlocked.value = true;
+      try {
+        sessionStorage.setItem(OVERVIEW_SECURITY_SESSION_KEY, '1');
+      } catch (e) { /* ignore */ }
+    }
+    function clearOverviewSecurityUnlocked() {
+      overviewSecurityUnlocked.value = false;
+      try {
+        sessionStorage.removeItem(OVERVIEW_SECURITY_SESSION_KEY);
+      } catch (e) { /* ignore */ }
+    }
+    const overviewSecurityUnlocked = ref(_readOverviewSecuritySession());
 
     // ── 主题（固定浅色） ──
     const currentTheme = ref('light');
@@ -78,6 +120,9 @@ const app = createApp({
       delete clone.tasks;
       delete clone.encryption;
       delete clone.status;
+      delete clone.current_account;
+      delete clone.active_character;
+      delete clone.characters_summary;
       return clone;
     });
 
@@ -100,6 +145,24 @@ const app = createApp({
       if (activeTab.value === 'general') return t['一般任务'] || {};
       if (activeTab.value === 'event') return t['活动任务'] || t['event_task'] || {};
       return {};
+    });
+
+    const characterDisplayName = computed(() => {
+      if (activeCharacter.server && activeCharacter.name) {
+        return activeCharacter.server + ' / ' + activeCharacter.name;
+      }
+      return characterName.value || '';
+    });
+
+    const charactersList = computed(() => {
+      const list = [];
+      for (const [srv, chars] of Object.entries(charactersTree)) {
+        const names = Array.isArray(chars) ? chars : Object.keys(chars);
+        for (const charName of names) {
+          list.push({ server: srv, name: charName, label: srv + ' / ' + charName });
+        }
+      }
+      return list;
     });
 
     // ── API helpers ──
@@ -135,6 +198,13 @@ const app = createApp({
           Object.keys(configData).forEach(k => delete configData[k]);
           Object.assign(configData, data);
           if (data.game) characterName.value = data.game.character_name || '';
+          if (data.active_character) {
+            Object.assign(activeCharacter, data.active_character);
+          }
+          if (data.characters_summary) {
+            Object.keys(charactersTree).forEach(k => delete charactersTree[k]);
+            Object.assign(charactersTree, data.characters_summary);
+          }
         }
       } catch (e) { console.error('Refresh failed:', e); }
     }
@@ -170,7 +240,6 @@ const app = createApp({
       const ansi_up = new AnsiUp();
       let buffer = [];
       let scheduled = false;
-      /** 任务状态写入配置后需拉取 /api/refresh；与调度总览分开防抖，避免刷屏 */
       let taskConfigRefreshTimer = null;
       const TASK_CONFIG_REFRESH_DEBOUNCE_MS = 400;
 
@@ -182,11 +251,9 @@ const app = createApp({
         }, TASK_CONFIG_REFRESH_DEBOUNCE_MS);
       };
 
-      /** 单任务结束、整批结束、用户中断等 — 与 task_manager / scheduler 日志保持一致 */
       const LOG_NEEDS_TASK_REFRESH =
         /(所有任务执行完成|任务执行被中断|任务执行已被中断|Task \[END\])/;
 
-      /** 与 deploy.log_level 一致，仅向日志区展示不低于该级别的行（无级别标记的行如连接提示仍展示） */
       const ANSI_STRIP = /\x1b\[[0-9;]*m/g;
       const LOG_LEVEL_ORDER = { DEBUG: 10, INFO: 20, WARNING: 30, ERROR: 40, CRITICAL: 50 };
       function stripAnsi(s) {
@@ -232,6 +299,7 @@ const app = createApp({
         if (needTaskConfigRefresh) {
           scheduleTaskConfigRefresh();
           fetchOverview();
+          fetchAllTasksSummary();
         }
         if (!scheduled) {
           scheduled = true;
@@ -252,7 +320,7 @@ const app = createApp({
 
     // ── actions ──
     async function startRun() {
-      if (!characterName.value) {
+      if (!characterName.value && !activeCharacter.name) {
         ElementPlus.ElMessage.warning('请先验证账号密码后再执行任务');
         return;
       }
@@ -291,14 +359,14 @@ const app = createApp({
       }
 
       const isSchedulerView = activeTab.value === 'overview' || activeTab.value === 'scheduler';
-      // 总览/调度：无到期任务时仍应 activate 调度器，以便在下一计划时间自动执行
       if (!tasks.length && !isSchedulerView) {
         ElementPlus.ElMessage.info('暂无待执行的任务');
         return;
       }
       try {
-        const res = await API.postRaw('/run', { tasks, activate_scheduler: true });
+        const res = await API.postRaw('/run', { tasks, activate_scheduler: true, ...runCharacterPayload() });
         const data = await res.json();
+        if (res.status === 400) { ElementPlus.ElMessage.error(data.message || '角色切换失败'); return; }
         if (res.status === 403) { ElementPlus.ElMessage.warning(data.message || '请先验证账号密码'); return; }
         fetchSchedulerStatus();
         fetchOverview();
@@ -309,14 +377,15 @@ const app = createApp({
     }
 
     async function runSingleTask(taskPath) {
-      if (!characterName.value) {
+      if (!characterName.value && !activeCharacter.name) {
         ElementPlus.ElMessage.warning('请先验证账号密码后再执行任务');
         return;
       }
       const fullPath = (activeTabLabel.value ? activeTabLabel.value + '/' : '') + taskPath;
       try {
-        const res = await API.postRaw('/run', { tasks: [fullPath], activate_scheduler: false });
+        const res = await API.postRaw('/run', { tasks: [fullPath], activate_scheduler: false, ...runCharacterPayload() });
         const data = await res.json();
+        if (res.status === 400) { ElementPlus.ElMessage.error(data.message || '角色切换失败'); return; }
         if (res.status === 403) { ElementPlus.ElMessage.warning(data.message || '请先验证账号密码'); return; }
         ElementPlus.ElMessage.success('已加入队列: ' + taskPath.split('/').pop());
         fetchSchedulerStatus();
@@ -324,20 +393,50 @@ const app = createApp({
       } catch (e) { ElementPlus.ElMessage.error('执行失败: ' + e); }
     }
 
-    function stopRun() {
-      API.post('/stop', {}).catch(e => console.error('Stop error:', e));
+    async function unifiedStop() {
+      _dispatchAbort.value = true;
+      isDispatchRunning.value = false;
+      dispatchProgress.current = 0;
+      dispatchProgress.total = 0;
+      dispatchProgress.currentChar = '';
+      try {
+        await API.post('/stop', {});
+      } catch (e) {
+        console.error('Stop error:', e);
+      }
+      await fetchSchedulerStatus();
+      await fetchOverview();
+      await fetchAllTasksSummary();
     }
 
-    async function verifyAccount() {
+    function stopRun() {
+      unifiedStop();
+    }
+
+    async function verifyAccount(securityKeyDirect) {
       try {
-        const { value } = await ElementPlus.ElMessageBox.prompt(
-          '请输入安全密码', '账号验证',
-          { inputType: 'password', confirmButtonText: '验证', cancelButtonText: '取消' });
-        const data = await API.post('/verify', { security_key: value });
-        if (data) {
+        let key = securityKeyDirect;
+        if (!key) {
+          const { value } = await ElementPlus.ElMessageBox.prompt(
+            '请输入安全密码', '账号验证',
+            { inputType: 'password', confirmButtonText: '验证', cancelButtonText: '取消' });
+          key = value;
+        }
+        const res = await API.postRaw('/verify', { security_key: key });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data && !data.error) {
           characterName.value = data.character_name || '';
+          if (data.active_character) Object.assign(activeCharacter, data.active_character);
           if (!configData.game) configData.game = {};
           configData.game.character_name = characterName.value;
+          await refreshConfig(true);
+          fetchOverview();
+          fetchAllTasksSummary();
+          loadDispatchQueue();
+          fetchAccounts();
+          markOverviewSecurityUnlocked();
+        } else if (!res.ok) {
+          ElementPlus.ElMessage.error(data.error || '验证失败，请检查安全密码');
         }
       } catch (e) { /* cancelled */ }
     }
@@ -556,7 +655,293 @@ const app = createApp({
       } catch (e) { ElementPlus.ElMessage.error('登录失败: ' + e); }
     }
 
+    // ── 账号管理 ──
+    async function fetchAccounts() {
+      try {
+        const data = await API.get('/accounts');
+        accounts.value = data.accounts || [];
+        currentAccount.value = data.current_account || '';
+        if (data.active_character) Object.assign(activeCharacter, data.active_character);
+        if (data.characters) {
+          Object.keys(charactersTree).forEach(k => delete charactersTree[k]);
+          Object.assign(charactersTree, data.characters);
+        }
+      } catch (e) { console.error('fetchAccounts', e); }
+    }
+
+    async function switchAccount(name, securityKeyDirect) {
+      if (name === '__new__') return;
+      try {
+        let securityKey = securityKeyDirect;
+        if (!securityKey) {
+          const { value } = await ElementPlus.ElMessageBox.prompt(
+            '请输入安全密码以切换账号', '切换账号',
+            { inputType: 'password', confirmButtonText: '切换', cancelButtonText: '取消' });
+          securityKey = value;
+        }
+        if (!securityKey) return;
+        const res = await API.postRaw('/accounts/switch', { name, security_key: securityKey });
+        const data = await res.json();
+        if (res.ok) {
+          currentAccount.value = name;
+          characterName.value = data.character_name || '';
+          if (data.active_character) Object.assign(activeCharacter, data.active_character);
+          if (data.characters) {
+            Object.keys(charactersTree).forEach(k => delete charactersTree[k]);
+            Object.assign(charactersTree, data.characters);
+          }
+          ElementPlus.ElMessage.success('已切换到账号: ' + name);
+          refreshConfig(true);
+          fetchAllTasksSummary();
+          loadDispatchQueue();
+          markOverviewSecurityUnlocked();
+        } else {
+          ElementPlus.ElMessage.error(data.error || '切换失败');
+        }
+      } catch { /* cancelled */ }
+    }
+
+    async function addAccount() {
+      if (!newAccountForm.name) { ElementPlus.ElMessage.warning('请输入账号名称'); return; }
+      if (!newAccountForm.security_key) { ElementPlus.ElMessage.warning('安全密码不能为空'); return; }
+      try {
+        const res = await API.postRaw('/accounts/add', { ...newAccountForm });
+        const data = await res.json();
+        if (res.ok) {
+          accounts.value = data.accounts || [];
+          accountDialogVisible.value = false;
+          Object.assign(newAccountForm, { name: '', account: '', password: '', server: '', character_name: '', security_key: '' });
+          ElementPlus.ElMessage.success('账号已创建');
+        } else {
+          ElementPlus.ElMessage.error(data.error || '创建失败');
+        }
+      } catch (e) { ElementPlus.ElMessage.error('创建失败: ' + e); }
+    }
+
+    async function deleteAccount(name) {
+      try {
+        await ElementPlus.ElMessageBox.confirm(
+          `确定删除账号 "${name}" 吗？该账号下所有角色数据将被删除，此操作不可恢复。`, '删除账号',
+          { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' });
+        const res = await API.postRaw('/accounts/delete', { name });
+        const data = await res.json();
+        if (res.ok) {
+          accounts.value = data.accounts || [];
+          currentAccount.value = data.current_account || '';
+          ElementPlus.ElMessage.success('账号已删除');
+        } else {
+          ElementPlus.ElMessage.error(data.error || '删除失败');
+        }
+      } catch { /* cancelled */ }
+    }
+
+    // ── 角色管理 ──
+    async function switchCharacter(server, character) {
+      try {
+        const res = await API.postRaw('/characters/switch', { server, character });
+        const data = await res.json();
+        if (res.ok) {
+          characterName.value = data.character_name || character;
+          if (data.active_character) Object.assign(activeCharacter, data.active_character);
+          ElementPlus.ElMessage.success('已切换到角色: ' + server + '/' + character);
+          refreshConfig(true);
+          fetchAllTasksSummary();
+        } else {
+          ElementPlus.ElMessage.error(data.error || '切换失败');
+        }
+      } catch (e) { ElementPlus.ElMessage.error('切换角色失败: ' + e); }
+    }
+
+    async function addCharacter() {
+      if (!newCharacterForm.server) { ElementPlus.ElMessage.warning('请输入服务器名称'); return; }
+      if (!newCharacterForm.character) { ElementPlus.ElMessage.warning('请输入角色名称'); return; }
+      try {
+        const res = await API.postRaw('/characters/add', { ...newCharacterForm });
+        const data = await res.json();
+        if (res.ok) {
+          if (data.characters) {
+            Object.keys(charactersTree).forEach(k => delete charactersTree[k]);
+            Object.assign(charactersTree, data.characters);
+          }
+          characterDialogVisible.value = false;
+          Object.assign(newCharacterForm, { server: '', character: '' });
+          ElementPlus.ElMessage.success('角色已添加');
+          fetchAccounts();
+        } else {
+          ElementPlus.ElMessage.error(data.error || '添加失败');
+        }
+      } catch (e) { ElementPlus.ElMessage.error('添加失败: ' + e); }
+    }
+
+    async function deleteCharacter(server, character) {
+      try {
+        await ElementPlus.ElMessageBox.confirm(
+          `确定删除角色 "${server}/${character}" 吗？该角色的任务数据将被删除，此操作不可恢复。`, '删除角色',
+          { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' });
+        const res = await API.postRaw('/characters/delete', { server, character });
+        const data = await res.json();
+        if (res.ok) {
+          if (data.characters) {
+            Object.keys(charactersTree).forEach(k => delete charactersTree[k]);
+            Object.assign(charactersTree, data.characters);
+          }
+          ElementPlus.ElMessage.success('角色已删除');
+          fetchAccounts();
+        } else {
+          ElementPlus.ElMessage.error(data.error || '删除失败');
+        }
+      } catch { /* cancelled */ }
+    }
+
+    // ── 调度队列方法 ──
+    async function fetchAllTasksSummary() {
+      try {
+        const data = await API.get('/characters/all_tasks_summary');
+        if (data && data.characters) {
+          Object.keys(allTasksSummary).forEach(k => delete allTasksSummary[k]);
+          Object.assign(allTasksSummary, data.characters);
+        }
+      } catch (e) { console.error('fetchAllTasksSummary', e); }
+    }
+
+    async function loadDispatchQueue() {
+      try {
+        const data = await API.get('/dispatch/queue');
+        dispatchQueue.value = data.queue || [];
+      } catch (e) { console.error('loadDispatchQueue', e); }
+    }
+
+    async function saveDispatchQueue() {
+      try {
+        await API.post('/dispatch/queue', { queue: dispatchQueue.value });
+      } catch (e) { console.error('saveDispatchQueue', e); }
+    }
+
+    function addToDispatch(server, name) {
+      const exists = dispatchQueue.value.some(c => c.server === server && c.name === name);
+      if (!exists) {
+        dispatchQueue.value.push({ server, name });
+        saveDispatchQueue();
+      }
+    }
+
+    function removeFromDispatch(server, name) {
+      dispatchQueue.value = dispatchQueue.value.filter(c => !(c.server === server && c.name === name));
+      saveDispatchQueue();
+    }
+
+    function _waitForTaskCompletion() {
+      return new Promise((resolve) => {
+        const CHECK_INTERVAL = 2000;
+        let timer = null;
+        const check = async () => {
+          if (_dispatchAbort.value) { resolve('aborted'); return; }
+          try {
+            const ov = await API.get('/overview');
+            if (ov && ov.stats && ov.stats.pending === 0) {
+              resolve('done');
+              return;
+            }
+            const sched = ov && ov.scheduler;
+            if (sched && sched.state === 'pending') {
+              resolve('done');
+              return;
+            }
+          } catch (e) { /* ignore */ }
+          timer = setTimeout(check, CHECK_INTERVAL);
+        };
+        timer = setTimeout(check, CHECK_INTERVAL);
+      });
+    }
+
+    async function runAllDispatchTasks() {
+      if (isDispatchRunning.value) return;
+      if (!dispatchQueue.value.length) {
+        ElementPlus.ElMessage.info('调度队列为空');
+        return;
+      }
+      isDispatchRunning.value = true;
+      _dispatchAbort.value = false;
+      const queue = [...dispatchQueue.value];
+      dispatchProgress.total = queue.length;
+
+      for (let i = 0; i < queue.length; i++) {
+        if (_dispatchAbort.value) break;
+        const char = queue[i];
+        dispatchProgress.current = i + 1;
+        dispatchProgress.currentChar = char.server + '/' + char.name;
+
+        try {
+          const switchRes = await API.postRaw('/characters/switch', { server: char.server, character: char.name });
+          const switchData = await switchRes.json();
+          if (!switchRes.ok) {
+            ElementPlus.ElMessage.error('切换角色失败: ' + (switchData.error || char.name));
+            continue;
+          }
+          characterName.value = switchData.character_name || char.name;
+          if (switchData.active_character) Object.assign(activeCharacter, switchData.active_character);
+          await refreshConfig(true);
+
+          const now = Date.now() / 1000;
+          const tasks = [];
+          function traverseAll(data, path = '') {
+            for (const [key, item] of Object.entries(data)) {
+              if (!item || typeof item !== 'object') continue;
+              if (item.hasOwnProperty('on')) {
+                if (item.on && item.next_exec_time < now) tasks.push(path + key);
+              } else { traverseAll(item, path + key + '/'); }
+            }
+          }
+          traverseAll(configData.tasks || {});
+
+          if (!tasks.length) {
+            await fetchAllTasksSummary();
+            continue;
+          }
+
+          const runRes = await API.postRaw('/run', {
+            tasks,
+            activate_scheduler: false,
+            server: char.server,
+            character: char.name,
+          });
+          const runData = await runRes.json().catch(() => ({}));
+          if (!runRes.ok) {
+            ElementPlus.ElMessage.error(runData.message || ('执行失败: ' + char.name));
+            continue;
+          }
+
+          await _waitForTaskCompletion();
+          await fetchAllTasksSummary();
+
+        } catch (e) {
+          console.error('dispatch run error for', char.name, e);
+          ElementPlus.ElMessage.error('执行角色任务失败: ' + char.name);
+        }
+      }
+
+      isDispatchRunning.value = false;
+      dispatchProgress.current = 0;
+      dispatchProgress.total = 0;
+      dispatchProgress.currentChar = '';
+      if (!_dispatchAbort.value) {
+        ElementPlus.ElMessage.success('所有角色任务执行完毕');
+      }
+      await fetchAllTasksSummary();
+    }
+
+    function stopDispatch() {
+      unifiedStop();
+    }
+
     // ── init ──
+    async function refreshOverviewPanel() {
+      await refreshConfig(true);
+      await fetchOverview();
+      await fetchAllTasksSummary();
+      await fetchSchedulerStatus();
+    }
+
     async function init() {
       await loadTheme();
       const ok = await checkAuth();
@@ -565,70 +950,10 @@ const app = createApp({
       refreshConfig(true);
       fetchOverview();
       fetchSchedulerStatus();
-      fetchProfiles();
+      fetchAccounts();
+      loadDispatchQueue();
+      fetchAllTasksSummary();
       setInterval(() => { fetchOverview(); fetchSchedulerStatus(); }, 15000);
-    }
-
-    async function fetchProfiles() {
-      try {
-        const data = await API.get('/profiles');
-        profiles.value = data.profiles || [];
-        currentProfile.value = data.current || 'default';
-      } catch (e) { console.error('fetchProfiles', e); }
-    }
-
-    async function switchProfile(name) {
-      if (name === '__new__') return;
-      try {
-        const { value: securityKey } = await ElementPlus.ElMessageBox.prompt(
-          '请输入安全密码以切换档案', '切换档案',
-          { inputType: 'password', confirmButtonText: '切换', cancelButtonText: '取消' });
-        if (!securityKey) return;
-        const res = await API.postRaw('/profiles/switch', { name, security_key: securityKey });
-        const data = await res.json();
-        if (res.ok) {
-          currentProfile.value = name;
-          characterName.value = data.character_name || '';
-          ElementPlus.ElMessage.success('已切换到档案: ' + name);
-          refreshConfig(true);
-        } else {
-          ElementPlus.ElMessage.error(data.error || '切换失败');
-        }
-      } catch { /* 用户取消 */ }
-    }
-
-    async function addProfile() {
-      if (!newProfileForm.name) { ElementPlus.ElMessage.warning('请输入档案名称'); return; }
-      if (!newProfileForm.security_key) { ElementPlus.ElMessage.warning('安全密码不能为空'); return; }
-      try {
-        const res = await API.postRaw('/profiles/add', { ...newProfileForm });
-        const data = await res.json();
-        if (res.ok) {
-          profiles.value = data.profiles || [];
-          profileDialogVisible.value = false;
-          Object.assign(newProfileForm, { name: '', account: '', password: '', character_name: '', security_key: '' });
-          ElementPlus.ElMessage.success('档案已创建');
-        } else {
-          ElementPlus.ElMessage.error(data.error || '创建失败');
-        }
-      } catch (e) { ElementPlus.ElMessage.error('创建失败: ' + e); }
-    }
-
-    async function deleteProfile(name) {
-      try {
-        await ElementPlus.ElMessageBox.confirm(
-          `确定删除档案 "${name}" 吗？此操作不可恢复。`, '删除档案',
-          { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' });
-        const res = await API.postRaw('/profiles/delete', { name });
-        const data = await res.json();
-        if (res.ok) {
-          profiles.value = data.profiles || [];
-          currentProfile.value = data.current || 'default';
-          ElementPlus.ElMessage.success('档案已删除');
-        } else {
-          ElementPlus.ElMessage.error(data.error || '删除失败');
-        }
-      } catch { /* 用户取消 */ }
     }
 
     // ── Electron 窗口控制 ──
@@ -642,12 +967,19 @@ const app = createApp({
       schedulerStatus, overviewData, activeGroupPath, pageTitle,
       editModalVisible, editTaskData, editTaskPath, paramEnumOptions, paramLabel,
       addDialogVisible, addForm,
-      profiles, currentProfile, profileDialogVisible, newProfileForm,
-      fetchProfiles, switchProfile, addProfile, deleteProfile,
+      accounts, currentAccount, accountDialogVisible, newAccountForm,
+      activeCharacter, charactersTree, characterDialogVisible, newCharacterForm,
+      characterDisplayName, charactersList,
+      dispatchQueue, allTasksSummary, isDispatchRunning, dispatchProgress,
+      fetchAccounts, switchAccount, addAccount, deleteAccount,
+      switchCharacter, addCharacter, deleteCharacter,
+      addToDispatch, removeFromDispatch, runAllDispatchTasks, stopDispatch, unifiedStop,
+      overviewSecurityUnlocked, clearOverviewSecurityUnlocked,
+      fetchAllTasksSummary, loadDispatchQueue, saveDispatchQueue,
       authRequired, loginPassword, submitLogin,
       currentTheme, applyTheme,
       setActiveGroup: path => { activeGroupPath.value = path; },
-      refreshConfig, fetchOverview, fetchSchedulerStatus,
+      refreshConfig, fetchOverview, fetchSchedulerStatus, refreshOverviewPanel,
       startRun, stopRun, runSingleTask, verifyAccount, resetScheduler,
       openEditModal, enumParamIsMultiple, saveTask, addListItem, removeListItem,
       saveTasks, saveSettings, clearLogs,

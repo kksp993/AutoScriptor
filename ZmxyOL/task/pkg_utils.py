@@ -128,6 +128,28 @@ def import_modules(py_files):
             print(f"Error importing {absolute_module_path}: {e}")
 
 
+def migrate_remove_daily_login_task(tasks: dict) -> None:
+    """daily_task/login/ 目录已被移除（登录由 scheduler 自动处理）。
+    清理当前角色 cfg['tasks']['每日任务'] 及账号文件中所有角色的残留 '登录' 分支。
+    """
+    daily = tasks.get("每日任务")
+    if isinstance(daily, dict):
+        daily.pop("登录", None)
+
+    chars = cfg._account_data.get("characters", {})
+    dirty = False
+    for srv_chars in chars.values():
+        for char_data in srv_chars.values():
+            if not isinstance(char_data, dict):
+                continue
+            char_daily = (char_data.get("tasks") or {}).get("每日任务")
+            if isinstance(char_daily, dict) and "登录" in char_daily:
+                char_daily.pop("登录")
+                dirty = True
+    if dirty:
+        cfg._save_account_file()
+
+
 def migrate_hgwj_daily_task_leaf_to_wanjiefuben(tasks: dict) -> None:
     """旧版 hgwj/daily_task.py 在「荒古万界」下注册为中文键「每日任务」，与分类重名。
     现改为 wanjiefuben.py → 「万界副本」。将旧叶节点配置合并到新键下。

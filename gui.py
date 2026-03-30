@@ -72,9 +72,72 @@ if args.electron:
     import webbrowser as _wb
     _wb.open = lambda *a, **kw: None
 
-if __name__ == '__main__':
-    if args.electron:
-        os.environ['UVICORN_LOG_LEVEL'] = 'info'
+
+def _webui_worker(restart_event):
+    """子进程入口：启动 WebUI 并支持更新后重启。"""
+    # 子进程继承了父进程的 env，PYTHONIOENCODING/PYTHONUTF8 已由解释器启动时生效。
+    # 针对 Electron 管道额外套 UTF-8 TextIOWrapper（与父进程行为一致）。
+    if os.environ.get("AUTOSCRIPTOR_ELECTRON_PIPE"):
+        for name in ("stdout", "stderr"):
+            stream = getattr(sys, name, None)
+            buf = getattr(stream, "buffer", None) if stream else None
+            if buf is None:
+                continue
+            try:
+                stream.flush()
+                stream.detach()
+                setattr(
+                    sys,
+                    name,
+                    io.TextIOWrapper(
+                        buf,
+                        encoding="utf-8",
+                        errors="replace",
+                        line_buffering=(name == "stderr"),
+                        write_through=True,
+                    ),
+                )
+            except Exception:
+                try:
+                    stream.reconfigure(encoding="utf-8", errors="replace")
+                except Exception:
+                    pass
+
+    if os.environ.get("AUTOSCRIPTOR_ELECTRON"):
+        import webbrowser as _wb
+        _wb.open = lambda *a, **kw: None
 
     from services.webui.server import run_webui
-    run_webui()
+    run_webui(restart_event=restart_event)
+
+
+if __name__ == '__main__':
+    import multiprocessing
+    multiprocessing.freeze_support()
+
+    if args.electron:
+        os.environ['UVICORN_LOG_LEVEL'] = 'info'
+        os.environ['AUTOSCRIPTOR_ELECTRON'] = '1'
+
+    from multiprocessing import Event, Process
+
+    should_exit = False
+    while not should_exit:
+        event = Event()
+        process = Process(target=_webui_worker, args=(event,))
+        process.start()
+        while not should_exit:
+            try:
+                signaled = event.wait(1)
+            except KeyboardInterrupt:
+                should_exit = True
+                break
+            if signaled:
+                print("[AutoScriptor] 更新完成，正在重启后端...", flush=True)
+                process.kill()
+                process.join(timeout=10)
+                break
+            elif process.is_alive():
+                continue
+            else:
+                should_exit = True

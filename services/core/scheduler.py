@@ -49,6 +49,7 @@ class Scheduler:
         self._wake = threading.Event()
         self._tasks_updated = threading.Event()
         self._consecutive_errors = 0
+        self._logged_in_character: tuple[str, str] | None = None  # (server, name)
 
     # ── 注入 ──
 
@@ -165,7 +166,7 @@ class Scheduler:
                 else:
                     _walk(val, path)
 
-        _walk(cfg["tasks"])
+        _walk(cfg.get("tasks") or {})
         return result
 
     def _get_wait_interval(self) -> float:
@@ -303,7 +304,7 @@ class Scheduler:
                 if explicit_tasks is not None:
                     due = [t for t in explicit_tasks if t not in attempted]
                 else:
-                    due = [t for t in self._collect_due(cfg["tasks"], "", time.time())
+                    due = [t for t in self._collect_due(cfg.get("tasks") or {}, "", time.time())
                            if t not in attempted]
                 if not due:
                     break
@@ -328,6 +329,8 @@ class Scheduler:
                         self.mark_error()
                     break
                 boost()
+
+                self._ensure_character_logged_in(cfg)
 
                 task_key = due[0]
                 attempted.add(task_key)
@@ -423,6 +426,7 @@ class Scheduler:
 
             runtime_ctx.mixctrl = None
             runtime_ctx.mumu = None
+            self._logged_in_character = None
             logger.info("%s 模拟器已安全关闭", tag)
             return True
         except Exception as e:
@@ -482,6 +486,35 @@ class Scheduler:
                 ensure_in(Loc.HOME)
             except Exception as e:
                 logger.warning("📅 回到主界面失败: %s", e)
+
+    # ── 角色登录检查 ──
+
+    def _ensure_character_logged_in(self, cfg):
+        """检查当前游戏中登录的角色是否与 cfg 中的一致，不一致则自动登录。"""
+        ac = cfg.active_character()
+        server = ac.get("server", "")
+        char_name = ac.get("name", "")
+        current = (server, char_name)
+
+        if current == self._logged_in_character:
+            return
+
+        logger.info("📅 角色变更: %s → %s/%s，执行自动登录",
+                     self._logged_in_character or "(无)", server, char_name)
+        try:
+            from ZmxyOL.nav import ensure_in
+            from ZmxyOL.nav.envs.login import login
+            ensure_in("登录")
+            login()
+            self._logged_in_character = current
+            logger.info("📅 自动登录完成: %s/%s", server, char_name)
+        except Exception as e:
+            logger.error("📅 自动登录失败: %s", e)
+            raise
+
+    def invalidate_login(self):
+        """外部通知角色已切换，下次执行前需重新登录。"""
+        self._logged_in_character = None
 
     # ── 状态查询 ──
 

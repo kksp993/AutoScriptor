@@ -50,14 +50,5 @@
         "ssh_user": null,
         "ssh_executable": "ssh"
     },
-    "current_profile": "default",
-    "encryption": {},
-    "tasks": {},
-    "status": {
-        "kunlunshan": {
-            "has_YuxuDian_ticket": false
-        },
-        "first_login_after_5am": false,
-        "first_login_after_5am_date": ""
-    }
+    "current_account": "default"
 }

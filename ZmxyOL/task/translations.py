@@ -45,7 +45,6 @@ TRANSLATION_MAP = {
     '极光天诏': 'jiguangtianzhao',
     '消费点券': 'dianquan_consume',
     '极渊副本': 'hyper_abyss_task',
-    '登录其他角色': 'login_other_character',
     '冰窟商店': 'bingku_shop',
     '幽冥冰窟': 'youming_bingku',
     '荣耀之战': 'rongyao_battle',

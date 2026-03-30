@@ -39,7 +39,7 @@
       .stat-label { @apply text-base text-gray-500 mt-1.5; }
     }
   </style>
-  <link rel="stylesheet" href="/static/css/style.css?v=23" />
+  <link rel="stylesheet" href="/static/css/style.css?v=25" />
 </head>
 <body class="app-body overflow-hidden" style="height:100vh;">
   <div id="app" class="flex h-screen overflow-hidden">
@@ -69,36 +69,64 @@
             <i class="fa fa-arrow-down text-sm"></i>
           </button>
 
-          <!-- 档案切换下拉（始终显示：无 config_*.json 时仍可「新建档案」） -->
-          <el-dropdown trigger="click" @command="switchProfile">
+          <!-- 账号切换下拉 -->
+          <el-dropdown trigger="click" @command="switchAccount">
             <span class="profile-dropdown topbar-profile text-sm font-medium">
               <i class="fa fa-id-card-o"></i>
-              {{ currentProfile }}
+              {{ currentAccount || '无账号' }}
               <i class="fa fa-caret-down" style="margin-left:3px"></i>
             </span>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item v-for="p in profiles" :key="p" :command="p"
-                  :class="{ 'font-bold': p === currentProfile }">
-                  <i class="fa fa-check" v-if="p === currentProfile" style="margin-right:6px;color:#22c55e"></i>
-                  {{ p }}
-                  <el-button v-if="p !== currentProfile" type="danger" link size="small"
-                    style="margin-left:12px" @click.stop="deleteProfile(p)">
+                <el-dropdown-item v-for="a in accounts" :key="a" :command="a"
+                  :class="{ 'font-bold': a === currentAccount }">
+                  <i class="fa fa-check" v-if="a === currentAccount" style="margin-right:6px;color:#22c55e"></i>
+                  {{ a }}
+                  <el-button v-if="a !== currentAccount" type="danger" link size="small"
+                    style="margin-left:12px" @click.stop="deleteAccount(a)">
                     <i class="fa fa-trash-o"></i>
                   </el-button>
                 </el-dropdown-item>
-                <el-dropdown-item divided :command="'__new__'" @click="profileDialogVisible=true">
-                  <i class="fa fa-plus" style="margin-right:6px"></i>新建档案
+                <el-dropdown-item divided :command="'__new__'" @click="accountDialogVisible=true">
+                  <i class="fa fa-plus" style="margin-right:6px"></i>新建账号
                 </el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
 
-          <span v-if="characterName"
+          <!-- 角色切换下拉 -->
+          <el-dropdown v-if="currentAccount && charactersList.length" trigger="click">
+            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 rounded-full text-sm font-medium cursor-pointer">
+              <i class="fa fa-user text-sm"></i>
+              {{ characterDisplayName || '选择角色' }}
+              <i class="fa fa-caret-down" style="margin-left:3px"></i>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item v-for="c in charactersList" :key="c.server+'/'+c.name"
+                  @click="switchCharacter(c.server, c.name)"
+                  :class="{ 'font-bold': c.server === activeCharacter.server && c.name === activeCharacter.name }">
+                  <i class="fa fa-check" v-if="c.server === activeCharacter.server && c.name === activeCharacter.name"
+                    style="margin-right:6px;color:#22c55e"></i>
+                  {{ c.label }}
+                  <el-button v-if="!(c.server === activeCharacter.server && c.name === activeCharacter.name)"
+                    type="danger" link size="small" style="margin-left:12px"
+                    @click.stop="deleteCharacter(c.server, c.name)">
+                    <i class="fa fa-trash-o"></i>
+                  </el-button>
+                </el-dropdown-item>
+                <el-dropdown-item divided @click="characterDialogVisible=true">
+                  <i class="fa fa-plus" style="margin-right:6px"></i>添加角色
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+
+          <span v-else-if="characterName"
                 class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 rounded-full text-sm font-medium">
             <i class="fa fa-user text-sm"></i>{{ characterName }}
           </span>
-          <button v-if="!characterName"
+          <button v-if="!characterName && !activeCharacter.name"
                   class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-700 rounded-full text-sm font-medium hover:bg-amber-100 transition-colors"
                   @click="verifyAccount">
             <i class="fa fa-key text-sm"></i>验证账号
@@ -120,7 +148,16 @@
 
         <overview-panel v-if="activeTab==='overview'"
           :overview-data="overviewData" :character-name="characterName"
-          @verify-account="verifyAccount"></overview-panel>
+          :accounts="accounts" :current-account="currentAccount"
+          :characters-tree="charactersTree" :active-character="activeCharacter"
+          :dispatch-queue="dispatchQueue" :all-tasks-summary="allTasksSummary"
+          :is-dispatch-running="isDispatchRunning" :dispatch-progress="dispatchProgress"
+          :logs="logs" :overview-security-unlocked="overviewSecurityUnlocked"
+          @verify-account="verifyAccount" @switch-character="switchCharacter"
+          @add-to-dispatch="addToDispatch" @remove-from-dispatch="removeFromDispatch"
+          @run-all-dispatch="runAllDispatchTasks" @stop-dispatch="stopDispatch"
+          @switch-account="switchAccount" @refresh-overview="refreshOverviewPanel"
+          @lock-overview-security="clearOverviewSecurityUnlocked"></overview-panel>
 
         <scheduler-panel v-if="activeTab==='scheduler'"
           :overview-data="overviewData" :logs="logs" :character-name="characterName"
@@ -188,13 +225,12 @@
       </el-dialog>
     </teleport>
 
-    <!-- 新增账号对话框 -->
+    <!-- 修改账密对话框 -->
     <teleport to="body">
-      <el-dialog v-model="addDialogVisible" title="添加账号" width="500px">
+      <el-dialog v-model="addDialogVisible" title="修改账号密码" width="500px">
         <el-form :model="addForm" label-width="90px">
-          <el-form-item label="账号"><el-input v-model="addForm.account" placeholder="请输入账号"></el-input></el-form-item>
-          <el-form-item label="密码"><el-input v-model="addForm.password" type="password" placeholder="请输入密码"></el-input></el-form-item>
-          <el-form-item label="角色名"><el-input v-model="addForm.character_name" placeholder="请输入角色名/ID"></el-input></el-form-item>
+          <el-form-item label="游戏账号"><el-input v-model="addForm.account" placeholder="请输入账号"></el-input></el-form-item>
+          <el-form-item label="游戏密码"><el-input v-model="addForm.password" type="password" placeholder="请输入密码"></el-input></el-form-item>
           <el-form-item label="安全密码"><el-input v-model="addForm.security_key" type="password" placeholder="用于加密保存"></el-input></el-form-item>
         </el-form>
         <template #footer>
@@ -204,31 +240,54 @@
       </el-dialog>
     </teleport>
 
-    <!-- 新建档案对话框 -->
+    <!-- 新建账号对话框 -->
     <teleport to="body">
-      <el-dialog v-model="profileDialogVisible" title="新建档案" width="500px">
+      <el-dialog v-model="accountDialogVisible" title="新建账号" width="500px">
         <el-alert type="info" :closable="false" style="margin-bottom:16px"
-          description="每个档案保存为独立配置文件（config_名称.json），切换时自动替换当前配置并用安全密码解密验证。"></el-alert>
-        <el-form :model="newProfileForm" label-width="90px">
-          <el-form-item label="档案名称" required>
-            <el-input v-model="newProfileForm.name" placeholder="如: 小号、大号"></el-input>
+          description="每个账号存储独立的游戏凭据和角色数据。创建后可在账号下添加多个服务器和角色，每个角色拥有独立的任务列表。"></el-alert>
+        <el-form :model="newAccountForm" label-width="100px">
+          <el-form-item label="账号名称" required>
+            <el-input v-model="newAccountForm.name" placeholder="如: 大号、小号"></el-input>
           </el-form-item>
-          <el-form-item label="账号">
-            <el-input v-model="newProfileForm.account" placeholder="游戏账号"></el-input>
+          <el-form-item label="游戏账号">
+            <el-input v-model="newAccountForm.account" placeholder="游戏登录账号"></el-input>
           </el-form-item>
-          <el-form-item label="密码">
-            <el-input v-model="newProfileForm.password" type="password" placeholder="游戏密码" show-password></el-input>
+          <el-form-item label="游戏密码">
+            <el-input v-model="newAccountForm.password" type="password" placeholder="游戏登录密码" show-password></el-input>
+          </el-form-item>
+          <el-form-item label="服务器">
+            <el-input v-model="newAccountForm.server" placeholder="如: 1区、测试服"></el-input>
           </el-form-item>
           <el-form-item label="角色名">
-            <el-input v-model="newProfileForm.character_name" placeholder="角色名/ID"></el-input>
+            <el-input v-model="newAccountForm.character_name" placeholder="角色名/ID"></el-input>
           </el-form-item>
           <el-form-item label="安全密码" required>
-            <el-input v-model="newProfileForm.security_key" type="password" placeholder="设置此档案的安全密码" show-password></el-input>
+            <el-input v-model="newAccountForm.security_key" type="password" placeholder="用于加密账号凭据" show-password></el-input>
           </el-form-item>
         </el-form>
         <template #footer>
-          <el-button @click="profileDialogVisible=false">取 消</el-button>
-          <el-button type="primary" @click="addProfile">创 建</el-button>
+          <el-button @click="accountDialogVisible=false">取 消</el-button>
+          <el-button type="primary" @click="addAccount">创 建</el-button>
+        </template>
+      </el-dialog>
+    </teleport>
+
+    <!-- 添加角色对话框 -->
+    <teleport to="body">
+      <el-dialog v-model="characterDialogVisible" title="添加角色" width="450px">
+        <el-alert type="info" :closable="false" style="margin-bottom:16px"
+          description="在当前账号下添加新角色。每个角色按「服务器 + 角色名」唯一标识，拥有独立的任务列表。"></el-alert>
+        <el-form :model="newCharacterForm" label-width="90px">
+          <el-form-item label="服务器" required>
+            <el-input v-model="newCharacterForm.server" placeholder="如: 1区、测试服"></el-input>
+          </el-form-item>
+          <el-form-item label="角色名" required>
+            <el-input v-model="newCharacterForm.character" placeholder="角色名/ID"></el-input>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="characterDialogVisible=false">取 消</el-button>
+          <el-button type="primary" @click="addCharacter">添 加</el-button>
         </template>
       </el-dialog>
     </teleport>
@@ -257,7 +316,7 @@
   <script src="/static/js/components/NewsPanel.js?v=3"></script>
   <script src="/static/js/components/AppSidebar.js?v=11"></script>
   <script src="/static/js/components/TaskTree.js?v=8"></script>
-  <script src="/static/js/components/Overview.js?v=8"></script>
+  <script src="/static/js/components/Overview.js?v=10"></script>
   <script src="/static/js/components/SchedulerPanel.js?v=9"></script>
   <script src="/static/js/components/TaskPanel.js?v=9"></script>
   <script src="/static/js/components/Settings.js?v=8"></script>
@@ -265,6 +324,6 @@
   <script src="/static/js/components/editor/EditorCanvas.js?v=10"></script>
   <script src="/static/js/components/editor/EditorControls.js?v=14"></script>
   <script src="/static/js/components/editor/EditorPanel.js?v=24"></script>
-  <script src="/static/js/app.js?v=11"></script>
+  <script src="/static/js/app.js?v=13"></script>
 </body>
 </html>

@@ -269,7 +269,66 @@ def make_public_config():
     tasks = config_data.get("tasks")
     if isinstance(tasks, dict):
         _inject_param_meta_into_tasks(tasks)
+    config_data["active_character"] = cfg.active_character()
+    config_data["characters_summary"] = _characters_summary()
     return config_data
+
+
+def _characters_summary() -> dict:
+    """Return { server: [char_name, ...] } without heavy tasks/status data."""
+    tree = cfg.list_characters()
+    return {srv: list(chars.keys()) for srv, chars in tree.items()} if tree else {}
+
+
+def _task_leaf_status(node: dict, now_ts: float) -> str:
+    if not node.get('on'):
+        return 'disabled'
+    if node.get('error'):
+        return 'error'
+    return 'pending' if node.get('next_exec_time', 0) < now_ts else 'completed'
+
+
+def _flatten_tasks(node: dict, now_ts: float, prefix: str = '') -> list:
+    """Recursively flatten a tasks tree into a list of {path, name, status}."""
+    result = []
+    for key, val in node.items():
+        if not isinstance(val, dict):
+            continue
+        path = f"{prefix}/{key}" if prefix else key
+        if 'on' in val and 'next_exec_time' in val:
+            result.append({
+                'path': path,
+                'name': key,
+                'status': _task_leaf_status(val, now_ts),
+            })
+        else:
+            result.extend(_flatten_tasks(val, now_ts, path))
+    return result
+
+
+def _all_characters_tasks_summary() -> dict:
+    """Build task summary for every character in the current account."""
+    now_ts = _time.time()
+    ac = cfg.active_character()
+    active_server = ac.get('server', '')
+    active_name = ac.get('name', '')
+    chars = cfg._account_data.get('characters', {})
+    result = {}
+    for srv, srv_chars in chars.items():
+        srv_result = {}
+        for char_name, char_data in srv_chars.items():
+            if srv == active_server and char_name == active_name:
+                tasks_tree = cfg._config.get('tasks', {})
+            else:
+                tasks_tree = char_data.get('tasks', {})
+            flat = _flatten_tasks(tasks_tree, now_ts)
+            counts = {'total': 0, 'pending': 0, 'completed': 0, 'error': 0, 'disabled': 0}
+            for t in flat:
+                counts['total'] += 1
+                counts[t['status']] += 1
+            srv_result[char_name] = {**counts, 'tasks_flat': flat}
+        result[srv] = srv_result
+    return result
 
 
 # ── FastAPI 应用 ──
@@ -461,23 +520,55 @@ async def save_tasks_api(request: Request):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+def _apply_run_character_from_body(body: dict):
+    """
+    若请求携带 server + character，在后端切换当前角色并写回 config/账号文件，
+    再使调度器下次执行前重新登录，避免前端已选角色与进程内 cfg 不一致。
+    成功返回 None，失败返回 JSONResponse。
+    """
+    server = (body.get("server") or "").strip()
+    character = (body.get("character") or "").strip()
+    if not server or not character:
+        return None
+    try:
+        with TASK_MANAGER._cfg_lock:
+            cfg.switch_character(server, character)
+            TASK_MANAGER.reload_tasks()
+        scheduler.invalidate_login()
+    except (KeyError, ValueError) as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
+    except Exception as e:
+        logger.error("run: switch character: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": "切换角色失败"},
+        )
+    return None
+
+
 @app.post("/api/run")
 async def run_tasks_api(request: Request):
     global RUN_THREAD
+
+    raw = await request.json()
+    if isinstance(raw, list):
+        body = {"tasks": raw, "activate_scheduler": True}
+    elif isinstance(raw, dict):
+        body = raw
+    else:
+        body = {}
+
+    err = _apply_run_character_from_body(body)
+    if err is not None:
+        return err
 
     character_name = cfg._config.get("game", {}).get("character_name", "")
     if not character_name:
         return JSONResponse(status_code=403,
                             content={'status': 'error', 'message': '请先验证账号密码后再执行任务'})
 
-    body = await request.json()
-
-    if isinstance(body, dict):
-        tasks = body.get("tasks", [])
-        activate_sched = body.get("activate_scheduler", True)
-    else:
-        tasks = body
-        activate_sched = True
+    tasks = body.get("tasks", [])
+    activate_sched = body.get("activate_scheduler", True)
 
     logger.debug("Received tasks: %s, activate_scheduler: %s", tasks, activate_sched)
     sorted_tasks = sorted(tasks, key=lambda x: ORDER_MAP.get(x, float('inf')))
@@ -539,15 +630,22 @@ async def verify_account_api(request: Request):
     security_key = data.get('security_key', '')
     TASK_MANAGER.reload_tasks(security_key)
     cfg._config.setdefault('game', {})
-    character_name = cfg["game"].get("character_name", "")
+    character_name = cfg._config.get("game", {}).get("character_name", "")
+    if not character_name:
+        ac = cfg.active_character()
+        character_name = ac.get("name", "")
+        cfg._config['game']['character_name'] = character_name
     if not character_name and security_key:
         _record_verify_failure(client_ip)
-    cfg._config['game']['character_name'] = character_name
-    return {"character_name": character_name}
+    return {
+        "character_name": character_name,
+        "active_character": cfg.active_character(),
+    }
 
 
 @app.post("/api/account")
-async def add_account_api(request: Request):
+async def update_account_credentials_api(request: Request):
+    """Update the encryption (account/password) for the current account."""
     data = await request.json()
     if not _check_request_freshness(data):
         return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
@@ -558,12 +656,11 @@ async def add_account_api(request: Request):
 
     account = data.get('account', '')
     password = data.get('password', '')
-    character_name = data.get('character_name', '')
     security_key = data.get('security_key', '')
     confirmed = data.get('confirmed', False)
     current_security_key = data.get('current_security_key', '')
 
-    existing_enc = cfg._config.get("encryption", {})
+    existing_enc = cfg._account_data.get("encryption", {})
     if existing_enc.get("encrypted_data"):
         if not current_security_key:
             return JSONResponse(status_code=403, content={
@@ -572,8 +669,7 @@ async def add_account_api(request: Request):
             })
         try:
             from AutoScriptor.crypto.config_manager import ConfigManager
-            cm = ConfigManager(cfg.CONFIG_PATH)
-            decrypted = cm.decrypt_config(current_security_key)
+            decrypted = ConfigManager.decrypt_data(existing_enc, current_security_key)
             if not decrypted:
                 _record_verify_failure(client_ip)
                 return JSONResponse(status_code=401, content={"error": "当前安全密码验证失败"})
@@ -585,15 +681,18 @@ async def add_account_api(request: Request):
     if existing_name and not confirmed:
         return {
             "need_confirm": True,
-            "message": f"更新账密会覆盖当前已有的设置（当前角色: {existing_name}），是否继续？"
+            "message": f"更新账密会覆盖当前已有的加密设置（当前角色: {existing_name}），是否继续？"
         }
     try:
-        from AutoScriptor.crypto.update_config import config_manager
-        config_manager.update_game_config(account, password, character_name, security_key)
+        from AutoScriptor.crypto.config_manager import ConfigManager
+        sensitive = {"account": account, "password": password}
+        cfg._account_data["encryption"] = ConfigManager.encrypt_data(sensitive, security_key)
+        cfg._save_account_file()
         TASK_MANAGER.reload_tasks(security_key)
-        character_name = cfg["game"].get("character_name", "")
+        character_name = cfg._config.get("game", {}).get("character_name", "")
     except Exception as e:
-        logger.error("add_account error: %s", e)
+        logger.error("update_account error: %s", e)
+        return JSONResponse(status_code=500, content={"error": str(e)})
     return {"character_name": character_name}
 
 
@@ -834,13 +933,180 @@ async def remote_access_toggle_api(request: Request):
     return RemoteAccess.get_status()
 
 
-# ── 多账号档案 API ──
+# ── 多账号 API ──
+
+@app.get("/api/accounts")
+async def accounts_list_api():
+    return {
+        "current_account": cfg.current_account(),
+        "accounts": cfg.list_accounts(),
+        "active_character": cfg.active_character(),
+        "characters": _characters_summary(),
+    }
+
+
+@app.post("/api/accounts/switch")
+async def accounts_switch_api(request: Request):
+    data = await request.json()
+    if not _check_request_freshness(data):
+        return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
+    name = data.get("name", "")
+    security_key = data.get("security_key", "")
+
+    if not security_key:
+        return JSONResponse(status_code=400, content={
+            "error": "请输入安全密码以切换账号", "need_security_key": True,
+        })
+    try:
+        cfg.switch_account(name, security_key)
+        TASK_MANAGER.reload_tasks(security_key)
+        scheduler.invalidate_login()
+        character_name = cfg._config.get("game", {}).get("character_name", "")
+        ac = cfg.active_character()
+        return {
+            "current_account": name,
+            "character_name": character_name,
+            "active_character": ac,
+            "characters": _characters_summary(),
+        }
+    except KeyError as e:
+        return JSONResponse(status_code=404, content={"error": str(e)})
+    except Exception as e:
+        logger.error("switch account error: %s", e)
+        return JSONResponse(status_code=500, content={"error": "切换失败，请检查安全密码是否正确"})
+
+
+@app.post("/api/accounts/add")
+async def accounts_add_api(request: Request):
+    data = await request.json()
+    name = data.get("name", "")
+    if not name:
+        return JSONResponse(status_code=400, content={"error": "账号名称不能为空"})
+
+    account = data.get("account", "")
+    password = data.get("password", "")
+    server = data.get("server", "默认服务器")
+    character_name = data.get("character_name", "默认角色")
+    security_key = data.get("security_key", "")
+
+    if not security_key:
+        return JSONResponse(status_code=400, content={"error": "安全密码不能为空"})
+
+    try:
+        cfg.add_account(name, account, password, server, character_name, security_key)
+        return {"accounts": cfg.list_accounts()}
+    except Exception as e:
+        logger.error("add account error: %s", e)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/accounts/delete")
+async def accounts_delete_api(request: Request):
+    data = await request.json()
+    name = data.get("name", "")
+    try:
+        cfg.delete_account(name)
+        return {"accounts": cfg.list_accounts(), "current_account": cfg.current_account()}
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+# ── 角色管理 API ──
+
+@app.get("/api/characters")
+async def characters_list_api():
+    return {
+        "active_character": cfg.active_character(),
+        "characters": _characters_summary(),
+    }
+
+
+@app.post("/api/characters/switch")
+async def characters_switch_api(request: Request):
+    data = await request.json()
+    if not _check_request_freshness(data):
+        return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
+    server = data.get("server", "")
+    character = data.get("character", "")
+    try:
+        cfg.switch_character(server, character)
+        TASK_MANAGER.reload_tasks()
+        scheduler.invalidate_login()
+        return {
+            "active_character": cfg.active_character(),
+            "character_name": character,
+            "characters": _characters_summary(),
+        }
+    except (KeyError, ValueError) as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+    except Exception as e:
+        logger.error("switch character error: %s", e)
+        return JSONResponse(status_code=500, content={"error": "切换角色失败"})
+
+
+@app.post("/api/characters/add")
+async def characters_add_api(request: Request):
+    data = await request.json()
+    server = data.get("server", "")
+    character = data.get("character", "")
+    try:
+        cfg.add_character(server, character)
+        return {
+            "active_character": cfg.active_character(),
+            "characters": _characters_summary(),
+        }
+    except (ValueError, KeyError) as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.post("/api/characters/delete")
+async def characters_delete_api(request: Request):
+    data = await request.json()
+    server = data.get("server", "")
+    character = data.get("character", "")
+    try:
+        cfg.delete_character(server, character)
+        return {
+            "active_character": cfg.active_character(),
+            "characters": _characters_summary(),
+        }
+    except (ValueError, KeyError) as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.get("/api/characters/all_tasks_summary")
+async def characters_all_tasks_summary_api():
+    try:
+        return {"characters": _all_characters_tasks_summary()}
+    except Exception as e:
+        logger.error("all_tasks_summary error: %s", e)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ── 调度队列 API ──
+
+@app.get("/api/dispatch/queue")
+async def dispatch_queue_get_api():
+    queue = cfg._account_data.get("dispatch_queue", [])
+    return {"queue": queue}
+
+
+@app.post("/api/dispatch/queue")
+async def dispatch_queue_save_api(request: Request):
+    data = await request.json()
+    queue = data.get("queue", [])
+    cfg._account_data["dispatch_queue"] = queue
+    cfg._save_account_file()
+    return {"queue": queue}
+
+
+# ── 兼容旧前端的 profiles API（转发到 accounts） ──
 
 @app.get("/api/profiles")
 async def profiles_list_api():
     return {
-        "current": cfg.current_profile(),
-        "profiles": cfg.list_profiles(),
+        "current": cfg.current_account(),
+        "profiles": cfg.list_accounts(),
     }
 
 
@@ -851,14 +1117,14 @@ async def profiles_switch_api(request: Request):
         return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
     name = data.get("name", "")
     security_key = data.get("security_key", "")
-
     if not security_key:
         return JSONResponse(status_code=400, content={
-            "error": "请输入安全密码以切换档案", "need_security_key": True,
+            "error": "请输入安全密码以切换账号", "need_security_key": True,
         })
     try:
-        cfg.switch_profile(name, security_key)
+        cfg.switch_account(name, security_key)
         TASK_MANAGER.reload_tasks(security_key)
+        scheduler.invalidate_login()
         character_name = cfg._config.get("game", {}).get("character_name", "")
         return {"current": name, "character_name": character_name}
     except KeyError as e:
@@ -866,40 +1132,6 @@ async def profiles_switch_api(request: Request):
     except Exception as e:
         logger.error("switch profile error: %s", e)
         return JSONResponse(status_code=500, content={"error": "切换失败，请检查安全密码是否正确"})
-
-
-@app.post("/api/profiles/add")
-async def profiles_add_api(request: Request):
-    data = await request.json()
-    name = data.get("name", "")
-    if not name:
-        return JSONResponse(status_code=400, content={"error": "name is required"})
-
-    account = data.get("account", "")
-    password = data.get("password", "")
-    character_name = data.get("character_name", "")
-    security_key = data.get("security_key", "")
-
-    if not security_key:
-        return JSONResponse(status_code=400, content={"error": "安全密码不能为空"})
-
-    try:
-        cfg.add_profile(name, account, password, character_name, security_key)
-        return {"profiles": cfg.list_profiles()}
-    except Exception as e:
-        logger.error("add profile error: %s", e)
-        return JSONResponse(status_code=500, content={"error": str(e)})
-
-
-@app.post("/api/profiles/delete")
-async def profiles_delete_api(request: Request):
-    data = await request.json()
-    name = data.get("name", "")
-    try:
-        cfg.delete_profile(name)
-        return {"profiles": cfg.list_profiles(), "current": cfg.current_profile()}
-    except ValueError as e:
-        return JSONResponse(status_code=400, content={"error": str(e)})
 
 
 # ── 配置导入导出 API ──
@@ -924,8 +1156,11 @@ async def config_import_api(request: Request):
             return JSONResponse(status_code=400, content={"error": "invalid JSON"})
         data.pop("encryption", None)
         data.pop("current_profile", None)
+        data.pop("current_account", None)
         data.pop("profiles", None)
         data.pop("game", None)
+        data.pop("active_character", None)
+        data.pop("characters_summary", None)
         if "deploy" in data and isinstance(data["deploy"], dict):
             data["deploy"].pop("password", None)
             data["deploy"].pop("ssl_key", None)
@@ -993,8 +1228,12 @@ async def deploy_save_api(request: Request):
 _server = None
 
 
-def run_webui():
-    """阻塞式启动 uvicorn 服务。"""
+def run_webui(restart_event=None):
+    """阻塞式启动 uvicorn 服务。
+
+    Args:
+        restart_event: multiprocessing.Event，更新完成后 set 以通知父进程重启。
+    """
     global _server
     import uvicorn
 
@@ -1016,9 +1255,11 @@ def run_webui():
     _apply_webui_log_level_from_config()
     _print_banner()
 
-    # 启动自动更新检查
+    # 启动自动更新检查 & 传递重启事件
     try:
         from services.core.updater import updater as _updater
+        if restart_event is not None:
+            _updater.set_restart_event(restart_event)
         interval = cfg.get("update.check_interval_minutes", 30)
         if cfg.get("update.auto_check", True) and interval > 0:
             _updater.start_scheduled_check(interval)
