@@ -111,6 +111,8 @@ let pyPid         = null;
 let serverReady   = false;
 let installerProc = null;
 let installerMode = false;
+/** 防止重复执行退出逻辑（treeKill 异步完成前勿二次 kill） */
+let quitStarted = false;
 
 /** 加载页尚未完成时 Python 已输出日志，IPC 无订阅会丢包 —— 先缓冲再补发 */
 const LOG_BUFFER_MAX = 500;
@@ -130,6 +132,31 @@ if (!gotLock) {
       mainWindow.focus();
     }
   });
+}
+
+// ── Port cleanup ─────────────────────────────────────────────────────────────
+/**
+ * Kill any stale process listening on port 5000 from a previous run.
+ * Synchronous — safe to call before startPython().
+ */
+function killStalePort5000() {
+  if (process.platform !== 'win32') return;
+  const { execSync } = require('child_process');
+  try {
+    const output = execSync('netstat -ano', { encoding: 'utf-8', timeout: 5000 });
+    const pids = new Set();
+    for (const line of output.split('\n')) {
+      if (line.includes(':5000') && line.includes('LISTENING')) {
+        const parts = line.trim().split(/\s+/);
+        const pid = parseInt(parts[parts.length - 1], 10);
+        if (pid > 0 && pid !== process.pid) pids.add(pid);
+      }
+    }
+    for (const pid of pids) {
+      console.log(`[main] Killing stale process on port 5000 (PID: ${pid})`);
+      try { execSync(`taskkill /PID ${pid} /T /F`, { timeout: 5000 }); } catch (_) {}
+    }
+  } catch (_) {}
 }
 
 // ── Python process ───────────────────────────────────────────────────────────
@@ -340,6 +367,7 @@ function transitionToApp() {
     mainWindow = null;
   }
 
+  killStalePort5000();
   createMainWindow();
   createTray();
   startPython();
@@ -522,22 +550,40 @@ function flushLoadingScreenIpc() {
 }
 
 // ── Quit ─────────────────────────────────────────────────────────────────────
+function finishQuit() {
+  pyPid = null;
+  pyProc = null;
+  killStalePort5000();
+  setTimeout(() => {
+    tray?.destroy();
+    app.quit();
+  }, 300);
+}
+
 function quitApp() {
+  if (quitStarted) return;
+  quitStarted = true;
   app.isQuitting = true;
-  if (pyPid) {
-    try { treeKill(pyPid, 'SIGTERM'); } catch (_) {}
-  }
-  if (pyProc) {
-    try { pyProc.kill(); } catch (_) {}
-  }
+
   if (installerProc) {
     try { installerProc.kill(); } catch (_) {}
     installerProc = null;
   }
-  setTimeout(() => {
-    tray?.destroy();
-    app.quit();
-  }, 800);
+
+  // Windows：必须先等 taskkill /T /F 整树结束，再退出 Electron。
+  // 若紧跟 pyProc.kill()，只会杀掉 gui.py 父进程，multiprocessing 子进程（uvicorn）易残留占端口。
+  if (pyPid) {
+    const pid = pyPid;
+    treeKill(pid, 'SIGTERM', (err) => {
+      if (err) console.error('[main] treeKill:', err);
+      finishQuit();
+    });
+    return;
+  }
+  if (pyProc) {
+    try { pyProc.kill(); } catch (_) {}
+  }
+  finishQuit();
 }
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
@@ -545,6 +591,7 @@ app.whenReady().then(() => {
   app.isQuitting = false;
 
   if (isInstalled()) {
+    killStalePort5000();
     createMainWindow();
     createTray();
     startPython();
@@ -562,7 +609,4 @@ app.on('window-all-closed', (e) => {
 
 app.on('before-quit', () => {
   app.isQuitting = true;
-  if (pyPid) {
-    try { treeKill(pyPid, 'SIGTERM'); } catch (_) {}
-  }
 });

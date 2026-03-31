@@ -17,6 +17,7 @@ const OverviewPanel = {
   },
   emits: [
     'verify-account', 'switch-character', 'add-to-dispatch', 'remove-from-dispatch',
+    'reorder-dispatch',
     'run-all-dispatch', 'stop-dispatch', 'switch-account', 'refresh-overview',
     'lock-overview-security',
   ],
@@ -25,7 +26,11 @@ const OverviewPanel = {
       securityKey: '',
       selectedAccount: '',
       expandedServers: {},
-      expandedDispatchChars: {},
+      /** 至多展开一个角色详情：'server/name' 或 null */
+      expandedDispatchKey: null,
+      dragOverIndex: null,
+      /** 总览任务说明折叠 key = server + '|' + name + '|' + path */
+      expandedTaskHelp: {},
       loginLoading: false,
     };
   },
@@ -42,17 +47,6 @@ const OverviewPanel = {
         }
       }
       return list;
-    },
-    sortedDispatchQueue() {
-      const q = [...this.dispatchQueue];
-      q.sort((a, b) => {
-        const aP = this.getCharPending(a.server, a.name);
-        const bP = this.getCharPending(b.server, b.name);
-        if (aP === 0 && bP > 0) return 1;
-        if (bP === 0 && aP > 0) return -1;
-        return 0;
-      });
-      return q;
     },
   },
   watch: {
@@ -107,12 +101,44 @@ const OverviewPanel = {
       const s = this.getCharSummary(server, name);
       return s ? s.tasks_flat : [];
     },
+    dispatchCharKey(server, name) {
+      return server + '/' + name;
+    },
     toggleDispatchChar(server, name) {
-      const key = server + '/' + name;
-      this.expandedDispatchChars[key] = !this.expandedDispatchChars[key];
+      const key = this.dispatchCharKey(server, name);
+      this.expandedDispatchKey = this.expandedDispatchKey === key ? null : key;
     },
     isDispatchCharExpanded(server, name) {
-      return !!this.expandedDispatchChars[server + '/' + name];
+      return this.expandedDispatchKey === this.dispatchCharKey(server, name);
+    },
+    onDragStartDispatch(e, idx) {
+      if (this.isDispatchRunning) {
+        e.preventDefault();
+        return;
+      }
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(idx));
+      try {
+        e.dataTransfer.setData('application/x-dispatch-index', String(idx));
+      } catch (_) { /* ignore */ }
+    },
+    onDragOverDispatchCard(e, idx) {
+      if (this.isDispatchRunning) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      this.dragOverIndex = idx;
+    },
+    onDropDispatchCard(e, idx) {
+      if (this.isDispatchRunning) return;
+      this.dragOverIndex = null;
+      let raw = e.dataTransfer.getData('text/plain');
+      if (!raw) raw = e.dataTransfer.getData('application/x-dispatch-index');
+      const from = parseInt(raw, 10);
+      if (Number.isNaN(from) || from === idx) return;
+      this.$emit('reorder-dispatch', from, idx);
+    },
+    onDragEndDispatch() {
+      this.dragOverIndex = null;
     },
     dotColor(status) {
       return { completed: '#22c55e', pending: '#f59e0b', error: '#ef4444', disabled: '#cbd5e1' }[status] || '#cbd5e1';
@@ -134,6 +160,29 @@ const OverviewPanel = {
       const tmr = new Date(now); tmr.setDate(tmr.getDate() + 1);
       if (d.toDateString() === tmr.toDateString()) return `明天 ${time}`;
       return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${time}`;
+    },
+    taskHelpKey(server, name, path) {
+      return `${server}|${name}|${path || ''}`;
+    },
+    toggleTaskHelp(server, name, path) {
+      const k = this.taskHelpKey(server, name, path);
+      this.expandedTaskHelp[k] = !this.expandedTaskHelp[k];
+    },
+    isTaskHelpExpanded(server, name, path) {
+      return !!this.expandedTaskHelp[this.taskHelpKey(server, name, path)];
+    },
+    taskHelpDoc(t) {
+      if (typeof getTaskHelpDoc !== 'function') return { flow: '', params: {} };
+      return getTaskHelpDoc(t.name, t.path);
+    },
+    taskHelpParamRows(t) {
+      if (typeof getTaskHelpParamRows !== 'function') return [];
+      return getTaskHelpParamRows(t.name, t.path, undefined);
+    },
+    formatParamValOv(v) {
+      if (v === null || v === undefined) return '';
+      if (typeof v === 'object') return JSON.stringify(v);
+      return String(v);
     },
     formatCountdown(ts) {
       if (!ts || ts <= 0) return '';
@@ -283,38 +332,74 @@ const OverviewPanel = {
 
         <!-- 下区：角色任务状态 -->
         <div class="ov-dispatch-status">
-          <div v-if="!sortedDispatchQueue.length" class="ov-empty-dispatch">
+          <div v-if="!dispatchQueue.length" class="ov-empty-dispatch">
             <i class="fa fa-inbox"></i>
             <p>从左侧角色列表点击 <strong>+</strong> 添加角色到调度队列</p>
           </div>
 
-          <div v-for="char in sortedDispatchQueue" :key="char.server + '/' + char.name" class="ov-dispatch-card">
-            <div class="ov-dispatch-card-header" @click="toggleDispatchChar(char.server, char.name)">
-              <div class="ov-dispatch-card-left">
-                <i class="fa" :class="isDispatchCharExpanded(char.server, char.name) ? 'fa-caret-down' : 'fa-caret-right'" style="width:14px"></i>
-                <span class="ov-dispatch-card-name">{{ char.server }} / {{ char.name }}</span>
-                <span v-if="isDispatchRunning && dispatchProgress.currentChar === char.server + '/' + char.name"
-                      class="ov-dispatch-running-tag"><i class="fa fa-spinner fa-spin"></i> 执行中</span>
-              </div>
-                <div class="ov-dispatch-card-right">
-                <div class="ov-task-dots">
-                  <span v-for="(t, i) in getCharTasks(char.server, char.name)" :key="i"
-                        class="ov-task-dot-char"
-                        :style="{ color: dotColor(t.status) }"
-                        :title="t.name + ' - ' + dotLabel(t.status)">●</span>
+          <div v-for="(char, dIdx) in dispatchQueue" :key="char.server + '/' + char.name"
+               class="ov-dispatch-card"
+               :class="{ 'ov-dispatch-card--drag-over': dragOverIndex === dIdx && !isDispatchRunning }"
+               @dragover="onDragOverDispatchCard($event, dIdx)"
+               @drop="onDropDispatchCard($event, dIdx)">
+            <div class="ov-dispatch-card-top">
+              <span class="ov-dispatch-drag-handle"
+                    :class="{ 'ov-dispatch-drag-handle--disabled': isDispatchRunning }"
+                    :draggable="!isDispatchRunning"
+                    title="拖拽排序执行顺序"
+                    @dragstart="onDragStartDispatch($event, dIdx)"
+                    @dragend="onDragEndDispatch"
+                    @click.stop>
+                <i class="fa fa-bars"></i>
+              </span>
+              <div class="ov-dispatch-card-header" @click="toggleDispatchChar(char.server, char.name)">
+                <div class="ov-dispatch-card-left">
+                  <i class="fa" :class="isDispatchCharExpanded(char.server, char.name) ? 'fa-caret-down' : 'fa-caret-right'" style="width:14px"></i>
+                  <span class="ov-dispatch-card-name">{{ char.server }} / {{ char.name }}</span>
+                  <span v-if="isDispatchRunning && dispatchProgress.currentChar === char.server + '/' + char.name"
+                        class="ov-dispatch-running-tag"><i class="fa fa-spinner fa-spin"></i> 执行中</span>
                 </div>
-                <el-button size="small" type="danger" text @click.stop="$emit('remove-from-dispatch', char.server, char.name)"
-                           :disabled="isDispatchRunning">
-                  <i class="fa fa-minus"></i>
-                </el-button>
+                <div class="ov-dispatch-card-right">
+                  <div class="ov-task-dots">
+                    <span v-for="(t, i) in getCharTasks(char.server, char.name)" :key="i"
+                          class="ov-task-dot-char"
+                          :style="{ color: dotColor(t.status) }"
+                          :title="t.name + ' - ' + dotLabel(t.status)">●</span>
+                  </div>
+                  <el-button size="small" type="danger" text @click.stop="$emit('remove-from-dispatch', char.server, char.name)"
+                             :disabled="isDispatchRunning">
+                    <i class="fa fa-minus"></i>
+                  </el-button>
+                </div>
               </div>
             </div>
             <transition name="ov-collapse">
               <div v-show="isDispatchCharExpanded(char.server, char.name)" class="ov-dispatch-card-body">
-                <div v-for="(t, i) in getCharTasks(char.server, char.name)" :key="i" class="ov-dispatch-task-row">
-                  <span class="ov-task-dot-char ov-task-dot-char--row" :style="{ color: dotColor(t.status) }">●</span>
-                  <span class="ov-dispatch-task-name">{{ t.name }}</span>
-                  <span class="ov-dispatch-task-status" :style="{ color: dotColor(t.status) }">{{ dotLabel(t.status) }}</span>
+                <div class="ov-dispatch-task-grid">
+                  <div v-for="(t, i) in getCharTasks(char.server, char.name)" :key="(t.path || t.name) + '-' + i" class="ov-dispatch-task-block">
+                    <div class="ov-dispatch-task-cell" @click="toggleTaskHelp(char.server, char.name, t.path)">
+                      <span class="ov-task-dot-char ov-task-dot-char--cell" :style="{ color: dotColor(t.status) }" :title="t.name + ' - ' + dotLabel(t.status)">●</span>
+                      <div class="flex-1 min-w-0 flex items-center gap-1">
+                        <span class="ov-dispatch-task-name ov-dispatch-task-name--cell flex-1 min-w-0">{{ t.name }}</span>
+                        <span v-if="t.beta" class="task-beta-tag flex-shrink-0">Beta</span>
+                      </div>
+                      <i class="fa ov-task-help-chev" :class="isTaskHelpExpanded(char.server, char.name, t.path) ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
+                    </div>
+                    <transition name="ov-collapse">
+                      <div v-show="isTaskHelpExpanded(char.server, char.name, t.path)" class="ov-task-help-panel">
+                        <p v-if="t.beta" class="task-doc-beta-line">*该任务为 Beta 实验功能：自动化流程、界面识别或参数含义可能随版本快速调整，不保证与当前游戏完全一致；请谨慎启用并及时反馈问题。</p>
+                        <p class="ov-task-help-flow">{{ taskHelpDoc(t).flow }}</p>
+                        <dl v-if="taskHelpParamRows(t).length" class="ov-task-help-params">
+                          <dt>可变参数</dt>
+                          <dd v-for="row in taskHelpParamRows(t)" :key="row.key">
+                            <span class="task-doc-k">{{ row.key }}</span>
+                            <span class="task-doc-d">{{ row.desc }}</span>
+                            <span v-if="row.value !== undefined" class="task-doc-v">当前：{{ formatParamValOv(row.value) }}</span>
+                          </dd>
+                        </dl>
+                      </div>
+                    </transition>
+                  </div>
                 </div>
                 <div v-if="!getCharTasks(char.server, char.name).length" class="ov-dispatch-no-tasks">暂无任务数据</div>
               </div>

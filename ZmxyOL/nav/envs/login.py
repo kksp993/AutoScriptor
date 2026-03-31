@@ -172,7 +172,7 @@ def _select_character(character_name, character_index):
     locate(I("活动公告页面"), 30)
     click(B(1240, 5, 40, 60))
     time.sleep(0.5)
-    dismiss_floating_window(max_retries=3, debug=False)
+    dismiss_floating_window(max_retries=1, debug=False)
     if ui_T(T("精彩活动"), 3):
         click(B(1100, 40, 40, 40))
     logger.info("登录完成")

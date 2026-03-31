@@ -1,4 +1,4 @@
+back_to_login
 battle
 brahma_tower
 login
-back_to_login

@@ -238,6 +238,12 @@ def _inject_param_meta_into_tasks(node: dict, prefix: str = "") -> None:
             meta = task_registry.get_param_meta(path)
             if meta:
                 val["param_meta"] = meta
+            else:
+                val.pop("param_meta", None)
+            if task_registry.get_beta(path):
+                val["beta"] = True
+            else:
+                val.pop("beta", None)
         else:
             _inject_param_meta_into_tasks(val, path)
 
@@ -251,6 +257,7 @@ def _strip_runtime_tasks_fields(node: dict) -> None:
             continue
         if TaskTree.is_leaf(val):
             val.pop("param_meta", None)
+            val.pop("beta", None)
             val.pop("fn", None)
             val.pop("order", None)
         else:
@@ -289,7 +296,9 @@ def _task_leaf_status(node: dict, now_ts: float) -> str:
 
 
 def _flatten_tasks(node: dict, now_ts: float, prefix: str = '') -> list:
-    """Recursively flatten a tasks tree into a list of {path, name, status}."""
+    """Recursively flatten a tasks tree into a list of {path, name, status, beta}."""
+    from AutoScriptor.utils.task_registry import task_registry
+
     result = []
     for key, val in node.items():
         if not isinstance(val, dict):
@@ -300,6 +309,7 @@ def _flatten_tasks(node: dict, now_ts: float, prefix: str = '') -> list:
                 'path': path,
                 'name': key,
                 'status': _task_leaf_status(val, now_ts),
+                'beta': task_registry.get_beta(path),
             })
         else:
             result.extend(_flatten_tasks(val, now_ts, path))
@@ -455,6 +465,11 @@ async def _on_startup():
     asyncio.create_task(_log_broadcaster())
 
 
+@app.on_event("shutdown")
+async def _on_shutdown():
+    shutdown_webui()
+
+
 # ── 首页 ──
 
 @app.get("/")
@@ -586,6 +601,13 @@ async def run_tasks_api(request: Request):
     RUN_THREAD.start()
     _set_thread_high_priority(RUN_THREAD)
     return {'status': 'ok', 'tasks': sorted_tasks, 'mode': 'direct'}
+
+
+@app.get("/api/run/status")
+async def run_status_api():
+    """直接执行任务使用的后台线程是否仍在运行（与调度器 state 无关）。"""
+    alive = RUN_THREAD is not None and RUN_THREAD.is_alive()
+    return {"running": alive}
 
 
 @app.post("/api/stop")
@@ -1226,6 +1248,7 @@ async def deploy_save_api(request: Request):
 # ── 入口 ──
 
 _server = None
+_shutdown_done = False
 
 
 def run_webui(restart_event=None):
@@ -1278,20 +1301,44 @@ def run_webui(restart_event=None):
         ssl_certfile=ssl_cert if ssl_cert else None,
     )
     _server = uvicorn.Server(config)
-    _server.run()
+    try:
+        _server.run()
+    finally:
+        shutdown_webui()
 
 
 def shutdown_webui():
-    from AutoScriptor.utils.perf import unboost
+    """停止调度器、释放运行时资源、通知 uvicorn 退出。幂等，多次调用安全。"""
+    global _shutdown_done
+    if _shutdown_done:
+        return
+    _shutdown_done = True
+
     try:
         scheduler.deactivate()
-        scheduler.stop()
+    except Exception:
+        pass
+    try:
+        scheduler.stop(timeout=3)
+    except Exception:
+        pass
+    try:
+        from AutoScriptor.utils.perf import unboost
         unboost()
-        bg.stop()
+    except Exception:
+        pass
+    try:
+        from services.core.runtime_context import runtime_ctx
+        if runtime_ctx.bg is not None:
+            runtime_ctx.bg.stop()
+        runtime_ctx.shutdown()
+    except Exception:
+        pass
+    try:
         if _server:
             _server.should_exit = True
-    except Exception as e:
-        logger.error("shutdown_webui error: %s", e)
+    except Exception:
+        pass
 
 
 if __name__ == '__main__':
@@ -1302,9 +1349,4 @@ if __name__ == '__main__':
         traceback.print_exc()
         logger.info("程序已退出")
     finally:
-        from AutoScriptor.utils.perf import unboost
-        try:
-            shutdown_webui()
-            unboost()
-        except Exception as e:
-            logger.error("shutdown_webui error: %s", e)
+        shutdown_webui()

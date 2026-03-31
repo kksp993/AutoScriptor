@@ -323,11 +323,17 @@ class Scheduler:
                         cfg["app"]["app_to_start"],
                     )
                 except Exception as e:
-                    logger.error("📅 模拟器启动失败: %s", e)
+                    logger.error("📅 模拟器启动失败: %s", e, exc_info=True)
                     self._consecutive_errors += 1
                     if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
                         self.mark_error()
-                    break
+                        break
+                    delay = min(30, 10 * self._consecutive_errors)
+                    logger.info("📅 %d 秒后重试 (%d/%d)",
+                                delay, self._consecutive_errors, MAX_CONSECUTIVE_ERRORS)
+                    self._wake.clear()
+                    self._wake.wait(delay)
+                    continue
                 boost()
 
                 self._ensure_character_logged_in(cfg)

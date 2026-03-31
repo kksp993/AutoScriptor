@@ -113,6 +113,8 @@ def _webui_worker(restart_event):
 
 if __name__ == '__main__':
     import multiprocessing
+    import signal
+
     multiprocessing.freeze_support()
 
     if args.electron:
@@ -121,15 +123,51 @@ if __name__ == '__main__':
 
     from multiprocessing import Event, Process
 
+    _mp_state = {"should_exit": False, "process": None}
+
+    def _stop_webui_worker(_signum=None, _frame=None):
+        """父进程收到终止信号时先结束子进程，避免 Windows 上仅父进程退出、uvicorn 子进程残留。"""
+        p = _mp_state["process"]
+        if p is not None and p.is_alive():
+            p.terminate()
+            try:
+                p.join(timeout=10)
+            except Exception:
+                pass
+            if p.is_alive():
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+        _mp_state["should_exit"] = True
+
+    for _sig in ("SIGTERM", "SIGINT"):
+        if hasattr(signal, _sig):
+            try:
+                signal.signal(getattr(signal, _sig), _stop_webui_worker)
+            except Exception:
+                pass
+    if hasattr(signal, "SIGBREAK"):
+        try:
+            signal.signal(signal.SIGBREAK, _stop_webui_worker)
+        except Exception:
+            pass
+
     should_exit = False
     while not should_exit:
+        _mp_state["should_exit"] = False
         event = Event()
         process = Process(target=_webui_worker, args=(event,))
+        _mp_state["process"] = process
         process.start()
         while not should_exit:
+            if _mp_state["should_exit"]:
+                should_exit = True
+                break
             try:
                 signaled = event.wait(1)
             except KeyboardInterrupt:
+                _stop_webui_worker()
                 should_exit = True
                 break
             if signaled:
@@ -141,3 +179,10 @@ if __name__ == '__main__':
                 continue
             else:
                 should_exit = True
+        if should_exit and process.is_alive():
+            _stop_webui_worker()
+            try:
+                process.join(timeout=2)
+            except Exception:
+                pass
+        _mp_state["process"] = None

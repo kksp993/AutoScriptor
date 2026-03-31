@@ -31,6 +31,76 @@
   opacity: 1;
 }
 
+/* 任务列表：折叠说明 */
+.task-doc-panel {
+  margin-top: 0.35rem;
+  padding: 0.6rem 0.65rem 0.65rem 2rem;
+  border-left: 2px solid rgba(34, 197, 94, 0.35);
+  background: rgba(248, 250, 252, 0.9);
+  border-radius: 0 0.5rem 0.5rem 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.55;
+  color: #475569;
+}
+.task-doc-flow {
+  margin: 0;
+  white-space: pre-wrap;
+}
+.task-doc-params {
+  margin: 0.5rem 0 0 0;
+  padding: 0;
+}
+.task-doc-params dt {
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 0.35rem;
+  font-size: 0.7rem;
+  text-transform: none;
+}
+.task-doc-params dd {
+  margin: 0.25rem 0 0 0;
+  padding-left: 0.35rem;
+  border-left: 2px solid #e2e8f0;
+}
+.task-doc-k {
+  font-family: ui-monospace, monospace;
+  font-size: 0.68rem;
+  color: #64748b;
+  margin-right: 0.35rem;
+}
+.task-doc-d {
+  color: #475569;
+}
+.task-doc-v {
+  display: block;
+  margin-top: 0.15rem;
+  color: #22c55e;
+  font-size: 0.68rem;
+}
+
+.task-beta-tag {
+  font-size: 0.5625rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: #b45309;
+  background: rgba(254, 243, 199, 0.95);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  border-radius: 3px;
+  padding: 2px 4px 1px;
+  vertical-align: super;
+  position: relative;
+  top: -2px;
+}
+.task-doc-beta-line {
+  margin: 0 0 0.5rem 0;
+  padding: 0;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  color: #b45309;
+  font-weight: 500;
+}
+
 /* Overview 面板 */
 .overview-grid {
   display: grid;
@@ -1244,17 +1314,54 @@ html.light .bg-white {
   box-shadow: 0 1px 6px rgba(15, 23, 42, 0.05);
   overflow: hidden;
   border: 1px solid #f1f5f9;
-  transition: border-color 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 .ov-dispatch-card:hover {
   border-color: #e2e8f0;
+}
+.ov-dispatch-card--drag-over {
+  border-color: #22c55e;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25);
+}
+
+.ov-dispatch-card-top {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.ov-dispatch-drag-handle {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  cursor: grab;
+  color: #cbd5e1;
+  font-size: 15px;
+  transition: color 0.15s, background 0.15s;
+  user-select: none;
+}
+.ov-dispatch-drag-handle:hover {
+  color: #64748b;
+  background: #f8fafc;
+}
+.ov-dispatch-drag-handle:active {
+  cursor: grabbing;
+}
+.ov-dispatch-drag-handle--disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+  pointer-events: none;
 }
 
 .ov-dispatch-card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 14px;
+  flex: 1;
+  min-width: 0;
+  padding: 12px 14px 12px 0;
   cursor: pointer;
   user-select: none;
   transition: background 0.15s;
@@ -1326,29 +1433,100 @@ html.light .bg-white {
 .ov-dispatch-card-body {
   border-top: 1px solid #f1f5f9;
   padding: 8px 14px 12px;
+  max-height: min(42vh, 360px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
 }
 
-.ov-dispatch-task-row {
+.ov-dispatch-task-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px 10px;
+  align-items: start;
+}
+
+.ov-dispatch-task-block {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 0;
-  border-bottom: 1px solid #fafafa;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
-.ov-dispatch-task-row:last-child {
-  border-bottom: none;
+.ov-dispatch-task-block .ov-dispatch-task-cell {
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 4px 2px;
+  margin: -4px -2px;
+  transition: background .15s;
+}
+.ov-dispatch-task-block .ov-dispatch-task-cell:hover {
+  background: rgba(34, 197, 94, 0.06);
 }
 
-.ov-dispatch-task-name {
-  flex: 1;
-  font-size: 17px;
+.ov-dispatch-task-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ov-task-dot-char--cell {
+  font-size: 14px;
+  line-height: 1.35;
+  flex-shrink: 0;
+  width: 1em;
+  text-align: center;
+}
+
+.ov-dispatch-task-name--cell {
+  font-size: 13px;
   font-weight: 600;
   color: #1e293b;
+  line-height: 1.35;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
-.ov-dispatch-task-status {
-  font-size: 15px;
+.ov-task-help-panel {
+  margin: 0 0 0 1.1rem;
+  padding: 0.45rem 0.5rem 0.5rem 0.65rem;
+  border-left: 2px solid rgba(34, 197, 94, 0.35);
+  background: rgba(248, 250, 252, 0.95);
+  border-radius: 0 0.5rem 0.5rem 0.5rem;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: #475569;
+}
+.ov-task-help-panel .ov-task-help-flow {
+  margin: 0;
+  white-space: pre-wrap;
+}
+.ov-task-help-params {
+  margin: 0.4rem 0 0 0;
+  padding: 0;
+}
+.ov-task-help-params dt {
   font-weight: 600;
+  color: #334155;
+  margin-bottom: 0.35rem;
+  font-size: 0.68rem;
+}
+.ov-task-help-params dd {
+  margin: 0.2rem 0 0 0;
+  padding-left: 0.3rem;
+  border-left: 2px solid #e2e8f0;
+  font-size: 0.68rem;
+}
+.ov-task-help-chev {
+  display: inline-block;
+  width: 0.75rem;
+  margin-left: 4px;
+  color: #94a3b8;
+  font-size: 0.65rem;
   flex-shrink: 0;
 }
 

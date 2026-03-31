@@ -20,11 +20,20 @@ class TaskRegistry:
             cls._instance._tasks = {}
         return cls._instance
 
-    def register(self, path: str, fn, order: int, param_meta: dict | None = None):
+    def register(
+        self,
+        path: str,
+        fn,
+        order: int,
+        param_meta: dict | None = None,
+        *,
+        beta: bool = False,
+    ):
         self._tasks[path] = {
             "fn": fn,
             "order": order,
             "param_meta": param_meta or {},
+            "beta": bool(beta),
         }
 
     def get_fn(self, path: str):
@@ -38,6 +47,10 @@ class TaskRegistry:
     def get_param_meta(self, path: str) -> dict:
         entry = self._tasks.get(path)
         return entry.get("param_meta", {}) if entry else {}
+
+    def get_beta(self, path: str) -> bool:
+        entry = self._tasks.get(path)
+        return bool(entry.get("beta")) if entry else False
 
     def set_fn(self, path: str, fn):
         if path in self._tasks:
