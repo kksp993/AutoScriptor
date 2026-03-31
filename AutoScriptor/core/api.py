@@ -48,10 +48,8 @@ def ensure_app_running(selected_emulator_index, adb_addr, app_to_start):
         bool: True 表示应用已在运行或已成功启动
     """
     mumu_manager_path = cfg["emulator"]["emu_path"]
-    print(f"selected_emulator_index: {selected_emulator_index}")
-    print(f"adb_addr: {adb_addr}")
-    print(f"app_to_start: {app_to_start}")
-    print(f"mumu_manager_path: {mumu_manager_path}")
+    logger.debug("ensure_app_running: index=%s, adb=%s, app=%s, emu=%s",
+                 selected_emulator_index, adb_addr, app_to_start, mumu_manager_path)
     # 启动模拟器前必须恢复正常进程优先级。
     # boost() 会将 Python 设为 HIGH_PRIORITY_CLASS，subprocess 子进程默认继承，
     # MuMu Hypervisor 在高优先级下启动会误判权限 → "安卓设备无法启动"。

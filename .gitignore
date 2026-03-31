@@ -35,3 +35,4 @@
 /.gitadd*
 /docs/refs/
 **/node_modules
+/accounts/

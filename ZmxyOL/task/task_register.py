@@ -16,16 +16,17 @@ registration_counter = 0
  
 
 
-def register_task(func=None, *, default_offset_hours=None, **task_kwargs):
+def register_task(func=None, *, default_offset_hours=None, beta=False, **task_kwargs):
     """
     装饰器：根据函数所在文件路径（'task' 目录下的子路径）注册任务。
 
     注册数据分两处存储：
       - cfg["tasks"]（用户配置，持久化到 JSON）：on、next_exec_time、params、next_exec_offset_hours
-      - TaskRegistry（运行时数据，不持久化）：fn、order、param_meta
+      - TaskRegistry（运行时数据，不持久化）：fn、order、param_meta、beta
 
     支持以下可选参数（仅对指定任务生效）：
       - default_offset_hours (int): 任务执行后延迟 N 小时再调度
+      - beta (bool): 为 True 时 WebUI 任务名旁显示 Beta 标记，说明区首行提示实验性任务
       - sched_window_hours (tuple[int,int]): 本地时间可执行时段 [start, end)，如 (10, 22)；
         调度器在时段外不会执行该任务，执行后 next_exec_time 也会落在时段内
       - allowed_weekdays (list[int]): 仅在这些星期可执行，cfg 约定 1=周一 … 7=周日（如 [6,7] 为周六日）；
@@ -39,7 +40,7 @@ def register_task(func=None, *, default_offset_hours=None, **task_kwargs):
     """
     if func is None:
         def wrapper(f):
-            return register_task(f, default_offset_hours=default_offset_hours, **task_kwargs)
+            return register_task(f, default_offset_hours=default_offset_hours, beta=beta, **task_kwargs)
         return wrapper
     global registration_counter  # 引入全局计数器
     registration_counter += 1
@@ -137,7 +138,7 @@ def register_task(func=None, *, default_offset_hours=None, **task_kwargs):
 
         # 8. fn / order / param_meta 注册到 TaskRegistry（运行时数据，不写入 JSON）
         task_path = "/".join(keys)
-        task_registry.register(task_path, task_wrapper(func), reg_order, param_meta)
+        task_registry.register(task_path, task_wrapper(func), reg_order, param_meta, beta=beta)
         # print(f"✅ 【{'/'.join(keys)}】 => {a}")
     except Exception as e:
         logger.error(f"An error occurred during registration for {func.__name__}: {e}，{traceback.format_exc()}")

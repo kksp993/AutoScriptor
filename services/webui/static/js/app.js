@@ -830,27 +830,31 @@ const app = createApp({
       saveDispatchQueue();
     }
 
+    function reorderDispatchQueue(fromIndex, toIndex) {
+      const q = [...dispatchQueue.value];
+      if (fromIndex < 0 || fromIndex >= q.length || toIndex < 0 || toIndex >= q.length) return;
+      if (fromIndex === toIndex) return;
+      const [item] = q.splice(fromIndex, 1);
+      q.splice(toIndex, 0, item);
+      dispatchQueue.value = q;
+      saveDispatchQueue();
+    }
+
     function _waitForTaskCompletion() {
       return new Promise((resolve) => {
-        const CHECK_INTERVAL = 2000;
-        let timer = null;
+        const CHECK_INTERVAL = 800;
         const check = async () => {
           if (_dispatchAbort.value) { resolve('aborted'); return; }
           try {
-            const ov = await API.get('/overview');
-            if (ov && ov.stats && ov.stats.pending === 0) {
-              resolve('done');
-              return;
-            }
-            const sched = ov && ov.scheduler;
-            if (sched && sched.state === 'pending') {
+            const st = await API.get('/run/status');
+            if (st && !st.running) {
               resolve('done');
               return;
             }
           } catch (e) { /* ignore */ }
-          timer = setTimeout(check, CHECK_INTERVAL);
+          setTimeout(check, CHECK_INTERVAL);
         };
-        timer = setTimeout(check, CHECK_INTERVAL);
+        check();
       });
     }
 
@@ -973,7 +977,7 @@ const app = createApp({
       dispatchQueue, allTasksSummary, isDispatchRunning, dispatchProgress,
       fetchAccounts, switchAccount, addAccount, deleteAccount,
       switchCharacter, addCharacter, deleteCharacter,
-      addToDispatch, removeFromDispatch, runAllDispatchTasks, stopDispatch, unifiedStop,
+      addToDispatch, removeFromDispatch, reorderDispatchQueue, runAllDispatchTasks, stopDispatch, unifiedStop,
       overviewSecurityUnlocked, clearOverviewSecurityUnlocked,
       fetchAllTasksSummary, loadDispatchQueue, saveDispatchQueue,
       authRequired, loginPassword, submitLogin,

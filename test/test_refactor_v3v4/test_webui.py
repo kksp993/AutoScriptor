@@ -224,6 +224,9 @@ class TestFastAPIApp(unittest.TestCase):
     def test_api_run_route(self):
         self.assertIn("/api/run", self.routes)
 
+    def test_api_run_status_route(self):
+        self.assertIn("/api/run/status", self.routes)
+
     def test_api_stop_route(self):
         self.assertIn("/api/stop", self.routes)
 
@@ -260,6 +263,9 @@ class TestFrontendStructure(unittest.TestCase):
     def test_app_js_exists(self):
         self.assertTrue(os.path.isfile(os.path.join(STATIC_DIR, "js", "app.js")))
 
+    def test_task_help_docs_exists(self):
+        self.assertTrue(os.path.isfile(os.path.join(STATIC_DIR, "js", "task_help_docs.js")))
+
     def test_component_files_exist(self):
         components_dir = os.path.join(STATIC_DIR, "js", "components")
         expected = ["TaskTree.js", "Overview.js", "TaskPanel.js", "Settings.js"]
@@ -270,7 +276,7 @@ class TestFrontendStructure(unittest.TestCase):
     def test_index_html_loads_all_components(self):
         with open(os.path.join(STATIC_DIR, "index.html"), "r", encoding="utf-8") as f:
             html = f.read()
-        for name in ["TaskTree.js", "Overview.js", "TaskPanel.js", "Settings.js", "app.js"]:
+        for name in ["task_help_docs.js", "TaskTree.js", "Overview.js", "TaskPanel.js", "Settings.js", "app.js"]:
             self.assertIn(name, html, f"index.html should load {name}")
 
     def test_index_html_has_vue_mount(self):
@@ -310,8 +316,8 @@ class TestVueComponentsContent(unittest.TestCase):
 
     def test_overview_has_emits(self):
         content = self._read_component("Overview.js")
-        self.assertIn("start-run", content)
-        self.assertIn("stop-run", content)
+        self.assertIn("run-all-dispatch", content)
+        self.assertIn("stop-dispatch", content)
 
     def test_task_tree_has_name(self):
         content = self._read_component("TaskTree.js")

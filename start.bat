@@ -54,6 +54,21 @@ if exist ".venv\Scripts\pip.exe" (
 echo [*] Update complete.
 
 :START_APP
+REM ── 清理残留的 5000 端口占用（上次异常退出时可能残留 Python 进程） ──
+echo [*] Checking port 5000...
+set "_FOUND_STALE="
+for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr ":5000.*LISTENING"') do (
+    if %%a NEQ 0 (
+        set "_FOUND_STALE=1"
+        echo [*] Killing stale process on port 5000 ^(PID: %%a^)
+        taskkill /PID %%a /T /F >nul 2>&1
+    )
+)
+if defined _FOUND_STALE (
+    echo [*] Waiting for port release...
+    timeout /t 1 /nobreak >nul 2>&1
+)
+
 cd /d "%ROOT%webapp"
 
 where npm >nul 2>&1
