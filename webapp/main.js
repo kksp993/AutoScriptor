@@ -8,14 +8,65 @@ const http = require('http');
 const fs = require('fs');
 
 // ── Config ──────────────────────────────────────────────────────────────────
-const ROOT         = path.resolve(__dirname, '..');          // project root
-const SERVER_URL   = 'http://127.0.0.1:5000';
-const GUI_SCRIPT   = path.join(ROOT, 'gui.py');
-const ICON_PATH    = path.join(__dirname, 'icon.ico');
-const ICON_PNG     = path.join(__dirname, 'icon.png');
-const LOAD_HTML    = path.join(__dirname, 'renderer', 'loading.html');
+/** 开发模式：仓库根目录。发行安装包：install.json 中的 installRoot，或 exe 同层（旧版整包）。 */
+const SERVER_URL = 'http://127.0.0.1:5000';
+
+let _rootCache = null;
+function invalidateRootCache() {
+  _rootCache = null;
+}
+
+function getRoot() {
+  if (!app.isPackaged) {
+    return path.resolve(__dirname, '..');
+  }
+  if (_rootCache !== null) return _rootCache;
+  try {
+    const marker = path.join(app.getPath('userData'), 'install.json');
+    if (fs.existsSync(marker)) {
+      const j = JSON.parse(fs.readFileSync(marker, 'utf8'));
+      if (j.installRoot && typeof j.installRoot === 'string') {
+        const r = path.resolve(j.installRoot);
+        if (fs.existsSync(r)) {
+          _rootCache = r;
+          return _rootCache;
+        }
+      }
+    }
+  } catch (_) {}
+  _rootCache = path.dirname(process.execPath);
+  return _rootCache;
+}
+
+function guiScriptPath() {
+  return path.join(getRoot(), 'gui.py');
+}
+
+function installStepScriptPath() {
+  return path.join(getRoot(), 'services', 'installer', 'install_steps.py');
+}
+
+function getBackendEngineExe() {
+  const name = process.platform === 'win32' ? 'autoscriptor-engine.exe' : 'autoscriptor-engine';
+  return path.join(getRoot(), 'backend', name);
+}
+
+/** 发行包内 backend.zip：优先 exe 同级（extraFiles），其次 resources（旧布局）。portable 解压后前者更可靠。 */
+function getBackendZipPath() {
+  if (!app.isPackaged) {
+    return path.join(process.resourcesPath, 'backend.zip');
+  }
+  const besideExe = path.join(path.dirname(process.execPath), 'backend.zip');
+  if (fs.existsSync(besideExe)) return besideExe;
+  const inResources = path.join(process.resourcesPath, 'backend.zip');
+  if (fs.existsSync(inResources)) return inResources;
+  return inResources;
+}
+
+const ICON_PATH = path.join(__dirname, 'icon.ico');
+const ICON_PNG = path.join(__dirname, 'icon.png');
+const LOAD_HTML = path.join(__dirname, 'renderer', 'loading.html');
 const INSTALL_HTML = path.join(__dirname, 'renderer', 'installer.html');
-const INSTALL_STEP_SCRIPT = path.join(ROOT, 'services', 'installer', 'install_steps.py');
 
 /** 窗口 / 托盘用图标：优先 .ico，其次同目录 icon.png（避免缺失时托盘为空白） */
 function loadAppIcon() {
@@ -38,8 +89,8 @@ function loadTrayIcon() {
 // Find Python executable (.venv preferred, then system)
 function findPython() {
   const candidates = [
-    path.join(ROOT, '.venv', 'Scripts', 'python.exe'),
-    path.join(ROOT, '.python310', 'python.exe'),
+    path.join(getRoot(), '.venv', 'Scripts', 'python.exe'),
+    path.join(getRoot(), '.python310', 'python.exe'),
     'python',
   ];
   for (const p of candidates) {
@@ -98,9 +149,12 @@ function createLineReader(onLine) {
   };
 }
 
-/** Check if the Python venv is already set up (i.e. installation completed) */
+/** 开发：venv 就绪。发行包：backend 下已有 Nuitka 引擎。 */
 function isInstalled() {
-  return fs.existsSync(path.join(ROOT, '.venv', 'Scripts', 'python.exe'));
+  if (app.isPackaged) {
+    return fs.existsSync(getBackendEngineExe());
+  }
+  return fs.existsSync(path.join(getRoot(), '.venv', 'Scripts', 'python.exe'));
 }
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -159,16 +213,78 @@ function killStalePort5000() {
   } catch (_) {}
 }
 
-// ── Python process ───────────────────────────────────────────────────────────
+// ── Backend process (Python dev or Nuitka engine in packaged app) ───────────
+function maybeNotifyServerReady(line) {
+  if (line.includes('Application startup complete') || line.includes('Uvicorn running on')) {
+    if (!serverReady) {
+      serverReady = true;
+      pollServer();
+    }
+  }
+}
+
+function attachBackendProcessHandlers() {
+  pyProc.stdout.on('data', createLineReader(line => {
+    console.log('[backend]', line);
+    sendToRenderer('log', line);
+    maybeNotifyServerReady(line);
+  }));
+
+  pyProc.stderr.on('data', createLineReader(line => {
+    console.log('[backend:err]', line);
+    sendToRenderer('log', line);
+    maybeNotifyServerReady(line);
+  }));
+
+  pyProc.on('error', err => {
+    console.error('[backend:error]', err);
+    sendToRenderer('log', String(err));
+  });
+
+  pyProc.on('spawn', () => {
+    pyPid = pyProc.pid;
+    console.log('[main] Backend PID:', pyPid);
+    sendToRenderer('status', 'starting');
+    setTimeout(() => { if (!serverReady) pollServer(); }, 20000);
+  });
+
+  pyProc.on('exit', (code) => {
+    console.log('[backend] exited with code', code);
+    if (!app.isQuitting) {
+      sendToRenderer('log', `[后端进程退出: code=${code}]`);
+    }
+  });
+}
+
 function startPython() {
+  const engineExe = getBackendEngineExe();
+  if (app.isPackaged && fs.existsSync(engineExe)) {
+    const backendCwd = path.dirname(engineExe);
+    console.log('[main] Starting packaged engine:', engineExe, 'cwd:', backendCwd);
+    pyProc = spawn(engineExe, ['--electron'], {
+      cwd: backendCwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        AUTOSCRIPTOR_ELECTRON_PIPE: '1',
+        AUTOSCRIPTOR_ELECTRON: '1',
+        UVICORN_LOG_LEVEL: 'info',
+        NO_COLOR: '1',
+      },
+    });
+    attachBackendProcessHandlers();
+    return;
+  }
+
   const pythonPath = findPython();
-  console.log('[main] Starting Python:', pythonPath, GUI_SCRIPT);
+  const guiScript = guiScriptPath();
+  console.log('[main] Starting Python:', pythonPath, guiScript);
 
   pyProc = spawn(
     pythonPath,
-    ['-X', 'utf8', '-u', GUI_SCRIPT, '--electron'],
+    ['-X', 'utf8', '-u', guiScript, '--electron'],
     {
-      cwd: ROOT,
+      cwd: getRoot(),
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
@@ -180,47 +296,13 @@ function startPython() {
     },
   );
 
-  // Read raw bytes as Buffer → decode UTF-8 manually to avoid Windows GBK mangling
-  pyProc.stdout.on('data', createLineReader(line => {
-    console.log('[python]', line);
-    sendToRenderer('log', line);
-  }));
-
-  pyProc.stderr.on('data', createLineReader(line => {
-    console.log('[python:err]', line);
-    sendToRenderer('log', line);
-    if (line.includes('Application startup complete') || line.includes('Uvicorn running on')) {
-      if (!serverReady) {
-        serverReady = true;
-        pollServer();
-      }
-    }
-  }));
-
-  pyProc.on('error', err => {
-    console.error('[python:error]', err);
-    sendToRenderer('log', String(err));
-  });
-
-  pyProc.on('spawn', () => {
-    pyPid = pyProc.pid;
-    console.log('[main] Python PID:', pyPid);
-    sendToRenderer('status', 'starting');
-    setTimeout(() => { if (!serverReady) pollServer(); }, 20000);
-  });
-
-  pyProc.on('exit', (code) => {
-    console.log('[python] exited with code', code);
-    if (!app.isQuitting) {
-      sendToRenderer('log', `[Python 进程退出: code=${code}]`);
-    }
-  });
+  attachBackendProcessHandlers();
 }
 
 // Poll until server responds with valid content, then load the app
 function pollServer(retries = 0) {
   if (retries > 90) {
-    sendToRenderer('log', '[错误] 服务器启动超时，请检查 Python 环境');
+    sendToRenderer('log', '[错误] 服务器启动超时，请检查本机环境与后端日志');
     return;
   }
   const req = http.get(SERVER_URL, (res) => {
@@ -359,6 +441,7 @@ function createInstallerWindow() {
 /** Transition from installer to normal app mode */
 function transitionToApp() {
   installerMode = false;
+  invalidateRootCache();
 
   if (mainWindow && !mainWindow.isDestroyed()) {
     app.isQuitting = true;
@@ -374,11 +457,58 @@ function transitionToApp() {
 }
 
 // ── Installer IPC handlers ──────────────────────────────────────────────────
-ipcMain.handle('installer:get-project-root', () => ROOT);
+ipcMain.handle('installer:get-project-root', () => getRoot());
 
+ipcMain.handle('installer:get-mode', () => {
+  if (!app.isPackaged) {
+    return { mode: 'development' };
+  }
+  const zipPath = getBackendZipPath();
+  const hasZip = fs.existsSync(zipPath);
+  const engineOk = fs.existsSync(getBackendEngineExe());
+  return {
+    mode: 'packaged',
+    hasBackendZip: hasZip,
+    installed: engineOk,
+  };
+});
+
+ipcMain.handle('installer:default-install-dir', () => {
+  return path.join(app.getPath('documents'), 'AutoScriptor');
+});
+
+ipcMain.handle('installer:run-packaged', async (_event, opts) => {
+  const installRoot = path.resolve(String(opts && opts.installRoot ? opts.installRoot : '').trim());
+  if (installRoot.length < 4) {
+    throw new Error('请选择有效的安装目录');
+  }
+  if (process.platform === 'win32') {
+    const low = installRoot.toLowerCase();
+    if (/^[a-z]:\\windows$/i.test(low) || low.includes(':\\windows\\system32')) {
+      throw new Error('请勿安装到 Windows 系统目录，请选择其他盘符或用户目录下的文件夹');
+    }
+  }
+  const { runPackagedInstall } = require('./install-packaged.cjs');
+  const pkg = require('./package.json');
+  const send = (data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('installer:progress', data);
+    }
+  };
+  await runPackagedInstall({
+    installRoot,
+    resourcesPath: process.resourcesPath,
+    zipPath: getBackendZipPath(),
+    exeDir: path.dirname(process.execPath),
+    appVersion: pkg.version,
+    userDataPath: app.getPath('userData'),
+    send,
+  });
+  invalidateRootCache();
+});
 ipcMain.on('installer:start', (event, config) => {
   const pythonPath = findPython();
-  const args = [INSTALL_STEP_SCRIPT, '--project-root', ROOT];
+  const args = [installStepScriptPath(), '--project-root', getRoot()];
   if (config && config.pipSource) {
     args.push('--pip-source', config.pipSource);
   }
@@ -389,7 +519,7 @@ ipcMain.on('installer:start', (event, config) => {
   console.log('[installer] Starting:', pythonPath, args.join(' '));
 
   installerProc = spawn(pythonPath, args, {
-    cwd: ROOT,
+    cwd: getRoot(),
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
       ...process.env,
@@ -459,7 +589,7 @@ ipcMain.on('installer:launch', () => {
 
 // ── Installer path-verification IPC ─────────────────────────────────────────
 ipcMain.handle('installer:read-config-paths', () => {
-  const cfgPath = path.join(ROOT, 'config.json');
+  const cfgPath = path.join(getRoot(), 'config.json');
   try {
     const data = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
     return data.emulator || {};
@@ -486,7 +616,7 @@ ipcMain.handle('installer:validate-path', (_event, p) => {
 });
 
 ipcMain.handle('installer:save-paths', (_event, paths) => {
-  const cfgPath = path.join(ROOT, 'config.json');
+  const cfgPath = path.join(getRoot(), 'config.json');
   try {
     const data = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
     if (!data.emulator) data.emulator = {};

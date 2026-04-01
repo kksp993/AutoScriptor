@@ -36,6 +36,49 @@ _ALLOWED_DOMAINS_JS = "bbs.4399.cn|my.4399.com"
 
 _cache: dict[str, Any] = {}
 
+# 从 HTML 中移除会拉起「登录 / 通行证」弹窗的外链脚本（在服务端处理，避免脚本先执行）
+_SCRIPT_TAG_WITH_SRC = re.compile(
+    r"<script\b[^>]*\bsrc\s*=\s*['\"]([^'\"]+)['\"][^>]*>\s*</script>",
+    re.I | re.DOTALL,
+)
+# src 中含以下子串则整段 script 删除（小写比较；宜窄不宜宽，避免误伤正文脚本）
+_LOGIN_SCRIPT_SRC_MARKERS = (
+    "passport.4399",
+    "uni.4399",
+    "u.4399.com",
+    "sso.4399",
+    "oauth.4399",
+    "/passport/",
+    "/sso/",
+    "unilogin",
+    "uni_login",
+)
+
+# 注入到 <head>：先隐藏常见弹层，减少闪屏（与下方 JS 配合）
+_HEAD_HIDE_LOGIN_CSS = (
+    "<style data-proxy-hide-login>"
+    ".layui-layer,.layui-layer-shade,.layui-layer-mask,.layui-layer-dialog,"
+    "#layui-layer,.layui-layer-content,.layui-layer-page,"
+    "[class*='login_dialog'],[class*='login_dailog'],[id*='login_box'],[id*='Login'],"
+    "[class*='j-login'],[class*='passport'],[class*='popup_login'],[class*='pop_login'],"
+    ".thread_login,.m-btn_login,.cn_login,.fdialog_wg,.fdialog_hd,.fdialog_content"
+    "{display:none!important;visibility:hidden!important;pointer-events:none!important}"
+    "</style>"
+)
+
+
+def _strip_login_scripts(html: str) -> str:
+    """删除外链 script 中指向 4399 通行证 / 统一登录 等脚本，减轻 iframe 内登录骚扰。"""
+
+    def _repl(m: re.Match) -> str:
+        src = m.group(1).lower()
+        if any(marker in src for marker in _LOGIN_SCRIPT_SRC_MARKERS):
+            return ""
+        return m.group(0)
+
+    return _SCRIPT_TAG_WITH_SRC.sub(_repl, html)
+
+
 # 注入到每个代理页面的 JS：运行时拦截 **所有** 导航行为
 # 1. 点击 <a> -> 改 href 为代理再 _self 导航
 # 2. window.open -> 同样走代理
@@ -43,37 +86,78 @@ _cache: dict[str, Any] = {}
 _NAV_INTERCEPTOR_JS = r"""
 <script data-proxy-interceptor>
 (function(){
-  /* ── A. 干掉 4399 登录弹窗 / 遮罩 ── */
+  /* ── A. 干掉 4399 登录弹窗 / 遮罩（含 bbs + my.4399） ── */
   function killLogin(){
-    /* UniLogin 初始化可能在 DOMContentLoaded 之后弹窗，定时清除 */
     var sels = [
       '.thread_login','.m-btn_login','.cn_login','.loginbtns',
-      '.j-login_dailog','.u_logform','.u_container','.m-dialog',
-      '#j-unlogin','.my_ftop'
+      '.j-login_dailog','.j-login_dialog','.u_logform','.u_container','.m-dialog',
+      '#j-unlogin','.my_ftop',
+      '#loginBg','#login_box','#j-popup-login',
+      '#newsLoginBar','.news_login_bar','.not_login',
+      '.u_logbtn','.u_regbtn',
+      '[class*="login_dailog"]','[class*="login_dialog"]',
+      '.fdialog_wg','.fdialog_hd','.fdialog_fd','.fdialog_content','[class*="fdialog_"]',
+      '.dialog_hd','.dialog_bd','.dialog_age',
+      '.my_unlogin','.j-user-login',
+      '.layui-layer','.layui-layer-shade','.layui-layer-mask','.layui-layer-dialog',
+      '#layui-layer','.layui-layer-content','.layui-layer-page',
+      '.pop_login','.login_pop','#login_pop','.wind_layer','#windLayer',
+      '[class*="popup_login"]','[class*="passport"]','[id*="passport"]',
+      '.age_dialog','.age-tip','.realname','.verify_box'
     ];
     sels.forEach(function(s){
-      document.querySelectorAll(s).forEach(function(el){ el.remove(); });
+      try {
+        document.querySelectorAll(s).forEach(function(el){ el.remove(); });
+      } catch (e) {}
     });
-    /* 登录弹窗可能用 fixed/absolute 定位 + 高 z-index 覆盖 */
-    document.querySelectorAll('[class*="mask"],[class*="cover"],[class*="overlay"]').forEach(function(el){
+    document.querySelectorAll('iframe').forEach(function(el){
+      var s = (el.getAttribute('src') || el.src || '');
+      if (/login|passport|sso|oauth|account|verify|实名|u\.4399|uni\.4399|passport\.4399|webapi\.4399|static\.4399.*passport|\/user\/|\/User\//i.test(s)) { el.remove(); }
+    });
+    document.querySelectorAll('[class*="mask"],[class*="cover"],[class*="overlay"],[class*="shade"]').forEach(function(el){
       var st = getComputedStyle(el);
       if (st.position === 'fixed' || st.position === 'absolute') el.remove();
     });
-    /* 恢复被 overflow:hidden 锁死的 body 滚动 */
+    try {
+      document.querySelectorAll('body > div').forEach(function(el){
+        var st = getComputedStyle(el);
+        var z = parseInt(st.zIndex, 10) || 0;
+        if (st.position === 'fixed' && z >= 9999 && el.scrollHeight >= window.innerHeight * 0.5) {
+          if (/login|passport|dialog|mask|shade|弹|登录|fdialog|layui|passport/i.test(el.className + ' ' + (el.id || ''))) el.remove();
+        }
+      });
+    } catch (e) {}
     document.body.style.overflow = 'auto';
     document.documentElement.style.overflow = 'auto';
+    document.body.classList.remove('layui-layer-wrap');
   }
-  /* 页面加载时立即清一次，再延迟清几次（有些弹窗是异步渲染的） */
   killLogin();
   document.addEventListener('DOMContentLoaded', killLogin);
-  setTimeout(killLogin, 300);
-  setTimeout(killLogin, 800);
-  setTimeout(killLogin, 2000);
-  /* 阻止 UniLogin 弹出：把它替换成空函数 */
-  window.UniLogin = window.UniLogin || {};
-  window.UniLogin.showPopupLogin = function(){};
-  window.UniLogin.setUnionLoginProps = function(){};
-  window.UniLoginInit = function(){};
+  [300, 800, 2000, 4000].forEach(function(ms){ setTimeout(killLogin, ms); });
+  try {
+    var moTimer = null;
+    var mo = new MutationObserver(function(){
+      if (moTimer) clearTimeout(moTimer);
+      moTimer = setTimeout(function(){ moTimer = null; killLogin(); }, 80);
+    });
+    mo.observe(document.documentElement, { childList: true, subtree: true });
+  } catch (e) {}
+  function sealUni(){
+    var U = window.UniLogin || {};
+    window.UniLogin = U;
+    U.showPopupLogin = function(){};
+    U.showPopupReg = function(){};
+    U.setUnionLoginProps = function(){};
+    U.getUid = function(){ return 0; };
+    window.UniLoginInit = function(){};
+  }
+  sealUni();
+  var _sealTick = 0;
+  var _sealId = setInterval(function(){
+    sealUni();
+    killLogin();
+    if (++_sealTick >= 200) clearInterval(_sealId);
+  }, 250);
 
   /* ── B. 站内链接走代理 ── */
   var ALLOWED = /^https?:\/\/(""" + _ALLOWED_DOMAINS_JS + r""")(\/|$|\?)/i;
@@ -223,25 +307,30 @@ async def proxy_page(url: str = Query(..., description="要代理的 4399 帖子
         return HTMLResponse("<h3>不允许的域名</h3>", status_code=403)
 
     # 提前注入到 <head> 最前面：在 4399 自身脚本运行前就把 UniLogin 拦截掉
+    # 注意：<base> 必须与当前页面域名一致，否则 my.4399.com 页面会错误解析相对路径导致白屏
+    scheme = parsed.scheme or "https"
+    base_origin = f"{scheme}://{parsed.netloc}/"
     _HEAD_EARLY_BLOCK = (
-        '<script>window.UniLogin={showPopupLogin:function(){},setUnionLoginProps:function(){}};'
-        'window.UniLoginInit=function(){};'
-        '</script>'
+        "<script>"
+        "window.UniLogin={showPopupLogin:function(){},showPopupReg:function(){},setUnionLoginProps:function(){},"
+        "getUid:function(){return 0},logout:function(){}};"
+        "window.UniLoginInit=function(){};"
+        "window.showPopupLogin=function(){};window.showLogin=function(){};"
+        "</script>"
     )
 
     try:
         resp = requests.get(url, headers=_BROWSER_HEADERS, timeout=20)
         resp.encoding = "utf-8"
-        content = resp.text
+        content = _strip_login_scripts(resp.text)
         if "<base" not in content[:2000].lower():
             content = content.replace(
                 "<head>",
-                "<head>" + _HEAD_EARLY_BLOCK
-                + '<base href="https://bbs.4399.cn/">',
+                "<head>" + _HEAD_EARLY_BLOCK + _HEAD_HIDE_LOGIN_CSS + f'<base href="{base_origin}">',
                 1,
             )
         else:
-            content = content.replace("<head>", "<head>" + _HEAD_EARLY_BLOCK, 1)
+            content = content.replace("<head>", "<head>" + _HEAD_EARLY_BLOCK + _HEAD_HIDE_LOGIN_CSS, 1)
         content = content.replace("</body>", _NAV_INTERCEPTOR_JS + "</body>", 1)
         return HTMLResponse(content)
     except Exception as e:

@@ -169,6 +169,8 @@
 
         <editor-panel v-if="activeTab==='editor'"></editor-panel>
 
+        <error-archives-panel v-if="activeTab==='errorArchives'"></error-archives-panel>
+
         <update-panel v-if="activeTab==='updater'"></update-panel>
 
         <settings-panel v-if="activeTab==='settings'"
@@ -315,7 +317,7 @@
 
   <!-- Vue 组件 -->
   <script src="/static/js/components/NewsPanel.js?v=3"></script>
-  <script src="/static/js/components/AppSidebar.js?v=11"></script>
+  <script src="/static/js/components/AppSidebar.js?v=12"></script>
   <script src="/static/js/task_help_docs.js?v=1"></script>
   <script src="/static/js/components/TaskTree.js?v=10"></script>
   <script src="/static/js/components/Overview.js?v=12"></script>
@@ -326,6 +328,7 @@
   <script src="/static/js/components/editor/EditorCanvas.js?v=10"></script>
   <script src="/static/js/components/editor/EditorControls.js?v=14"></script>
   <script src="/static/js/components/editor/EditorPanel.js?v=24"></script>
-  <script src="/static/js/app.js?v=13"></script>
+  <script src="/static/js/components/ErrorArchivesPanel.js?v=4"></script>
+  <script src="/static/js/app.js?v=14"></script>
 </body>
 </html>

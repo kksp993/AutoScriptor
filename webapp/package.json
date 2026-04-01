@@ -6,15 +6,25 @@
   "private": true,
   "scripts": {
     "postinstall": "node ../scripts/npm-postinstall.js",
+    "prebuild": "node scripts/ensure-ico.cjs",
     "start": "electron .",
+    "prepare-release-shell": "node scripts/prepare-release-shell.cjs",
+    "verify-pack": "node scripts/verify-pack.cjs",
     "build": "electron-builder build --win --config electron-builder.config.js",
     "build:portable": "electron-builder build --win portable --config electron-builder.config.js"
   },
   "dependencies": {
-    "tree-kill": "^1.2.2"
+    "tree-kill": "^1.2.2",
+    "yauzl": "^3.3.0"
   },
   "devDependencies": {
-    "electron": "^28.3.3",
-    "electron-builder": "^24.9.4"
+    "electron": "^41.1.0",
+    "electron-builder": "^26.8.1",
+    "html-minifier-terser": "^7.2.0",
+    "javascript-obfuscator": "^4.1.1",
+    "png-to-ico": "^3.0.1"
+  },
+  "overrides": {
+    "minimatch": "10.2.4"
   }
 }

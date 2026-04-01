@@ -25,6 +25,29 @@ try:
 except Exception:
     _SERVER_AVAILABLE = False
 
+from services.webui.security import (
+    grant_credential_unlock,
+    validate_credential_unlock,
+    revoke_credential_unlock,
+)
+
+
+# ── 安全凭据解锁（不依赖完整 server 依赖树） ──
+
+
+class TestCredentialUnlock(unittest.TestCase):
+    """grant / validate / revoke 令牌生命周期"""
+
+    def test_grant_validate_revoke(self):
+        t = grant_credential_unlock()
+        self.assertTrue(validate_credential_unlock(t))
+        revoke_credential_unlock(t)
+        self.assertFalse(validate_credential_unlock(t))
+
+    def test_empty_token_invalid(self):
+        self.assertFalse(validate_credential_unlock(None))
+        self.assertFalse(validate_credential_unlock(""))
+
 
 # ── 辅助函数单元测试 ──
 
@@ -239,6 +262,10 @@ class TestFastAPIApp(unittest.TestCase):
     def test_api_verify_route(self):
         self.assertIn("/api/verify", self.routes)
 
+    def test_api_credential_routes(self):
+        self.assertIn("/api/credential/status", self.routes)
+        self.assertIn("/api/credential/revoke", self.routes)
+
     def test_api_account_route(self):
         self.assertIn("/api/account", self.routes)
 
@@ -268,7 +295,7 @@ class TestFrontendStructure(unittest.TestCase):
 
     def test_component_files_exist(self):
         components_dir = os.path.join(STATIC_DIR, "js", "components")
-        expected = ["TaskTree.js", "Overview.js", "TaskPanel.js", "Settings.js"]
+        expected = ["TaskTree.js", "Overview.js", "TaskPanel.js", "Settings.js", "ErrorArchivesPanel.js"]
         for name in expected:
             path = os.path.join(components_dir, name)
             self.assertTrue(os.path.isfile(path), f"missing component: {name}")
@@ -290,6 +317,7 @@ class TestFrontendStructure(unittest.TestCase):
         self.assertIn("overview-panel", html)
         self.assertIn("task-panel", html)
         self.assertIn("settings-panel", html)
+        self.assertIn("error-archives-panel", html)
 
 
 class TestVueComponentsContent(unittest.TestCase):
@@ -360,6 +388,7 @@ class TestAppJsContent(unittest.TestCase):
         self.assertIn("OverviewPanel", self.content)
         self.assertIn("TaskPanel", self.content)
         self.assertIn("SettingsPanel", self.content)
+        self.assertIn("ErrorArchivesPanel", self.content)
 
     def test_default_tab_is_overview(self):
         self.assertIn("'overview'", self.content)

@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld('electron', {
   // Installer APIs
   installer: {
     getProjectRoot: () => ipcRenderer.invoke('installer:get-project-root'),
+    getInstallerMode: () => ipcRenderer.invoke('installer:get-mode'),
+    defaultInstallDir: () => ipcRenderer.invoke('installer:default-install-dir'),
+    runPackagedInstall: (opts) => ipcRenderer.invoke('installer:run-packaged', opts),
     startInstall:   (config) => ipcRenderer.send('installer:start', config),
     onProgress:     (cb) => ipcRenderer.on('installer:progress', (_e, data) => cb(data)),
     launch:         () => ipcRenderer.send('installer:launch'),

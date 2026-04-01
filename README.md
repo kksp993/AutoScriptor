@@ -39,6 +39,8 @@ AutoScriptor 是一个基于 Python 的自动化脚本与任务编排器，专�
 
 如需完整的入门到进阶与 API 参考，请查阅: [docs/AutoScriptor/API.md](docs/AutoScriptor/API.md)
 
+**发行构建与日常运行**（`build_release.py` 参数、portable/NSIS、增量缓存、安装向导、`backend.zip` 与排错）：[docs/AutoScriptor/release-build-and-run.md](docs/AutoScriptor/release-build-and-run.md)
+
 ## 环境配置
 
 **系统要求**：
@@ -99,6 +101,8 @@ AutoScriptor 是一个基于 Python 的自动化脚本与任务编排器，专�
    ```
 
 5. 按照安装器要求一步步安装依赖到 venv，若发生错误，请删除 .venv 重试。
+
+6. **从源码打发行包（维护者）**：在仓库根目录用 **`.venv-nuitka`** 执行 `python scripts/build_release.py`（可加 `-j 16` 等），默认产物为 **`dist_electron/AutoScriptor_Zao_Install.exe`**（单文件；首次运行即 HTML 安装向导，解压引擎并配置 MuMu/ADB）。完整说明见上文 **release-build-and-run** 文档。
 
 ## 游戏内容配置
 
@@ -193,7 +197,7 @@ AutoScriptor/
 │   ├── webui/            # Web 可视化界面（FastAPI + 静态前端）
 │   └── core/             # 核心服务（任务管理等）
 ├── webapp/               # Electron 桌面客户端（npm start）
-├── gui.py                # Electron 调用的 WebUI 入口（等同启动 uvicorn）
+├── gui.py                # 后端 WebUI 入口（**日常使用请走 webapp：`npm start`**）
 ├── ZmxyOL/               # 游戏任务定义
 │   ├── task/             # 任务实现
 │   ├── nav/              # 导航和环境管理

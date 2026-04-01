@@ -57,6 +57,8 @@ const config = {
       { target: 'portable', arch: ['x64'] },
     ],
     icon: 'buildResources/icon.ico',
+    // 避免拉取 winCodeSign 并在解压时创建符号链接（无开发者模式/非管理员会失败）
+    signAndEditExecutable: false,
   },
 
   nsis: {
@@ -67,6 +69,7 @@ const config = {
     shortcutName: '造笔',
     installerIcon: 'buildResources/icon.ico',
     uninstallerIcon: 'buildResources/icon.ico',
+    compression: 'normal',
   },
 
   portable: {

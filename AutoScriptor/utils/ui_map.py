@@ -37,9 +37,11 @@ class UIMapManager:
 
     def init_ui(self, app_name: str):
             try:
+                from AutoScriptor.utils.paths import get_assets_dir
+                assets_root = str(get_assets_dir())
                 logger.info("正在初始化 UI Map，这可能需要一些时间...")
                 start_time = time.time()
-                csv_path = os.path.join(os.getcwd(), app_name, "assets", 'config', 'ui_map.csv')
+                csv_path = os.path.join(assets_root, 'config', 'ui_map.csv')
                 logger.info(f"加载 UI Map 配置文件: {os.path.abspath(csv_path)}")
                 
                 df = pd.read_csv(csv_path, header=0, encoding='utf-8')
@@ -53,7 +55,7 @@ class UIMapManager:
                     except ValueError:
                         box0 = Box(0, 0, 1280, 720)
                     
-                    img_path = os.path.abspath(os.path.join(os.getcwd(), app_name, 'assets', 'pic', img_name)) if isinstance(img_name, str) else None
+                    img_path = os.path.abspath(os.path.join(assets_root, 'pic', img_name)) if isinstance(img_name, str) else None
                     self._ui[key] = UiEntry(key, box0, img_path, text_val or None)
                     
                     # 每处理100个条目显示一次进度

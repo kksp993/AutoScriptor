@@ -3,6 +3,7 @@ import importlib
 import os
 import pathlib
 from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.paths import is_compiled
 from AutoScriptor.utils.task_registry import task_registry
 from ZmxyOL.task.translations import translate_path_part, normalize_to_cn
 
@@ -94,7 +95,13 @@ def get_custom_order_key(path: pathlib.Path):
 
 
 def gather_py_files():
-    """Collect all Python files under PACKAGE_PATH."""
+    """Collect all Python files under PACKAGE_PATH.
+
+    In compiled (Nuitka) mode, .py files don't exist on disk.
+    Return an empty list -- import_modules() will use the manifest instead.
+    """
+    if is_compiled():
+        return []
     return list(PACKAGE_PATH.rglob("*.py"))
 
 
@@ -115,6 +122,20 @@ def print_sorted_files(py_files):
 
 
 def import_modules(py_files):
+    """Import task modules.
+
+    In compiled mode (py_files is empty), use the explicit manifest list.
+    In dev mode, derive module names from file paths as before.
+    """
+    if not py_files and is_compiled():
+        from ZmxyOL.task._manifest import TASK_MODULES
+        for module_name in TASK_MODULES:
+            try:
+                importlib.import_module(module_name)
+            except Exception as e:
+                print(f"Error importing {module_name}: {e}")
+        return
+
     for py_file in py_files:
         if py_file.name == "__init__.py":
             continue
@@ -223,7 +244,10 @@ def update_order_files(py_files):
     """基于实际文件系统生成各层级 _order.txt（不创建新目录）。
     - 子项按已加载并排序后的 cfg['tasks'] 的注册顺序排序；若无记录则置后。
     - 根目录与 daily_task/hyper 可覆盖顺序，但仅包含已存在的子项。
+    - 编译模式下跳过（包目录不可写且无源文件）。
     """
+    if is_compiled():
+        return {}
     fixed_orders = {
         "": ["daily_task", "weekly_task", "event_task", "normal_task"],
     }
