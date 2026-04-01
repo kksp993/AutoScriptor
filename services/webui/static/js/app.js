@@ -1,7 +1,7 @@
 const { createApp, ref, reactive, computed, nextTick } = Vue;
 
 const app = createApp({
-  components: { AppSidebar, NewsPanel, OverviewPanel, SchedulerPanel, TaskPanel, SettingsPanel, EditorPanel, UpdatePanel },
+  components: { AppSidebar, NewsPanel, OverviewPanel, SchedulerPanel, TaskPanel, SettingsPanel, EditorPanel, ErrorArchivesPanel, UpdatePanel },
   setup() {
     const configData = reactive({});
     const activeTab = ref('news');
@@ -90,27 +90,33 @@ const app = createApp({
     const loginPassword = ref('');
 
     // 总览「安全密码」与角色名解耦：characterName 来自账号 JSON，刷新后即有，不代表已验证。
-    const OVERVIEW_SECURITY_SESSION_KEY = 'webui_overview_security_ok';
-    function _readOverviewSecuritySession() {
-      try {
-        return typeof sessionStorage !== 'undefined' && sessionStorage.getItem(OVERVIEW_SECURITY_SESSION_KEY) === '1';
-      } catch (e) {
-        return false;
-      }
-    }
+    // 是否已解锁以服务端 HttpOnly Cookie + GET /api/credential/status 为准，禁止仅靠本地缓存「重放」绕过。
+    const overviewSecurityUnlocked = ref(false);
+
     function markOverviewSecurityUnlocked() {
       overviewSecurityUnlocked.value = true;
-      try {
-        sessionStorage.setItem(OVERVIEW_SECURITY_SESSION_KEY, '1');
-      } catch (e) { /* ignore */ }
     }
-    function clearOverviewSecurityUnlocked() {
+    async function clearOverviewSecurityUnlocked() {
       overviewSecurityUnlocked.value = false;
       try {
-        sessionStorage.removeItem(OVERVIEW_SECURITY_SESSION_KEY);
+        await fetch('/api/credential/revoke', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ _timestamp: Date.now() / 1000 }),
+        });
       } catch (e) { /* ignore */ }
     }
-    const overviewSecurityUnlocked = ref(_readOverviewSecuritySession());
+    async function fetchCredentialStatus() {
+      try {
+        const data = await API.get('/credential/status');
+        if (data && !data.error) {
+          overviewSecurityUnlocked.value = !!data.unlocked;
+        }
+      } catch (e) {
+        overviewSecurityUnlocked.value = false;
+      }
+    }
 
     // ── 主题（固定浅色） ──
     const currentTheme = ref('light');
@@ -132,7 +138,8 @@ const app = createApp({
 
     const pageTitle = computed(() => {
       const map = {
-        news: '资讯', overview: '总览', scheduler: '调度', editor: '编辑器', updater: '检查更新', settings: '设置',
+        news: '资讯', overview: '总览', scheduler: '调度', editor: '编辑器',
+        errorArchives: '错误汇总', updater: '检查更新', settings: '设置',
         daily: '每日任务', weekly: '每周任务', general: '一般任务', event: '活动任务',
       };
       return map[activeTab.value] || '';
@@ -167,10 +174,13 @@ const app = createApp({
 
     // ── API helpers ──
     const API = {
-      async get(url) { return (await fetch('/api' + url)).json(); },
+      async get(url) {
+        return (await fetch('/api' + url, { credentials: 'same-origin' })).json();
+      },
       async post(url, body) {
         return (await fetch('/api' + url, {
           method: 'POST',
+          credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...body, _timestamp: Date.now() / 1000 }),
         })).json();
@@ -178,6 +188,7 @@ const app = createApp({
       async postRaw(url, body) {
         return fetch('/api' + url, {
           method: 'POST',
+          credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...body, _timestamp: Date.now() / 1000 }),
         });
@@ -320,6 +331,10 @@ const app = createApp({
 
     // ── actions ──
     async function startRun() {
+      if (!overviewSecurityUnlocked.value) {
+        ElementPlus.ElMessage.warning('请先验证安全密码后再执行任务');
+        return;
+      }
       if (!characterName.value && !activeCharacter.name) {
         ElementPlus.ElMessage.warning('请先验证账号密码后再执行任务');
         return;
@@ -367,7 +382,11 @@ const app = createApp({
         const res = await API.postRaw('/run', { tasks, activate_scheduler: true, ...runCharacterPayload() });
         const data = await res.json();
         if (res.status === 400) { ElementPlus.ElMessage.error(data.message || '角色切换失败'); return; }
-        if (res.status === 403) { ElementPlus.ElMessage.warning(data.message || '请先验证账号密码'); return; }
+        if (res.status === 403) {
+          if (data && data.need_credential_unlock) await fetchCredentialStatus();
+          ElementPlus.ElMessage.warning((data && data.message) || '请先验证安全密码后再执行任务');
+          return;
+        }
         fetchSchedulerStatus();
         fetchOverview();
         if (res.ok && isSchedulerView && !tasks.length) {
@@ -377,6 +396,10 @@ const app = createApp({
     }
 
     async function runSingleTask(taskPath) {
+      if (!overviewSecurityUnlocked.value) {
+        ElementPlus.ElMessage.warning('请先验证安全密码后再执行任务');
+        return;
+      }
       if (!characterName.value && !activeCharacter.name) {
         ElementPlus.ElMessage.warning('请先验证账号密码后再执行任务');
         return;
@@ -386,7 +409,11 @@ const app = createApp({
         const res = await API.postRaw('/run', { tasks: [fullPath], activate_scheduler: false, ...runCharacterPayload() });
         const data = await res.json();
         if (res.status === 400) { ElementPlus.ElMessage.error(data.message || '角色切换失败'); return; }
-        if (res.status === 403) { ElementPlus.ElMessage.warning(data.message || '请先验证账号密码'); return; }
+        if (res.status === 403) {
+          if (data && data.need_credential_unlock) await fetchCredentialStatus();
+          ElementPlus.ElMessage.warning((data && data.message) || '请先验证安全密码后再执行任务');
+          return;
+        }
         ElementPlus.ElMessage.success('已加入队列: ' + taskPath.split('/').pop());
         fetchSchedulerStatus();
         fetchOverview();
@@ -430,6 +457,7 @@ const app = createApp({
           if (!configData.game) configData.game = {};
           configData.game.character_name = characterName.value;
           await refreshConfig(true);
+          await fetchCredentialStatus();
           fetchOverview();
           fetchAllTasksSummary();
           loadDispatchQueue();
@@ -620,7 +648,7 @@ const app = createApp({
     // ── 密码认证 ──
     async function checkAuth() {
       try {
-        const res = await fetch('/api/refresh');
+        const res = await fetch('/api/refresh', { credentials: 'same-origin' });
         if (res.status === 401) {
           authRequired.value = true;
           return false;
@@ -634,6 +662,7 @@ const app = createApp({
       try {
         const res = await fetch('/api/auth', {
           method: 'POST',
+          credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: loginPassword.value }),
         });
@@ -641,7 +670,8 @@ const app = createApp({
           authRequired.value = false;
           loginPassword.value = '';
           ElementPlus.ElMessage.success('登录成功');
-          refreshConfig(true);
+          await refreshConfig(true);
+          await fetchCredentialStatus();
           fetchOverview();
           setupWebSocket();
         } else {
@@ -691,7 +721,8 @@ const app = createApp({
             Object.assign(charactersTree, data.characters);
           }
           ElementPlus.ElMessage.success('已切换到账号: ' + name);
-          refreshConfig(true);
+          await refreshConfig(true);
+          await fetchCredentialStatus();
           fetchAllTasksSummary();
           loadDispatchQueue();
           markOverviewSecurityUnlocked();
@@ -860,6 +891,10 @@ const app = createApp({
 
     async function runAllDispatchTasks() {
       if (isDispatchRunning.value) return;
+      if (!overviewSecurityUnlocked.value) {
+        ElementPlus.ElMessage.warning('请先验证安全密码后再执行队列');
+        return;
+      }
       if (!dispatchQueue.value.length) {
         ElementPlus.ElMessage.info('调度队列为空');
         return;
@@ -951,7 +986,8 @@ const app = createApp({
       const ok = await checkAuth();
       if (!ok) return;
       setupWebSocket();
-      refreshConfig(true);
+      await refreshConfig(true);
+      await fetchCredentialStatus();
       fetchOverview();
       fetchSchedulerStatus();
       fetchAccounts();

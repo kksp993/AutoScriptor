@@ -33,7 +33,7 @@ from services.core.banner import _print_banner
 from services.core.scheduler import scheduler, SchedulerState
 from AutoScriptor.utils.perf import set_thread_high_priority as _set_thread_high_priority
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, File, WebSocket, WebSocketDisconnect, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -70,8 +70,15 @@ _plain_fmt    = logging.Formatter(
     datefmt="%H:%M:%S",
 )
 
-sse_log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'logs'))
-os.makedirs(sse_log_dir, exist_ok=True)
+from AutoScriptor.utils.paths import get_logs_root, get_static_dir, get_vendor_dir
+from services.webui.error_archives import (
+    delete_archives,
+    get_archive_detail,
+    import_zip_bytes,
+    list_error_archives,
+    read_archive_file,
+)
+sse_log_dir = str(get_logs_root())
 sse_log_path = os.path.join(sse_log_dir, 'webui_sse.log')
 file_handler = logging.FileHandler(sse_log_path, encoding='utf-8')
 file_handler.setLevel(logging.INFO)
@@ -145,6 +152,11 @@ from services.webui.security import (
     login_limiter as _login_limiter,
     verify_limiter as _verify_limiter,
     SESSION_TTL as _SESSION_TTL,
+    grant_credential_unlock as _grant_credential_unlock,
+    validate_credential_unlock as _validate_credential_unlock,
+    revoke_credential_unlock as _revoke_credential_unlock,
+    CREDENTIAL_UNLOCK_COOKIE_NAME as _CREDENTIAL_UNLOCK_COOKIE_NAME,
+    CREDENTIAL_UNLOCK_TTL as _CREDENTIAL_UNLOCK_TTL,
 )
 
 
@@ -164,11 +176,49 @@ def _record_verify_failure(ip: str):
     _verify_limiter.record_failure(ip)
 
 
+def _credential_unlock_from_request(request: Request) -> str | None:
+    return request.cookies.get(_CREDENTIAL_UNLOCK_COOKIE_NAME) or request.headers.get(
+        "X-Credential-Unlock"
+    )
+
+
+def _attach_credential_unlock_cookie(response: JSONResponse, token: str) -> JSONResponse:
+    response.set_cookie(
+        _CREDENTIAL_UNLOCK_COOKIE_NAME,
+        token,
+        httponly=True,
+        samesite="strict",
+        max_age=_CREDENTIAL_UNLOCK_TTL,
+        path="/",
+    )
+    return response
+
+
+def _clear_credential_unlock_cookie(response: JSONResponse) -> JSONResponse:
+    response.delete_cookie(_CREDENTIAL_UNLOCK_COOKIE_NAME, path="/")
+    return response
+
+
+def _require_credential_unlock(request: Request) -> JSONResponse | None:
+    """执行自动化前须持有由 /api/verify 或带密钥切换账号签发的解锁 Cookie。"""
+    tok = _credential_unlock_from_request(request)
+    if not _validate_credential_unlock(tok):
+        return JSONResponse(
+            status_code=403,
+            content={
+                "status": "error",
+                "message": "请先验证安全密码后再执行任务",
+                "need_credential_unlock": True,
+            },
+        )
+    return None
+
+
 # ── Vendor 文件管理 ──
 
 _HERE = os.path.dirname(__file__)
-VENDOR_DIR = os.path.join(_HERE, 'vendor')
-STATIC_DIR = os.path.join(_HERE, 'static')
+VENDOR_DIR = str(get_vendor_dir())
+STATIC_DIR = str(get_static_dir())
 VENDOR_SOURCES = {
     'tailwind.css': 'https://cdn.tailwindcss.com',
     'vue.global.prod.js': 'https://unpkg.com/vue@3/dist/vue.global.prod.js',
@@ -373,12 +423,15 @@ async def auth_api(request: Request):
         if stored and not stored.startswith("pbkdf2$"):
             cfg._config.setdefault("deploy", {})["password"] = _hash_deploy_password(raw)
             cfg.save_config()
+        old_cred = _credential_unlock_from_request(request)
+        _revoke_credential_unlock(old_cred)
         session_token = _create_session()
         resp = JSONResponse(content={"status": "ok"})
         resp.set_cookie(
             "auth_token", session_token,
             httponly=True, samesite="strict", max_age=_SESSION_TTL,
         )
+        _clear_credential_unlock_cookie(resp)
         return resp
 
     _record_login_failure(client_ip)
@@ -573,6 +626,10 @@ async def run_tasks_api(request: Request):
     else:
         body = {}
 
+    err = _require_credential_unlock(request)
+    if err is not None:
+        return err
+
     err = _apply_run_character_from_body(body)
     if err is not None:
         return err
@@ -640,6 +697,22 @@ async def stop_tasks_api():
         return JSONResponse(status_code=500, content={'error': str(e)})
 
 
+@app.get("/api/credential/status")
+async def credential_status_api(request: Request):
+    """前端同步「是否已通过安全密码解锁」——以服务端 HttpOnly Cookie 为准，避免 sessionStorage 误放行。"""
+    tok = _credential_unlock_from_request(request)
+    return {"unlocked": _validate_credential_unlock(tok)}
+
+
+@app.post("/api/credential/revoke")
+async def credential_revoke_api(request: Request):
+    """用户主动「重新验证」时吊销解锁令牌并清除 Cookie。"""
+    old = _credential_unlock_from_request(request)
+    _revoke_credential_unlock(old)
+    resp = JSONResponse(content={"status": "ok"})
+    return _clear_credential_unlock_cookie(resp)
+
+
 @app.post("/api/verify")
 async def verify_account_api(request: Request):
     client_ip = request.client.host if request.client else "unknown"
@@ -649,20 +722,47 @@ async def verify_account_api(request: Request):
     data = await request.json()
     if not _check_request_freshness(data):
         return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
-    security_key = data.get('security_key', '')
-    TASK_MANAGER.reload_tasks(security_key)
-    cfg._config.setdefault('game', {})
+    security_key = data.get("security_key", "")
+    enc = cfg._account_data.get("encryption", {})
+    has_enc = bool(enc.get("encrypted_data"))
+    if has_enc and not str(security_key).strip():
+        return JSONResponse(status_code=401, content={"error": "请输入安全密码"})
+
+    try:
+        TASK_MANAGER.reload_tasks(security_key)
+    except Exception as e:
+        logger.error("verify reload_tasks: %s", e)
+        return JSONResponse(status_code=500, content={"error": "加载配置失败"})
+
+    cfg._config.setdefault("game", {})
     character_name = cfg._config.get("game", {}).get("character_name", "")
     if not character_name:
         ac = cfg.active_character()
         character_name = ac.get("name", "")
-        cfg._config['game']['character_name'] = character_name
-    if not character_name and security_key:
-        _record_verify_failure(client_ip)
-    return {
-        "character_name": character_name,
-        "active_character": cfg.active_character(),
-    }
+        if character_name:
+            cfg._config["game"]["character_name"] = character_name
+
+    if has_enc:
+        if not cfg._config.get("game", {}).get("account"):
+            _record_verify_failure(client_ip)
+            return JSONResponse(status_code=401, content={"error": "安全密码错误"})
+
+    if not character_name:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "账号中未找到角色，请先选择或创建角色"},
+        )
+
+    old_tok = _credential_unlock_from_request(request)
+    _revoke_credential_unlock(old_tok)
+    tok = _grant_credential_unlock()
+    resp = JSONResponse(
+        content={
+            "character_name": character_name,
+            "active_character": cfg.active_character(),
+        }
+    )
+    return _attach_credential_unlock_cookie(resp, tok)
 
 
 @app.post("/api/account")
@@ -715,7 +815,11 @@ async def update_account_credentials_api(request: Request):
     except Exception as e:
         logger.error("update_account error: %s", e)
         return JSONResponse(status_code=500, content={"error": str(e)})
-    return {"character_name": character_name}
+    old_tok = _credential_unlock_from_request(request)
+    _revoke_credential_unlock(old_tok)
+    tok = _grant_credential_unlock()
+    resp = JSONResponse(content={"character_name": character_name})
+    return _attach_credential_unlock_cookie(resp, tok)
 
 
 @app.post("/api/enum-options")
@@ -985,12 +1089,18 @@ async def accounts_switch_api(request: Request):
         scheduler.invalidate_login()
         character_name = cfg._config.get("game", {}).get("character_name", "")
         ac = cfg.active_character()
-        return {
-            "current_account": name,
-            "character_name": character_name,
-            "active_character": ac,
-            "characters": _characters_summary(),
-        }
+        old_tok = _credential_unlock_from_request(request)
+        _revoke_credential_unlock(old_tok)
+        tok = _grant_credential_unlock()
+        resp = JSONResponse(
+            content={
+                "current_account": name,
+                "character_name": character_name,
+                "active_character": ac,
+                "characters": _characters_summary(),
+            }
+        )
+        return _attach_credential_unlock_cookie(resp, tok)
     except KeyError as e:
         return JSONResponse(status_code=404, content={"error": str(e)})
     except Exception as e:
@@ -1148,7 +1258,11 @@ async def profiles_switch_api(request: Request):
         TASK_MANAGER.reload_tasks(security_key)
         scheduler.invalidate_login()
         character_name = cfg._config.get("game", {}).get("character_name", "")
-        return {"current": name, "character_name": character_name}
+        old_tok = _credential_unlock_from_request(request)
+        _revoke_credential_unlock(old_tok)
+        tok = _grant_credential_unlock()
+        resp = JSONResponse(content={"current": name, "character_name": character_name})
+        return _attach_credential_unlock_cookie(resp, tok)
     except KeyError as e:
         return JSONResponse(status_code=404, content={"error": str(e)})
     except Exception as e:
@@ -1198,6 +1312,72 @@ async def config_import_api(request: Request):
         read_config()
         return {"status": "ok"}
     except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ── 错误归档 API ──
+
+@app.get("/api/error-archives")
+async def error_archives_list_api():
+    try:
+        return list_error_archives()
+    except Exception as e:
+        logger.exception("error-archives list failed")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/error-archives/detail")
+async def error_archives_detail_api(folder: str):
+    try:
+        detail = get_archive_detail(folder)
+        if not detail:
+            return JSONResponse(status_code=404, content={"error": "not found"})
+        return detail
+    except Exception as e:
+        logger.exception("error-archives detail failed")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/api/error-archives/file")
+async def error_archives_file_api(folder: str, path: str):
+    try:
+        p = read_archive_file(folder, path)
+        if not p:
+            return JSONResponse(status_code=404, content={"error": "not found"})
+        suffix = p.suffix.lower()
+        media = "image/png" if suffix == ".png" else "image/jpeg" if suffix in (".jpg", ".jpeg") else "application/octet-stream"
+        return FileResponse(p, media_type=media, filename=p.name)
+    except Exception as e:
+        logger.exception("error-archives file failed")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.delete("/api/error-archives")
+async def error_archives_delete_api(request: Request):
+    try:
+        data = await request.json()
+        folders = data.get("folders") or []
+        if not isinstance(folders, list):
+            return JSONResponse(status_code=400, content={"error": "folders must be a list"})
+        return delete_archives([str(x) for x in folders])
+    except Exception as e:
+        logger.exception("error-archives delete failed")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/error-archives/import")
+async def error_archives_import_api(file: UploadFile = File(...)):
+    try:
+        raw = await file.read()
+        if not raw:
+            return JSONResponse(status_code=400, content={"error": "empty file"})
+        name = (file.filename or "import").rsplit(".", 1)[0]
+        result = import_zip_bytes(raw, suggested_name=name)
+        if not result.get("ok"):
+            return JSONResponse(status_code=400, content=result)
+        return result
+    except Exception as e:
+        logger.exception("error-archives import failed")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 

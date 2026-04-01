@@ -54,10 +54,25 @@ _electron_force_utf8_stdio()
 
 import argparse
 import os
+import site
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
+# Nuitka 编译后 sys.path 由编译器自动管理，无需手动插入；
+# 开发模式下仍需将项目根加入 sys.path 以支持 import AutoScriptor / ZmxyOL
+_COMPILED = "__compiled__" in dir()
+if _COMPILED:
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(sys.executable)))
+    # standalone 下 site.USER_SITE 常为 None，Paddle 在 set_paddle_lib_path 等处会拼接失败
+    _exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    if getattr(site, "USER_SITE", None) is None:
+        site.USER_SITE = os.path.join(_exe_dir, ".user_site")
+        try:
+            os.makedirs(site.USER_SITE, exist_ok=True)
+        except OSError:
+            pass
+else:
+    ROOT = os.path.dirname(os.path.abspath(__file__))
+    if ROOT not in sys.path:
+        sys.path.insert(0, ROOT)
 
 parser = argparse.ArgumentParser(description='AutoScriptor web service')
 parser.add_argument('--host', default='127.0.0.1')

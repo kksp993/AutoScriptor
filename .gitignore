@@ -15,6 +15,15 @@
 **/.pytest_cache
 **/.mypy_cache
 **/.ruff_cache
+/.nuitka-cache
+# Nuitka 专用完整 Python venv（与 **/.venv 不同名，需单独忽略）
+/.venv-nuitka/
+# electron-builder 输出（与 **/dist 的「dist」目录名不同，需单独忽略）
+/dist_electron/
+# Nuitka 崩溃报告（本地排错）
+nuitka-crash-report.xml
+# Playwright / 调试截图（脚本目录）
+/scripts/_pw*.png
 **/.DS_Store
 **/.venv
 **/.env
@@ -35,4 +44,6 @@
 /.gitadd*
 /docs/refs/
 **/node_modules
+webapp/.release-staging
+webapp/buildResources/icon.ico
 /accounts/

@@ -1,0 +1,117 @@
+"""
+统一路径解析模块
+================
+为开发模式 (python gui.py) 和编译模式 (Nuitka standalone) 提供一致的路径 API。
+
+在开发模式下:
+  APP_ROOT  = 项目根目录 (包含 gui.py 的目录)
+  DATA_ROOT = 项目根目录 (config.json, accounts/, ZmxyOL/assets/ 等)
+
+在 Nuitka standalone 编译后:
+  APP_ROOT  = 安装目录 (造笔.exe 所在目录)
+  DATA_ROOT = APP_ROOT / data  (用户可编辑数据)
+
+环境变量 AUTOSCRIPTOR_DATA_DIR 可覆盖 DATA_ROOT (Electron main.js 会设置此变量)。
+"""
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+from functools import lru_cache
+
+
+def is_compiled() -> bool:
+    """当前是否运行在 Nuitka 编译后的二进制中。"""
+    # 须在模块 globals 上检测：函数内 dir() 无参时只含局部名，不含 __compiled__
+    if "__compiled__" in globals():
+        return True
+    # 少数环境下子模块未注入 __compiled__；用引擎 exe 名区分「python gui.py」与 standalone
+    try:
+        if Path(sys.executable).resolve().name.lower() == "autoscriptor-engine.exe":
+            return True
+    except OSError:
+        pass
+    return False
+
+
+@lru_cache(maxsize=1)
+def get_app_root() -> Path:
+    """应用根目录。
+
+    - 编译模式: gui.dist/ 所在目录的父级 (即安装目录)
+    - 开发模式: 项目根目录 (包含 gui.py)
+    """
+    if is_compiled():
+        return Path(sys.executable).resolve().parent.parent
+    # 开发模式: paths.py -> AutoScriptor/utils/ -> AutoScriptor/ -> 项目根
+    return Path(__file__).resolve().parent.parent.parent
+
+
+@lru_cache(maxsize=1)
+def get_data_root() -> Path:
+    """用户数据根目录 (config.json, accounts/, profiles 等)。
+
+    优先使用环境变量 AUTOSCRIPTOR_DATA_DIR (Electron 启动时设置)。
+    """
+    env_override = os.environ.get("AUTOSCRIPTOR_DATA_DIR")
+    if env_override:
+        return Path(env_override).resolve()
+    if is_compiled():
+        return get_app_root() / "data"
+    return get_app_root()
+
+
+@lru_cache(maxsize=1)
+def get_engine_root() -> Path:
+    """引擎文件目录 (编译后的 .pyd/.dll 所在处)。
+
+    - 编译模式: gui.dist/ 目录
+    - 开发模式: 项目根目录
+    """
+    if is_compiled():
+        return Path(sys.executable).resolve().parent
+    return get_app_root()
+
+
+@lru_cache(maxsize=1)
+def get_logs_root() -> Path:
+    """日志目录 (始终可写)。"""
+    root = get_data_root() / "logs"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def get_error_archives_dir() -> Path:
+    """任务错误归档目录 (与 log_archiver.archive_error 写入位置一致)。"""
+    d = get_logs_root() / "errors"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def get_profiles_dir() -> Path:
+    """配招 YAML 目录 (用户可编辑)。"""
+    if is_compiled():
+        return get_data_root() / "profiles"
+    return get_data_root() / "ZmxyOL" / "assets" / "profiles"
+
+
+def get_assets_dir() -> Path:
+    """ZmxyOL 资源目录 (ui_map.csv, pic/ 等)。"""
+    if is_compiled():
+        return get_data_root() / "assets"
+    return get_data_root() / "ZmxyOL" / "assets"
+
+
+def get_static_dir() -> Path:
+    """WebUI 静态文件目录。"""
+    if is_compiled():
+        return get_engine_root() / "services" / "webui" / "static"
+    return get_app_root() / "services" / "webui" / "static"
+
+
+def get_vendor_dir() -> Path:
+    """WebUI vendor 目录。"""
+    if is_compiled():
+        return get_engine_root() / "services" / "webui" / "vendor"
+    return get_app_root() / "services" / "webui" / "vendor"

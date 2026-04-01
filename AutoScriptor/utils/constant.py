@@ -30,8 +30,10 @@ class AutoConfig:
 
     def __init__(self):
         if not hasattr(self, '_initialized'):
-            self.CONFIG_PATH = os.path.join(os.getcwd(), "config.json")
-            self.ACCOUNTS_DIR = os.path.join(os.path.dirname(self.CONFIG_PATH), "accounts")
+            from AutoScriptor.utils.paths import get_data_root
+            data_root = str(get_data_root())
+            self.CONFIG_PATH = os.path.join(data_root, "config.json")
+            self.ACCOUNTS_DIR = os.path.join(data_root, "accounts")
             self._account_data = {}
             self._initialized = True
 

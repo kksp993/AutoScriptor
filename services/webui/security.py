@@ -107,3 +107,48 @@ def check_request_freshness(data: dict, max_age: int = 60) -> bool:
         return abs(_time.time() - float(ts)) <= max_age
     except (ValueError, TypeError):
         return False
+
+
+# ── 游戏凭据解锁（安全密码）会话 ──
+# 与 deploy 登录会话独立：仅凭磁盘上的 character_name 不能执行自动化，须先完成验证或带密钥切换账号。
+
+_credential_unlock_tokens: dict[str, float] = {}
+CREDENTIAL_UNLOCK_COOKIE_NAME = "credential_unlock"
+CREDENTIAL_UNLOCK_TTL = 3600 * 8  # 8 小时
+
+
+def _credential_cleanup_expired() -> None:
+    now = _time.time()
+    for k in [k for k, v in _credential_unlock_tokens.items() if v < now]:
+        _credential_unlock_tokens.pop(k, None)
+
+
+def grant_credential_unlock() -> str:
+    """签发新的解锁令牌（写入 HttpOnly Cookie，由服务端校验）。"""
+    _credential_cleanup_expired()
+    tok = _secrets.token_urlsafe(32)
+    _credential_unlock_tokens[tok] = _time.time() + CREDENTIAL_UNLOCK_TTL
+    return tok
+
+
+def validate_credential_unlock(token: str | None) -> bool:
+    if not token:
+        return False
+    _credential_cleanup_expired()
+    exp = _credential_unlock_tokens.get(token)
+    if exp is None:
+        return False
+    if exp < _time.time():
+        _credential_unlock_tokens.pop(token, None)
+        return False
+    return True
+
+
+def revoke_credential_unlock(token: str | None) -> None:
+    if token:
+        _credential_unlock_tokens.pop(token, None)
+
+
+def get_credential_unlock_tokens_for_tests() -> dict[str, float]:
+    """仅测试用：返回内部令牌表副本"""
+    return dict(_credential_unlock_tokens)

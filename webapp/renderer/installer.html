@@ -319,85 +319,7 @@
     .path-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
     .path-input:read-only { color: var(--text-secondary); cursor: default; }
 
-    /* ── Installing ────────────────────────────────────────── */
-    .install-steps {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      margin-bottom: 24px;
-    }
-    .install-step-item {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 14px;
-      border-radius: 10px;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      transition: border-color .3s, background .3s;
-    }
-    .install-step-item.running {
-      border-color: var(--border-accent);
-      background: var(--accent-soft);
-    }
-    .install-step-item.done {
-      border-color: rgba(22,163,74,0.15);
-      background: rgba(22,163,74,0.04);
-    }
-    .step-icon {
-      width: 24px; height: 24px;
-      border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 12px;
-      flex-shrink: 0;
-      transition: all .3s;
-    }
-    .step-icon.pending {
-      border: 2px solid #cbd5e1;
-      color: transparent;
-    }
-    .step-icon.running {
-      border: 2px solid var(--accent);
-      border-top-color: transparent;
-      animation: spin .8s linear infinite;
-    }
-    .step-icon.done {
-      background: var(--accent);
-      color: #fff;
-      border: none;
-      font-weight: 700;
-    }
-    .step-icon.error {
-      background: #ef4444;
-      color: #fff;
-      border: none;
-      font-weight: 700;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .step-info {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      min-width: 0;
-    }
-    .step-text {
-      font-size: 13px;
-      color: var(--text-secondary);
-    }
-    .step-eta {
-      font-size: 11px;
-      color: var(--text-muted);
-      letter-spacing: 0.2px;
-    }
-    .step-eta.slow {
-      color: #d97706;
-      font-weight: 500;
-    }
-    .install-step-item.running .step-text { color: var(--text-primary); font-weight: 500; }
-    .install-step-item.running .step-eta { color: var(--accent); font-weight: 400; }
-    .install-step-item.running .step-eta.slow { color: var(--accent); }
-    .install-step-item.done .step-text { color: var(--text-muted); }
-    .install-step-item.done .step-eta { display: none; }
+    /* ── Installing（步骤列表已移除：发行版仅 progress/log，与旧版四步 UI 不同步）── */
 
     /* Progress bar */
     .progress-section {
@@ -859,8 +781,12 @@
 
           <div class="setting-group">
             <div class="setting-label">安装路径</div>
+            <p class="subtitle" style="margin: -6px 0 10px; font-size: 12px; color: var(--text-muted);" id="installPathHint">
+              开发模式：显示项目根目录。发行版：请选择将存放 backend、data 与配置的目录（建议选择非系统盘）。
+            </p>
             <div class="path-input-row">
-              <input class="path-input" id="installPath" readonly />
+              <input class="path-input" id="installPath" readonly placeholder="选择目录…" />
+              <button type="button" class="btn-browse" id="btnBrowseInstall">浏览…</button>
             </div>
           </div>
         </div>
@@ -875,37 +801,6 @@
             <div class="warning-content">
               <div class="warning-title" id="warningTitle"></div>
               <div class="warning-detail" id="warningDetail"></div>
-            </div>
-          </div>
-
-          <div class="install-steps" id="installSteps">
-            <div class="install-step-item" data-sid="python">
-              <div class="step-icon pending">✓</div>
-              <div class="step-info">
-                <span class="step-text">检查 Python 环境</span>
-                <span class="step-eta">&lt; 1 秒</span>
-              </div>
-            </div>
-            <div class="install-step-item" data-sid="venv">
-              <div class="step-icon pending">✓</div>
-              <div class="step-info">
-                <span class="step-text">创建虚拟环境</span>
-                <span class="step-eta">约 5-10 秒</span>
-              </div>
-            </div>
-            <div class="install-step-item" data-sid="deps">
-              <div class="step-icon pending">✓</div>
-              <div class="step-info">
-                <span class="step-text">安装依赖包</span>
-                <span class="step-eta slow">约 3-8 分钟 · 需下载 ~500MB</span>
-              </div>
-            </div>
-            <div class="install-step-item" data-sid="config">
-              <div class="step-icon pending">✓</div>
-              <div class="step-info">
-                <span class="step-text">环境配置</span>
-                <span class="step-eta">&lt; 5 秒</span>
-              </div>
             </div>
           </div>
 
@@ -1221,34 +1116,31 @@
       if (msg) progressLabel.textContent = msg;
     }
 
-    const stepTimers = {};
+    window._installerPackagedMode = false;
 
-    function updateStepItem(sid, status) {
-      const item = document.querySelector(`.install-step-item[data-sid="${sid}"]`);
-      if (!item) return;
-      const icon = item.querySelector('.step-icon');
-      const eta = item.querySelector('.step-eta');
-      item.className = 'install-step-item ' + status;
-      icon.className = 'step-icon ' + status;
-      icon.textContent = status === 'done' ? '✓' : status === 'error' ? '✕' : '';
-
-      if (status === 'running') {
-        stepTimers[sid] = Date.now();
-        if (eta) eta.textContent = '进行中...';
-      } else if (status === 'done' && stepTimers[sid]) {
-        const elapsed = Date.now() - stepTimers[sid];
-        if (eta) {
-          eta.classList.remove('slow');
-          eta.style.display = '';
-          eta.textContent = '✓ ' + formatElapsed(elapsed);
-          eta.style.color = 'var(--accent)';
-        }
-      }
-    }
-
-    function startInstall() {
+    async function startInstall() {
       goToStep(2);
       startElapsedTimer();
+      if (window._installerPackagedMode && window.electron?.installer?.runPackagedInstall) {
+        const root = (document.getElementById('installPath').value || '').trim();
+        if (!root) {
+          addLog('请选择安装目录', 'error');
+          stopElapsedTimer();
+          goToStep(1);
+          return;
+        }
+        try {
+          await window.electron.installer.runPackagedInstall({ installRoot: root });
+        } catch (e) {
+          addLog(String(e && e.message ? e.message : e), 'error');
+          stopElapsedTimer();
+          installSubtitle.textContent = '安装出错';
+          btnNext.textContent = '返回上一步';
+          btnNext.disabled = false;
+          btnNext.onclick = () => goToStep(1);
+        }
+        return;
+      }
       if (window.electron && window.electron.installer) {
         window.electron.installer.startInstall({ pipSource: selectedPipSource });
       } else {
@@ -1427,16 +1319,47 @@
        ═══════════════════════════════════════════════════════ */
     if (window.electron) {
       if (window.electron.installer) {
-        window.electron.installer.getProjectRoot().then(p => {
-          document.getElementById('installPath').value = p || '';
-        }).catch(() => {});
+        (async () => {
+          try {
+            const mode = await window.electron.installer.getInstallerMode();
+            const packagedFirst = mode && mode.mode === 'packaged' && mode.hasBackendZip && !mode.installed;
+            window._installerPackagedMode = !!packagedFirst;
+            if (packagedFirst) {
+              const step0sub = document.querySelector('#step0 .subtitle');
+              if (step0sub) {
+                step0sub.textContent =
+                  '安装向导将引导您解压引擎与数据，并配置模拟器路径。解压过程可能持续数分钟，请留意下方日志，勿关闭窗口。';
+              }
+              const step1sub = document.querySelector('#step1 > .subtitle');
+              if (step1sub) {
+                step1sub.textContent = '请选择安装根目录；完成后可在下一步配置 MuMu 等路径。';
+              }
+              const pipEl = document.getElementById('pipSourceGroup');
+              if (pipEl) pipEl.closest('.setting-group').style.display = 'none';
+              const hint = document.getElementById('installPathHint');
+              if (hint) {
+                hint.textContent = '请选择安装根目录（将创建 backend、data 与配置文件）。解压过程较长，请查看下方实时日志。';
+              }
+              const def = await window.electron.installer.defaultInstallDir();
+              if (def) document.getElementById('installPath').value = def;
+            } else {
+              const p = await window.electron.installer.getProjectRoot();
+              document.getElementById('installPath').value = p || '';
+            }
+          } catch (e) {
+            console.warn(e);
+            window.electron.installer.getProjectRoot().then(pr => {
+              document.getElementById('installPath').value = pr || '';
+            }).catch(() => {});
+          }
+        })();
 
         window.electron.installer.onProgress(data => {
           if (!data) return;
           switch (data.type) {
             case 'step':
-              updateStepItem(data.id, data.status);
-              if (data.status === 'running') {
+              /* 开发模式 Python 安装脚本仍会发 step；仅更新副标题，不再有四格步骤 UI */
+              if (data.status === 'running' && data.title) {
                 installSubtitle.textContent = data.title + '...';
               }
               break;
@@ -1469,7 +1392,10 @@
             case 'complete': {
               stopElapsedTimer();
               const total = installStartTime ? formatElapsed(Date.now() - installStartTime) : '';
-              addLog('✅ 依赖安装完成，正在验证环境配置...' + (total ? ` (耗时 ${total})` : ''), 'success');
+              const msg = window._installerPackagedMode
+                ? '✅ 引擎与数据已释放完成，正在验证环境配置...'
+                : '✅ 依赖安装完成，正在验证环境配置...';
+              addLog(msg + (total ? ` (耗时 ${total})` : ''), 'success');
               installElapsedTotal = total;
               setTimeout(() => goToStep(3), 600);
               break;
@@ -1484,6 +1410,18 @@
       document.getElementById('btnClose').onclick = () => {
         if (window.electron.windowClose) window.electron.windowClose();
       };
+
+      const btnBrowseInstall = document.getElementById('btnBrowseInstall');
+      if (btnBrowseInstall) {
+        btnBrowseInstall.addEventListener('click', async () => {
+          if (!window.electron?.installer?.browsePath) return;
+          const chosen = await window.electron.installer.browsePath({
+            title: '选择造笔安装目录',
+            isDirectory: true,
+          });
+          if (chosen) document.getElementById('installPath').value = chosen;
+        });
+      }
     } else {
       document.getElementById('installPath').value = 'D:\\Projects\\AutoScriptor (dev)';
     }
