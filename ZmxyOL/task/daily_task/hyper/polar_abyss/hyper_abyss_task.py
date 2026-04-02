@@ -1,7 +1,6 @@
 import enum
 import traceback
 
-from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
@@ -55,6 +54,7 @@ def task(
     AnShen: JhsyNandu = JhsyNandu.灵域,
     TuShen: JhsyNandu = JhsyNandu.灵域,
     cancel_on_failed: bool = True,
+    battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
     **kwargs,
 ):
     _ = kwargs

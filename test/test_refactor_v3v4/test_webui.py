@@ -295,7 +295,7 @@ class TestFrontendStructure(unittest.TestCase):
 
     def test_component_files_exist(self):
         components_dir = os.path.join(STATIC_DIR, "js", "components")
-        expected = ["TaskTree.js", "Overview.js", "TaskPanel.js", "Settings.js", "ErrorArchivesPanel.js"]
+        expected = ["TaskTree.js", "Overview.js", "TaskPanel.js", "Settings.js", "AboutPanel.js", "ErrorArchivesPanel.js"]
         for name in expected:
             path = os.path.join(components_dir, name)
             self.assertTrue(os.path.isfile(path), f"missing component: {name}")
@@ -303,7 +303,7 @@ class TestFrontendStructure(unittest.TestCase):
     def test_index_html_loads_all_components(self):
         with open(os.path.join(STATIC_DIR, "index.html"), "r", encoding="utf-8") as f:
             html = f.read()
-        for name in ["task_help_docs.js", "TaskTree.js", "Overview.js", "TaskPanel.js", "Settings.js", "app.js"]:
+        for name in ["task_help_docs.js", "TaskTree.js", "Overview.js", "TaskPanel.js", "Settings.js", "AboutPanel.js", "app.js"]:
             self.assertIn(name, html, f"index.html should load {name}")
 
     def test_index_html_has_vue_mount(self):
@@ -317,6 +317,7 @@ class TestFrontendStructure(unittest.TestCase):
         self.assertIn("overview-panel", html)
         self.assertIn("task-panel", html)
         self.assertIn("settings-panel", html)
+        self.assertIn("about-panel", html)
         self.assertIn("error-archives-panel", html)
 
 
@@ -388,6 +389,7 @@ class TestAppJsContent(unittest.TestCase):
         self.assertIn("OverviewPanel", self.content)
         self.assertIn("TaskPanel", self.content)
         self.assertIn("SettingsPanel", self.content)
+        self.assertIn("AboutPanel", self.content)
         self.assertIn("ErrorArchivesPanel", self.content)
 
     def test_default_tab_is_overview(self):

@@ -13,7 +13,7 @@ const APP_MENU = [
       { id: 'daily',   label: '每日任务', icon: 'fa-sun-o' },
       { id: 'weekly',  label: '每周任务', icon: 'fa-calendar' },
       { id: 'general', label: '一般任务', icon: 'fa-tasks' },
-      { id: 'event',   label: '活动任务', icon: 'fa-star' },
+      { id: 'custom',  label: '自定义任务', icon: 'fa-code' },
     ],
   },
   {
@@ -23,6 +23,7 @@ const APP_MENU = [
       { id: 'errorArchives', label: '错误汇总', icon: 'fa-exclamation-triangle' },
       { id: 'updater',  label: '检查更新', icon: 'fa-cloud-download' },
       { id: 'settings', label: '设置',     icon: 'fa-cog' },
+      { id: 'about',    label: '关于',     icon: 'fa-info-circle' },
     ],
   },
 ];
@@ -213,7 +214,7 @@ const AppSidebar = {
       </div>
     </div>
 
-    <nav class="flex-1 overflow-y-auto py-2">
+    <nav class="flex-1 overflow-y-auto pt-2 pb-1">
       <template v-for="group in menu" :key="group.group">
         <div class="sidebar-group-label">{{ group.group }}</div>
         <a v-for="item in group.items" :key="item.id"

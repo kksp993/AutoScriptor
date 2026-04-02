@@ -1,7 +1,7 @@
 const { createApp, ref, reactive, computed, nextTick } = Vue;
 
 const app = createApp({
-  components: { AppSidebar, NewsPanel, OverviewPanel, SchedulerPanel, TaskPanel, SettingsPanel, EditorPanel, ErrorArchivesPanel, UpdatePanel },
+  components: { AppSidebar, NewsPanel, OverviewPanel, SchedulerPanel, TaskPanel, SettingsPanel, EditorPanel, ErrorArchivesPanel, UpdatePanel, AboutPanel },
   setup() {
     const configData = reactive({});
     const activeTab = ref('news');
@@ -15,6 +15,9 @@ const app = createApp({
       runtime: { initialized: false, has_mixctrl: false, has_mumu: false, has_bg: false, has_vlm: false },
     });
 
+    /** 错误汇总「前往标注」等：切换到编辑器后由 EditorPanel 消费并清空 */
+    const pendingEditorImportUrl = ref('');
+
     const editModalVisible = ref(false);
     const editTaskData = ref({});
     const editTaskPath = ref('');
@@ -23,6 +26,7 @@ const app = createApp({
     const activeGroupPath = ref('');
     const paramEnumOptions = reactive({});
     const PARAM_KEY_LABELS = {
+      battle_flow: '战斗招式',
       battle_loop:'战斗循环次数',
       battle_times: '战斗轮数',
       speed_x: '战斗加速',
@@ -132,15 +136,16 @@ const app = createApp({
       return clone;
     });
 
+    /** 用于拼接任务路径前缀；一般任务页内同时含「一般任务」「活动任务」两棵顶层树，前缀由树路径自带，故 general 为空。 */
     const activeTabLabel = computed(() => {
-      return { daily: '每日任务', weekly: '每周任务', general: '一般任务', event: '活动任务' }[activeTab.value] || '';
+      return { daily: '每日任务', weekly: '每周任务', general: '', custom: '自定义任务' }[activeTab.value] || '';
     });
 
     const pageTitle = computed(() => {
       const map = {
         news: '资讯', overview: '总览', scheduler: '调度', editor: '编辑器',
-        errorArchives: '错误汇总', updater: '检查更新', settings: '设置',
-        daily: '每日任务', weekly: '每周任务', general: '一般任务', event: '活动任务',
+        errorArchives: '错误汇总', updater: '检查更新', settings: '设置', about: '关于',
+        daily: '每日任务', weekly: '每周任务', general: '一般任务', custom: '自定义任务',
       };
       return map[activeTab.value] || '';
     });
@@ -149,8 +154,13 @@ const app = createApp({
       const t = configData.tasks || {};
       if (activeTab.value === 'daily') return t['每日任务'] || {};
       if (activeTab.value === 'weekly') return t['每周任务'] || {};
-      if (activeTab.value === 'general') return t['一般任务'] || {};
-      if (activeTab.value === 'event') return t['活动任务'] || t['event_task'] || {};
+      if (activeTab.value === 'general') {
+        return {
+          一般任务: t['一般任务'] || {},
+          活动任务: t['活动任务'] || t['event_task'] || {},
+        };
+      }
+      if (activeTab.value === 'custom') return t['自定义任务'] || {};
       return {};
     });
 
@@ -499,6 +509,12 @@ const app = createApp({
 
     function openEditModal(key, data, path, parent) {
       const cloned = JSON.parse(JSON.stringify(data));
+      if (cloned.params && typeof cloned.params === 'object') {
+        delete cloned.params.profession;
+      }
+      if (cloned.param_meta && typeof cloned.param_meta === 'object') {
+        delete cloned.param_meta.profession;
+      }
       const meta = (cloned && cloned.param_meta) || {};
       for (const [pk, mp] of Object.entries(meta)) {
         if (mp && typeof mp === 'object' && mp.multiple === false && cloned.params && Array.isArray(cloned.params[pk]) && cloned.params[pk].length === 1) {
@@ -524,9 +540,16 @@ const app = createApp({
 
     function saveTask() {
       if (!(editTaskParent.value && editTaskKey.value)) return;
+      const payload = { ...editTaskData.value };
+      if (payload.params && typeof payload.params === 'object') {
+        delete payload.params.profession;
+      }
+      if (payload.param_meta && typeof payload.param_meta === 'object') {
+        delete payload.param_meta.profession;
+      }
       editTaskParent.value[editTaskKey.value] = {
         ...editTaskParent.value[editTaskKey.value],
-        ...editTaskData.value,
+        ...payload,
       };
       if (editTaskParent.value[editTaskKey.value].on) {
         editTaskParent.value[editTaskKey.value].next_exec_time = 0;
@@ -1002,6 +1025,15 @@ const app = createApp({
       if (window.electron) window.electron.windowTray();
     }
 
+    function goToEditorWithImage(url) {
+      pendingEditorImportUrl.value = typeof url === 'string' ? url : '';
+      activeTab.value = 'editor';
+    }
+
+    function onEditorImported() {
+      pendingEditorImportUrl.value = '';
+    }
+
     return {
       configData, activeTab, logs, characterName, filteredConfig, currentTasks,
       schedulerStatus, overviewData, activeGroupPath, pageTitle,
@@ -1026,6 +1058,7 @@ const app = createApp({
       openAddAccountDialog: () => { addDialogVisible.value = true; },
       submitAddAccount,
       isElectron, minimizeToTray,
+      pendingEditorImportUrl, goToEditorWithImage, onEditorImported,
       init,
     };
   },

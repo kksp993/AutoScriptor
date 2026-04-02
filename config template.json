@@ -33,7 +33,13 @@
         "ssl_cert": null,
         "language": "zh-CN",
         "cdn": false,
-        "timezone_offset": null
+        "timezone_offset": null,
+        "content_manifest_url": null,
+        "content_manifest_sha256": null,
+        "content_update_public_key_path": null,
+        "content_update_public_key_pem": null,
+        "content_update_require_credential_unlock": false,
+        "content_update_apply_cooldown_sec": 180
     },
     "notify": {
         "enabled": false,

@@ -7,6 +7,7 @@ WebUI 安全模块
 from __future__ import annotations
 
 import hashlib as _hashlib
+import os as _os
 import secrets as _secrets
 import time as _time
 
@@ -94,6 +95,69 @@ class RateLimiter:
 
 login_limiter = RateLimiter(max_failures=5, window=300)
 verify_limiter = RateLimiter(max_failures=5, window=300)
+
+
+class CallRateLimiter:
+    """限制某操作在窗口内的调用次数（不区分成功失败）。"""
+
+    def __init__(self, max_calls: int = 8, window: int = 3600):
+        self.max_calls = max_calls
+        self.window = window
+        self._calls: dict[str, list[float]] = {}
+
+    def allow(self, ip: str) -> bool:
+        now = _time.time()
+        calls = [t for t in self._calls.get(ip, []) if now - t < self.window]
+        if len(calls) >= self.max_calls:
+            return False
+        calls.append(now)
+        self._calls[ip] = calls
+        return True
+
+    def clear(self):
+        self._calls.clear()
+
+
+class MinIntervalLimiter:
+    """同一 IP 两次操作之间最短间隔（防短时间连点刷流量）。"""
+
+    def __init__(self, min_interval_sec: float = 120.0):
+        self.min_interval = min_interval_sec
+        self._last: dict[str, float] = {}
+
+    def allow(self, ip: str) -> bool:
+        now = _time.time()
+        last = self._last.get(ip, 0.0)
+        if now - last < self.min_interval:
+            return False
+        self._last[ip] = now
+        return True
+
+    def clear(self):
+        self._last.clear()
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(_os.environ.get(name, "").strip() or default)
+    except ValueError:
+        return default
+
+
+# 「检查更新」：默认每 IP 每小时最多 20 次（manifest 虽小仍可被刷探测）
+content_update_check_limiter = CallRateLimiter(
+    max_calls=max(1, int(_env_float("AUTOSCRIPTOR_CONTENT_CHECK_MAX_PER_HOUR", 20))),
+    window=3600,
+)
+
+# 「应用更新」：每小时最多 5 次 / IP + 两次应用至少间隔 min_interval 秒
+content_update_apply_limiter = CallRateLimiter(
+    max_calls=max(1, int(_env_float("AUTOSCRIPTOR_CONTENT_APPLY_MAX_PER_HOUR", 5))),
+    window=3600,
+)
+content_update_apply_min_interval = MinIntervalLimiter(
+    min_interval_sec=_env_float("AUTOSCRIPTOR_CONTENT_APPLY_MIN_INTERVAL_SEC", 120.0),
+)
 
 
 # ── 重放攻击防护 ──

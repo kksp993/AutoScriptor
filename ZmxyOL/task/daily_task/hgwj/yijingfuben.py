@@ -6,7 +6,6 @@ import traceback
 from AutoScriptor.utils.logger import logger
 
 from ZmxyOL.nav.api import locate_region
-from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from ZmxyOL.battle.character.hero import h
@@ -27,6 +26,7 @@ def task(
     CangLongYouGu:YijingNandu=YijingNandu.不打,
     MingHaiZhiYuan:YijingNandu=YijingNandu.不打,
     cancel_on_failed:bool=True,
+    battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):
     task_list={
         "虎神之崖":(T("虎神之崖", box=Box(106,389,94,37).margin()), HuShenZhiYa),

@@ -62,6 +62,15 @@ def get_data_root() -> Path:
     return get_app_root()
 
 
+def get_custom_task_dir() -> Path:
+    """用户自定义任务脚本目录 (各 .py 内使用 @register_task)。
+
+    开发模式: 项目根目录下 custom_task/
+    发行模式: data/custom_task/（或 AUTOSCRIPTOR_DATA_DIR/custom_task/）
+    """
+    return get_data_root() / "custom_task"
+
+
 @lru_cache(maxsize=1)
 def get_engine_root() -> Path:
     """引擎文件目录 (编译后的 .pyd/.dll 所在处)。

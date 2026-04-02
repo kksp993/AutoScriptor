@@ -6,7 +6,7 @@ function buildDisplayParams(params) {
   let count = 0;
   for (const [k, v] of Object.entries(params)) {
     if (count >= 3) break;
-    if (k === 'param_meta') continue;
+    if (k === 'param_meta' || k === 'profession') continue;
     if (typeof v === 'boolean' || Array.isArray(v) || (typeof v === 'object' && v !== null)) continue;
     const shown = k === 'method' && methodDisplay[v] ? methodDisplay[v] : v;
     if (typeof shown === 'string' && shown.length > 12) continue;
@@ -22,7 +22,7 @@ function countVariableParams(params) {
   const methodDisplay = { YAOSHI: '购买符印之匙', QILING: '购买唤灵之心' };
   let n = 0;
   for (const [k, v] of Object.entries(params)) {
-    if (k === 'param_meta') continue;
+    if (k === 'param_meta' || k === 'profession') continue;
     if (typeof v === 'boolean' || Array.isArray(v) || (typeof v === 'object' && v !== null)) continue;
     const shown = k === 'method' && methodDisplay[v] ? methodDisplay[v] : v;
     if (typeof shown === 'string' && shown.length > 12) continue;
@@ -89,16 +89,17 @@ const TaskTreeTaskRow = {
     },
   },
   template: `
-<div class="task-tree-item bg-gray-50 px-3.5 py-2.5 rounded-lg border border-gray-200 hover:border-primary/40 hover:bg-gray-100 transition-colors flex flex-col gap-1">
-  <div class="flex items-center gap-2.5 min-w-0 w-full">
+<div class="task-tree-item bg-gray-50 px-3.5 py-2.5 rounded-lg border border-gray-200 hover:border-primary/40 hover:bg-gray-100 transition-colors flex flex-col gap-1 min-w-0 max-w-full">
+  <div class="flex items-center gap-2 min-w-0 w-full">
     <button type="button" class="task-doc-chevron flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-md text-gray-500 hover:text-primary hover:bg-primary/10 transition-colors"
             :title="docExpanded ? '收起说明' : '执行流程与参数说明'"
             @click.stop="docExpanded = !docExpanded">
       <i class="fa text-xs transition-transform" :class="docExpanded ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
     </button>
-    <span class="inline-flex items-start gap-1 min-w-0 max-w-[min(50%,12rem)] flex-shrink-0 cursor-pointer"
+    <span class="inline-flex items-start gap-1 min-w-0 max-w-[min(46%,11rem)] shrink cursor-pointer"
           @click.stop="$emit('edit-task', taskKey, item, taskPath, parentTree)">
       <span class="font-medium text-sm text-dark truncate">{{ taskKey }}</span>
+      <span v-if="item.custom" class="task-custom-tag">自定义</span>
       <span v-if="item.beta" class="task-beta-tag">Beta</span>
     </span>
     <div class="relative flex-1 min-w-0 flex items-center min-h-[1.5rem]">
@@ -131,6 +132,7 @@ const TaskTreeTaskRow = {
   </div>
   <transition name="expand">
     <div v-show="docExpanded" class="task-doc-panel">
+      <p v-if="item.custom" class="task-doc-custom-line">*自定义任务：任意 Python 与主程序同进程运行，可访问本机与游戏自动化接口；请仅使用可信来源脚本，风险自负。</p>
       <p v-if="item.beta" class="task-doc-beta-line">*该任务为 Beta 实验功能：自动化流程、界面识别或参数含义可能随版本快速调整，不保证与当前游戏完全一致；请谨慎启用并及时反馈问题。</p>
       <p class="task-doc-flow">{{ helpDoc.flow }}</p>
       <dl v-if="paramHelpRows.length" class="task-doc-params">
@@ -221,7 +223,7 @@ const TaskTree = {
     };
   },
   template: `
-<div class="space-y-1">
+<div class="space-y-1 min-w-0">
   <template v-for="key in objectKeys(treeData)" :key="key">
     <!-- 叶子任务行 -->
     <task-tree-task-row v-if="isTask(treeData[key])"

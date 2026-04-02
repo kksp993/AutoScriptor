@@ -381,12 +381,14 @@ const OverviewPanel = {
                       <span class="ov-task-dot-char ov-task-dot-char--cell" :style="{ color: dotColor(t.status) }" :title="t.name + ' - ' + dotLabel(t.status)">●</span>
                       <div class="flex-1 min-w-0 flex items-center gap-1">
                         <span class="ov-dispatch-task-name ov-dispatch-task-name--cell flex-1 min-w-0">{{ t.name }}</span>
+                        <span v-if="t.custom" class="task-custom-tag flex-shrink-0">自定义</span>
                         <span v-if="t.beta" class="task-beta-tag flex-shrink-0">Beta</span>
                       </div>
                       <i class="fa ov-task-help-chev" :class="isTaskHelpExpanded(char.server, char.name, t.path) ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
                     </div>
                     <transition name="ov-collapse">
                       <div v-show="isTaskHelpExpanded(char.server, char.name, t.path)" class="ov-task-help-panel">
+                        <p v-if="t.custom" class="task-doc-custom-line">*自定义任务：任意 Python 与主程序同进程运行；请仅使用可信来源脚本，风险自负。</p>
                         <p v-if="t.beta" class="task-doc-beta-line">*该任务为 Beta 实验功能：自动化流程、界面识别或参数含义可能随版本快速调整，不保证与当前游戏完全一致；请谨慎启用并及时反馈问题。</p>
                         <p class="ov-task-help-flow">{{ taskHelpDoc(t).flow }}</p>
                         <dl v-if="taskHelpParamRows(t).length" class="ov-task-help-params">

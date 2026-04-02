@@ -2,13 +2,14 @@ import traceback
 
 from ZmxyOL.battle.procedure.chaos import DEFAULT_LINGQI_PRIORITY_VALUES, sort_stage_lingqi_pairs
 from ZmxyOL.battle.tasks import JIBEI_CHAOS_TABLE, get_task_table
-from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
 
 @register_task
-def task():
+def task(
+    battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
+):
     ensure_in("极北",-1)
     Weather = h.check_linggen()
     logger.info(f"当前灵气: {Weather}")

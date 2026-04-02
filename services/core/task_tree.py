@@ -5,7 +5,7 @@ TaskTree: 任务树数据模型
 不依赖任何游戏逻辑（AutoScriptor / ZmxyOL），仅操作 dict 结构。
 """
 
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 class TaskTree:
@@ -38,6 +38,23 @@ class TaskTree:
         for key in path:
             node = node[key]
         return node
+
+    @staticmethod
+    def prune_leaves_not_in_registry(
+        branch: Dict[str, Any],
+        path_prefix: str,
+        has_task: Callable[[str], bool],
+    ) -> None:
+        """就地删除「叶节点路径在注册表中不存在」的项；若子目录变空则删除。"""
+        for key, val in list(branch.items()):
+            path = f"{path_prefix}/{key}" if path_prefix else key
+            if TaskTree.is_leaf(val):
+                if not has_task(path):
+                    del branch[key]
+            elif isinstance(val, dict):
+                TaskTree.prune_leaves_not_in_registry(val, path, has_task)
+                if not val:
+                    del branch[key]
 
     # ── 状态查询 ──
 

@@ -22,7 +22,7 @@ mkl>=2023.0.0
 colormath
 uiautomator2==2.16.17
 uiautomator2cache==0.3.1
-
+bsdiff4
 astor>=0.8.1
 # jax==0.4.27
 # jaxlib == 0.4.27
@@ -33,6 +33,7 @@ websockets
 dpath
 openai
 requests
+bsdiff4>=1.2.0
 lxml
 pyyaml
 pywebio

@@ -1,8 +1,8 @@
 from datetime import datetime
 from AutoScriptor import *
 from ZmxyOL.nav import *
+from ZmxyOL import register_task
 import traceback
-from ZmxyOL.task.task_register import register_task
 
 from ZmxyOL.task.time import next_Mon, next_month
 

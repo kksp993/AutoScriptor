@@ -3,7 +3,6 @@ import traceback
 
 from numpy import arange
 from AutoScriptor.utils import box
-from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
@@ -88,7 +87,8 @@ def fanTianTa(
     battle_times=50, 
     difficulty=FFT_difficulty.past, 
     preference=(FFT_preference.purple,FFT_preference.yellow),
-    conquer_TianMo=False
+    conquer_TianMo=False,
+    battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):
     ensure_in("极北",-1)
     click(B(0,120,90,100))

@@ -1,6 +1,5 @@
 
 import traceback
-from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.errors import TaskRequireReTry
@@ -8,7 +7,7 @@ from AutoScriptor.errors import TaskRequireReTry
 
 
 @register_task
-def zudui_task():
+def zudui_task(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
     ensure_in("天庭",-1)
     click(ui["彩虹楼"].i)
     click(T("东天王殿"),delay=0.5)

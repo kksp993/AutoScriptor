@@ -1,5 +1,4 @@
 import traceback
-from ZmxyOL.task.task_register import register_task
 from AutoScriptor import *
 from ZmxyOL import *
 
@@ -14,7 +13,7 @@ tasks =[
 ]
 
 @register_task
-def task():
+def task(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
     from ZmxyOL.battle.character.hero import h
     h.battle_tasks(task_table=tasks[0])
 

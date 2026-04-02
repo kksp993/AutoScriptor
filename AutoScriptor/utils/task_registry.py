@@ -28,12 +28,14 @@ class TaskRegistry:
         param_meta: dict | None = None,
         *,
         beta: bool = False,
+        custom: bool = False,
     ):
         self._tasks[path] = {
             "fn": fn,
             "order": order,
             "param_meta": param_meta or {},
             "beta": bool(beta),
+            "custom": bool(custom),
         }
 
     def get_fn(self, path: str):
@@ -51,6 +53,10 @@ class TaskRegistry:
     def get_beta(self, path: str) -> bool:
         entry = self._tasks.get(path)
         return bool(entry.get("beta")) if entry else False
+
+    def get_custom(self, path: str) -> bool:
+        entry = self._tasks.get(path)
+        return bool(entry.get("custom")) if entry else False
 
     def set_fn(self, path: str, fn):
         if path in self._tasks:
