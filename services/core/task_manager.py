@@ -62,6 +62,7 @@ _CATEGORY_NEXT_DATE = {
     "每日任务": NextDate.tomorrow,
     "活动任务": NextDate.tomorrow,
     "每周任务": NextDate.next_week,
+    "自定义任务": NextDate.tomorrow,
 }
 
 
@@ -250,8 +251,11 @@ class TaskManager:
         raw = task_data.get('params', {})
         meta = task_registry.get_param_meta(task_path)
         sig = inspect.signature(fn)
+        has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
         params = {}
         for k, v in raw.items():
+            if not has_var_kw and k not in sig.parameters:
+                continue
             enum_cls = self._get_enum_class(k, meta, sig)
             params[k] = self._coerce_enum(v, enum_cls) if enum_cls else v
         return params

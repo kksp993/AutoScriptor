@@ -1,5 +1,4 @@
 import traceback
-from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger

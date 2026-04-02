@@ -1,8 +1,9 @@
 /**
- * 错误汇总：左侧按日期归档列表，右侧摘要 + 控制台风格日志，可点开截图预览（复制/关闭）。
+ * 错误汇总：左侧按日期归档列表，右侧摘要 + 控制台风格日志，可点开截图预览（复制 / 前往标注 / 关闭）。
  */
 const ErrorArchivesPanel = {
   name: 'ErrorArchivesPanel',
+  emits: ['go-to-editor-with-image'],
   data() {
     return {
       loading: false,
@@ -178,6 +179,11 @@ const ErrorArchivesPanel = {
         ElementPlus.ElMessage.error(String(e.message || e));
       }
     },
+    goToAnnotate() {
+      if (!this.previewUrl) return;
+      this.$emit('go-to-editor-with-image', this.previewUrl);
+      this.closePreview();
+    },
     imgSrc(relPath) {
       if (!this.activeFolder || !relPath) return '';
       const q = new URLSearchParams({ folder: this.activeFolder, path: relPath });
@@ -310,6 +316,9 @@ const ErrorArchivesPanel = {
         <span class="text-sm font-medium text-slate-700 truncate flex-1">{{ previewTitle }}</span>
         <el-button size="small" type="primary" @click="copyPreview">
           <i class="fa fa-clipboard mr-1"></i>复制图片
+        </el-button>
+        <el-button size="small" type="success" plain @click="goToAnnotate">
+          <i class="fa fa-pencil-square-o mr-1"></i>前往标注
         </el-button>
         <el-button size="small" @click="closePreview">
           <i class="fa fa-times mr-1"></i>关闭

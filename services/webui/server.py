@@ -151,6 +151,9 @@ from services.webui.security import (
     check_request_freshness as _check_request_freshness,
     login_limiter as _login_limiter,
     verify_limiter as _verify_limiter,
+    content_update_check_limiter as _content_update_check_limiter,
+    content_update_apply_limiter as _content_update_apply_limiter,
+    content_update_apply_min_interval as _content_update_apply_min_interval,
     SESSION_TTL as _SESSION_TTL,
     grant_credential_unlock as _grant_credential_unlock,
     validate_credential_unlock as _validate_credential_unlock,
@@ -294,6 +297,10 @@ def _inject_param_meta_into_tasks(node: dict, prefix: str = "") -> None:
                 val["beta"] = True
             else:
                 val.pop("beta", None)
+            if task_registry.get_custom(path):
+                val["custom"] = True
+            else:
+                val.pop("custom", None)
         else:
             _inject_param_meta_into_tasks(val, path)
 
@@ -308,6 +315,7 @@ def _strip_runtime_tasks_fields(node: dict) -> None:
         if TaskTree.is_leaf(val):
             val.pop("param_meta", None)
             val.pop("beta", None)
+            val.pop("custom", None)
             val.pop("fn", None)
             val.pop("order", None)
         else:
@@ -346,7 +354,7 @@ def _task_leaf_status(node: dict, now_ts: float) -> str:
 
 
 def _flatten_tasks(node: dict, now_ts: float, prefix: str = '') -> list:
-    """Recursively flatten a tasks tree into a list of {path, name, status, beta}."""
+    """Recursively flatten a tasks tree into a list of {path, name, status, beta, custom}."""
     from AutoScriptor.utils.task_registry import task_registry
 
     result = []
@@ -355,12 +363,15 @@ def _flatten_tasks(node: dict, now_ts: float, prefix: str = '') -> list:
             continue
         path = f"{prefix}/{key}" if prefix else key
         if 'on' in val and 'next_exec_time' in val:
-            result.append({
+            row = {
                 'path': path,
                 'name': key,
                 'status': _task_leaf_status(val, now_ts),
                 'beta': task_registry.get_beta(path),
-            })
+            }
+            if task_registry.get_custom(path):
+                row['custom'] = True
+            result.append(row)
         else:
             result.extend(_flatten_tasks(val, now_ts, path))
     return result
@@ -1033,6 +1044,63 @@ async def update_run_api():
     from services.core.updater import updater
     ok = updater.run_update()
     return {"success": ok, **updater.get_status()}
+
+
+# ── 内容增量更新（bsdiff / manifest，与 Git 更新独立）──
+
+@app.get("/api/content-update/status")
+async def content_update_status_api():
+    from services.core.content_delta_update import content_delta_updater
+    return content_delta_updater.get_status()
+
+
+@app.post("/api/content-update/check")
+async def content_update_check_api(request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    if not _content_update_check_limiter.allow(client_ip):
+        return JSONResponse(
+            status_code=429,
+            content={"error": "检查更新过于频繁，请稍后再试"},
+        )
+    from services.core.content_delta_update import content_delta_updater
+    has_update, message = content_delta_updater.check_has_update()
+    return {
+        "has_update": has_update,
+        "message": message,
+        **content_delta_updater.get_status(),
+    }
+
+
+@app.post("/api/content-update/apply")
+async def content_update_apply_api(request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    from services.core.content_delta_update import content_delta_updater
+
+    rem_cd = content_delta_updater.apply_cooldown_remaining_sec()
+    if rem_cd > 0:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": f"全机冷却中，约 {int(rem_cd) + 1} 秒后再试",
+                "apply_cooldown_remaining_sec": round(rem_cd, 1),
+            },
+        )
+    if not _content_update_apply_min_interval.allow(client_ip):
+        return JSONResponse(
+            status_code=429,
+            content={"error": "操作过于频繁，请稍后再试"},
+        )
+    if not _content_update_apply_limiter.allow(client_ip):
+        return JSONResponse(
+            status_code=429,
+            content={"error": "应用更新过于频繁，请稍后再试"},
+        )
+    if content_delta_updater.requires_credential_unlock():
+        cred_err = _require_credential_unlock(request)
+        if cred_err is not None:
+            return cred_err
+    ok = content_delta_updater.apply_manifest()
+    return {"success": ok, **content_delta_updater.get_status()}
 
 
 # ── 远程访问 API ──

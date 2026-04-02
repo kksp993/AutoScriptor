@@ -50,7 +50,7 @@ def battle(self: Hero):
 @combo
 def battle_loop(
     self: Hero,
-    flow_name: str = '战斗循环',
+    flow_name: str | None = None,
     battle_weight: int = None,
     delay: float = 0,
     max_duration: int = None,
@@ -59,12 +59,18 @@ def battle_loop(
 
     优先从已加载的 profile flows 读取配置；
     battle_weight / max_duration 可覆盖 YAML 中的值。
+    flow_name 为 None 时使用 register_task 注入的 task_context_battle_flow，否则默认「战斗循环」。
+    配招职业在任务入口已由 register_task 调用 get_battle_profile；非任务路径此处再补载。
     """
+    from ZmxyOL.task.battle_task_params import get_battle_profile
     from AutoScriptor.utils.logger import logger as _logger
     from AutoScriptor.utils.cancel import check_cancel_raise
     from time import time
 
-    self._ensure_profile()
+    if not self._profile_flows:
+        get_battle_profile(self)
+    if flow_name is None:
+        flow_name = getattr(self, "task_context_battle_flow", None) or "战斗循环"
     flow = self._profile_flows.get(flow_name)
     if flow is None:
         flow = self._profile_flows.get('战斗循环')
@@ -183,10 +189,11 @@ Hero.add_skill('way_to_exit', 离开关卡)
 
 
 @combo
-def jjc_battle(self: Hero, delay: float = 4.3):
-    """竞技场战斗: 使用竞技场循环流程"""
+def jjc_battle(self: Hero, delay: float = 4.3, flow_name: str | None = None):
+    """竞技场战斗: flow_name 为 None 时用任务参数或「竞技场循环」。"""
+    if flow_name is None:
+        flow_name = getattr(self, "task_context_battle_flow", None) or "竞技场循环"
     self._ensure_profile()
-    flow_name = '竞技场循环'
     if flow_name in self._profile_flows:
         self.battle_loop(flow_name=flow_name, delay=delay)
     else:

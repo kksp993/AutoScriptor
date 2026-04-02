@@ -5,6 +5,15 @@ title AutoScriptor
 set "ROOT=%~dp0"
 cd /d "%ROOT%"
 
+REM 将便携版/运行态下的 accounts\*.json 覆盖回仓库 accounts\
+if not exist "dist_electron\zaobi\data\accounts\" goto :skip_acc_sync
+if not exist "accounts\" mkdir "accounts"
+copy /y "dist_electron\zaobi\data\accounts\*.json" "accounts\" >nul 2>&1
+if errorlevel 1 echo [WARN] 未找到 dist_electron\zaobi\data\accounts\*.json，跳过同步。
+:skip_acc_sync
+
+cd /d "%ROOT%webapp"
+
 set "BRANCH=feat/launcher"
 
 REM ── 检查 git ──

@@ -2,7 +2,6 @@ import traceback
 
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import RequestHumanTakeover
 from AutoScriptor.core.api import _locate_all
-from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
@@ -17,7 +16,9 @@ def reset_task():
     return True
 
 @register_task
-def task():
+def task(
+    battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
+):
     print(cfg["weekday"])
     if cfg["weekday"] in [1,2,3,4]:
         logger.info(f"今日{cfg['weekday']}为周一至周四，不进行天选阁任务")

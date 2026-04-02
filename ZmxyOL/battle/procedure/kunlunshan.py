@@ -1,5 +1,4 @@
 import traceback
-from ZmxyOL.task.task_register import register_task
 from AutoScriptor import *
 from ZmxyOL import *
 from ZmxyOL.battle.character.hero import h, combo
@@ -39,9 +38,11 @@ def kls_yxd_callback():
     )
     bg.set_signal("Pause_battle", False)
 
-def kunlunshan_battle(num: int = 5):
+def kunlunshan_battle(num: int = 5, flow_name: str | None = None):
     # 如果未提供 num 参数，则从上下文中获取 task_num 作为默认值
-    for _ in range(num): 
+    if flow_name is None:
+        flow_name = getattr(h, "task_context_battle_flow", None) or "战斗循环"
+    for _ in range(num):
         h.set(has_cd=False, speed_x=3)   
         bg.set_signal("try_exit", False)
         bg.add(
@@ -77,7 +78,7 @@ def kunlunshan_battle(num: int = 5):
             ],
             once=True
         )
-        h.set(has_cd=False, speed_x=3).battle_loop(max_duration=1000)
+        h.set(has_cd=False, speed_x=3).battle_loop(flow_name=flow_name, max_duration=1000)
         sleep(1)
         h.way_to_exit(until=lambda: ui_T((I("加载中"), T("还有"))), exit_loc=0)
         wait_for_disappear(I("加载中"))

@@ -1,6 +1,5 @@
 import traceback
 from ZmxyOL.battle.utils import ChiBang, WuQi, YiFu, wear_shizhuang_choice
-from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
@@ -58,7 +57,8 @@ def task(
     Bingku_ChiBang=ChiBang.风虎背饰,    
     Changgui_WuQi=WuQi.影蛇之刃,
     Changgui_YiFu=YiFu.影蛇灵袍,
-    Changgui_ChiBang=ChiBang.影蛇风翼
+    Changgui_ChiBang=ChiBang.影蛇风翼,
+    battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):
     wear_shizhuang_choice(Bingku_WuQi)
     wear_shizhuang_choice(Bingku_YiFu)

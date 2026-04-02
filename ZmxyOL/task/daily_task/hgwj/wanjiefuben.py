@@ -2,7 +2,6 @@ import traceback
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.cancel import check_cancel_raise
 from ZmxyOL.nav.api import locate_region
-from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from ZmxyOL.battle.character.hero import h
@@ -92,15 +91,16 @@ def _handle_settlement() -> str:
 
 
 @register_task
-def task2():
-    task()
-    task()
+def task2(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
+    task(battle_flow=battle_flow)
+    task(battle_flow=battle_flow)
 
 
-def task():
+def task(
+    battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
+):
     ensure_in("外域区域")
-    click(T("信标定位", box=Box(1040, 600, 110, -1)))
-    wait_for_appear(T("定位完成"))
+    click(T("信标定位", box=Box(1045,654,113,54).margin()), until=lambda: ui_T(T("定位完成")))
     click(B(630, 360))
     wait_for_appear(T("总灵根值"))
     click(B(960, 510, 90, 90))

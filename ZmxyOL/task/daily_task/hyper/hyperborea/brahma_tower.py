@@ -1,5 +1,4 @@
 import traceback
-from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
@@ -50,7 +49,7 @@ def FTT_battle_one_round():
 
 
 @register_task
-def fanTianTa(battle_times=1):
+def fanTianTa(battle_times=1, battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
     ensure_in("极北",-1)
     click(B(0,120,90,100))
     for diff in ["现在", "过去"]:

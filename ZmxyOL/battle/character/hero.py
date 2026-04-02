@@ -27,6 +27,8 @@ class Hero:
         self._profile_skills = {}
         self._profile_flows = {}
         self._profession = None
+        # register_task 在任务体执行前写入；battle_loop / jjc_battle 等在 flow_name 为 None 时取用
+        self.task_context_battle_flow: str | None = None
 
     def skill(self, index: int, long_click_duration_s=0):
         click(B(f"战斗-技能{index}"), long_click_duration_s)

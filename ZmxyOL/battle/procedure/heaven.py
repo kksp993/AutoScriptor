@@ -11,6 +11,7 @@ def battle_task(
     crash_suddenly:bool=False, 
     bonus_x:int=0,
     cancel_on_failed:bool=True,
+    flow_name: str | None = None,
 ):
     bg.clear_signals()
     wait_for_disappear((I("加载中"), I("极北-加载中")))
@@ -45,7 +46,9 @@ def battle_task(
     sleep(0.5)
     click(B("战斗-化身"), repeat=2)
     # 战斗结束不执行
-    self.battle_loop()
+    if flow_name is None:
+        flow_name = getattr(self, "task_context_battle_flow", None) or "战斗循环"
+    self.battle_loop(flow_name=flow_name)
     # bonus=0 不执行
     if bg.signal("bonus_x", bonus_x) > 1:
         for _ in range(bg.signal("bonus_x", bonus_x)):
@@ -87,6 +90,7 @@ def heaven_draw_card_exit(self:Hero):
 def heaven_battle(
     self,
     exit_loc:float=100,
+    flow_name: str | None = None,
 ):
     """天庭战斗"""
     bg.add(
@@ -111,7 +115,9 @@ def heaven_battle(
         ],
         once=False
     )
-    self.battle_loop(battle_weight=2, delay=2)
+    if flow_name is None:
+        flow_name = getattr(self, "task_context_battle_flow", None) or "战斗循环"
+    self.battle_loop(flow_name=flow_name, battle_weight=2, delay=2)
     bg.set_signal("try_exit", False)
     bg.set_signal("Pause_battle", False)
 

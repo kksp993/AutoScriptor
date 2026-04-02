@@ -39,7 +39,7 @@
       .stat-label { @apply text-base text-gray-500 mt-1.5; }
     }
   </style>
-  <link rel="stylesheet" href="/static/css/style.css?v=27" />
+  <link rel="stylesheet" href="/static/css/style.css?v=28" />
 </head>
 <body class="app-body overflow-hidden" style="height:100vh;">
   <div id="app" class="flex h-screen overflow-hidden">
@@ -167,9 +167,12 @@
           @open-add-account="openAddAccountDialog" @reset-scheduler="resetScheduler"
           @clear-logs="clearLogs"></scheduler-panel>
 
-        <editor-panel v-if="activeTab==='editor'"></editor-panel>
+        <editor-panel v-if="activeTab==='editor'"
+          :pending-import-url="pendingEditorImportUrl"
+          @imported="onEditorImported"></editor-panel>
 
-        <error-archives-panel v-if="activeTab==='errorArchives'"></error-archives-panel>
+        <error-archives-panel v-if="activeTab==='errorArchives'"
+          @go-to-editor-with-image="goToEditorWithImage"></error-archives-panel>
 
         <update-panel v-if="activeTab==='updater'"></update-panel>
 
@@ -177,12 +180,14 @@
           :filtered-config="filteredConfig"
           @save-settings="saveSettings"></settings-panel>
 
-        <task-panel v-if="activeTab==='daily' || activeTab==='weekly' || activeTab==='general' || activeTab==='event'"
+        <about-panel v-if="activeTab==='about'"></about-panel>
+
+        <task-panel v-if="activeTab==='daily' || activeTab==='weekly' || activeTab==='general' || activeTab==='custom'"
+          :active-tab="activeTab"
           :current-tasks="currentTasks" :logs="logs" :character-name="characterName"
           :scheduler-status="schedulerStatus"
           @edit-task="openEditModal" @expanded-change="setActiveGroup"
-          @start-run="startRun" @stop-run="stopRun" @verify-account="verifyAccount"
-          @open-add-account="openAddAccountDialog" @save-tasks="saveTasks"
+          @start-run="startRun" @stop-run="stopRun" @save-tasks="saveTasks"
           @clear-logs="clearLogs" @refresh-config="refreshConfig" @reset-scheduler="resetScheduler"
           @run-task="runSingleTask"></task-panel>
 
@@ -195,20 +200,20 @@
         <el-form :model="editTaskData" label-width="100px">
           <el-form-item label="启用状态"><el-switch v-model="editTaskData.on"></el-switch></el-form-item>
           <template v-for="(val, key) in editTaskData.params" :key="key">
-            <el-form-item :label="paramLabel(key)" v-if="paramEnumOptions[key] && !enumParamIsMultiple(key)">
+            <el-form-item :label="paramLabel(key)" v-if="key !== 'profession' && paramEnumOptions[key] && !enumParamIsMultiple(key)">
               <el-select v-model="editTaskData.params[key]" placeholder="请选择">
                 <el-option v-for="o in paramEnumOptions[key]" :key="o.value || o" :label="o.label || o" :value="o.value || o"></el-option>
               </el-select>
             </el-form-item>
-            <el-form-item :label="paramLabel(key)" v-else-if="paramEnumOptions[key] && enumParamIsMultiple(key)">
+            <el-form-item :label="paramLabel(key)" v-else-if="key !== 'profession' && paramEnumOptions[key] && enumParamIsMultiple(key)">
               <el-select v-model="editTaskData.params[key]" multiple placeholder="请选择">
                 <el-option v-for="o in paramEnumOptions[key]" :key="o.value || o" :label="o.label || o" :value="o.value || o"></el-option>
               </el-select>
             </el-form-item>
-            <el-form-item :label="paramLabel(key)" v-else-if="typeof val==='boolean'"><el-switch v-model="editTaskData.params[key]"></el-switch></el-form-item>
-            <el-form-item :label="paramLabel(key)" v-else-if="typeof val==='number'"><el-input-number v-model="editTaskData.params[key]" :min="0"></el-input-number></el-form-item>
-            <el-form-item :label="paramLabel(key)" v-else-if="typeof val==='string'"><el-input v-model="editTaskData.params[key]"></el-input></el-form-item>
-            <el-form-item :label="paramLabel(key)" v-else-if="Array.isArray(val)">
+            <el-form-item :label="paramLabel(key)" v-else-if="key !== 'profession' && typeof val==='boolean'"><el-switch v-model="editTaskData.params[key]"></el-switch></el-form-item>
+            <el-form-item :label="paramLabel(key)" v-else-if="key !== 'profession' && typeof val==='number'"><el-input-number v-model="editTaskData.params[key]" :min="0"></el-input-number></el-form-item>
+            <el-form-item :label="paramLabel(key)" v-else-if="key !== 'profession' && typeof val==='string'"><el-input v-model="editTaskData.params[key]"></el-input></el-form-item>
+            <el-form-item :label="paramLabel(key)" v-else-if="key !== 'profession' && Array.isArray(val)">
               <div class="w-full space-y-2">
                 <div v-for="(item, idx) in editTaskData.params[key]" :key="idx" class="flex items-center gap-2">
                   <el-input-number v-if="typeof item==='number'" v-model="editTaskData.params[key][idx]"></el-input-number>
@@ -317,18 +322,19 @@
 
   <!-- Vue 组件 -->
   <script src="/static/js/components/NewsPanel.js?v=3"></script>
-  <script src="/static/js/components/AppSidebar.js?v=12"></script>
+  <script src="/static/js/components/AppSidebar.js?v=13"></script>
   <script src="/static/js/task_help_docs.js?v=1"></script>
   <script src="/static/js/components/TaskTree.js?v=10"></script>
   <script src="/static/js/components/Overview.js?v=12"></script>
   <script src="/static/js/components/SchedulerPanel.js?v=9"></script>
   <script src="/static/js/components/TaskPanel.js?v=9"></script>
   <script src="/static/js/components/Settings.js?v=8"></script>
+  <script src="/static/js/components/AboutPanel.js?v=1"></script>
   <script src="/static/js/components/UpdatePanel.js?v=1"></script>
   <script src="/static/js/components/editor/EditorCanvas.js?v=10"></script>
   <script src="/static/js/components/editor/EditorControls.js?v=14"></script>
-  <script src="/static/js/components/editor/EditorPanel.js?v=24"></script>
+  <script src="/static/js/components/editor/EditorPanel.js?v=25"></script>
   <script src="/static/js/components/ErrorArchivesPanel.js?v=4"></script>
-  <script src="/static/js/app.js?v=14"></script>
+  <script src="/static/js/app.js?v=15"></script>
 </body>
 </html>

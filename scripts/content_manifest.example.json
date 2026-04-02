@@ -1,0 +1,21 @@
+{
+  "content_version": "0.1.1",
+  "min_shell_version": "1.0.0",
+  "signature_ed25519": "BASE64_ED25519_SIGNATURE_FROM_sign_content_manifest.py",
+  "artifacts": [
+    {
+      "kind": "bsdiff",
+      "relative_path": "backend/autoscriptor-engine.exe",
+      "url": "https://your-cdn.example/updates/engine-0.1.0-to-0.1.1.bsdiff",
+      "patch_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "old_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "new_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    {
+      "kind": "raw",
+      "relative_path": "services/webui/static/js/app.js",
+      "url": "https://your-cdn.example/updates/app-0.1.1.js",
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+  ]
+}

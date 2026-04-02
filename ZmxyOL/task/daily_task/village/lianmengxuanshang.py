@@ -1,8 +1,8 @@
 
 from AutoScriptor import *
 from ZmxyOL.nav import *
+from ZmxyOL import register_task
 import traceback
-from ZmxyOL.task.task_register import register_task
 from AutoScriptor.utils.logger import logger
 
 LEVEL_MAP = {

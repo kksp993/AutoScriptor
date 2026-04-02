@@ -101,6 +101,42 @@
   font-weight: 500;
 }
 
+.task-custom-tag {
+  font-size: 0.5625rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: #b91c1c;
+  background: rgba(254, 226, 226, 0.95);
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  border-radius: 3px;
+  padding: 2px 4px 1px;
+  vertical-align: super;
+  position: relative;
+  top: -2px;
+}
+.task-doc-custom-line {
+  margin: 0 0 0.5rem 0;
+  padding: 0;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  color: #b91c1c;
+  font-weight: 600;
+}
+/* 任务列：禁止横向撑出滚轮；纵向仍可按需滚动 */
+.task-panel-tasklist {
+  overscroll-behavior: contain;
+}
+
+.task-panel-custom-warn {
+  color: #b91c1c;
+  font-weight: 600;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(254, 242, 242, 0.95);
+  border-radius: 0.5rem;
+  padding: 0.65rem 0.75rem;
+}
+
 /* Overview 面板 */
 .overview-grid {
   display: grid;
@@ -207,7 +243,7 @@
 .sidebar-logo {
   display: flex;
   align-items: center;
-  padding: 18px 16px 14px;
+  padding: 14px 16px 10px;
   gap: 10px;
   border-bottom: 1px solid rgba(255,255,255,0.06);
 }
@@ -261,12 +297,16 @@
   color: #6b7280;
 }
 .sidebar-group-label {
-  padding: 16px 18px 6px;
+  padding: 10px 18px 5px;
   font-size: 12px !important;
   font-weight: 600;
   letter-spacing: 0.08em;
   color: #475569;
   text-transform: uppercase;
+}
+/* 首个分组（CONTROL）上方留白再压一点，避免侧栏出现纵向滚轮 */
+.sidebar-group-label:first-of-type {
+  padding-top: 4px;
 }
 .sidebar-item {
   display: flex;

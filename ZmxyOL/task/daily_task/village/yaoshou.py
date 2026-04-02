@@ -1,11 +1,12 @@
 import traceback
-from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
 
 @register_task(sched_window_hours=(10, 22))
-def task():
+def task(
+    battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
+):
     global cfg
     if cfg["weekday"] in [1,2,3,4]:
         logger.info(f"今日{cfg['weekday']}为周一至周四，不进行妖兽任务")

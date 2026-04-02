@@ -47,3 +47,4 @@ nuitka-crash-report.xml
 webapp/.release-staging
 webapp/buildResources/icon.ico
 /accounts/
+/.autoscriptor/

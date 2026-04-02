@@ -1,12 +1,13 @@
 import traceback
-from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
 
 
 @register_task
-def daily_arena_task():
+def daily_arena_task(
+    battle_flow: BattleFlowName = DEFAULT_JJC_BATTLE_FLOW,
+):
     ensure_in(["村庄","仙盟"])
     logger.info("====斗兽场====")
     click(I("导航-竞技"), delay=0.5)

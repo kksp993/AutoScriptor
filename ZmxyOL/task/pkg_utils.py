@@ -5,7 +5,7 @@ import pathlib
 from AutoScriptor.utils.constant import cfg
 from AutoScriptor.utils.paths import is_compiled
 from AutoScriptor.utils.task_registry import task_registry
-from ZmxyOL.task.translations import translate_path_part, normalize_to_cn
+from ZmxyOL.task.translations import translate_path_part, normalize_cfg_key
 
 
 def get_min_order(node, path_prefix=""):
@@ -221,14 +221,14 @@ def normalize_cfg_tasks_to_cn():
     original = cfg._config.get('tasks', {}) or {}
     normalized: dict = {}
     for key, value in original.items():
-        cn_key = normalize_to_cn(key)
+        cn_key = normalize_cfg_key(key)
         if isinstance(value, dict):
             # 递归规范化子树
             sub_cfg = {'__temp__': value}
             # 将一层展开并规范化
             tmp_normalized = {}
             for sub_k, sub_v in value.items():
-                cn_sub_k = normalize_to_cn(sub_k)
+                cn_sub_k = normalize_cfg_key(sub_k)
                 tmp_normalized[cn_sub_k] = sub_v
             deep_merge(normalized.setdefault(cn_key, {}), tmp_normalized)
         else:

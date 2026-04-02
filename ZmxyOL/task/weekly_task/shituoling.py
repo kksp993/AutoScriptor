@@ -1,7 +1,6 @@
 import traceback
 from enum import IntEnum
 
-from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
@@ -27,7 +26,10 @@ class ShituolingDiff(IntEnum):
 
 
 @register_task(allowed_weekdays=[6, 7])
-def task(diff: ShituolingDiff = ShituolingDiff.D15):
+def task(
+    diff: ShituolingDiff = ShituolingDiff.D15,
+    battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
+):
     d = int(diff)
     ensure_in("村庄")
     click(T("挑战", box=Box(0,65,1280,56).margin()))

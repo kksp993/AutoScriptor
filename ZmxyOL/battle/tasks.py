@@ -115,8 +115,10 @@ def challenge_task_daily():
 
 
 @combo
-def battle_tasks(self:"Hero", task_table:list[str], speed_x:int=1):#type: ignore
+def battle_tasks(self:"Hero", task_table:list[str], speed_x:int=1, flow_name: str | None = None):#type: ignore
     if isinstance(task_table, str): task_table = [task_table]
+    if flow_name is None:
+        flow_name = getattr(self, "task_context_battle_flow", None) or "战斗循环"
     for v in get_task_table(task_table).values():
         ensure_in(*v["location"])
         click(v["target"])
@@ -125,7 +127,7 @@ def battle_tasks(self:"Hero", task_table:list[str], speed_x:int=1):#type: ignore
         click(T("开始挑战"))
         if ui_T(I("加载中"),3):
             wait_for_disappear(I("加载中"))
-            self.set(has_cd=False, speed_x=speed_x).heaven_battle(exit_loc=v["exit_loc"])
+            self.set(has_cd=False, speed_x=speed_x).heaven_battle(exit_loc=v["exit_loc"], flow_name=flow_name)
         else:
             click(T("确定",box=Box(658,495,142,82)), if_exist=True)
             click(B(1061,172,47,50), until=lambda: ui_F(T("副本奖励")))

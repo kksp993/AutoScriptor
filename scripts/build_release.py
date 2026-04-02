@@ -550,6 +550,16 @@ def collect_data():
     # logs/ 目录 (占位)
     (DATA_DIR / "logs").mkdir(parents=True, exist_ok=True)
 
+    # custom_task/ 用户自定义 Python 任务（与开发态仓库根 custom_task 对齐）
+    custom_src = PROJECT_ROOT / "custom_task"
+    custom_dst = DATA_DIR / "custom_task"
+    if custom_src.is_dir():
+        shutil.copytree(custom_src, custom_dst, dirs_exist_ok=True)
+        print("[data] custom_task/")
+    else:
+        custom_dst.mkdir(parents=True, exist_ok=True)
+        print("[data] custom_task/ (空目录)")
+
     print("[data] 数据收集完成!")
 
 

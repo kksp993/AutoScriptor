@@ -7,6 +7,11 @@
 const EditorPanel = {
   name: 'EditorPanel',
   components: { EditorCanvas, EditorControls },
+  props: {
+    /** 由错误汇总等页设置：切换到编辑器后从此 URL 拉取图片并走 /ingest-image */
+    pendingImportUrl: { type: String, default: '' },
+  },
+  emits: ['imported'],
   template: `
 <div class="flex flex-col lg:flex-row gap-3 h-full min-h-0">
   <!-- 左侧：上下分栏 -->
@@ -261,7 +266,7 @@ const EditorPanel = {
   </div>
 </div>`,
 
-  setup() {
+  setup(props, { emit }) {
     const { ref, computed, watch } = Vue;
 
     // ── state ──
@@ -510,6 +515,35 @@ const EditorPanel = {
         loadingImport.value = false;
       }
     }
+
+    /** 从同源 URL（如 /api/error-archives/file?…）拉取图片并导入编辑器 */
+    async function importFromUrl(url) {
+      if (!url) return;
+      try {
+        const r = await fetch(url, { credentials: 'same-origin' });
+        if (!r.ok) throw new Error(r.statusText || '请求失败');
+        const blob = await r.blob();
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error('读取失败'));
+          reader.readAsDataURL(blob);
+        });
+        await ingestFromDataUrl(dataUrl);
+      } catch (e) {
+        ElementPlus.ElMessage.error('加载图片失败: ' + e);
+      }
+    }
+
+    watch(
+      () => props.pendingImportUrl,
+      async (url) => {
+        if (!url) return;
+        await importFromUrl(url);
+        emit('imported');
+      },
+      { immediate: true },
+    );
 
     function loadImageFile(f) {
       if (!f || !f.type || !f.type.startsWith('image/')) {
