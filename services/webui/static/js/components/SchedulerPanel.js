@@ -6,7 +6,7 @@ const SchedulerPanel = {
     characterName: { type: String, default: '' },
     schedulerStatus: { type: Object, required: true },
   },
-  emits: ['start-run', 'stop-run', 'verify-account', 'open-add-account', 'reset-scheduler', 'clear-logs'],
+  emits: ['start-run', 'stop-run', 'reset-scheduler', 'clear-logs'],
   methods: {
     formatTimestamp(ts) {
       if (!ts || ts <= 0) return '\u2014';
@@ -61,15 +61,11 @@ const SchedulerPanel = {
       </div>
     </div>
 
-    <!-- 操作：主操作一行、账号一行，每行独立双列网格，左右边与面板 padding 对齐 -->
+    <!-- 操作：主操作一行，双列网格，左右边与面板 padding 对齐 -->
     <div class="sched-control-actions mb-4">
       <div class="sched-control-row">
         <el-button type="primary" size="large" @click="$emit('start-run')" :disabled="!characterName"><i class="fa fa-play mr-1.5"></i>开始运行</el-button>
         <el-button type="danger" size="large" @click="$emit('stop-run')"><i class="fa fa-stop mr-1.5"></i>终止执行</el-button>
-      </div>
-      <div class="sched-control-row">
-        <el-button size="large" @click="$emit('verify-account')"><i class="fa fa-check mr-1.5"></i>账号验证</el-button>
-        <el-button size="large" @click="$emit('open-add-account')"><i class="fa fa-plus mr-1.5"></i>添加账号</el-button>
       </div>
       <el-button v-if="overviewData.scheduler.state==='error'" type="danger" size="large" @click="$emit('reset-scheduler')" class="sched-btn-full"><i class="fa fa-refresh mr-1.5"></i>恢复调度</el-button>
     </div>

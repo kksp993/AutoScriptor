@@ -613,6 +613,54 @@
       font-weight: 700;
     }
 
+    .preflight-panel {
+      margin-top: 8px;
+      padding: 16px 18px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      max-width: 560px;
+    }
+    .preflight-banner {
+      padding: 12px 14px;
+      border-radius: 8px;
+      background: rgba(22, 163, 74, 0.08);
+      border: 1px solid rgba(22, 163, 74, 0.22);
+      margin-bottom: 14px;
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--text-primary);
+    }
+    .preflight-banner--muted {
+      background: #f8fafc;
+      border-color: var(--border);
+    }
+    .preflight-path, .preflight-ver {
+      margin: 6px 0 0 0;
+      font-size: 12px;
+      color: var(--text-secondary);
+      word-break: break-all;
+    }
+    .preflight-list {
+      margin: 0;
+      padding-left: 1.2em;
+      font-size: 13px;
+      line-height: 1.75;
+      color: var(--text-secondary);
+    }
+    .preflight-list code {
+      font-size: 12px;
+      background: rgba(0,0,0,0.05);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    .preflight-note {
+      margin: 14px 0 0 0;
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
     /* ── Bottom Bar ────────────────────────────────────────── */
     .bottom-bar {
       height: 64px;
@@ -681,7 +729,42 @@
     }
     .btn-primary:hover::after { left: 125%; }
 
-    .btn-row { display: flex; gap: 12px; }
+    .btn-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+
+    .wizard-existing-block {
+      display: none;
+      flex-direction: column;
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    .wizard-existing-block.show { display: flex; }
+    .wizard-banner-warn {
+      padding: 14px 16px;
+      border-radius: 12px;
+      background: rgba(245, 158, 11, 0.09);
+      border: 1px solid rgba(234, 88, 12, 0.28);
+      font-size: 13px;
+      line-height: 1.65;
+      color: var(--text-primary);
+    }
+    .wizard-banner-warn strong { display: block; margin-bottom: 8px; font-size: 15px; }
+    .wizard-banner-warn .preflight-path { margin-top: 6px; word-break: break-all; white-space: pre-line; }
+    .btn-secondary {
+      height: 36px;
+      padding: 0 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background .15s, border-color .15s;
+    }
+    .btn-secondary:hover {
+      background: var(--bg-card);
+      border-color: var(--border-accent);
+    }
   </style>
 </head>
 <body>
@@ -725,30 +808,45 @@
     <div class="right-panel">
       <div class="step-container">
 
-        <!-- Step 0: Welcome -->
+        <!-- Step 0: Welcome（发行包 + 命令行 --installer 且检测到已装引擎时，先显示「需卸载」说明） -->
         <div class="step active" id="step0">
-          <h2>欢迎安装 造笔</h2>
-          <p class="subtitle">安装向导将引导您完成环境配置。首次安装需下载约 500MB 依赖包，预计耗时 3-10 分钟（取决于网络速度）。</p>
-          <div class="features">
-            <div class="feature-card">
-              <span class="feature-icon">🎮</span>
-              <div class="feature-title">模拟器自动化</div>
-              <div class="feature-desc">支持 MuMu 等主流安卓模拟器的智能控制</div>
+          <div id="wizardExistingBlock" class="wizard-existing-block">
+            <div class="wizard-banner-warn">
+              <strong>检测到本机已安装「造笔」</strong>
+              日常使用请从<strong>桌面或开始菜单</strong>启动「造笔」；本程序是<strong>安装向导</strong>，不要当作日常启动方式。
+              若要重新安装或覆盖安装，请先卸载当前版本（点击下方运行卸载脚本），卸载完成后再点「刷新状态」。
+              <p class="preflight-path" id="wizardExistingPaths"></p>
             </div>
-            <div class="feature-card">
-              <span class="feature-icon">🔍</span>
-              <div class="feature-title">OCR 识别</div>
-              <div class="feature-desc">PaddleOCR 驱动，精准识别游戏内文字</div>
+            <div class="btn-row">
+              <button type="button" class="btn-secondary" id="btnWizardRunUninstall">运行卸载脚本</button>
+              <button type="button" class="btn-secondary" id="btnWizardOpenRoot">打开安装目录</button>
+              <button type="button" class="btn-secondary" id="btnWizardRefresh">我已卸载，刷新状态</button>
             </div>
-            <div class="feature-card">
-              <span class="feature-icon">📋</span>
-              <div class="feature-title">任务编排</div>
-              <div class="feature-desc">可视化配置每日、每周、活动任务流程</div>
-            </div>
-            <div class="feature-card">
-              <span class="feature-icon">🌐</span>
-              <div class="feature-title">Web 管理</div>
-              <div class="feature-desc">现代化 WebUI 界面，支持远程监控管理</div>
+          </div>
+          <div id="wizardWelcomeBlock">
+            <h2 id="step0Title">欢迎安装 造笔</h2>
+            <p class="subtitle" id="step0Subtitle">安装向导将引导您完成环境配置。首次安装需下载约 500MB 依赖包，预计耗时 3-10 分钟（取决于网络速度）。</p>
+            <div class="features">
+              <div class="feature-card">
+                <span class="feature-icon">🎮</span>
+                <div class="feature-title">模拟器自动化</div>
+                <div class="feature-desc">支持 MuMu 等主流安卓模拟器的智能控制</div>
+              </div>
+              <div class="feature-card">
+                <span class="feature-icon">🔍</span>
+                <div class="feature-title">OCR 识别</div>
+                <div class="feature-desc">PaddleOCR 驱动，精准识别游戏内文字</div>
+              </div>
+              <div class="feature-card">
+                <span class="feature-icon">📋</span>
+                <div class="feature-title">任务编排</div>
+                <div class="feature-desc">可视化配置每日、每周、活动任务流程</div>
+              </div>
+              <div class="feature-card">
+                <span class="feature-icon">🌐</span>
+                <div class="feature-title">Web 管理</div>
+                <div class="feature-desc">现代化 WebUI 界面，支持远程监控管理</div>
+              </div>
             </div>
           </div>
         </div>
@@ -788,6 +886,29 @@
               <input class="path-input" id="installPath" readonly placeholder="选择目录…" />
               <button type="button" class="btn-browse" id="btnBrowseInstall">浏览…</button>
             </div>
+          </div>
+        </div>
+
+        <!-- Step 1b: 覆盖安装 / 首次说明（仅发行包在「开始安装」后进入） -->
+        <div class="step" id="stepPreflight">
+          <h2 id="preflightH2">安装前确认</h2>
+          <p class="subtitle" id="preflightSub">请阅读以下说明后继续。</p>
+          <div class="preflight-panel">
+            <div id="preflightBannerExisting" class="preflight-banner" style="display:none;">
+              <strong>检测到本机已有「造笔」安装记录</strong>
+              <p class="preflight-path" id="preflightOldPath"></p>
+              <p class="preflight-ver" id="preflightOldVer"></p>
+            </div>
+            <div id="preflightBannerFirst" class="preflight-banner preflight-banner--muted" style="display:none;">
+              未检测到历史安装记录，将按您选择的目录进行<strong>首次安装</strong>。
+            </div>
+            <ul class="preflight-list">
+              <li>将尝试<strong>结束占用旧版引擎的进程</strong>（可执行文件位于安装目录下 <code>backend</code> 内），并清理本机 <strong>5000</strong> 端口上的残留监听，以降低「无法删除/覆盖」类错误。</li>
+              <li>本次安装将<strong>覆盖</strong>目标目录中的 <code>backend</code> 引擎文件夹（相当于替换旧版程序文件）。</li>
+              <li><code>data</code> 目录若已存在，将按<strong>随包数据</strong>同步；若有重要账号，请先自行备份 <code>data/accounts</code> 等文件。</li>
+              <li>杀毒软件仍可能短暂锁定文件；若失败请稍后重试或暂时排除安装目录。</li>
+            </ul>
+            <p class="preflight-note">说明：无法保证解除<strong>所有</strong>第三方程序的占用；若仍报错，请关闭相关程序后重试。</p>
           </div>
         </div>
 
@@ -903,6 +1024,7 @@
           <div class="dot" data-dot="2"></div>
           <div class="dot" data-dot="3"></div>
           <div class="dot" data-dot="4"></div>
+          <div class="dot" data-dot="5"></div>
         </div>
         <div class="btn-row">
           <button class="btn-primary" id="btnNext">开始配置 →</button>
@@ -992,10 +1114,11 @@
        Step Navigation
        ═══════════════════════════════════════════════════════ */
     let currentStep = 0;
-    const totalSteps = 5;
+    const totalSteps = 6;
     const steps = [
       document.getElementById('step0'),
       document.getElementById('step1'),
+      document.getElementById('stepPreflight'),
       document.getElementById('step2'),
       document.getElementById('step3'),
       document.getElementById('step4'),
@@ -1004,6 +1127,8 @@
     const btnNext = document.getElementById('btnNext');
 
     let pathsAllValid = false;
+    window._wizardGateActive = false;
+    window._wizardGateCanProceed = true;
 
     function goToStep(n) {
       if (n < 0 || n >= totalSteps) return;
@@ -1021,7 +1146,8 @@
         else if (i === n) d.classList.add('active');
       });
 
-      if (n === 3) loadAndVerifyPaths();
+      if (n === 4) loadAndVerifyPaths();
+      if (n === 2) refreshPreflightStep();
 
       updateButton();
     }
@@ -1029,9 +1155,15 @@
     function updateButton() {
       switch (currentStep) {
         case 0:
-          btnNext.textContent = '开始配置 →';
-          btnNext.disabled = false;
-          btnNext.onclick = () => goToStep(1);
+          if (window._wizardGateActive && !window._wizardGateCanProceed) {
+            btnNext.textContent = '请先卸载或刷新状态';
+            btnNext.disabled = true;
+            btnNext.onclick = null;
+          } else {
+            btnNext.textContent = '开始配置 →';
+            btnNext.disabled = false;
+            btnNext.onclick = () => goToStep(1);
+          }
           break;
         case 1:
           btnNext.textContent = '开始安装';
@@ -1039,22 +1171,96 @@
           btnNext.onclick = startInstall;
           break;
         case 2:
+          btnNext.textContent = '确认并继续安装';
+          btnNext.disabled = false;
+          btnNext.onclick = beginPackagedInstall;
+          break;
+        case 3:
           btnNext.textContent = '安装中...';
           btnNext.disabled = true;
           btnNext.onclick = null;
           break;
-        case 3:
+        case 4:
           btnNext.textContent = pathsAllValid ? '完成安装 →' : '验证中...';
           btnNext.disabled = !pathsAllValid;
           btnNext.onclick = pathsAllValid ? confirmAndFinish : null;
           break;
-        case 4:
+        case 5:
           btnNext.textContent = '启动 造笔';
           btnNext.disabled = false;
           btnNext.onclick = launchApp;
           break;
       }
     }
+
+    function applyWizardGate(ctx) {
+      if (!ctx) return;
+      const existingEl = document.getElementById('wizardExistingBlock');
+      const welcomeEl = document.getElementById('wizardWelcomeBlock');
+      const pathsEl = document.getElementById('wizardExistingPaths');
+      const leftVer = document.querySelector('.left-version');
+      if (ctx.appVersion && leftVer) leftVer.textContent = 'v' + ctx.appVersion;
+
+      const gate = !!ctx.needsUninstallGate;
+      window._wizardGateActive = gate;
+      window._wizardGateCanProceed = !gate;
+
+      if (gate) {
+        if (existingEl) {
+          existingEl.classList.add('show');
+        }
+        if (welcomeEl) welcomeEl.style.display = 'none';
+        const lines = [];
+        if (ctx.installRoot) lines.push('安装目录：' + ctx.installRoot);
+        if (ctx.recordVersion) lines.push('记录版本：' + ctx.recordVersion);
+        lines.push('本安装包版本：' + ctx.appVersion);
+        if (pathsEl) pathsEl.textContent = lines.join('\n');
+      } else {
+        if (existingEl) existingEl.classList.remove('show');
+        if (welcomeEl) welcomeEl.style.display = '';
+        if (pathsEl) pathsEl.textContent = '';
+      }
+      if (currentStep === 0) updateButton();
+    }
+
+    (function wireWizardExistingButtons() {
+      const runBtn = document.getElementById('btnWizardRunUninstall');
+      const openBtn = document.getElementById('btnWizardOpenRoot');
+      const refreshBtn = document.getElementById('btnWizardRefresh');
+      if (runBtn) {
+        runBtn.addEventListener('click', async () => {
+          if (!window.electron?.installer?.runUninstallBat) return;
+          try {
+            await window.electron.installer.runUninstallBat();
+          } catch (e) {
+            const msg = e && e.message ? e.message : String(e);
+            alert(msg);
+          }
+        });
+      }
+      if (openBtn) {
+        openBtn.addEventListener('click', async () => {
+          if (!window.electron?.installer?.openInstallRoot) return;
+          try {
+            const r = await window.electron.installer.openInstallRoot();
+            if (r && !r.ok && r.error) alert(r.error);
+          } catch (e) {
+            alert(e && e.message ? e.message : String(e));
+          }
+        });
+      }
+      if (refreshBtn) {
+        refreshBtn.addEventListener('click', async () => {
+          if (!window.electron?.installer?.getWizardContext) return;
+          try {
+            const wctx = await window.electron.installer.getWizardContext();
+            applyWizardGate(wctx);
+          } catch (e) {
+            alert(e && e.message ? e.message : String(e));
+          }
+        });
+      }
+    })();
 
     /* ═══════════════════════════════════════════════════════
        Settings
@@ -1118,29 +1324,90 @@
 
     window._installerPackagedMode = false;
 
-    async function startInstall() {
-      goToStep(2);
+    async function refreshPreflightStep() {
+      const ex = document.getElementById('preflightBannerExisting');
+      const fi = document.getElementById('preflightBannerFirst');
+      const pathEl = document.getElementById('preflightOldPath');
+      const verEl = document.getElementById('preflightOldVer');
+      const h2 = document.getElementById('preflightH2');
+      const sub = document.getElementById('preflightSub');
+      if (!window.electron?.installer?.getExistingInstallInfo) {
+        if (ex) ex.style.display = 'none';
+        if (fi) fi.style.display = 'block';
+        return;
+      }
+      try {
+        const info = await window.electron.installer.getExistingInstallInfo();
+        if (info && info.hasExisting && info.installRoot) {
+          if (h2) h2.textContent = '检测到已有「造笔」安装';
+          if (sub) sub.textContent = '本次为覆盖安装：将结束可能占用旧版引擎的进程，再解压新版。请确认目标安装目录。';
+          if (ex) ex.style.display = 'block';
+          if (fi) fi.style.display = 'none';
+          if (pathEl) pathEl.textContent = '上次安装位置：' + info.installRoot;
+          if (verEl) verEl.textContent = info.version ? ('记录版本：' + info.version) : '';
+        } else {
+          if (h2) h2.textContent = '安装前确认';
+          if (sub) sub.textContent = '即将开始解压引擎与数据。';
+          if (ex) ex.style.display = 'none';
+          if (fi) fi.style.display = 'block';
+          if (pathEl) pathEl.textContent = '';
+          if (verEl) verEl.textContent = '';
+        }
+      } catch (e) {
+        if (h2) h2.textContent = '安装前确认';
+        if (sub) sub.textContent = '即将开始解压引擎与数据。';
+        if (ex) ex.style.display = 'none';
+        if (fi) fi.style.display = 'block';
+      }
+    }
+
+    async function beginPackagedInstall() {
+      const root = (document.getElementById('installPath').value || '').trim();
+      if (!root) {
+        addLog('请选择安装目录', 'error');
+        goToStep(1);
+        return;
+      }
+      goToStep(3);
       startElapsedTimer();
+      let previousInstallRoot = null;
+      try {
+        if (window.electron?.installer?.getExistingInstallInfo) {
+          const info = await window.electron.installer.getExistingInstallInfo();
+          if (info && info.installRoot) previousInstallRoot = info.installRoot;
+        }
+      } catch (_) {}
+      try {
+        if (window.electron?.installer?.releaseInstallLocks) {
+          await window.electron.installer.releaseInstallLocks({
+            installRoot: root,
+            previousInstallRoot: previousInstallRoot || undefined,
+          });
+        }
+        await window.electron.installer.runPackagedInstall({ installRoot: root });
+      } catch (e) {
+        addLog(String(e && e.message ? e.message : e), 'error');
+        stopElapsedTimer();
+        installSubtitle.textContent = '安装出错';
+        btnNext.textContent = '返回上一步';
+        btnNext.disabled = false;
+        btnNext.onclick = () => goToStep(1);
+      }
+    }
+
+    async function startInstall() {
       if (window._installerPackagedMode && window.electron?.installer?.runPackagedInstall) {
         const root = (document.getElementById('installPath').value || '').trim();
         if (!root) {
           addLog('请选择安装目录', 'error');
-          stopElapsedTimer();
-          goToStep(1);
           return;
         }
-        try {
-          await window.electron.installer.runPackagedInstall({ installRoot: root });
-        } catch (e) {
-          addLog(String(e && e.message ? e.message : e), 'error');
-          stopElapsedTimer();
-          installSubtitle.textContent = '安装出错';
-          btnNext.textContent = '返回上一步';
-          btnNext.disabled = false;
-          btnNext.onclick = () => goToStep(1);
-        }
+        await refreshPreflightStep();
+        goToStep(2);
         return;
       }
+      goToStep(3);
+      startElapsedTimer();
       if (window.electron && window.electron.installer) {
         window.electron.installer.startInstall({ pipSource: selectedPipSource });
       } else {
@@ -1261,7 +1528,7 @@
         if (descEl) descEl.innerHTML =
           `造笔已准备就绪。<br>安装耗时 <strong>${installElapsedTotal}</strong>，点击下方按钮启动应用程序。`;
       }
-      goToStep(4);
+      goToStep(5);
     }
 
     document.querySelectorAll('.btn-browse').forEach(btn => {
@@ -1322,7 +1589,8 @@
         (async () => {
           try {
             const mode = await window.electron.installer.getInstallerMode();
-            const packagedFirst = mode && mode.mode === 'packaged' && mode.hasBackendZip && !mode.installed;
+            /* 含已解压引擎的重装场景，仍走 runPackagedInstall，不再误用 Python 开发脚本 */
+            const packagedFirst = mode && mode.mode === 'packaged' && mode.hasBackendZip;
             window._installerPackagedMode = !!packagedFirst;
             if (packagedFirst) {
               const step0sub = document.querySelector('#step0 .subtitle');
@@ -1345,6 +1613,14 @@
             } else {
               const p = await window.electron.installer.getProjectRoot();
               document.getElementById('installPath').value = p || '';
+            }
+            if (typeof window.electron.installer.getWizardContext === 'function') {
+              try {
+                const wctx = await window.electron.installer.getWizardContext();
+                applyWizardGate(wctx);
+              } catch (we) {
+                console.warn(we);
+              }
             }
           } catch (e) {
             console.warn(e);
@@ -1397,7 +1673,7 @@
                 : '✅ 依赖安装完成，正在验证环境配置...';
               addLog(msg + (total ? ` (耗时 ${total})` : ''), 'success');
               installElapsedTotal = total;
-              setTimeout(() => goToStep(3), 600);
+              setTimeout(() => goToStep(4), 600);
               break;
             }
           }

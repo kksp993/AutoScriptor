@@ -4,9 +4,11 @@
 """
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import io
 import os
+import sys
 import re
 import shutil
 import zipfile
@@ -16,14 +18,22 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 def _load_paths_module():
-    """直接加载 AutoScriptor/utils/paths.py，避免 import AutoScriptor 触发重型依赖。"""
+    """加载 paths：开发模式可读源码文件；Nuitka 打包后磁盘上无 paths.py，须用已加载模块或 importlib。"""
     repo = Path(__file__).resolve().parents[2]
     pfile = repo / "AutoScriptor" / "utils" / "paths.py"
-    spec = importlib.util.spec_from_file_location("as_paths_webui", pfile)
-    mod = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(mod)
-    return mod
+    if pfile.is_file():
+        try:
+            spec = importlib.util.spec_from_file_location("as_paths_webui", pfile)
+            mod = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(mod)
+            return mod
+        except Exception:
+            pass
+    m = sys.modules.get("AutoScriptor.utils.paths")
+    if m is not None:
+        return m
+    return importlib.import_module("AutoScriptor.utils.paths")
 
 
 _pm = _load_paths_module()

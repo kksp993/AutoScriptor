@@ -10,7 +10,15 @@ const OverviewPanel = {
     dispatchQueue: { type: Array, default: () => [] },
     allTasksSummary: { type: Object, default: () => ({}) },
     isDispatchRunning: { type: Boolean, default: false },
-    dispatchProgress: { type: Object, default: () => ({ current: 0, total: 0, currentChar: '' }) },
+    dispatchProgress: {
+      type: Object,
+      default: () => ({
+        currentChar: '',
+        totalTaskCount: 0,
+        completedTaskCount: 0,
+        inCurrentRunHalf: false,
+      }),
+    },
     logs: { type: Array, default: () => [] },
     /** 本浏览器会话内是否已通过安全密码解锁总览（与 characterName 无关） */
     overviewSecurityUnlocked: { type: Boolean, default: false },
@@ -148,7 +156,19 @@ const OverviewPanel = {
     },
     formatProgress() {
       if (!this.isDispatchRunning) return '';
-      return `(${this.dispatchProgress.current}/${this.dispatchProgress.total}) ${this.dispatchProgress.currentChar}`;
+      const t = this.dispatchProgress.totalTaskCount || 0;
+      const eff = (this.dispatchProgress.completedTaskCount || 0)
+        + (this.dispatchProgress.inCurrentRunHalf ? 0.5 : 0);
+      const effStr = Number.isInteger(eff) ? String(eff) : eff.toFixed(1);
+      return `(${effStr}/${t}) ${this.dispatchProgress.currentChar}`;
+    },
+    dispatchProgressPercent() {
+      if (!this.isDispatchRunning) return 0;
+      const t = this.dispatchProgress.totalTaskCount || 0;
+      if (!t) return 0;
+      const eff = (this.dispatchProgress.completedTaskCount || 0)
+        + (this.dispatchProgress.inCurrentRunHalf ? 0.5 : 0);
+      return Math.min(100, Math.round((100 * eff) / t));
     },
     formatTimestamp(ts) {
       if (!ts || ts <= 0) return '\u2014';
@@ -325,7 +345,7 @@ const OverviewPanel = {
             </span>
           </div>
           <div v-if="isDispatchRunning" class="ov-dispatch-progress-bar">
-            <el-progress :percentage="dispatchProgress.total ? Math.round(dispatchProgress.current / dispatchProgress.total * 100) : 0"
+            <el-progress :percentage="dispatchProgressPercent()"
                          :stroke-width="6" color="#22c55e"></el-progress>
           </div>
         </div>
@@ -355,7 +375,10 @@ const OverviewPanel = {
               <div class="ov-dispatch-card-header" @click="toggleDispatchChar(char.server, char.name)">
                 <div class="ov-dispatch-card-left">
                   <i class="fa" :class="isDispatchCharExpanded(char.server, char.name) ? 'fa-caret-down' : 'fa-caret-right'" style="width:14px"></i>
-                  <span class="ov-dispatch-card-name">{{ char.server }} / {{ char.name }}</span>
+                  <span class="ov-dispatch-card-name">
+                    <span class="ov-dispatch-card-server">{{ char.server }}</span>
+                    <span class="ov-dispatch-card-character">{{ char.name }}</span>
+                  </span>
                   <span v-if="isDispatchRunning && dispatchProgress.currentChar === char.server + '/' + char.name"
                         class="ov-dispatch-running-tag"><i class="fa fa-spinner fa-spin"></i> 执行中</span>
                 </div>

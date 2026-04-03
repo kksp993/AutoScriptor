@@ -27,7 +27,8 @@ astor>=0.8.1
 # jax==0.4.27
 # jaxlib == 0.4.27
 fastapi
-python-multipart
+# Form / UploadFile 必装；pip 包名 python-multipart，import 名为 multipart（实现包 python_multipart；Nuitka 见 build_release --follow-import-to）
+python-multipart>=0.0.9
 uvicorn[standard]
 websockets
 dpath

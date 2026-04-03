@@ -27,6 +27,10 @@ AutoScriptor 商业发行版构建脚本
 用户文档（参数、产物形态、缓存、排错）:
   docs/AutoScriptor/release-build-and-run.md
 
+打包前（推荐，约数秒，避免白等 20+ 分钟 Nuitka）::
+
+  .venv-nuitka\\Scripts\\python.exe scripts\\verify_packaging_prereqs.py
+
 前置条件:
   - Python 3.10 + .venv 已激活
   - pip install nuitka ordered-set zstandard
@@ -343,6 +347,10 @@ def copy_nofollow_runtime_packages() -> None:
     # rich：Nuitka 易漏带 _unicode_data 下「unicode17-0-0」等动态子模块，整包覆盖
     _copy_site_entry(sp, dst_root, "rich")
 
+    # FastAPI/Starlette UploadFile 依赖 python-multipart；部分 Nuitka 版本 follow 后仍可能未进 standalone
+    _copy_site_entry(sp, dst_root, "multipart")
+    _copy_site_entry(sp, dst_root, "python_multipart")
+
     for extra in _PADDLE_SATELLITE:
         _copy_site_entry(sp, dst_root, extra)
     for fname in _PADDLE_SATELLITE_FILES:
@@ -361,6 +369,7 @@ def copy_nofollow_runtime_packages() -> None:
         "beautifulsoup", "tqdm", "pymupdf", "openpyxl", "pdf2docx", "premailer",
         "rapidfuzz", "visualdl", "python-docx", "lxml", "fire", "cython",
         "fonttools",
+        "python_multipart",
     )
     for item in sp.iterdir():
         if not item.is_dir() or not item.name.endswith(".dist-info"):
@@ -448,6 +457,11 @@ def run_nuitka(timings: list[tuple[str, float]] | None = None, jobs: int | None 
         "--nofollow-import-to=distutils",
         # paddle.audio 等会 import wave；nofollow paddle 时静态分析易漏，显式纳入 standalone
         "--include-module=wave",
+        # FastAPI Form/UploadFile 依赖 python-multipart（import 名 multipart，实现包 python_multipart）。
+        # 勿用 --include-package=multipart：Nuitka 4.x 在部分环境下 locateModule finding≠absolute 会 FATAL；
+        # 用 follow-import-to 加入跟随列表即可，且 server.py 已顶层 import multipart。
+        "--follow-import-to=multipart",
+        "--follow-import-to=python_multipart",
         # pypinyin 在包内旁加载 JSON；与 copy_pypinyin_package_data() 一并保证可运行
         "--include-package-data=pypinyin",
         "--include-data-dir=services/webui/static=services/webui/static",

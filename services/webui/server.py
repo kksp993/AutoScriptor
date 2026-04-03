@@ -33,6 +33,9 @@ from services.core.banner import _print_banner
 from services.core.scheduler import scheduler, SchedulerState
 from AutoScriptor.utils.perf import set_thread_high_priority as _set_thread_high_priority
 
+# FastAPI Form/UploadFile 运行时依赖；Nuitka 不会从 fastapi 静态跟到该包，须显式 import 以打入 standalone
+import multipart  # noqa: F401
+
 from fastapi import FastAPI, File, WebSocket, WebSocketDisconnect, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
