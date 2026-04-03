@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Vue 3 在 HTML 内联模板需运行时编译器（new Function），Electron 下若未显式允许 unsafe-eval 会导致界面停留在 {{ }} 未编译状态 -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; font-src 'self' data:; connect-src 'self' ws: wss: http: https:;" />
   <title>造笔 - AutoScriptor</title>
   <script src="/vendor/tailwind.css"></script>
   <link href="/vendor/font-awesome.min.css" rel="stylesheet" />
@@ -39,7 +42,7 @@
       .stat-label { @apply text-base text-gray-500 mt-1.5; }
     }
   </style>
-  <link rel="stylesheet" href="/static/css/style.css?v=28" />
+  <link rel="stylesheet" href="/static/css/style.css?v=29" />
 </head>
 <body class="app-body overflow-hidden" style="height:100vh;">
   <div id="app" class="flex h-screen overflow-hidden">
@@ -97,9 +100,13 @@
           <!-- 角色切换下拉 -->
           <el-dropdown v-if="currentAccount && charactersList.length" trigger="click">
             <span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 rounded-full text-sm font-medium cursor-pointer">
-              <i class="fa fa-user text-sm"></i>
-              {{ characterDisplayName || '选择角色' }}
-              <i class="fa fa-caret-down" style="margin-left:3px"></i>
+              <i class="fa fa-user text-sm flex-shrink-0"></i>
+              <span v-if="activeCharacter.server && activeCharacter.name" class="inline-flex flex-col leading-tight text-left">
+                <span>{{ activeCharacter.server }}</span>
+                <span>{{ activeCharacter.name }}</span>
+              </span>
+              <span v-else>{{ characterDisplayName || '选择角色' }}</span>
+              <i class="fa fa-caret-down flex-shrink-0" style="margin-left:3px"></i>
             </span>
             <template #dropdown>
               <el-dropdown-menu>
@@ -108,7 +115,10 @@
                   :class="{ 'font-bold': c.server === activeCharacter.server && c.name === activeCharacter.name }">
                   <i class="fa fa-check" v-if="c.server === activeCharacter.server && c.name === activeCharacter.name"
                     style="margin-right:6px;color:#22c55e"></i>
-                  {{ c.label }}
+                  <span class="inline-flex flex-col leading-tight text-left">
+                    <span>{{ c.server }}</span>
+                    <span>{{ c.name }}</span>
+                  </span>
                   <el-button v-if="!(c.server === activeCharacter.server && c.name === activeCharacter.name)"
                     type="danger" link size="small" style="margin-left:12px"
                     @click.stop="deleteCharacter(c.server, c.name)">
@@ -163,8 +173,7 @@
         <scheduler-panel v-if="activeTab==='scheduler'"
           :overview-data="overviewData" :logs="logs" :character-name="characterName"
           :scheduler-status="schedulerStatus"
-          @start-run="startRun" @stop-run="stopRun" @verify-account="verifyAccount"
-          @open-add-account="openAddAccountDialog" @reset-scheduler="resetScheduler"
+          @start-run="startRun" @stop-run="stopRun" @reset-scheduler="resetScheduler"
           @clear-logs="clearLogs"></scheduler-panel>
 
         <editor-panel v-if="activeTab==='editor'"
@@ -323,10 +332,9 @@
   <!-- Vue 组件 -->
   <script src="/static/js/components/NewsPanel.js?v=3"></script>
   <script src="/static/js/components/AppSidebar.js?v=13"></script>
-  <script src="/static/js/task_help_docs.js?v=1"></script>
   <script src="/static/js/components/TaskTree.js?v=10"></script>
-  <script src="/static/js/components/Overview.js?v=12"></script>
-  <script src="/static/js/components/SchedulerPanel.js?v=9"></script>
+  <script src="/static/js/components/Overview.js?v=14"></script>
+  <script src="/static/js/components/SchedulerPanel.js?v=10"></script>
   <script src="/static/js/components/TaskPanel.js?v=9"></script>
   <script src="/static/js/components/Settings.js?v=8"></script>
   <script src="/static/js/components/AboutPanel.js?v=1"></script>
@@ -335,6 +343,6 @@
   <script src="/static/js/components/editor/EditorControls.js?v=14"></script>
   <script src="/static/js/components/editor/EditorPanel.js?v=25"></script>
   <script src="/static/js/components/ErrorArchivesPanel.js?v=4"></script>
-  <script src="/static/js/app.js?v=15"></script>
+  <script src="/static/js/app.js?v=18"></script>
 </body>
 </html>

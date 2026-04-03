@@ -94,6 +94,41 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "${ps1.replace(/"/g, '\\"')}
   fs.writeFileSync(bat, batBody, 'utf8');
 }
 
+function sleepMs(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Windows 上旧 backend 可能被 python/gui 或杀软占用，单次 rm 易 EPERM；短暂重试并给出可操作提示。
+ */
+async function removeBackendDirWithRetry(backendDest, send) {
+  const max = 5;
+  let lastErr = null;
+  for (let i = 0; i < max; i++) {
+    try {
+      fs.rmSync(backendDest, { recursive: true, force: true });
+      return null;
+    } catch (e) {
+      lastErr = e;
+      const code = e && (e.code || e.errno);
+      const msg = String(e && e.message ? e.message : e);
+      if (send && i === 0) {
+        send({
+          type: 'log',
+          message:
+            '[提示] 正在删除旧 backend 目录，若被占用将重试几次。请关闭占用该目录的程序（如造笔/引擎、python.exe）后重试。',
+        });
+      } else if (send) {
+        send({ type: 'log', message: `[重试 ${i + 1}/${max}] 删除 backend: ${msg}` });
+      }
+      if (i < max - 1) await sleepMs(600 * (i + 1));
+    }
+  }
+  const hint =
+    '无法删除旧目录「backend」（权限被拒绝）。请：1）在任务管理器中结束「造笔」、python、相关进程；2）暂时关闭杀毒软件或把该目录加入排除；3）换一个安装目录（建议选「文档」下的 AutoScriptor 文件夹，勿选 dist_electron 等开发输出目录）。原始错误: ';
+  return new Error(hint + (lastErr && lastErr.message ? lastErr.message : String(lastErr)));
+}
+
 function registerUninstall(installRoot, displayVersion) {
   const key = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\AutoScriptorZao';
   const bat = path.join(installRoot, '卸载造笔.bat');
@@ -139,7 +174,8 @@ async function runPackagedInstall(opts) {
 
   const backendDest = path.join(rootResolved, 'backend');
   if (fs.existsSync(backendDest)) {
-    fs.rmSync(backendDest, { recursive: true, force: true });
+    const errRm = await removeBackendDirWithRetry(backendDest, send);
+    if (errRm) throw errRm;
   }
   fs.mkdirSync(backendDest, { recursive: true });
 

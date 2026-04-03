@@ -22,7 +22,6 @@ def register_task(
     default_offset_hours=None,
     beta=False,
     path_cn=None,
-    path_en=None,
     **task_kwargs,
 ):
     """
@@ -38,7 +37,6 @@ def register_task(
       - path_cn (str): **仅 custom_task 目录下脚本必填**。斜杠分隔的 cfg 任务路径（中文键），
         首段一般为「自定义任务」或与目录对应的英文名（如 custom_task 会规范为「自定义任务」）。
         示例：path_cn="自定义任务/示例/hello_custom"
-      - path_en (str): 可选，与 path_cn 对应的英文路径说明（如 custom_task/example_hello），仅作开发文档/对照，不写入配置。
       - sched_window_hours (tuple[int,int]): 本地时间可执行时段 [start, end)，如 (10, 22)；
         调度器在时段外不会执行该任务，执行后 next_exec_time 也会落在时段内
       - allowed_weekdays (list[int]): 仅在这些星期可执行，cfg 约定 1=周一 … 7=周日（如 [6,7] 为周六日）；
@@ -60,7 +58,6 @@ def register_task(
                 default_offset_hours=default_offset_hours,
                 beta=beta,
                 path_cn=path_cn,
-                path_en=path_en,
                 **task_kwargs,
             )
         return wrapper
@@ -117,16 +114,13 @@ def register_task(
             if not raw_cn:
                 logger.error(
                     "custom_task 下的任务必须传入 path_cn，例如 "
-                    '@register_task(path_cn="自定义任务/示例/hello_custom", path_en="custom_task/example_hello.py") '
-                    "（path_en 可选，仅作中英文对照说明）"
+                    '@register_task(path_cn="自定义任务/示例/hello_custom")'
                 )
                 return func
             keys = [normalize_cfg_key(p) for p in raw_cn.split("/") if p.strip()]
             if not keys:
                 logger.error("path_cn 解析后为空: %r", path_cn)
                 return func
-            if path_en:
-                logger.debug("custom_task %s 英文路径说明: %s", func.__name__, path_en)
         else:
             keys = [normalize_to_cn(key) for key in keys]
 

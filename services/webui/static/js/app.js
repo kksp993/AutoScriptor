@@ -86,7 +86,15 @@ const app = createApp({
     const dispatchQueue = ref([]);
     const allTasksSummary = reactive({});
     const isDispatchRunning = ref(false);
-    const dispatchProgress = reactive({ current: 0, total: 0, currentChar: '' });
+    const dispatchProgress = reactive({
+      currentChar: '',
+      /** 点击「执行所有」时，队列内各角色待执行 (pending / 黄点) 任务总数 */
+      totalTaskCount: 0,
+      /** 本次调度已成功跑完的任务数（各次 /run 的 tasks.length 之和） */
+      completedTaskCount: 0,
+      /** 当前有一次 /run 正在执行时计 0.5 个已完成任务，用于进度条 */
+      inCurrentRunHalf: false,
+    });
     const _dispatchAbort = ref(false);
 
     // ── 密码保护 ──
@@ -164,19 +172,15 @@ const app = createApp({
       return {};
     });
 
-    const characterDisplayName = computed(() => {
-      if (activeCharacter.server && activeCharacter.name) {
-        return activeCharacter.server + ' / ' + activeCharacter.name;
-      }
-      return characterName.value || '';
-    });
+    /** 顶栏在「未选完整 server+name」时显示的单行名（来自配置） */
+    const characterDisplayName = computed(() => characterName.value || '');
 
     const charactersList = computed(() => {
       const list = [];
       for (const [srv, chars] of Object.entries(charactersTree)) {
         const names = Array.isArray(chars) ? chars : Object.keys(chars);
         for (const charName of names) {
-          list.push({ server: srv, name: charName, label: srv + ' / ' + charName });
+          list.push({ server: srv, name: charName });
         }
       }
       return list;
@@ -430,12 +434,23 @@ const app = createApp({
       } catch (e) { ElementPlus.ElMessage.error('执行失败: ' + e); }
     }
 
+    function _resetDispatchProgress() {
+      dispatchProgress.currentChar = '';
+      dispatchProgress.totalTaskCount = 0;
+      dispatchProgress.completedTaskCount = 0;
+      dispatchProgress.inCurrentRunHalf = false;
+    }
+
+    function _pendingTaskCountForChar(server, name) {
+      const s = allTasksSummary[server]?.[name];
+      if (!s) return 0;
+      return Math.max(0, s.pending || 0);
+    }
+
     async function unifiedStop() {
       _dispatchAbort.value = true;
       isDispatchRunning.value = false;
-      dispatchProgress.current = 0;
-      dispatchProgress.total = 0;
-      dispatchProgress.currentChar = '';
+      _resetDispatchProgress();
       try {
         await API.post('/stop', {});
       } catch (e) {
@@ -924,13 +939,17 @@ const app = createApp({
       }
       isDispatchRunning.value = true;
       _dispatchAbort.value = false;
+      await fetchAllTasksSummary();
       const queue = [...dispatchQueue.value];
-      dispatchProgress.total = queue.length;
+      let totalPendingAtClick = 0;
+      for (const c of queue) totalPendingAtClick += _pendingTaskCountForChar(c.server, c.name);
+      dispatchProgress.totalTaskCount = totalPendingAtClick;
+      dispatchProgress.completedTaskCount = 0;
+      dispatchProgress.inCurrentRunHalf = false;
 
       for (let i = 0; i < queue.length; i++) {
         if (_dispatchAbort.value) break;
         const char = queue[i];
-        dispatchProgress.current = i + 1;
         dispatchProgress.currentChar = char.server + '/' + char.name;
 
         try {
@@ -973,19 +992,22 @@ const app = createApp({
             continue;
           }
 
+          dispatchProgress.inCurrentRunHalf = true;
           await _waitForTaskCompletion();
+          dispatchProgress.inCurrentRunHalf = false;
+          if (_dispatchAbort.value) break;
+          dispatchProgress.completedTaskCount += tasks.length;
           await fetchAllTasksSummary();
 
         } catch (e) {
+          dispatchProgress.inCurrentRunHalf = false;
           console.error('dispatch run error for', char.name, e);
           ElementPlus.ElMessage.error('执行角色任务失败: ' + char.name);
         }
       }
 
       isDispatchRunning.value = false;
-      dispatchProgress.current = 0;
-      dispatchProgress.total = 0;
-      dispatchProgress.currentChar = '';
+      _resetDispatchProgress();
       if (!_dispatchAbort.value) {
         ElementPlus.ElMessage.success('所有角色任务执行完毕');
       }

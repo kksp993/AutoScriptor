@@ -86,6 +86,20 @@ function loadTrayIcon() {
   }
 }
 
+/**
+ * 主窗口与安装向导共用。Vue 3 在 WebUI 的 index.html 内联模板依赖运行时编译器（内部会 new Function）。
+ * Electron 在 nodeIntegration:false + preload 时默认 sandbox:true，沙箱内对 eval/newFunction 的限制会导致
+ * 页面一直停留在未编译的 `{{ }}`；关闭 sandbox 后由 meta CSP + 无 node 集成仍保持隔离。
+ */
+function browserWindowWebPreferences() {
+  return {
+    preload: path.join(__dirname, 'preload.js'),
+    nodeIntegration: false,
+    contextIsolation: true,
+    sandbox: false,
+  };
+}
+
 // Find Python executable (.venv preferred, then system)
 function findPython() {
   const candidates = [
@@ -155,6 +169,29 @@ function isInstalled() {
     return fs.existsSync(getBackendEngineExe());
   }
   return fs.existsSync(path.join(getRoot(), '.venv', 'Scripts', 'python.exe'));
+}
+
+/** 安装向导专用：命令行带 `--installer` / `--install-wizard` 时始终只打开向导，不启动主窗口与 Python。 */
+function isInstallerWizardArgv() {
+  return process.argv.some((a) => a === '--installer' || a === '--install-wizard');
+}
+
+/** userData/install.json：与 installer:get-existing-install-info 一致。 */
+function readInstallJsonExisting() {
+  try {
+    const marker = path.join(app.getPath('userData'), 'install.json');
+    if (!fs.existsSync(marker)) {
+      return { hasExisting: false, installRoot: null, version: null };
+    }
+    const j = JSON.parse(fs.readFileSync(marker, 'utf8'));
+    const ir = j.installRoot && typeof j.installRoot === 'string' ? path.resolve(j.installRoot) : null;
+    if (!ir || !fs.existsSync(ir)) {
+      return { hasExisting: false, installRoot: null, version: j.version || null };
+    }
+    return { hasExisting: true, installRoot: ir, version: j.version || null };
+  } catch (_) {
+    return { hasExisting: false, installRoot: null, version: null };
+  }
 }
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -338,15 +375,17 @@ function createMainWindow() {
     show: false,
     icon,
     title: '造笔 - AutoScriptor',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: false,
-      contextIsolation: true,
-    },
+    webPreferences: browserWindowWebPreferences(),
   });
 
   // Show once DOM is ready
   mainWindow.once('ready-to-show', () => mainWindow.show());
+
+  // 转发 renderer console 到主进程 stdout（便于终端看到前端 JS 报错）
+  mainWindow.webContents.on('console-message', (_e, level, msg, line, src) => {
+    const tag = ['V','I','W','E'][level] || 'L';
+    console.log(`[renderer:${tag}] ${msg}  (${src}:${line})`);
+  });
 
   // Load loading screen first；等页面真正加载完再允许发 log（否则早到的行会丢）
   loadingScreenLogFlushDone = false;
@@ -413,11 +452,7 @@ function createInstallerWindow() {
     show: false,
     icon,
     title: '造笔 安装向导',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: false,
-      contextIsolation: true,
-    },
+    webPreferences: browserWindowWebPreferences(),
   });
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
@@ -460,6 +495,7 @@ function transitionToApp() {
 ipcMain.handle('installer:get-project-root', () => getRoot());
 
 ipcMain.handle('installer:get-mode', () => {
+  invalidateRootCache();
   if (!app.isPackaged) {
     return { mode: 'development' };
   }
@@ -477,11 +513,134 @@ ipcMain.handle('installer:default-install-dir', () => {
   return path.join(app.getPath('documents'), 'AutoScriptor');
 });
 
+/** 读取 userData/install.json，用于覆盖安装提示 */
+ipcMain.handle('installer:get-existing-install-info', () => readInstallJsonExisting());
+
+ipcMain.handle('installer:get-wizard-context', () => {
+  invalidateRootCache();
+  const isWizard = isInstallerWizardArgv();
+  let appVersion = '0.0.0';
+  try {
+    appVersion = require('./package.json').version;
+  } catch (_) {}
+  const packaged = app.isPackaged;
+  const engineOk = packaged && fs.existsSync(getBackendEngineExe());
+  const existing = readInstallJsonExisting();
+  let uninstallBatPath = null;
+  if (existing.installRoot) {
+    const bat = path.join(existing.installRoot, '卸载造笔.bat');
+    if (fs.existsSync(bat)) uninstallBatPath = bat;
+  }
+  const needsUninstallGate = isWizard && packaged && engineOk;
+  return {
+    isWizard,
+    packaged,
+    appVersion,
+    engineOk,
+    hasExistingInstall: existing.hasExisting,
+    installRoot: existing.installRoot,
+    recordVersion: existing.version,
+    uninstallBatPath,
+    needsUninstallGate,
+  };
+});
+
+ipcMain.handle('installer:run-uninstall-bat', () => {
+  const ex = readInstallJsonExisting();
+  if (!ex.installRoot || !fs.existsSync(ex.installRoot)) {
+    throw new Error('未找到安装目录，请先点击「刷新状态」');
+  }
+  const bat = path.join(ex.installRoot, '卸载造笔.bat');
+  if (!fs.existsSync(bat)) {
+    throw new Error('未找到卸载脚本：' + bat);
+  }
+  const child = spawn('cmd.exe', ['/c', 'start', '""', bat], {
+    cwd: ex.installRoot,
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+  return { ok: true, path: bat };
+});
+
+ipcMain.handle('installer:open-install-root', (_event, maybeRoot) => {
+  const s = maybeRoot != null ? String(maybeRoot).trim() : '';
+  const r = s ? path.resolve(s) : null;
+  const target = r && fs.existsSync(r) ? r : readInstallJsonExisting().installRoot;
+  if (!target || !fs.existsSync(target)) {
+    return { ok: false, error: '目录不存在' };
+  }
+  shell.openPath(target);
+  return { ok: true };
+});
+
+/**
+ * 安装前：释放本机 5000 端口，并结束「可执行文件路径位于指定 backend 目录下」的进程（缓解 EPERM）。
+ * opts: { installRoot, previousInstallRoot? }
+ */
+function releaseInstallLocks(opts) {
+  const o = opts && typeof opts === 'object' ? opts : {};
+  const roots = new Set();
+  const addBackend = (r) => {
+    const s = String(r || '').trim();
+    if (s.length < 4) return;
+    const abs = path.resolve(s);
+    roots.add(path.join(abs, 'backend'));
+  };
+  addBackend(o.installRoot);
+  if (o.previousInstallRoot) addBackend(o.previousInstallRoot);
+
+  killStalePort5000();
+
+  if (process.platform !== 'win32' || roots.size === 0) {
+    return { ok: true, killedNote: 'port5000' };
+  }
+
+  const dirList = [...roots].map((d) => d.replace(/'/g, "''"));
+  const ps = `
+$dirs = @(${dirList.map((d) => `'${d}'`).join(',')})
+Get-CimInstance Win32_Process | ForEach-Object {
+  $exe = $_.ExecutablePath
+  if (-not $exe) { return }
+  foreach ($d in $dirs) {
+    if ($exe.StartsWith($d, [System.StringComparison]::OrdinalIgnoreCase)) {
+      Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+      break
+    }
+  }
+}
+`;
+  try {
+    const { execFileSync } = require('child_process');
+    execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps],
+      { encoding: 'utf8', windowsHide: true, timeout: 60000 },
+    );
+  } catch (e) {
+    console.warn('[releaseInstallLocks]', e && e.message ? e.message : e);
+  }
+  return { ok: true, killedNote: 'port5000+backend' };
+}
+
+ipcMain.handle('installer:release-install-locks', async (_event, opts) => releaseInstallLocks(opts));
+
 ipcMain.handle('installer:run-packaged', async (_event, opts) => {
   const installRoot = path.resolve(String(opts && opts.installRoot ? opts.installRoot : '').trim());
   if (installRoot.length < 4) {
     throw new Error('请选择有效的安装目录');
   }
+  let previousInstallRoot = null;
+  try {
+    const marker = path.join(app.getPath('userData'), 'install.json');
+    if (fs.existsSync(marker)) {
+      const j = JSON.parse(fs.readFileSync(marker, 'utf8'));
+      if (j.installRoot && typeof j.installRoot === 'string') {
+        previousInstallRoot = path.resolve(j.installRoot);
+      }
+    }
+  } catch (_) {}
+  releaseInstallLocks({ installRoot, previousInstallRoot });
   if (process.platform === 'win32') {
     const low = installRoot.toLowerCase();
     if (/^[a-z]:\\windows$/i.test(low) || low.includes(':\\windows\\system32')) {
@@ -719,6 +878,11 @@ function quitApp() {
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
   app.isQuitting = false;
+
+  if (isInstallerWizardArgv()) {
+    createInstallerWindow();
+    return;
+  }
 
   if (isInstalled()) {
     killStalePort5000();
