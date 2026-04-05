@@ -5,8 +5,23 @@ const SchedulerPanel = {
     logs: { type: Array, required: true },
     characterName: { type: String, default: '' },
     schedulerStatus: { type: Object, required: true },
+    executionBusy: { type: Boolean, default: false },
   },
   emits: ['start-run', 'stop-run', 'reset-scheduler', 'clear-logs'],
+  computed: {
+    /** 当前调度状态的文字说明，告知用户该状态的含义 */
+    schedStateHint() {
+      const s = this.overviewData.scheduler;
+      if (!s) return '';
+      if (s.state === 'running') return '调度已激活：将自动监控并执行到期任务';
+      if (s.state === 'error') return '调度已暂停：连续失败，请检查日志后点击「恢复调度」';
+      return '调度未激活：到期任务不会自动执行，需点击「开始运行」';
+    },
+    /** 当前角色是否处于「调度模式运行中」状态 */
+    isSchedulerRunning() {
+      return this.overviewData.scheduler && this.overviewData.scheduler.state === 'running';
+    },
+  },
   methods: {
     formatTimestamp(ts) {
       if (!ts || ts <= 0) return '\u2014';
@@ -44,18 +59,21 @@ const SchedulerPanel = {
 
     <!-- 状态 + 下次执行 -->
     <div class="bg-gray-50 rounded-lg p-4 mb-4">
-      <div class="flex items-center gap-2 mb-2">
+      <div class="flex items-center gap-2 mb-1">
         <span class="w-3 h-3 rounded-full shrink-0" :style="{ backgroundColor: schedColor(overviewData.scheduler.color) }"></span>
-        <span class="text-sm font-medium" :style="{ color: schedColor(overviewData.scheduler.color) }">{{ overviewData.scheduler.label || '未知' }}</span>
+        <span class="text-sm font-medium" :style="{ color: schedColor(overviewData.scheduler.color) }" :title="schedStateHint">{{ overviewData.scheduler.label || '未知' }}</span>
         <span v-if="characterName" class="ml-auto text-xs px-2.5 py-1 bg-green-50 text-green-700 rounded"><i class="fa fa-user mr-1"></i>{{ characterName }}</span>
         <span v-else class="ml-auto text-xs px-2.5 py-1 bg-red-50 text-red-600 rounded">未验证</span>
       </div>
-      <div class="text-xs text-gray-500 mt-1 text-center">下次执行</div>
+      <div class="text-xs text-gray-400 mb-2" style="line-height:1.4">{{ schedStateHint }}</div>
+      <div class="text-xs text-gray-500 mt-1 text-center">下次执行（当前角色）</div>
       <div class="text-lg font-semibold text-dark mt-0.5 text-center">
-        <template v-if="overviewData.stats && overviewData.stats.pending > 0">-- --</template>
+        <template v-if="!isSchedulerRunning">-- --</template>
+        <template v-else-if="overviewData.stats && overviewData.stats.pending > 0">即将执行</template>
         <template v-else>{{ overviewData.scheduler.next_execution ? formatTimestamp(overviewData.scheduler.next_execution) : '暂无计划' }}</template>
       </div>
-      <div v-if="overviewData.stats && overviewData.stats.pending > 0" class="text-xs text-gray-400 mt-1 text-center">即将执行</div>
+      <div v-if="!isSchedulerRunning" class="text-xs text-gray-400 mt-1 text-center">调度未激活</div>
+      <div v-else-if="overviewData.stats && overviewData.stats.pending > 0" class="text-xs text-gray-400 mt-1 text-center">有到期任务等待执行</div>
       <div v-else-if="overviewData.scheduler.next_execution" class="text-xs text-gray-400 mt-1 text-center">
         {{ formatCountdown(overviewData.scheduler.next_execution) }}
       </div>
@@ -64,7 +82,7 @@ const SchedulerPanel = {
     <!-- 操作：主操作一行，双列网格，左右边与面板 padding 对齐 -->
     <div class="sched-control-actions mb-4">
       <div class="sched-control-row">
-        <el-button type="primary" size="large" @click="$emit('start-run')" :disabled="!characterName"><i class="fa fa-play mr-1.5"></i>开始运行</el-button>
+        <el-button type="primary" size="large" @click="$emit('start-run')" :disabled="!characterName || executionBusy"><i class="fa fa-play mr-1.5"></i>开始运行</el-button>
         <el-button type="danger" size="large" @click="$emit('stop-run')"><i class="fa fa-stop mr-1.5"></i>终止执行</el-button>
       </div>
       <el-button v-if="overviewData.scheduler.state==='error'" type="danger" size="large" @click="$emit('reset-scheduler')" class="sched-btn-full"><i class="fa fa-refresh mr-1.5"></i>恢复调度</el-button>
@@ -93,7 +111,7 @@ const SchedulerPanel = {
             </td>
             <td class="py-2 text-center">
               <span v-if="t.status==='pending'" class="inline-block px-2 py-0.5 text-sm rounded-full bg-amber-100 text-amber-700">待执行</span>
-              <span v-else class="inline-block px-2 py-0.5 text-sm rounded-full bg-green-100 text-green-700">已完成</span>
+              <span v-else class="inline-block px-2 py-0.5 text-sm rounded-full bg-green-100 text-green-700">待执行</span>
             </td>
             <td class="py-2 text-right text-gray-500 text-sm whitespace-nowrap">{{ t.next_exec_time > 0 ? formatTimestamp(t.next_exec_time) : '立即' }}</td>
           </tr>

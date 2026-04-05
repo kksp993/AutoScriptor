@@ -44,7 +44,6 @@ def battle_task(
         ]
     )
     sleep(0.5)
-    click(B("战斗-化身"), repeat=2)
     # 战斗结束不执行
     if flow_name is None:
         flow_name = getattr(self, "task_context_battle_flow", None) or "战斗循环"

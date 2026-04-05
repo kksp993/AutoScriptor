@@ -6,6 +6,7 @@ const TaskPanel = {
     logs: { type: Array, required: true },
     characterName: { type: String, default: '' },
     schedulerStatus: { type: Object, required: true },
+    executionBusy: { type: Boolean, default: false },
   },
   emits: [
     'edit-task', 'expanded-change', 'start-run', 'stop-run',
@@ -26,7 +27,7 @@ const TaskPanel = {
       </button>
     </div>
     <div class="task-panel-tasklist flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden">
-      <task-tree :tree-data="currentTasks"
+      <task-tree :tree-data="currentTasks" :run-task-disabled="executionBusy"
         @edit-task="(k,d,p,par)=>$emit('edit-task',k,d,p,par)"
         @expanded-change="v=>$emit('expanded-change',v)"
         @run-task="p=>$emit('run-task',p)">
@@ -38,7 +39,8 @@ const TaskPanel = {
   <div class="lg:w-2/3 bg-white rounded-xl shadow-md p-5 flex flex-col overflow-hidden min-h-0">
     <div class="flex flex-col gap-4 flex-1 min-h-0">
       <div class="flex flex-wrap xl:flex-nowrap gap-2.5 items-center min-w-0">
-        <button @click="$emit('start-run')" class="px-4 py-2.5 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium shrink-0">
+        <button @click="$emit('start-run')" :disabled="executionBusy"
+                class="px-4 py-2.5 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium shrink-0 disabled:opacity-50 disabled:pointer-events-none">
           <i class="fa fa-play mr-1.5"></i>开始运行
         </button>
         <button class="px-4 py-2.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors text-sm font-medium shrink-0" @click="$emit('stop-run')">

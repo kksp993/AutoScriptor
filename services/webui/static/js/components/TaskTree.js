@@ -38,6 +38,7 @@ const TaskTreeTaskRow = {
     item: { type: Object, required: true },
     taskPath: { type: String, required: true },
     parentTree: { type: Object, required: true },
+    runTaskDisabled: { type: Boolean, default: false },
   },
   emits: ['edit-task', 'run-task'],
   data() {
@@ -48,13 +49,13 @@ const TaskTreeTaskRow = {
       statusClasses: {
         disabled: 'bg-gray-200 text-gray-600',
         pending: 'bg-yellow-200 text-yellow-600',
-        completed: 'bg-green-200 text-green-600',
+        scheduled: 'bg-green-200 text-green-600',
         error: 'bg-red-200 text-red-600',
       },
       statusLabels: {
         disabled: '未启用',
-        pending: '待完成',
-        completed: '已完成',
+        pending: '待执行',
+        scheduled: '待执行',
         error: '错误',
       },
     };
@@ -123,7 +124,9 @@ const TaskTreeTaskRow = {
             @click.stop="toggleTask(item)">
         {{ statusLabels[getTaskStatus(item)] }}
       </span>
-      <button class="w-7 h-7 flex items-center justify-center rounded-full bg-primary/10 hover:bg-primary/25 text-primary transition-colors flex-shrink-0"
+      <button type="button"
+              class="w-7 h-7 flex items-center justify-center rounded-full bg-primary/10 hover:bg-primary/25 text-primary transition-colors flex-shrink-0 disabled:opacity-40 disabled:pointer-events-none"
+              :disabled="runTaskDisabled"
               @click.stop="$emit('run-task', taskPath)"
               title="运行此任务">
         <i class="fa fa-play text-xs"></i>
@@ -164,11 +167,12 @@ const TaskTreeTaskRow = {
     getTaskStatus(taskItem) {
       if (!taskItem.on) return 'disabled';
       if (taskItem.error) return 'error';
-      return taskItem.next_exec_time < Date.now() / 1000 ? 'pending' : 'completed';
+      return taskItem._due ? 'pending' : 'scheduled';
     },
     toggleTask(taskItem) {
       taskItem.on = !taskItem.on;
-      if (taskItem.on) taskItem.next_exec_time = 0;
+      if (taskItem.on) { taskItem.next_exec_time = 0; taskItem._due = true; }
+      else { taskItem._due = false; }
     },
     setupResizeObserver() {
       this.resizeObserver = new ResizeObserver(() => this.measure());
@@ -203,6 +207,7 @@ const TaskTree = {
     treeData: { type: Object, required: true },
     basePath: { type: String, default: '' },
     depth: { type: Number, default: 0 },
+    runTaskDisabled: { type: Boolean, default: false },
   },
   emits: ['edit-task', 'expanded-change', 'run-task'],
   data() {
@@ -211,13 +216,13 @@ const TaskTree = {
       statusClasses: {
         disabled: 'bg-gray-200 text-gray-600',
         pending: 'bg-yellow-200 text-yellow-600',
-        completed: 'bg-green-200 text-green-600',
+        scheduled: 'bg-green-200 text-green-600',
         error: 'bg-red-200 text-red-600',
       },
       statusLabels: {
         disabled: '未启用',
-        pending: '待完成',
-        completed: '已完成',
+        pending: '待执行',
+        scheduled: '待执行',
         error: '错误',
       },
     };
@@ -231,6 +236,7 @@ const TaskTree = {
       :item="treeData[key]"
       :task-path="childBasePath(key)"
       :parent-tree="treeData"
+      :run-task-disabled="runTaskDisabled"
       @edit-task="(childKey, item, path, parent) => $emit('edit-task', childKey, item, path, parent)"
       @run-task="path => $emit('run-task', path)">
     </task-tree-task-row>
@@ -252,6 +258,7 @@ const TaskTree = {
         <div v-if="expanded[key]" class="ml-3 pl-3 border-l-2 border-primary/20">
           <task-tree
             :tree-data="treeData[key]" :base-path="childBasePath(key)" :depth="depth + 1"
+            :run-task-disabled="runTaskDisabled"
             @edit-task="(childKey, item, path, parent) => $emit('edit-task', childKey, item, path, parent)"
             @expanded-change="$emit('expanded-change', $event)"
             @run-task="path => $emit('run-task', path)">
@@ -277,6 +284,7 @@ const TaskTree = {
         <div v-if="expanded[key]" class="ml-2 pl-2 border-l border-gray-200">
           <task-tree
             :tree-data="treeData[key]" :base-path="childBasePath(key)" :depth="depth + 1"
+            :run-task-disabled="runTaskDisabled"
             @edit-task="(childKey, item, path, parent) => $emit('edit-task', childKey, item, path, parent)"
             @expanded-change="$emit('expanded-change', $event)"
             @run-task="path => $emit('run-task', path)">
@@ -313,10 +321,10 @@ const TaskTree = {
     getTaskStatus(item) {
       if (!item.on) return 'disabled';
       if (item.error) return 'error';
-      return item.next_exec_time < Date.now() / 1000 ? 'pending' : 'completed';
+      return item._due ? 'pending' : 'scheduled';
     },
     countStatus(section) {
-      const c = { disabled: 0, pending: 0, completed: 0, error: 0 };
+      const c = { disabled: 0, pending: 0, scheduled: 0, error: 0 };
       Object.values(section).forEach(item => {
         if (this.isTask(item)) {
           c[this.getTaskStatus(item)]++;

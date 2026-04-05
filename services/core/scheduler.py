@@ -34,6 +34,133 @@ class SchedulerState(Enum):
 CHECK_INTERVAL = 3600
 MAX_CONSECUTIVE_ERRORS = 3
 
+
+def collect_active_times_from_tasks_tree(tasks: dict) -> list[float]:
+    """收集任务树中所有 on=True 且已注册任务的「有效」下次执行时间（含 sched_window / 星期限制）。"""
+    from AutoScriptor.utils.task_registry import task_registry
+    from services.core.task_manager import (
+        parse_sched_window_hours,
+        clamp_to_sched_window,
+        parse_allowed_weekdays,
+        calc_next_allowed_weekday_ts,
+    )
+    import datetime as _dt
+
+    now_ts = time.time()
+    result: list[float] = []
+
+    def _walk(node: dict, prefix: str = "") -> None:
+        for key, val in node.items():
+            if not isinstance(val, dict):
+                continue
+            path = f"{prefix}/{key}" if prefix else key
+            if "on" in val:
+                if val.get("on") and task_registry.has_task(path):
+                    raw = float(val.get("next_exec_time", 0) or 0)
+                    sw = parse_sched_window_hours(val)
+                    effective = clamp_to_sched_window(max(raw, now_ts), sw[0], sw[1]) if sw else (raw or now_ts)
+                    aw = parse_allowed_weekdays(val)
+                    if aw is not None:
+                        now_dt = _dt.datetime.fromtimestamp(now_ts)
+                        wd = now_dt.weekday() + 1
+                        if effective <= now_ts and wd not in set(aw):
+                            effective = calc_next_allowed_weekday_ts(now_dt, aw)
+                        elif effective > now_ts:
+                            tdt = _dt.datetime.fromtimestamp(effective)
+                            if (tdt.weekday() + 1) not in set(aw):
+                                effective = calc_next_allowed_weekday_ts(tdt, aw)
+                    result.append(effective)
+            else:
+                _walk(val, path)
+
+    _walk(tasks or {})
+    return result
+
+
+def collect_active_times_from_all_characters(cfg) -> list[float]:
+    """当前账号下所有角色的「有效」下次执行时间（与总览 / all_tasks_summary 一致）。"""
+    ac = cfg.active_character()
+    active_server = ac.get("server", "")
+    active_name = ac.get("name", "")
+    chars = cfg._account_data.get("characters", {}) or {}
+    result: list[float] = []
+    for srv, srv_chars in chars.items():
+        for char_name, char_data in srv_chars.items():
+            if srv == active_server and char_name == active_name:
+                tasks_tree = cfg._config.get("tasks", {})
+            else:
+                tasks_tree = char_data.get("tasks", {}) or {}
+            result.extend(collect_active_times_from_tasks_tree(tasks_tree))
+    return result
+
+
+def next_display_timestamp_from_times(times: list[float]) -> float | None:
+    """与 Scheduler.get_next_execution_timestamp 一致：有到期则返回当前时刻，否则最早未来时间。"""
+    now = time.time()
+    if not times:
+        return None
+    if any(t <= now for t in times):
+        return now
+    return min(times)
+
+
+def is_task_due(val: dict, path: str, now_ts: float) -> bool:
+    """判定单个任务是否到期（与 Scheduler._collect_due 完全一致的判定逻辑，无副作用）。"""
+    from AutoScriptor.utils.task_registry import task_registry
+    from services.core.task_manager import (
+        parse_sched_window_hours,
+        clamp_to_sched_window,
+        parse_allowed_weekdays,
+    )
+    import datetime as _dt
+
+    if not val.get("on"):
+        return False
+    if not task_registry.has_task(path):
+        return False
+    hoarding = val.get("hoarding_minutes", 0)
+    effective_now = now_ts - (hoarding * 60) if hoarding else now_ts
+    if effective_now < val.get("next_exec_time", 0):
+        return False
+    sw = parse_sched_window_hours(val)
+    if sw is not None:
+        deferred = clamp_to_sched_window(now_ts, sw[0], sw[1])
+        if deferred > now_ts:
+            return False
+    aw = parse_allowed_weekdays(val)
+    if aw is not None:
+        wd = _dt.datetime.fromtimestamp(now_ts).weekday() + 1
+        if wd not in set(aw):
+            return False
+    return True
+
+
+def calc_effective_next_time(val: dict, now_ts: float) -> float:
+    """计算任务的有效下次执行时间（用于展示），与 collect_active_times_from_tasks_tree 一致。"""
+    from services.core.task_manager import (
+        parse_sched_window_hours,
+        clamp_to_sched_window,
+        parse_allowed_weekdays,
+        calc_next_allowed_weekday_ts,
+    )
+    import datetime as _dt
+
+    nxt = float(val.get("next_exec_time", 0) or 0)
+    sw = parse_sched_window_hours(val)
+    eff = clamp_to_sched_window(max(nxt, now_ts), sw[0], sw[1]) if sw else (nxt or now_ts)
+    aw = parse_allowed_weekdays(val)
+    if aw is not None:
+        now_dt = _dt.datetime.fromtimestamp(now_ts)
+        wd = now_dt.weekday() + 1
+        if eff <= now_ts and wd not in set(aw):
+            eff = calc_next_allowed_weekday_ts(now_dt, aw)
+        elif eff > now_ts:
+            tdt = _dt.datetime.fromtimestamp(eff)
+            if (tdt.weekday() + 1) not in set(aw):
+                eff = calc_next_allowed_weekday_ts(tdt, aw)
+    return eff
+
+
 _STATE_LABELS = {"pending": "待运行", "running": "运行中", "error": "发生错误"}
 _STATE_COLORS = {"pending": "green", "running": "orange", "error": "red"}
 
@@ -128,46 +255,10 @@ class Scheduler:
     # ── 任务时间收集（共用） ──
 
     def _collect_active_times(self) -> list[float]:
-        """收集所有 on=True 的叶子任务的「有效」下次执行时间（含 sched_window 映射）。"""
+        """收集当前账号下所有角色的 on=True 任务的「有效」下次执行时间（含 sched_window 等）。"""
         from AutoScriptor.utils.constant import cfg
-        from AutoScriptor.utils.task_registry import task_registry
-        from services.core.task_manager import (
-            parse_sched_window_hours,
-            clamp_to_sched_window,
-            parse_allowed_weekdays,
-            calc_next_allowed_weekday_ts,
-        )
-        import datetime as _dt
 
-        now_ts = time.time()
-        result = []
-
-        def _walk(node: dict, prefix: str = ""):
-            for key, val in node.items():
-                if not isinstance(val, dict):
-                    continue
-                path = f"{prefix}/{key}" if prefix else key
-                if 'on' in val:
-                    if val.get('on') and task_registry.has_task(path):
-                        raw = float(val.get('next_exec_time', 0) or 0)
-                        sw = parse_sched_window_hours(val)
-                        effective = clamp_to_sched_window(max(raw, now_ts), sw[0], sw[1]) if sw else (raw or now_ts)
-                        aw = parse_allowed_weekdays(val)
-                        if aw is not None:
-                            now_dt = _dt.datetime.fromtimestamp(now_ts)
-                            wd = now_dt.weekday() + 1
-                            if effective <= now_ts and wd not in set(aw):
-                                effective = calc_next_allowed_weekday_ts(now_dt, aw)
-                            elif effective > now_ts:
-                                tdt = _dt.datetime.fromtimestamp(effective)
-                                if (tdt.weekday() + 1) not in set(aw):
-                                    effective = calc_next_allowed_weekday_ts(tdt, aw)
-                        result.append(effective)
-                else:
-                    _walk(val, path)
-
-        _walk(cfg.get("tasks") or {})
-        return result
+        return collect_active_times_from_all_characters(cfg)
 
     def _get_wait_interval(self) -> float:
         times = self._collect_active_times()
@@ -186,13 +277,7 @@ class Scheduler:
 
     def get_next_execution_timestamp(self) -> float | None:
         """对外展示的「下次执行」：若有已到期任务则视为即刻，否则为最早的未来计划时间。"""
-        now = time.time()
-        times = self._collect_active_times()
-        if not times:
-            return None
-        if any(t <= now for t in times):
-            return now
-        return min(times)
+        return next_display_timestamp_from_times(self._collect_active_times())
 
     # ── 后台主循环 ──
 
@@ -273,6 +358,61 @@ class Scheduler:
                 tasks.extend(self._collect_due(val, path, now_ts))
         return tasks
 
+    def _iter_characters_schedule_order(self):
+        """调度顺序：优先账号内 dispatch_queue，其余按服务器名、角色名排序。"""
+        from AutoScriptor.utils.constant import cfg
+
+        chars = cfg._account_data.get("characters", {}) or {}
+        seen: set[tuple[str, str]] = set()
+        for item in cfg._account_data.get("dispatch_queue", []) or []:
+            s = (item.get("server") or "").strip()
+            n = (item.get("name") or "").strip()
+            if not s or not n:
+                continue
+            key = (s, n)
+            if key in seen:
+                continue
+            if s not in chars or n not in chars[s]:
+                continue
+            seen.add(key)
+            yield key
+        for srv in sorted(chars.keys()):
+            for name in sorted(chars[srv].keys()):
+                key = (srv, name)
+                if key not in seen:
+                    yield key
+
+    def _collect_due_cross_character(self) -> list[str]:
+        """
+        收集到期任务路径；若当前角色无到期，则按顺序切换到下一有到期任务的角色。
+        与总览多角色统计一致，避免「全角色调度」后活动角色停在队列末尾时其他角色永不执行。
+        """
+        from AutoScriptor.utils.constant import cfg
+
+        due = self._collect_due(cfg.get("tasks") or {}, "", time.time())
+        if due:
+            return due
+        ac = cfg.active_character()
+        cur = (ac.get("server", ""), ac.get("name", ""))
+        for server, name in self._iter_characters_schedule_order():
+            if (server, name) == cur:
+                continue
+            try:
+                if self._task_manager:
+                    with self._task_manager._cfg_lock:
+                        cfg.switch_character(server, name)
+                        self._task_manager.reload_tasks()
+                else:
+                    cfg.switch_character(server, name)
+            except (KeyError, ValueError) as e:
+                logger.warning("📅 切换角色跳过 %s/%s: %s", server, name, e)
+                continue
+            self.invalidate_login()
+            due = self._collect_due(cfg.get("tasks") or {}, "", time.time())
+            if due:
+                return due
+        return []
+
     # ── 共用执行管线 ──
 
     def _run_task_pipeline(self, explicit_tasks: list[str] | None = None):
@@ -280,7 +420,7 @@ class Scheduler:
         统一的任务执行管线，调度模式和单任务模式共用。
 
         explicit_tasks=None  → 调度模式，由 _collect_due() 动态收集到期任务
-        explicit_tasks=[...] → 单任务模式，执行外部传入的固定列表
+        explicit_tasks=[...] → 单任务模式，执行外部传入的固定列表（不跑自动登录，假定当前角色正确）
         """
         from AutoScriptor.utils.constant import cfg
         from AutoScriptor.utils.perf import boost, unboost
@@ -304,8 +444,7 @@ class Scheduler:
                 if explicit_tasks is not None:
                     due = [t for t in explicit_tasks if t not in attempted]
                 else:
-                    due = [t for t in self._collect_due(cfg.get("tasks") or {}, "", time.time())
-                           if t not in attempted]
+                    due = [t for t in self._collect_due_cross_character() if t not in attempted]
                 if not due:
                     break
 
@@ -336,7 +475,12 @@ class Scheduler:
                     continue
                 boost()
 
-                self._ensure_character_logged_in(cfg)
+                if explicit_tasks is not None:
+                    # 单任务 / 直接执行：不触发换号与自动登录流程，假定当前游戏内角色与配置一致
+                    ac = cfg.active_character()
+                    self._logged_in_character = (ac.get("server", ""), ac.get("name", ""))
+                else:
+                    self._ensure_character_logged_in(cfg)
 
                 task_key = due[0]
                 attempted.add(task_key)

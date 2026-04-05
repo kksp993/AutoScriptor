@@ -22,6 +22,7 @@ def register_task(
     default_offset_hours=None,
     beta=False,
     path_cn=None,
+    task_doc=None,
     **task_kwargs,
 ):
     """
@@ -34,6 +35,7 @@ def register_task(
     支持以下可选参数（仅对指定任务生效）：
       - default_offset_hours (int): 任务执行后延迟 N 小时再调度
       - beta (bool): 为 True 时 WebUI 任务名旁显示 Beta 标记，说明区首行提示实验性任务
+      - task_doc (str): 可选。WebUI 任务展开说明中的「执行流程」正文；不传则从任务函数 docstring 首段提取
       - path_cn (str): **仅 custom_task 目录下脚本必填**。斜杠分隔的 cfg 任务路径（中文键），
         首段一般为「自定义任务」或与目录对应的英文名（如 custom_task 会规范为「自定义任务」）。
         示例：path_cn="自定义任务/示例/hello_custom"
@@ -43,7 +45,8 @@ def register_task(
         到期但不在允许日时，调度器会推迟 next_exec_time 至下一允许日的 5:00
       - 任务函数若声明参数 battle_flow（BattleFlowName）：执行前由框架注入 get_battle_profile(h)，
         并把所选流程名写入 h.task_context_battle_flow；battle_loop / jjc_battle / battle_task 等
-        在未显式传入 flow_name 时将使用该值。
+        在未显式传入 flow_name 时将使用该值。WebUI 下拉按任务路径过滤：profiles/*/流程/通用 与 legacy 扁平
+        为全局；profiles/*/流程/<任务叶名>/ 仅对 cfg 路径最后一级同名的任务显示（见 battle_task_params）。
       - 其他任意元数据参数 (key=value): 写入 cfg 配置节点
 
     用法示例：
@@ -58,6 +61,7 @@ def register_task(
                 default_offset_hours=default_offset_hours,
                 beta=beta,
                 path_cn=path_cn,
+                task_doc=task_doc,
                 **task_kwargs,
             )
         return wrapper
@@ -142,6 +146,14 @@ def register_task(
         for key, value in task_kwargs.items():
             current_level[last_key][key] = value
 
+        doc_flow = ""
+        if task_doc is not None and str(task_doc).strip():
+            doc_flow = str(task_doc).strip()
+        else:
+            raw = inspect.getdoc(func) or ""
+            if raw.strip():
+                doc_flow = raw.strip().split("\n\n")[0].strip()
+
         # 解析函数签名，提取参数默认值和枚举元数据
         sig = inspect.signature(func)
         defaults = {}
@@ -171,7 +183,13 @@ def register_task(
         # 8. fn / order / param_meta 注册到 TaskRegistry（运行时数据，不写入 JSON）
         task_path = "/".join(keys)
         task_registry.register(
-            task_path, task_wrapper(func), reg_order, param_meta, beta=beta, custom=is_custom
+            task_path,
+            task_wrapper(func),
+            reg_order,
+            param_meta,
+            beta=beta,
+            custom=is_custom,
+            doc_flow=doc_flow,
         )
         # print(f"✅ 【{'/'.join(keys)}】 => {a}")
     except Exception as e:

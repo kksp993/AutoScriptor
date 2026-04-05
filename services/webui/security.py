@@ -89,6 +89,14 @@ class RateLimiter:
     def record_failure(self, ip: str):
         self._failures.setdefault(ip, []).append(_time.time())
 
+    def remaining_before_lockout(self, ip: str) -> int:
+        """滑动窗口内当前失败计数下，还剩几次错误会触发限流（与 is_limited 使用相同的裁剪逻辑）。"""
+        now = _time.time()
+        attempts = self._failures.get(ip, [])
+        attempts = [t for t in attempts if now - t < self.window]
+        self._failures[ip] = attempts
+        return max(0, self.max_failures - len(attempts))
+
     def clear(self):
         self._failures.clear()
 

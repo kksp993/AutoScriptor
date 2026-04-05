@@ -82,6 +82,7 @@ class AutoConfig:
         server = ac.get("server", "")
         char_name = ac.get("name", "")
         self._config['game']['character_name'] = char_name
+        self._config['game']['server_name'] = server
 
         chars = self._account_data.get("characters", {})
         char_node = chars.get(server, {}).get(char_name, {})
@@ -255,6 +256,7 @@ class AutoConfig:
         self._config['tasks'] = char_node.get("tasks", {})
         self._config['status'] = char_node.get("status", {})
         self._config['game']['character_name'] = character
+        self._config['game']['server_name'] = server
 
         self.save_config()
         logger.info(f"已切换到角色: {server}/{character}")
@@ -262,16 +264,29 @@ class AutoConfig:
     def add_account(self, name: str, account: str, password: str,
                     server: str, character_name: str, security_key: str):
         """Create a new account file with encrypted credentials and one initial character."""
+        name = (name or "").strip()
+        account = (account or "").strip()
+        password = (password or "").strip()
+        server = (server or "").strip()
+        character_name = (character_name or "").strip()
+        security_key = (security_key or "").strip()
         if not name:
             raise ValueError("账号名称不能为空")
+        if not account:
+            raise ValueError("游戏账号不能为空")
+        if not password:
+            raise ValueError("游戏密码不能为空")
+        if not server:
+            raise ValueError("服务器不能为空")
+        if not character_name:
+            raise ValueError("角色名不能为空")
+        if not security_key:
+            raise ValueError("安全密码不能为空")
         if os.path.exists(self._account_path(name)):
             raise ValueError(f"账号 '{name}' 已存在")
 
         sensitive = {"account": account, "password": password}
         encryption = ConfigManager.encrypt_data(sensitive, security_key)
-
-        server = server or "默认服务器"
-        character_name = character_name or "默认角色"
 
         account_data = {
             "encryption": encryption,

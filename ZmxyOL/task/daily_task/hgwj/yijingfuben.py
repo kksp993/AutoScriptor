@@ -47,7 +47,7 @@ def task(
             click(task)
 
             remains = extract_info(B(853,390,220,51), post_process=lambda s: int(s.strip()[-2]), ensure_not_empty=True)
-            if remains == 0: continue
+            if remains == 0: break
             
             diff = extract_info(B(220,474,230,62), post_process=lambda s: s.strip(), ensure_not_empty=True)
             diff_repeat = (diff_list[nandu] - diff_list[diff]) % 3

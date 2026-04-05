@@ -104,11 +104,20 @@ class LoginCtx:
         if self._loaded:
             return
         if not self.account or not self.password:
-            cfg.load_config(getpass.getpass("请输入 安全密码: "))
-            self.account = cfg["game"].get("account", None)
-            self.password = cfg["game"].get("password", None)
-            if not self.character_name:
-                self.character_name = cfg["game"].get("character_name", None)
+            # WebUI /api/verify 已用安全密码解密并驻留在 cfg 中；若此处再 getpass，
+            # 在 Electron/无 TTY 下常得到空串 → load_config("") 会整表重载且不解密，反而清空账密。
+            g = cfg._config.get("game") or {}
+            if g.get("account") and g.get("password"):
+                self.account = g["account"]
+                self.password = g["password"]
+                if not self.character_name:
+                    self.character_name = g.get("character_name")
+            else:
+                cfg.load_config(getpass.getpass("请输入 安全密码: "))
+                self.account = cfg["game"].get("account", None)
+                self.password = cfg["game"].get("password", None)
+                if not self.character_name:
+                    self.character_name = cfg["game"].get("character_name", None)
         self._loaded = True
 
 
@@ -141,28 +150,16 @@ def _handle_post_login_popups():
     click(T("授权并登录"), if_exist=True, timeout=3)
 
 
-def _select_character(character_name, character_index):
-    """Select character and enter game."""
+def _select_character():
+    """在角色选择页进入游戏；服务器与角色名仅来自已加载的 cfg['game']（Web 验证或 load_config 已写入），此处不解析、不触发解密。"""
     click(T("开心收下"), if_exist=True, timeout=3)
     click(B(640, 575), if_exist=True)
 
-    if character_index:
-        sleep(1)
-        if character_index <= 5:
-            click(B(104, 63 + 70 * (character_index - 1), 149, 54))
-        else:
-            click(B(104, 516, 63, 26))
-            sleep(1)
-            click(B(104, 63 + 70 * (character_index - 6), 149, 54))
-    elif character_name:
-        click(T(character_name), delay=1, timeout=60)
-    else:
-        name = cfg["game"].get("character_name")
-        if not name:
-            raise ValueError("请先配合完成安全密码验证")
-        click(T(name), delay=1)
-
-    click(B(640, 580), if_exist=True)
+    g = cfg["game"]
+    assert g.get("server_name") and g.get("character_name"), "请先配置服务器和角色"
+    ensure_server(g["server_name"])
+    ensure_character(g["character_name"])
+    
     click(T("进入游戏", color="橙色"), timeout=10)
 
     if ui_T(T("确定"), 3):
@@ -187,7 +184,7 @@ _login = PageRouter()
 
 @_login.page("角色选择", T("进入游戏", color="橙色"))
 def _on_character_select(ctx):
-    _select_character(ctx.character_name, ctx.character_index)
+    _select_character()
     ctx.done = True
 
 @_login.page("初始授权", T("已阅读并同意"))
@@ -221,6 +218,30 @@ def _on_quick_login(ctx):
         click(T("登录", color="绿色"), if_exist=True)
     _handle_post_login_popups()
 
+def ensure_server(server_name:str):
+    switch_base("mumu")
+    cur_server = extract_info(B(1007,49,232,30), post_process=lambda s: s.strip().replace("（","(").split("(")[0], ensure_not_empty=True)
+    if cur_server != server_name:
+        click(T("服务器", box=Box(1110,663,132,34).margin()))
+        wait_for_appear(T("更换服务器", box=Box(532,110,217,38).margin()))
+        while ui_F(T(server_name)):
+            swipe(B(482,494), B(482,224))
+        click(T(server_name))
+        cnt = 0
+        while cnt < 10:
+            if server_name == extract_info(B(1007,49,232,30), post_process=lambda s: s.strip().replace("（","(").split("(")[0], ensure_not_empty=True):
+                return
+            cnt += 1
+            time.sleep(1)
+        raise Exception(f"当前服务器不是{server_name},当前服务器是{cur_server},请检查服务器是否正确")
+
+def ensure_character(character_name:str):
+    click(B(104,16,60,26))
+    if ui_F(T(character_name, box=Box(17,54,254,433).margin())):
+        click(B(104,516,63,26))
+    if ui_F(T(character_name, box=Box(17,54,254,433).margin())):
+        raise Exception(f"角色{character_name}不存在,请检查账户服务器是否正确")
+    click(T(character_name, box=Box(17,54,254,433).margin()))
 
 
 

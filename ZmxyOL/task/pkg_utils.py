@@ -240,10 +240,22 @@ def normalize_cfg_tasks_to_cn():
     except Exception:
         pass
 
+def _read_order_lines(order_file: pathlib.Path):
+    """读取已有 _order.txt；无文件或为空则返回 None。"""
+    if not order_file.is_file():
+        return None
+    try:
+        with open(order_file, 'r', encoding='utf-8') as f:
+            lines = [line.strip() for line in f.readlines() if line.strip()]
+        return lines if lines else None
+    except Exception:
+        return None
+
+
 def update_order_files(py_files):
-    """基于实际文件系统生成各层级 _order.txt（不创建新目录）。
-    - 子项按已加载并排序后的 cfg['tasks'] 的注册顺序排序；若无记录则置后。
-    - 根目录与 daily_task/hyper 可覆盖顺序，但仅包含已存在的子项。
+    """基于实际文件系统维护各层级 _order.txt（不创建新目录）。
+    - 若某目录下已有非空的 _order.txt，则保留其中的顺序，仅追加新子项、去掉已不存在的名。
+    - 仅在尚无 _order.txt（或为空）时，按注册顺序生成；根目录首次生成时可用固定前缀顺序。
     - 编译模式下跳过（包目录不可写且无源文件）。
     """
     if is_compiled():
@@ -258,15 +270,26 @@ def update_order_files(py_files):
             return
         order_file = dir_path / '_order.txt'
         if "__pycache__" in dir_parts_eng: return
-        key = "/".join(dir_parts_eng)
-        override = fixed_orders.get(key)
-        if override:
-            present = set(child_names_eng)
-            ordered = [name for name in override if name in present]
+
+        existing = _read_order_lines(order_file)
+        present = set(child_names_eng)
+        if existing is not None:
+            merged = [name for name in existing if name in present]
+            seen = set(merged)
             for name in child_names_eng:
-                if name not in ordered:
-                    ordered.append(name)
-            child_names_eng = ordered
+                if name not in seen:
+                    merged.append(name)
+                    seen.add(name)
+            child_names_eng = merged
+        else:
+            key = "/".join(dir_parts_eng)
+            override = fixed_orders.get(key)
+            if override:
+                ordered = [name for name in override if name in present]
+                for name in child_names_eng:
+                    if name not in ordered:
+                        ordered.append(name)
+                child_names_eng = ordered
 
         with open(order_file, 'w', encoding='utf-8') as f:
             for name in child_names_eng:

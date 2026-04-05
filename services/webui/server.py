@@ -28,6 +28,7 @@ from AutoScriptor.utils.logger import logger, _TaskFilter as _LogTaskFilter
 
 from AutoScriptor import *
 from AutoScriptor.utils.constant import cfg
+from ZmxyOL.task.battle_task_params import battle_flow_allowed_for_task
 from services.core.task_manager import TaskManager
 from services.core.banner import _print_banner
 from services.core.scheduler import scheduler, SchedulerState
@@ -282,10 +283,13 @@ def _get_ordered_paths(data_dict, prefix=''):
 
 
 def _inject_param_meta_into_tasks(node: dict, prefix: str = "") -> None:
-    """将 TaskRegistry 中的 param_meta 挂到任务叶节点，供 WebUI 枚举下拉使用（仅用于 API 返回副本）。"""
+    """将 TaskRegistry 中的 param_meta / beta / custom / _due 挂到任务叶节点（仅用于 API 返回副本）。"""
     from AutoScriptor.utils.task_registry import task_registry
     from services.core.task_tree import TaskTree
+    from services.core.scheduler import is_task_due
+    import time as _t
 
+    now_ts = _t.time()
     for key, val in node.items():
         if not isinstance(val, dict):
             continue
@@ -304,6 +308,7 @@ def _inject_param_meta_into_tasks(node: dict, prefix: str = "") -> None:
                 val["custom"] = True
             else:
                 val.pop("custom", None)
+            val["_due"] = is_task_due(val, path, now_ts)
         else:
             _inject_param_meta_into_tasks(val, path)
 
@@ -321,6 +326,7 @@ def _strip_runtime_tasks_fields(node: dict) -> None:
             val.pop("custom", None)
             val.pop("fn", None)
             val.pop("order", None)
+            val.pop("_due", None)
         else:
             _strip_runtime_tasks_fields(val)
 
@@ -348,12 +354,13 @@ def _characters_summary() -> dict:
     return {srv: list(chars.keys()) for srv, chars in tree.items()} if tree else {}
 
 
-def _task_leaf_status(node: dict, now_ts: float) -> str:
+def _task_leaf_status(node: dict, path: str, now_ts: float) -> str:
+    from services.core.scheduler import is_task_due
     if not node.get('on'):
         return 'disabled'
     if node.get('error'):
         return 'error'
-    return 'pending' if node.get('next_exec_time', 0) < now_ts else 'completed'
+    return 'pending' if is_task_due(node, path, now_ts) else 'scheduled'
 
 
 def _flatten_tasks(node: dict, now_ts: float, prefix: str = '') -> list:
@@ -369,7 +376,7 @@ def _flatten_tasks(node: dict, now_ts: float, prefix: str = '') -> list:
             row = {
                 'path': path,
                 'name': key,
-                'status': _task_leaf_status(val, now_ts),
+                'status': _task_leaf_status(val, path, now_ts),
                 'beta': task_registry.get_beta(path),
             }
             if task_registry.get_custom(path):
@@ -380,8 +387,72 @@ def _flatten_tasks(node: dict, now_ts: float, prefix: str = '') -> list:
     return result
 
 
+def _aggregate_stats_all_characters(now_ts: float) -> dict:
+    """汇总当前账号下所有角色的任务统计（与单角色 stats 结构一致）。"""
+    ac = cfg.active_character()
+    active_server = ac.get('server', '')
+    active_name = ac.get('name', '')
+    chars = cfg._account_data.get('characters', {})
+    total = pending = scheduled = error = disabled = 0
+    for srv, srv_chars in chars.items():
+        for char_name, char_data in srv_chars.items():
+            if srv == active_server and char_name == active_name:
+                tasks_tree = cfg._config.get('tasks', {})
+            else:
+                tasks_tree = char_data.get('tasks', {})
+            flat = _flatten_tasks(tasks_tree, now_ts)
+            for t in flat:
+                total += 1
+                st = t['status']
+                if st == 'disabled':
+                    disabled += 1
+                elif st == 'pending':
+                    pending += 1
+                elif st == 'scheduled':
+                    scheduled += 1
+                elif st == 'error':
+                    error += 1
+    enabled = pending + scheduled + error
+    return {
+        'total': total, 'enabled': enabled, 'pending': pending,
+        'scheduled': scheduled, 'error': error, 'disabled': disabled,
+    }
+
+
+def _overall_next_execution_all_characters() -> float | None:
+    """当前账号下所有角色中，最早一次「有效」计划执行时间（含 sched_window 等）。"""
+    from services.core.scheduler import (
+        collect_active_times_from_tasks_tree,
+        next_display_timestamp_from_times,
+    )
+
+    ac = cfg.active_character()
+    active_server = ac.get('server', '')
+    active_name = ac.get('name', '')
+    chars = cfg._account_data.get('characters', {})
+    candidates: list[float] = []
+    for srv, srv_chars in chars.items():
+        for char_name, char_data in srv_chars.items():
+            if srv == active_server and char_name == active_name:
+                tasks_tree = cfg._config.get('tasks', {})
+            else:
+                tasks_tree = char_data.get('tasks', {})
+            times = collect_active_times_from_tasks_tree(tasks_tree)
+            nxt = next_display_timestamp_from_times(times)
+            if nxt is not None:
+                candidates.append(nxt)
+    if not candidates:
+        return None
+    return min(candidates)
+
+
 def _all_characters_tasks_summary() -> dict:
     """Build task summary for every character in the current account."""
+    from services.core.scheduler import (
+        collect_active_times_from_tasks_tree,
+        next_display_timestamp_from_times,
+    )
+
     now_ts = _time.time()
     ac = cfg.active_character()
     active_server = ac.get('server', '')
@@ -396,11 +467,13 @@ def _all_characters_tasks_summary() -> dict:
             else:
                 tasks_tree = char_data.get('tasks', {})
             flat = _flatten_tasks(tasks_tree, now_ts)
-            counts = {'total': 0, 'pending': 0, 'completed': 0, 'error': 0, 'disabled': 0}
+            counts = {'total': 0, 'pending': 0, 'scheduled': 0, 'error': 0, 'disabled': 0}
             for t in flat:
                 counts['total'] += 1
                 counts[t['status']] += 1
-            srv_result[char_name] = {**counts, 'tasks_flat': flat}
+            times = collect_active_times_from_tasks_tree(tasks_tree)
+            next_exec = next_display_timestamp_from_times(times)
+            srv_result[char_name] = {**counts, 'tasks_flat': flat, 'next_execution': next_exec}
         result[srv] = srv_result
     return result
 
@@ -449,7 +522,7 @@ async def auth_api(request: Request):
         return resp
 
     _record_login_failure(client_ip)
-    remaining = _MAX_LOGIN_FAILURES - len(_login_failures.get(client_ip, []))
+    remaining = _login_limiter.remaining_before_lockout(client_ip)
     return JSONResponse(status_code=401, content={
         "error": f"密码错误（剩余 {max(remaining, 0)} 次尝试）"
     })
@@ -458,6 +531,10 @@ async def auth_api(request: Request):
 # 编辑器 API 路由
 from services.webui.routes.editor import router as editor_router
 app.include_router(editor_router)
+
+# 画布 API 路由
+from services.webui.routes.canvas import router as canvas_router
+app.include_router(canvas_router)
 
 # 资讯 API 路由
 from services.webui.routes.news import router as news_router
@@ -659,10 +736,36 @@ async def run_tasks_api(request: Request):
     logger.debug("Received tasks: %s, activate_scheduler: %s", tasks, activate_sched)
     sorted_tasks = sorted(tasks, key=lambda x: ORDER_MAP.get(x, float('inf')))
 
+    direct_busy = RUN_THREAD is not None and RUN_THREAD.is_alive()
     if activate_sched:
+        if direct_busy:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "status": "error",
+                    "message": "单任务或队列正在直接执行中，请先终止后再启动调度",
+                },
+            )
         scheduler.activate()
         scheduler.wake()
         return {'status': 'ok', 'tasks': sorted_tasks, 'mode': 'scheduler'}
+
+    if direct_busy:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "status": "error",
+                "message": "已有任务正在执行，请先终止后再试",
+            },
+        )
+    if scheduler.state == SchedulerState.RUNNING:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "status": "error",
+                "message": "调度器运行中，请先停止调度或结束当前调度周期后再执行单任务",
+            },
+        )
 
     def _run(ts):
         scheduler.run_direct(ts)
@@ -749,12 +852,18 @@ async def verify_account_api(request: Request):
         return JSONResponse(status_code=500, content={"error": "加载配置失败"})
 
     cfg._config.setdefault("game", {})
+    ac = cfg.active_character()
     character_name = cfg._config.get("game", {}).get("character_name", "")
     if not character_name:
-        ac = cfg.active_character()
         character_name = ac.get("name", "")
         if character_name:
             cfg._config["game"]["character_name"] = character_name
+
+    server_name = cfg._config.get("game", {}).get("server_name", "")
+    if not server_name:
+        server_name = ac.get("server", "")
+        if server_name:
+            cfg._config["game"]["server_name"] = server_name
 
     if has_enc:
         if not cfg._config.get("game", {}).get("account"):
@@ -841,6 +950,11 @@ async def enum_options_api(request: Request):
     try:
         data = await request.json()
         paths = data.get('paths', [])
+        raw_tp = data.get('task_path')
+        if isinstance(raw_tp, str):
+            task_path = raw_tp.strip() or None
+        else:
+            task_path = None
         if not isinstance(paths, list):
             return JSONResponse(status_code=400, content={'error': 'paths must be a list'})
         result = {}
@@ -857,6 +971,13 @@ async def enum_options_api(request: Request):
                         label = str(m.value)
                     else:
                         label = m.name
+                    if (
+                        task_path
+                        and EnumClass.__name__ == 'BattleFlowName'
+                        and isinstance(m.value, str)
+                        and not battle_flow_allowed_for_task(m.value, task_path)
+                    ):
+                        continue
                     opts.append({"value": m.name, "label": label})
                 result[p] = opts
             except Exception:
@@ -923,22 +1044,24 @@ async def scheduler_reset_api():
     return scheduler.status_dict()
 
 
+@app.post("/api/scheduler/deactivate")
+async def scheduler_deactivate_api():
+    """仅将调度器切回待运行，不取消直接执行线程、不发送 cancel。"""
+    scheduler.deactivate()
+    return scheduler.status_dict()
+
+
 @app.get("/api/overview")
 async def overview_data_api():
     try:
-        from services.core.task_manager import (
-            parse_sched_window_hours,
-            clamp_to_sched_window,
-            parse_allowed_weekdays,
-            calc_next_allowed_weekday_ts,
-        )
+        from services.core.scheduler import is_task_due, calc_effective_next_time
 
         now_ts = _time.time()
-        total = enabled = pending = completed = disabled = 0
+        total = enabled = pending = scheduled = disabled = 0
         upcoming = []
 
         def _walk(node, prefix=''):
-            nonlocal total, enabled, pending, completed, disabled
+            nonlocal total, enabled, pending, scheduled, disabled
             for key, val in node.items():
                 if not isinstance(val, dict):
                     continue
@@ -949,29 +1072,17 @@ async def overview_data_api():
                         disabled += 1
                     else:
                         enabled += 1
-                        nxt = val.get('next_exec_time', 0)
-                        if nxt <= now_ts:
+                        due = is_task_due(val, path, now_ts)
+                        if due:
                             pending += 1
                         else:
-                            completed += 1
-                        sw = parse_sched_window_hours(val)
-                        nxt_show = clamp_to_sched_window(max(nxt, now_ts), sw[0], sw[1]) if sw else nxt
-                        aw = parse_allowed_weekdays(val)
-                        if aw is not None:
-                            import datetime as _dt
-                            now_dt = _dt.datetime.fromtimestamp(now_ts)
-                            wd = now_dt.weekday() + 1
-                            if nxt_show <= now_ts and wd not in set(aw):
-                                nxt_show = calc_next_allowed_weekday_ts(now_dt, aw)
-                            elif nxt_show > now_ts:
-                                tdt = _dt.datetime.fromtimestamp(nxt_show)
-                                if (tdt.weekday() + 1) not in set(aw):
-                                    nxt_show = calc_next_allowed_weekday_ts(tdt, aw)
+                            scheduled += 1
+                        nxt_display = calc_effective_next_time(val, now_ts)
                         upcoming.append({
                             'path': path,
-                            'on': val.get('on', False),
-                            'next_exec_time': nxt_show,
-                            'status': 'pending' if nxt <= now_ts else 'completed',
+                            'on': True,
+                            'next_exec_time': nxt_display,
+                            'status': 'pending' if due else 'scheduled',
                         })
                 else:
                     _walk(val, path)
@@ -982,6 +1093,9 @@ async def overview_data_api():
         next_ts = scheduler.get_next_execution_timestamp()
         sched = scheduler.status_dict()
         sched['next_execution'] = next_ts
+
+        stats_all = _aggregate_stats_all_characters(now_ts)
+        overall_next = _overall_next_execution_all_characters()
 
         runtime_status = {}
         try:
@@ -994,8 +1108,10 @@ async def overview_data_api():
             'scheduler': sched,
             'stats': {
                 'total': total, 'enabled': enabled, 'pending': pending,
-                'completed': completed, 'disabled': disabled,
+                'scheduled': scheduled, 'disabled': disabled,
             },
+            'stats_all': stats_all,
+            'overall_next_execution': overall_next,
             'upcoming': upcoming[:30],
             'runtime': runtime_status,
         }
@@ -1182,16 +1298,23 @@ async def accounts_switch_api(request: Request):
 @app.post("/api/accounts/add")
 async def accounts_add_api(request: Request):
     data = await request.json()
-    name = data.get("name", "")
+    name = str(data.get("name", "") or "").strip()
+    account = str(data.get("account", "") or "").strip()
+    password = str(data.get("password", "") or "").strip()
+    server = str(data.get("server", "") or "").strip()
+    character_name = str(data.get("character_name", "") or "").strip()
+    security_key = str(data.get("security_key", "") or "").strip()
+
     if not name:
         return JSONResponse(status_code=400, content={"error": "账号名称不能为空"})
-
-    account = data.get("account", "")
-    password = data.get("password", "")
-    server = data.get("server", "默认服务器")
-    character_name = data.get("character_name", "默认角色")
-    security_key = data.get("security_key", "")
-
+    if not account:
+        return JSONResponse(status_code=400, content={"error": "游戏账号不能为空"})
+    if not password:
+        return JSONResponse(status_code=400, content={"error": "游戏密码不能为空"})
+    if not server:
+        return JSONResponse(status_code=400, content={"error": "服务器不能为空"})
+    if not character_name:
+        return JSONResponse(status_code=400, content={"error": "角色名不能为空"})
     if not security_key:
         return JSONResponse(status_code=400, content={"error": "安全密码不能为空"})
 
