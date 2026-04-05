@@ -111,7 +111,7 @@ def kunlunshan_task(self, battle_loop: int = 7):
     click(T("夺回昆仑山"), delay=1)
     click(I("昆仑山任务"), delay=1)
     sleep(1)
-    click(T("领奖"), until=lambda: ui_F(T("领奖")))
+    click(T("领奖", box=Box(868,15,169,622).margin()), until=lambda: ui_F(T("领奖", box=Box(868,15,169,622).margin())))
     click(B(1070,75,30,30))
     wait_for_appear(T("夺回昆仑山"))
     click(B(1200,30,30,30))

@@ -29,5 +29,18 @@ const AboutPanel = {
       请仅从官方发布渠道获取与更新本软件。非官方渠道获得的副本可能已被篡改，使用风险由使用者自行承担。
     </p>
   </section>
+
+  <el-divider />
+
+  <section class="space-y-3 text-sm text-slate-700 leading-relaxed">
+    <p class="font-semibold text-slate-800">免责声明</p>
+    <ul class="list-disc pl-5 space-y-2 text-slate-600">
+      <li>📌 本项目仅供学习交流，开发者团队保留最终解释权</li>
+      <li>⚖️ 使用本工具产生的一切风险需自行承担</li>
+      <li>🚫 本项目未授权任何个人、商家、自媒体账号等进行售卖</li>
+      <li>🚫 若您遇到商家使用本软件进行代练并收费，产生的任何问题及后果与本软件无关</li>
+      <li>🚫 开发者团队不会为您提供任何"售后"服务，作者及贡献者对任何人因使用本代码导致的任何损失、账号封禁或法律纠纷不承担任何直接或间接的责任。一切后果由使用者自行承担。</li>
+    </ul>
+  </section>
 </div>`,
 };

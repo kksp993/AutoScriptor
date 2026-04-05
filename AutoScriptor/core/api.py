@@ -565,7 +565,10 @@ def extract_info(
     *,
     ocr_ttl: float = 0.5,
     max_retries: int = 10,
+    screenshot_frame=None,
 )->str|None:
+    """若传入 *screenshot_frame*（BGR ndarray），则在该帧上 OCR，且重试时不再刷新画面；
+    用于 Web 编辑器导入图片与模拟执行时与画布一致。未传入时仍每次重试从 mixctrl 截屏。"""
     res = None
     last_ocr_at: float | None = None
     for _ in range(max_retries):
@@ -574,7 +577,7 @@ def extract_info(
             wait = ocr_ttl - (time.monotonic() - last_ocr_at)
             if wait > 0:
                 cancellable_sleep(wait)
-        screenshot = mixctrl.screenshot()
+        screenshot = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
         res = ocr_for_box(screenshot, target.box, ttl=ocr_ttl)
         last_ocr_at = time.monotonic()
         logger.debug(f"Extract info {target} raw_res: {res}")
@@ -587,7 +590,8 @@ def extract_info(
         if ensure_not_empty and isinstance(res, str) and len(res) == 0: continue
         if res is not None: break
     if save_screenshot and cfg["app"]["debug_mode"]:
-        save_debug_screenshot(target=target, screenshot=mixctrl.screenshot(), box=target.box, ocr_text=res, prefix="e")
+        dbg = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
+        save_debug_screenshot(target=target, screenshot=dbg, box=target.box, ocr_text=res, prefix="e")
     return res
 
 def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), resize: tuple = (-1, -1))->list[str|None]:

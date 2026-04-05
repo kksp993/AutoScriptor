@@ -123,6 +123,13 @@ class TestRateLimiter(unittest.TestCase):
             self.limiter.record_failure("10.0.0.3")
         self.assertFalse(self.limiter.is_limited("10.0.0.3"))
 
+    def test_remaining_before_lockout(self):
+        self.limiter.record_failure("10.0.0.5")
+        self.assertEqual(self.limiter.remaining_before_lockout("10.0.0.5"), 2)
+        for _ in range(2):
+            self.limiter.record_failure("10.0.0.5")
+        self.assertEqual(self.limiter.remaining_before_lockout("10.0.0.5"), 0)
+
     def test_clear_resets(self):
         for _ in range(3):
             self.limiter.record_failure("10.0.0.4")

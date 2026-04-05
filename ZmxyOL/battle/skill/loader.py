@@ -14,6 +14,7 @@ from pathlib import Path
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.paths import get_profiles_dir
 from ZmxyOL.battle.skill.action_parser import parse_action, is_atomic
+from AutoScriptor.utils.flow_yaml_layout import iter_flow_yaml_files
 from ZmxyOL.battle.skill.strategy import compile_strategies, Strategy
 
 PROFILES_DIR = get_profiles_dir()
@@ -34,12 +35,12 @@ def load_and_compile(profession: str) -> Dict[str, Any]:
     raw_flows = {}
 
     _load_dir(PROFILES_DIR / 'default' / '技能', raw_skills)
-    _load_dir(PROFILES_DIR / 'default' / '流程', raw_flows)
+    _load_flow_tree(PROFILES_DIR / 'default' / '流程', raw_flows)
 
     prof_dir = PROFILES_DIR / profession
     if prof_dir.exists():
         _load_dir(prof_dir / '技能', raw_skills)
-        _load_dir(prof_dir / '流程', raw_flows)
+        _load_flow_tree(prof_dir / '流程', raw_flows)
     else:
         logger.warning("职业目录 '%s' 不存在，仅使用 default 配置", profession)
 
@@ -57,6 +58,23 @@ def load_and_compile(profession: str) -> Dict[str, Any]:
 # YAML 扫描
 # ======================================================================
 
+def _merge_flow_yaml_file(f: Path, target: dict) -> None:
+    """合并单个流程 YAML 的顶层 key 到 target。"""
+    try:
+        with open(f, "r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+        if isinstance(data, dict):
+            target.update(data)
+    except Exception as e:
+        logger.error("加载 YAML 失败: %s — %s", f, e)
+
+
+def _load_flow_tree(flow_root: Path, target: dict) -> None:
+    """按约定顺序加载「流程」目录：legacy 扁平、通用、各任务子目录。"""
+    for f in iter_flow_yaml_files(flow_root):
+        _merge_flow_yaml_file(f, target)
+
+
 def _load_dir(dir_path: Path, target: dict):
     """扫描目录下所有 .yaml/.yml 文件，合并顶层 key 到 target。
     同名 key 后加载覆盖先加载（职业覆盖 default）。
@@ -66,13 +84,7 @@ def _load_dir(dir_path: Path, target: dict):
     for f in sorted(dir_path.iterdir()):
         if f.suffix not in ('.yaml', '.yml'):
             continue
-        try:
-            with open(f, 'r', encoding='utf-8') as fh:
-                data = yaml.safe_load(fh)
-            if isinstance(data, dict):
-                target.update(data)
-        except Exception as e:
-            logger.error("加载 YAML 失败: %s — %s", f, e)
+        _merge_flow_yaml_file(f, target)
 
 
 # ======================================================================

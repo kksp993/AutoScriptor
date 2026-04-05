@@ -467,12 +467,35 @@ async def editor_remote_swipe(request: Request):
 _MAX_SNIPPET_LEN = 16000
 
 
+def _editor_snippet_lhs_name(last_stmt: ast.stmt) -> str | None:
+    """从最后一条语句解析「赋值左侧」可展示的单变量名；无法解析则返回 None。"""
+    if isinstance(last_stmt, ast.Assign):
+        t = last_stmt.targets[-1]
+        if isinstance(t, ast.Name):
+            return t.id
+        if isinstance(t, (ast.Tuple, ast.List)) and t.elts:
+            last = t.elts[-1]
+            if isinstance(last, ast.Name):
+                return last.id
+        return None
+    if isinstance(last_stmt, ast.AnnAssign):
+        if isinstance(last_stmt.target, ast.Name):
+            return last_stmt.target.id
+        return None
+    if isinstance(last_stmt, ast.AugAssign):
+        if isinstance(last_stmt.target, ast.Name):
+            return last_stmt.target.id
+        return None
+    return None
+
+
 def _run_editor_snippet(code: str, *, virtual_only: bool = False) -> dict:
     """在受限命名空间中执行用户代码，捕获所有异常，不向外抛出。
 
     返回值通过 JSON 的 ``result`` 字段给出，始终为 ``repr(值)`` 的字符串（含 ``None`` → ``\"None\"``）。
     多行代码时若最后一行是表达式（如 ``locate(...)``），会对其求值并返回，避免 ``exec`` 丢弃结果。
-    纯语句块可在末尾写 ``__result__ = ...`` 指定要展示的值。
+    若最后一行是赋值（``info = extract_info(...)``、``x += 1``、``x: int = 1`` 等），默认返回左侧变量在命名空间中的值。
+    否则可在末尾写 ``__result__ = ...`` 指定要展示的值。
 
     ``virtual_only=True`` 时临时替换 ``mixctrl`` 的 click/long_click/swipe，不下发模拟器，
     并在成功响应中附带 ``virtual_clicks`` / ``virtual_swipes`` 供前端画布标注。
@@ -571,11 +594,20 @@ def _run_editor_snippet(code: str, *, virtual_only: bool = False) -> dict:
             "click": mc.click,
             "long_click": mc.long_click,
             "swipe": mc.swipe,
+            "screenshot": mc.screenshot,
         }
         patched_mc = mc
+
+        def _v_screenshot(self):
+            # 与编辑器画布一致：导入图片时 _last_screenshot 为当前图，避免 extract_info 等仍读实时模拟器
+            if _last_screenshot is not None:
+                return _last_screenshot
+            return backup["screenshot"](self)
+
         mc.click = types.MethodType(_v_click, mc)
         mc.long_click = types.MethodType(_v_long_click, mc)
         mc.swipe = types.MethodType(_v_swipe, mc)
+        mc.screenshot = types.MethodType(_v_screenshot, mc)
 
     try:
         with suppress_cancel_checks():
@@ -593,7 +625,10 @@ def _run_editor_snippet(code: str, *, virtual_only: bool = False) -> dict:
                     value = eval(compile(ast.Expression(body[-1].value), "<editor>", "eval"), ns, ns)
                 else:
                     exec(compile(tree, "<editor>", "exec"), ns, ns)
-                    if "__result__" in ns:
+                    lhs = _editor_snippet_lhs_name(body[-1])
+                    if lhs is not None and lhs in ns:
+                        value = ns[lhs]
+                    elif "__result__" in ns:
                         value = ns["__result__"]
 
                 out = stdout_buf.getvalue().strip()
@@ -616,6 +651,7 @@ def _run_editor_snippet(code: str, *, virtual_only: bool = False) -> dict:
             patched_mc.click = backup["click"]
             patched_mc.long_click = backup["long_click"]
             patched_mc.swipe = backup["swipe"]
+            patched_mc.screenshot = backup["screenshot"]
 
 
 @router.post("/execute-code")
@@ -641,8 +677,6 @@ async def editor_preview_extract(request: Request):
     """对当前选区执行 extract_info 预览（与录制区生成代码一致），仅用于提示，不崩溃。"""
     try:
         ctx = _get_runtime()
-        if ctx.mixctrl is None:
-            return {"ok": False, "error": "mixctrl 未初始化"}
         data = await request.json()
         left, top = int(data["left"]), int(data["top"])
         width, height = int(data["width"]), int(data["height"])
@@ -654,8 +688,18 @@ async def editor_preview_extract(request: Request):
                 return s.strip()
             return s
 
+        frame = _last_screenshot
+        if frame is None:
+            if ctx.mixctrl is None:
+                return {"ok": False, "error": "请先获取截图或导入图片"}
+            frame = ctx.mixctrl.screenshot()
         with suppress_cancel_checks():
-            info = extract_info(B(left, top, width, height), post_process=_pp, ensure_not_empty=True)
+            info = extract_info(
+                B(left, top, width, height),
+                post_process=_pp,
+                ensure_not_empty=True,
+                screenshot_frame=frame,
+            )
         return {"ok": True, "info": info}
     except Exception as e:
         logger.warning("editor/preview-extract: %s", e)

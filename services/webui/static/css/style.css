@@ -1291,11 +1291,13 @@ html.light .bg-white {
 }
 
 .ov-dispatch-meta-countdown {
-  font-size: 14px;
+  flex-basis: 100%;
+  font-size: 13px;
   color: #94a3b8;
   margin-left: 0;
-  width: 100%;
-  margin-top: 4px;
+  margin-top: 2px;
+  padding-left: 0;
+  line-height: 1.4;
 }
 
 .ov-dispatch-actions {
@@ -1447,10 +1449,35 @@ html.light .bg-white {
   font-weight: 600;
 }
 
+.ov-char-next-exec {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  flex-shrink: 0;
+  max-width: 12rem;
+  text-align: right;
+}
+.ov-char-next-exec-line1 {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.ov-char-next-exec-line2 {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
 .ov-dispatch-card-right {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-end;
 }
 
 /* 任务状态：实心 ●（与任务列表页一致，全部任务均有色点，不省略） */
@@ -1611,4 +1638,190 @@ html.light .bg-white {
 .ov-collapse-enter-to, .ov-collapse-leave-from {
   max-height: 800px;
   opacity: 1;
+}
+
+/* ══════════════════════════════════════════════════════════
+   Canvas Panel -- Drawflow 可视化画布样式
+   ══════════════════════════════════════════════════════════ */
+
+.drawflow-container {
+  width: 100%;
+  height: 100%;
+  background-color: #fafbfc;
+  background-image:
+    radial-gradient(circle, #d1d5db 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.drawflow .drawflow-node {
+  border-radius: 10px;
+  border: 2px solid #e2e8f0;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  min-width: 100px;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+/* 竖向流程：入口在上、出口在下，连线自上而下 */
+.canvas-drawflow-vertical .drawflow .drawflow-node.canvas-df-node {
+  flex-direction: column !important;
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+  padding: 6px 8px !important;
+  min-width: 104px !important;
+  max-width: 300px !important;
+  width: max-content !important;
+}
+.canvas-drawflow-vertical .drawflow .drawflow-node.canvas-df-node .inputs,
+.canvas-drawflow-vertical .drawflow .drawflow-node.canvas-df-node .outputs {
+  width: 100% !important;
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  justify-content: center !important;
+  align-items: center !important;
+  gap: 6px !important;
+  position: relative !important;
+  min-height: 12px;
+  margin: 0 !important;
+}
+.canvas-drawflow-vertical .drawflow .drawflow-node.canvas-df-node .inputs {
+  order: 0 !important;
+  margin-bottom: 2px !important;
+}
+.canvas-drawflow-vertical .drawflow .drawflow-node.canvas-df-node .drawflow_content_node {
+  order: 1 !important;
+  width: 100% !important;
+}
+.canvas-drawflow-vertical .drawflow .drawflow-node.canvas-df-node .outputs {
+  order: 2 !important;
+  margin-top: 2px !important;
+}
+.canvas-drawflow-vertical .drawflow .drawflow-node.canvas-df-node .input,
+.canvas-drawflow-vertical .drawflow .drawflow-node.canvas-df-node .output {
+  position: relative !important;
+  left: auto !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: auto !important;
+  margin: 0 !important;
+}
+/* 无入口/无出口时不占竖向空隙 */
+.canvas-drawflow-vertical .drawflow .drawflow-node.canvas-df-node .inputs:empty,
+.canvas-drawflow-vertical .drawflow .drawflow-node.canvas-df-node .outputs:empty {
+  display: none !important;
+  margin: 0 !important;
+  min-height: 0 !important;
+}
+.drawflow .drawflow-node:hover {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+}
+.drawflow .drawflow-node.selected {
+  border-color: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34,197,94,0.18);
+}
+.drawflow .drawflow-node .input,
+.drawflow .drawflow-node .output {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #94a3b8;
+  background: #fff;
+}
+.drawflow .drawflow-node .input:hover,
+.drawflow .drawflow-node .output:hover {
+  border-color: #22c55e;
+  background: #dcfce7;
+}
+.drawflow .connection .main-path {
+  stroke: #94a3b8;
+  stroke-width: 2.5;
+}
+.drawflow .connection .main-path:hover {
+  stroke: #22c55e;
+  stroke-width: 3;
+}
+
+/* Node content：紧凑一行 = 图标 + 名称 +（可选）右侧摘要 */
+.canvas-node-content.canvas-node-compact {
+  padding: 2px 0;
+  min-width: 0;
+}
+.canvas-node-compact .canvas-node-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 12px;
+  color: #1e293b;
+  margin: 0;
+  min-width: 0;
+}
+.canvas-node-head-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.canvas-node-compact .canvas-node-header i {
+  font-size: 13px;
+}
+.canvas-node-compact .canvas-node-title {
+  white-space: nowrap;
+}
+.canvas-node-summary-inline {
+  font-size: 10px;
+  font-weight: 400;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+  max-width: 160px;
+  line-height: 1.25;
+}
+
+/* Node palette items */
+.canvas-node-item {
+  border: 1px solid transparent;
+  font-size: 13px;
+}
+.canvas-node-item:active {
+  opacity: 0.7;
+}
+
+/* Category color bands on node left border */
+.drawflow .drawflow-node.canvas-df-node {
+  border-left-width: 4px;
+}
+.canvas-node-flow .canvas-node-header i { color: #22c55e; }
+.canvas-node-action .canvas-node-header i { color: #3b82f6; }
+.canvas-node-detect .canvas-node-header i { color: #10b981; }
+.canvas-node-nav .canvas-node-header i { color: #14b8a6; }
+
+/* Output labels for if_branch */
+.drawflow .drawflow-node .output_1::after {
+  content: '';
+}
+.drawflow .drawflow-node .output_2::after {
+  content: '';
+}
+
+/* Target picker: 固定截图，禁止浏览器默认拖拽图片，便于框选标注 */
+.canvas-target-picker-wrap {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.canvas-target-picker-img {
+  display: block;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  -webkit-user-drag: none;
+  -khtml-user-drag: none;
+  -moz-user-drag: none;
+  pointer-events: auto;
 }

@@ -134,7 +134,7 @@ class TestOverviewWalk(unittest.TestCase):
         """复现 server.py 中 overview_data_api 的 _walk 统计逻辑"""
         import time
         now_ts = time.time()
-        stats = {"total": 0, "enabled": 0, "pending": 0, "completed": 0, "disabled": 0}
+        stats = {"total": 0, "enabled": 0, "pending": 0, "scheduled": 0, "disabled": 0}
         upcoming = []
 
         def _inner(node, prefix=""):
@@ -152,8 +152,8 @@ class TestOverviewWalk(unittest.TestCase):
                         if nxt <= now_ts:
                             stats["pending"] += 1
                         else:
-                            stats["completed"] += 1
-                        upcoming.append({"path": path, "status": "pending" if nxt <= now_ts else "completed"})
+                            stats["scheduled"] += 1
+                        upcoming.append({"path": path, "status": "pending" if nxt <= now_ts else "scheduled"})
                 else:
                     _inner(val, path)
 
@@ -185,15 +185,15 @@ class TestOverviewWalk(unittest.TestCase):
         self.assertEqual(stats["enabled"], 1)
         self.assertEqual(upcoming[0]["status"], "pending")
 
-    def test_completed_tasks(self):
+    def test_scheduled_tasks(self):
         import time
         future_ts = time.time() + 86400
         tasks = {
-            "已完成": {"on": True, "next_exec_time": future_ts},
+            "待执行": {"on": True, "next_exec_time": future_ts},
         }
         stats, upcoming = self._walk(tasks)
-        self.assertEqual(stats["completed"], 1)
-        self.assertEqual(upcoming[0]["status"], "completed")
+        self.assertEqual(stats["scheduled"], 1)
+        self.assertEqual(upcoming[0]["status"], "scheduled")
 
     def test_nested_mixed(self):
         import time
@@ -212,12 +212,12 @@ class TestOverviewWalk(unittest.TestCase):
         self.assertEqual(stats["enabled"], 2)
         self.assertEqual(stats["disabled"], 1)
         self.assertEqual(stats["pending"], 1)
-        self.assertEqual(stats["completed"], 1)
+        self.assertEqual(stats["scheduled"], 1)
         self.assertEqual(len(upcoming), 2)
 
     def test_stats_keys_complete(self):
         stats, _ = self._walk({})
-        expected = {"total", "enabled", "pending", "completed", "disabled"}
+        expected = {"total", "enabled", "pending", "scheduled", "disabled"}
         self.assertEqual(set(stats.keys()), expected)
 
 
@@ -243,6 +243,7 @@ class TestFastAPIApp(unittest.TestCase):
     def test_api_scheduler_routes(self):
         self.assertIn("/api/scheduler/status", self.routes)
         self.assertIn("/api/scheduler/reset", self.routes)
+        self.assertIn("/api/scheduler/deactivate", self.routes)
 
     def test_api_run_route(self):
         self.assertIn("/api/run", self.routes)
@@ -410,6 +411,10 @@ class TestAppJsContent(unittest.TestCase):
 
     def test_has_polling(self):
         self.assertIn("setInterval", self.content)
+
+    def test_enum_options_passes_task_path(self):
+        self.assertIn("task_path", self.content)
+        self.assertIn("/enum-options", self.content)
 
 
 # ── 后端入口函数 ──

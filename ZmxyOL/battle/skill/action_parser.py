@@ -8,6 +8,7 @@
   - 跳跃:N   → 跳 N 次
   - 等待:S   → 等 S 秒
   - 化身:N   → 点 N 次
+  - 化身长按:S → 长按化身 S 秒（与「化身:N」区分）
   - 其他按钮:S → 长按 S 秒
 """
 
@@ -129,6 +130,7 @@ _ACTION_BUILDERS = {
     '无双':  _build_click_btn('无双'),
 
     '化身':  _build_click_btn('化身', param_is_repeat=True),
+    '化身长按': _build_click_btn('化身', param_is_repeat=False),
     '真武':  _build_click_btn('本命神'),
     '本命神': _build_click_btn('本命神'),
     '合体':  _build_click_btn('合体'),

@@ -10,13 +10,15 @@ const OverviewPanel = {
     dispatchQueue: { type: Array, default: () => [] },
     allTasksSummary: { type: Object, default: () => ({}) },
     isDispatchRunning: { type: Boolean, default: false },
+    /** 总调度 / 调度模式 / 单任务 任一路径占用 */
+    executionBusy: { type: Boolean, default: false },
     dispatchProgress: {
       type: Object,
       default: () => ({
         currentChar: '',
         totalTaskCount: 0,
+        /** 已消化黄点数（与总览圆点一致，执行过程中动态更新） */
         completedTaskCount: 0,
-        inCurrentRunHalf: false,
       }),
     },
     logs: { type: Array, default: () => [] },
@@ -55,6 +57,35 @@ const OverviewPanel = {
         }
       }
       return list;
+    },
+    /** 全局是否有待到期任务（全账号汇总，避免仅当前角色时与总览不一致） */
+    globalPendingAny() {
+      const a = this.overviewData.statsAll;
+      const s = this.overviewData.stats;
+      const p = (a && a.pending) || (s && s.pending) || 0;
+      return p > 0;
+    },
+    /** 总览「下次执行」时间戳：优先全账号最早时间，否则当前角色调度器侧 */
+    overviewNextDisplayTs() {
+      const o = this.overviewData;
+      if (!o) return null;
+      if (o.overall_next_execution != null && o.overall_next_execution !== undefined) {
+        return o.overall_next_execution;
+      }
+      const nx = o.scheduler && o.scheduler.next_execution;
+      return nx != null && nx !== undefined ? nx : null;
+    },
+    /** 总调度或调度模式是否处于活跃/运行中 */
+    isAnyScheduleActive() {
+      return this.isDispatchRunning || (this.overviewData.scheduler && this.overviewData.scheduler.state === 'running');
+    },
+    /** 调度状态的文字说明 */
+    overviewSchedHint() {
+      const s = this.overviewData.scheduler;
+      if (this.isDispatchRunning) return '总调度执行中：正在按队列顺序执行各角色任务';
+      if (s && s.state === 'running') return '调度已激活：将自动执行到期任务';
+      if (s && s.state === 'error') return '调度已暂停：连续失败，需在调度面板手动恢复';
+      return '调度未激活：点击「执行所有」启动总调度，或在调度面板启动单角色调度';
     },
   },
   watch: {
@@ -109,6 +140,21 @@ const OverviewPanel = {
       const s = this.getCharSummary(server, name);
       return s ? s.tasks_flat : [];
     },
+    getCharNextExecution(server, name) {
+      const s = this.getCharSummary(server, name);
+      if (!s || s.next_execution == null || s.next_execution === undefined) return null;
+      return s.next_execution;
+    },
+    /** 调度卡片右侧「下次」展示：绝对时间 + 相对倒计时（分行） */
+    getCharNextExecDisplay(server, name) {
+      const ts = this.getCharNextExecution(server, name);
+      if (!ts) return null;
+      const rel = this.formatCountdown(ts);
+      return {
+        abs: `下次 ${this.formatTimestamp(ts)}`,
+        rel: rel || '',
+      };
+    },
     dispatchCharKey(server, name) {
       return server + '/' + name;
     },
@@ -149,16 +195,15 @@ const OverviewPanel = {
       this.dragOverIndex = null;
     },
     dotColor(status) {
-      return { completed: '#22c55e', pending: '#f59e0b', error: '#ef4444', disabled: '#cbd5e1' }[status] || '#cbd5e1';
+      return { scheduled: '#22c55e', pending: '#f59e0b', error: '#ef4444', disabled: '#cbd5e1' }[status] || '#cbd5e1';
     },
     dotLabel(status) {
-      return { completed: '已完成', pending: '待执行', error: '错误', disabled: '未启用' }[status] || '未知';
+      return { scheduled: '待执行', pending: '待执行', error: '错误', disabled: '未启用' }[status] || '未知';
     },
     formatProgress() {
       if (!this.isDispatchRunning) return '';
       const t = this.dispatchProgress.totalTaskCount || 0;
-      const eff = (this.dispatchProgress.completedTaskCount || 0)
-        + (this.dispatchProgress.inCurrentRunHalf ? 0.5 : 0);
+      const eff = this.dispatchProgress.completedTaskCount || 0;
       const effStr = Number.isInteger(eff) ? String(eff) : eff.toFixed(1);
       return `(${effStr}/${t}) ${this.dispatchProgress.currentChar}`;
     },
@@ -166,8 +211,7 @@ const OverviewPanel = {
       if (!this.isDispatchRunning) return 0;
       const t = this.dispatchProgress.totalTaskCount || 0;
       if (!t) return 0;
-      const eff = (this.dispatchProgress.completedTaskCount || 0)
-        + (this.dispatchProgress.inCurrentRunHalf ? 0.5 : 0);
+      const eff = this.dispatchProgress.completedTaskCount || 0;
       return Math.min(100, Math.round((100 * eff) / t));
     },
     formatTimestamp(ts) {
@@ -320,21 +364,23 @@ const OverviewPanel = {
           </div>
           <div class="ov-dispatch-sched-meta">
             <span class="ov-dispatch-meta-label">调度状态</span>
-            <span class="ov-dispatch-meta-value" :style="{ color: schedColor(overviewData.scheduler && overviewData.scheduler.color) }">
+            <span class="ov-dispatch-meta-value" :style="{ color: schedColor(overviewData.scheduler && overviewData.scheduler.color) }" :title="overviewSchedHint">
               {{ (overviewData.scheduler && overviewData.scheduler.label) || '未知' }}
             </span>
             <span class="ov-dispatch-meta-sep">|</span>
             <span class="ov-dispatch-meta-label">下次执行</span>
             <span class="ov-dispatch-meta-value ov-dispatch-meta-time">
-              <template v-if="overviewData.stats && overviewData.stats.pending > 0">即将执行</template>
-              <template v-else>{{ overviewData.scheduler && overviewData.scheduler.next_execution ? formatTimestamp(overviewData.scheduler.next_execution) : '暂无计划' }}</template>
+              <template v-if="!isAnyScheduleActive">-- --</template>
+              <template v-else-if="globalPendingAny">即将执行</template>
+              <template v-else>{{ overviewNextDisplayTs ? formatTimestamp(overviewNextDisplayTs) : '暂无计划' }}</template>
             </span>
-            <span v-if="overviewData.scheduler && overviewData.scheduler.next_execution && !(overviewData.stats && overviewData.stats.pending > 0)" class="ov-dispatch-meta-countdown">
-              {{ formatCountdown(overviewData.scheduler.next_execution) }}
+            <span v-if="isAnyScheduleActive && overviewNextDisplayTs && !globalPendingAny" class="ov-dispatch-meta-countdown">
+              {{ formatCountdown(overviewNextDisplayTs) }}
             </span>
           </div>
+          <div class="text-xs text-gray-400 mt-1" style="line-height:1.4">{{ overviewSchedHint }}</div>
           <div class="ov-dispatch-actions">
-            <el-button type="primary" size="large" @click="$emit('run-all-dispatch')" :disabled="isDispatchRunning || !dispatchQueue.length">
+            <el-button type="primary" size="large" @click="$emit('run-all-dispatch')" :disabled="!dispatchQueue.length || executionBusy">
               <i class="fa fa-play mr-1.5"></i>执行所有
             </el-button>
             <el-button type="danger" size="large" @click="$emit('stop-dispatch')">
@@ -389,6 +435,12 @@ const OverviewPanel = {
                           :style="{ color: dotColor(t.status) }"
                           :title="t.name + ' - ' + dotLabel(t.status)">●</span>
                   </div>
+                  <template v-for="nx in [getCharNextExecDisplay(char.server, char.name)]" :key="char.server + '/' + char.name + '-next'">
+                    <span v-if="!isDispatchRunning && nx" class="ov-char-next-exec">
+                      <span class="ov-char-next-exec-line1">{{ nx.abs }}</span>
+                      <span v-if="nx.rel" class="ov-char-next-exec-line2">{{ nx.rel }}</span>
+                    </span>
+                  </template>
                   <el-button size="small" type="danger" text @click.stop="$emit('remove-from-dispatch', char.server, char.name)"
                              :disabled="isDispatchRunning">
                     <i class="fa fa-minus"></i>

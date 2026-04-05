@@ -36,6 +36,7 @@ _FAIL_IDF = (
 def _stop_battle():
     bg.set_signal("Pause_battle", True)
     bg.set_signal("try_exit", True)
+    bg.set_signal("all_task_done", True)
 
 
 def _handle_settlement() -> str:
@@ -120,7 +121,7 @@ def task(
     if ui_T(I("加载中"), timeout=0.5):
         wait_for_disappear(I("加载中"))
 
-    while True:
+    while not bg.signal("all_task_done", False):
         bg.set_signal("try_exit", False)
         bg.set_signal("Pause_battle", False)
         bg.add(name="hgwj_settle", identifier=_SETTLE_IDF, callback=_stop_battle)
@@ -142,7 +143,7 @@ def task(
             bg.remove("hgwj_fail")
 
         if _handle_settlement() == "done":
-            break
+            bg.set_signal("all_task_done", True)
 
     click(B(30, 30, 30, 30), until=lambda: ui_T((T("荒古万界"), I("导航-菜单"), T("世界地图"))))
     click(B(1200, 30, 30, 30))

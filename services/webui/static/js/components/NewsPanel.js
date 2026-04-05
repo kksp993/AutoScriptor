@@ -3,11 +3,15 @@ const NewsPanel = {
   data() {
     return {
       posts: [],
+      /** 服务端是否可用「安全解锁 + 游戏账密」走通行证代拉论坛（见 GET /api/news/posts → bbs_session_eligible） */
+      bbsSessionEligible: false,
       loading: true,
       error: '',
       dialogVisible: false,
       dialogTitle: '',
       iframeSrc: '',
+      /** 当前弹窗对应的帖子（用于展示与列表一致的简介正文） */
+      dialogPost: null,
     };
   },
   computed: {
@@ -32,8 +36,9 @@ const NewsPanel = {
       this.error = '';
       try {
         const qs = force ? '?force=1' : '';
-        const res = await fetch('/api/news/posts' + qs);
+        const res = await fetch('/api/news/posts' + qs, { credentials: 'same-origin' });
         const data = await res.json();
+        this.bbsSessionEligible = !!data.bbs_session_eligible;
         if (data.error) {
           this.error = data.error;
           this.posts = data.posts || [];
@@ -47,9 +52,14 @@ const NewsPanel = {
       }
     },
     openPost(post) {
+      this.dialogPost = post;
       this.dialogTitle = post.title;
       this.iframeSrc = '/api/news/proxy?url=' + encodeURIComponent(post.url);
       this.dialogVisible = true;
+    },
+    onNewsDialogClosed() {
+      this.dialogPost = null;
+      this.iframeSrc = '';
     },
     openForum() {
       window.open('https://bbs.4399.cn/forums-kind-id-1493-order-dl', '_blank');
@@ -92,6 +102,9 @@ const NewsPanel = {
         <i class="fa fa-newspaper-o text-primary mr-1"></i>游戏资讯
       </h2>
       <span class="text-xs text-gray-400">造梦西游OL · 官方公告</span>
+      <span v-if="bbsSessionEligible" class="text-xs text-emerald-600" title="已验证安全密码且配置中有游戏账密时，内嵌原文将尝试经通行证登录后拉取">
+        <i class="fa fa-unlock-alt"></i> 通行证代拉已就绪
+      </span>
     </div>
     <div class="flex items-center gap-2">
       <el-button size="small" :icon="''" :loading="loading" @click="fetchPosts(true)">
@@ -194,10 +207,35 @@ const NewsPanel = {
                width="90%"
                top="3vh"
                destroy-on-close
-               class="news-dialog">
-      <div class="news-iframe-wrap">
-        <iframe v-if="dialogVisible" :src="iframeSrc" frameborder="0"
-                style="width:100%;height:75vh;border:none;border-radius:6px;"></iframe>
+               class="news-dialog"
+               @closed="onNewsDialogClosed">
+      <div v-if="dialogPost" class="news-dialog-body">
+        <section class="news-dialog-lead" aria-label="公告摘要">
+          <p class="news-dialog-summary">{{ dialogPost.summary }}</p>
+          <div class="news-dialog-lead-foot">
+            <span class="news-dialog-meta">
+              <i class="fa fa-user-o"></i> {{ dialogPost.author }}
+              <span class="news-dialog-meta-sep">·</span>
+              <i class="fa fa-calendar-o"></i> {{ formatDate(dialogPost.date) }}
+            </span>
+            <a class="news-dialog-open-original"
+               :href="dialogPost.url"
+               target="_blank"
+               rel="noopener noreferrer">
+              论坛原文 <i class="fa fa-external-link"></i>
+            </a>
+          </div>
+        </section>
+        <p class="news-dialog-iframe-hint text-xs text-gray-400">
+          下方为论坛页内嵌预览；若站点要求登录，会显示说明页，请使用「论坛原文」在浏览器中阅读全文。
+        </p>
+        <div class="news-iframe-wrap">
+          <iframe v-if="dialogVisible && iframeSrc"
+                  :src="iframeSrc"
+                  frameborder="0"
+                  title="论坛页面"
+                  style="width:100%;height:min(52vh,560px);min-height:280px;border:none;border-radius:6px;"></iframe>
+        </div>
       </div>
     </el-dialog>
   </teleport>

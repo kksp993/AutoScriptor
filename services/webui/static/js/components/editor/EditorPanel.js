@@ -142,7 +142,7 @@ const EditorPanel = {
           <span class="text-xs text-gray-500">自定义代码执行</span>
           <el-input type="textarea" v-model="customExecCode" size="small"
             :autosize="{ minRows: 6, maxRows: 18 }"
-            placeholder="如 locate(T(&quot;确定&quot;))；最后一行若为表达式会作为返回值。纯语句可写 __result__ = ..."
+            placeholder="如 locate(T(&quot;确定&quot;))；最后一行为表达式则返回其值；为赋值（如 info = extract_info(...)）则返回左侧变量。也可用 __result__ = …"
             class="editor-custom-exec-input" />
           <el-button size="small"
             @click="executeCustomCode" :loading="execCustomLoading"
@@ -905,7 +905,7 @@ const EditorPanel = {
         const stdout = res.stdout ? String(res.stdout).trim() : '';
         if (!hasResult && !stdout) {
           ElementPlus.ElMessage({
-            message: '执行完成（无表达式返回值）。把要查看的表达式放在最后一行，或使用 __result__ = …',
+            message: '执行完成（无返回值）。最后一行写表达式，或赋值如 info = …（会返回 info），或 __result__ = …',
             type: 'info',
             duration: 9000,
             showClose: true,

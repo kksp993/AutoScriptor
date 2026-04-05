@@ -49,10 +49,15 @@ def FTT_battle_one_round():
 
 
 @register_task
-def fanTianTa(battle_times=1, battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
+def fanTianTa(
+    battle_times=1,
+    claim_past=True,
+    battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
+):
+    """claim_past：每日领取时是否也点「过去」；账号未解锁过去时设为 False。"""
     ensure_in("极北",-1)
     click(B(0,120,90,100))
-    for diff in ["现在", "过去"]:
+    for diff in (["现在", "过去"] if claim_past else ["现在"]):
         click(T(diff),offset=(0,100))
         sleep(3)
         click(T("确认"), if_exist=True)
@@ -68,9 +73,13 @@ def fanTianTa(battle_times=1, battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW)
         else:
             click(T("碾压"))
             wait_for_appear(T("优先级"))
-            click(T("烦恼"))
-            click(T("立即碾压"))
-            click(T("空白处"))
+            remains = extract_info(B(341,505,310,57), post_process=lambda s: int(s.strip()[-2]), ensure_not_empty=True)
+            if remains > 0:
+                click(T("烦恼"))
+                click(T("立即碾压"))
+                click(T("空白处"))
+            else:
+                click(B(1011,49,57,52))
         sleep(3)
     click(B(30,30,30,30))
     sleep(1)

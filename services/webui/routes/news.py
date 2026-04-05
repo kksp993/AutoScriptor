@@ -7,6 +7,7 @@ News API routes – 4399 BBS 论坛资讯抓取与代理
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from datetime import datetime, timedelta
@@ -14,9 +15,15 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
-from fastapi import APIRouter, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from lxml import html as lxml_html
+
+from services.webui.routes.news_4399_session import (
+    get_cached_or_login_session,
+    get_game_credentials_from_server,
+)
+from services.webui.security import CREDENTIAL_UNLOCK_COOKIE_NAME, validate_credential_unlock
 
 router = APIRouter(prefix="/api/news", tags=["news"])
 
@@ -77,6 +84,84 @@ def _strip_login_scripts(html: str) -> str:
         return m.group(0)
 
     return _SCRIPT_TAG_WITH_SRC.sub(_repl, html)
+
+
+def _strip_document_domain_assignments(html: str) -> str:
+    """
+    论坛页常见 document.domain = '4399.com' 或拼接表达式。
+    在 http://127.0.0.1/.../api/news/proxy 的 iframe 内执行会抛 SecurityError（宿主不是 4399 子域）。
+    """
+    html = re.sub(r"document\.domain\s*=\s*[^;]+;", "", html, flags=re.MULTILINE)
+    html = re.sub(
+        r"document\s*\[\s*['\"]domain['\"]\s*\]\s*=\s*[^;]+;",
+        "",
+        html,
+        flags=re.MULTILINE,
+    )
+    return html
+
+
+# 必须在页面其它脚本之前执行：把跨站 XHR/fetch 改到同源代理，避免 bbs.4399.cn 的 CORS
+# 依赖前置脚本设置 window.__4399_PROXY_ORIGIN__（与当前页上游 bbs / my 一致），用于把「根路径」/xxx 指回上游而非 127.0.0.1
+_HEAD_XHR_SANDBOX_JS = r"""<script data-proxy-xhr-sandbox>
+(function(){
+  var P = '/api/news/proxy?url=';
+  function rootOrigin(){
+    var o = window.__4399_PROXY_ORIGIN__;
+    return (typeof o === 'string' && o) ? o.replace(/\/+$/, '') : 'https://bbs.4399.cn';
+  }
+  function toP(u){
+    if (typeof u !== 'string') return u;
+    if (/^https?:\/\/bbs\.4399\.cn\//i.test(u)) return P + encodeURIComponent(u);
+    if (/^https?:\/\/my\.4399\.com\//i.test(u)) return P + encodeURIComponent(u);
+    if (/^\/\/bbs\.4399\.cn\//i.test(u)) return P + encodeURIComponent('https:' + u);
+    if (/^\/\/my\.4399\.com\//i.test(u)) return P + encodeURIComponent('https:' + u);
+    if (u.charAt(0) === '/' && u.indexOf('/api/') !== 0 && u.indexOf('/static/') !== 0) {
+      return P + encodeURIComponent(rootOrigin() + u);
+    }
+    return u;
+  }
+  var oo = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(){
+    var a = [].slice.call(arguments);
+    if (a.length >= 2) {
+      var u = a[1];
+      if (typeof u === 'string') a[1] = toP(u);
+      else if (typeof URL !== 'undefined' && u instanceof URL) a[1] = toP(u.href);
+    }
+    return oo.apply(this, a);
+  };
+  var of = window.fetch;
+  if (typeof of === 'function') {
+    window.fetch = function(input, init){
+      if (typeof input === 'string') return of.call(this, toP(input), init);
+      if (typeof Request !== 'undefined' && input && input instanceof Request) {
+        var nu = toP(input.url);
+        if (nu !== input.url) input = new Request(nu, input);
+      }
+      return of.call(this, input, init);
+    };
+  }
+})();
+</script>"""
+
+
+def _upstream_is_json_like(resp: requests.Response) -> bool:
+    """子请求（如 profile/notice-profile ?_AJAX_=1）多为 JSON，需原样透传，不能当 HTML 注入。"""
+    ct = (resp.headers.get("Content-Type") or "").lower()
+    try:
+        raw = resp.text.lstrip()
+    except Exception:
+        return False
+    if ("text/html" in ct or "application/xhtml" in ct) and not (
+        raw.startswith("{") or raw.startswith("[")
+    ):
+        return False
+    if "json" in ct and "javascript" not in ct:
+        return True
+    if raw.startswith("{") or raw.startswith("["):
+        return True
+    return False
 
 
 # 注入到每个代理页面的 JS：运行时拦截 **所有** 导航行为
@@ -194,6 +279,56 @@ _NAV_INTERCEPTOR_JS = r"""
 _cache_time: float = 0.0
 
 
+def _bbs_session_eligible(request: Request) -> bool:
+    """是否具备使用通行证代拉论坛页的条件（已解锁 + 配置中有解密后的游戏账密）。"""
+    tok = request.cookies.get(CREDENTIAL_UNLOCK_COOKIE_NAME)
+    if not validate_credential_unlock(tok):
+        return False
+    acc, pwd = get_game_credentials_from_server()
+    return bool(acc and pwd)
+
+
+def _is_login_wall_response(resp: requests.Response) -> bool:
+    """
+    4399 论坛在无 Cookie 时会把 thread 请求 302 到 my.4399.com 登录页；
+    此时 HTML 为游戏吧壳/登录页，并非帖子正文，不应在 iframe 里冒充「原文」。
+    """
+    u = (getattr(resp, "url", None) or "").lower()
+    if "my.4399.com" in u and ("login" in u or "/account/" in u):
+        return True
+    if "passport.4399" in u or "sso.4399" in u:
+        return True
+    return False
+
+
+def _forum_iframe_placeholder(original_url: str) -> str:
+    """iframe 内展示的占位页：说明需浏览器登录后查看，并提供与弹层一致的原文链接。"""
+    from html import escape
+
+    safe = escape(original_url, quote=True)
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>需登录查看</title>
+  <style>
+    body {{ font-family: system-ui, sans-serif; margin: 0; padding: 20px 22px;
+      background: #f8fafc; color: #334155; line-height: 1.6; font-size: 14px; }}
+    h1 {{ font-size: 16px; margin: 0 0 12px; color: #0f172a; }}
+    p {{ margin: 0 0 12px; }}
+    a {{ color: #2563eb; word-break: break-all; }}
+  </style>
+</head>
+<body>
+  <h1>无法在窗口内嵌中显示全文</h1>
+  <p>4399 论坛在无登录会话时会跳转到通行证/游戏吧页面。</p>
+  <p>若您已在 WebUI 验证<strong>安全密码</strong>且配置中存有<strong>游戏账号密码</strong>，本站会尝试自动登录通行证后再拉取正文；若仍失败（如需验证码），请使用<strong>「论坛原文」</strong>在浏览器中打开。</p>
+  <p><a href="{safe}" target="_blank" rel="noopener noreferrer">在新标签页打开帖子</a></p>
+</body>
+</html>"""
+
+
 def _parse_relative_time(text: str) -> str | None:
     """将 '6小时前' / '3天前' 等相对时间转换为 YYYY-MM-DD 字符串。"""
     now = datetime.now()
@@ -277,39 +412,54 @@ def _scrape_posts() -> list[dict]:
 
 
 @router.get("/posts")
-async def get_posts(force: int = Query(0, description="传 1 强制刷新缓存")):
+async def get_posts(request: Request, force: int = Query(0, description="传 1 强制刷新缓存")):
     """返回最近两周的论坛帖子列表（带缓存）。"""
     global _cache, _cache_time
 
     now = time.time()
     if not force and _cache.get("posts") is not None and (now - _cache_time) < _CACHE_TTL:
-        return _cache
+        return {**_cache, "bbs_session_eligible": _bbs_session_eligible(request)}
 
     try:
         posts = _scrape_posts()
         _cache = {"posts": posts, "cached_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         _cache_time = now
-        return _cache
+        return {**_cache, "bbs_session_eligible": _bbs_session_eligible(request)}
     except Exception as e:
         if _cache.get("posts") is not None:
-            return _cache
-        return {"posts": [], "error": str(e)}
+            return {**_cache, "bbs_session_eligible": _bbs_session_eligible(request)}
+        return {"posts": [], "error": str(e), "bbs_session_eligible": _bbs_session_eligible(request)}
 
 
 @router.get("/proxy", response_class=HTMLResponse)
-async def proxy_page(url: str = Query(..., description="要代理的 4399 帖子页面 URL")):
+async def proxy_page(request: Request, url: str = Query(..., description="要代理的 4399 帖子页面 URL")):
     """
     反向代理 4399 帖子页面，供前端 iframe 嵌入。
     仅允许 bbs.4399.cn / my.4399.com 域名，防止 SSRF。
+    若请求携带有效的 credential_unlock Cookie 且配置中已有解密后的游戏账密，
+    则先经 ptlogin 建立通行证会话再抓取（与自动化使用同一套账号密码）。
     """
     parsed = urlparse(url)
     if parsed.hostname not in _ALLOWED_DOMAINS:
         return HTMLResponse("<h3>不允许的域名</h3>", status_code=403)
 
+    tok = request.cookies.get(CREDENTIAL_UNLOCK_COOKIE_NAME)
+    http_session: requests.Session | None = None
+    if validate_credential_unlock(tok):
+        acc, pwd = get_game_credentials_from_server()
+        if acc and pwd and tok:
+            http_session = get_cached_or_login_session(tok, acc, pwd)
+
     # 提前注入到 <head> 最前面：在 4399 自身脚本运行前就把 UniLogin 拦截掉
     # 注意：<base> 必须与当前页面域名一致，否则 my.4399.com 页面会错误解析相对路径导致白屏
     scheme = parsed.scheme or "https"
     base_origin = f"{scheme}://{parsed.netloc}/"
+    upstream_origin = f"{scheme}://{parsed.netloc}"
+    _ORIGIN_BLOCK = (
+        "<script>window.__4399_PROXY_ORIGIN__="
+        + json.dumps(upstream_origin)
+        + ";</script>"
+    )
     _HEAD_EARLY_BLOCK = (
         "<script>"
         "window.UniLogin={showPopupLogin:function(){},showPopupReg:function(){},setUnionLoginProps:function(){},"
@@ -320,17 +470,29 @@ async def proxy_page(url: str = Query(..., description="要代理的 4399 帖子
     )
 
     try:
-        resp = requests.get(url, headers=_BROWSER_HEADERS, timeout=20)
+        if http_session is not None:
+            resp = http_session.get(url, headers=_BROWSER_HEADERS, timeout=20)
+        else:
+            resp = requests.get(url, headers=_BROWSER_HEADERS, timeout=20)
         resp.encoding = "utf-8"
+        if _is_login_wall_response(resp):
+            return HTMLResponse(_forum_iframe_placeholder(url))
+        # 站内 AJAX（如 profile/notice-profile）走 JSON，必须原样返回，否则会破坏 JSON 且无法去 document.domain
+        if _upstream_is_json_like(resp):
+            mt = resp.headers.get("Content-Type") or "application/json; charset=utf-8"
+            return Response(content=resp.content, media_type=mt)
+
         content = _strip_login_scripts(resp.text)
+        content = _strip_document_domain_assignments(content)
+        _head_bundle = _ORIGIN_BLOCK + _HEAD_XHR_SANDBOX_JS + _HEAD_EARLY_BLOCK + _HEAD_HIDE_LOGIN_CSS
         if "<base" not in content[:2000].lower():
             content = content.replace(
                 "<head>",
-                "<head>" + _HEAD_EARLY_BLOCK + _HEAD_HIDE_LOGIN_CSS + f'<base href="{base_origin}">',
+                "<head>" + _head_bundle + f'<base href="{base_origin}">',
                 1,
             )
         else:
-            content = content.replace("<head>", "<head>" + _HEAD_EARLY_BLOCK + _HEAD_HIDE_LOGIN_CSS, 1)
+            content = content.replace("<head>", "<head>" + _head_bundle, 1)
         content = content.replace("</body>", _NAV_INTERCEPTOR_JS + "</body>", 1)
         return HTMLResponse(content)
     except Exception as e:
