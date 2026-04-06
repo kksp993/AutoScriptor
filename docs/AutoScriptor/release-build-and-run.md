@@ -99,7 +99,7 @@ cd D:\Projects\AutoScriptor
 
 | 形态 | 默认？ | 产物（示例） | 适用场景 |
 |------|--------|----------------|----------|
-| **portable 单文件** | **是** | `AutoScriptor_Zao_Install.exe` | 对外分发 **一个 exe**；首次运行即 **HTML 安装向导**（解压引擎 → MuMu/ADB）。 |
+| **portable 单文件** | **是** | `造笔.exe` | 对外分发 **一个 exe**；首次运行即 **HTML 安装向导**（解压引擎 → MuMu/ADB）。 |
 | **NSIS** | 否（`--electron-nsis`） | `AutoScriptor_Zao_installer.exe` | 需要「开始菜单 / 控制面板卸载」等**系统级安装**时。 |
 | **ZIP 目录包** | 否（`--electron-zip`） | `AutoScriptor_Zao_*.zip` | 解压整目录调试；**不是**默认分发形态。 |
 
@@ -108,7 +108,7 @@ cd D:\Projects\AutoScriptor
 - **NSIS 安装程序**（`AutoScriptor_Zao_installer.exe`）：Nullsoft **默认向导**（选目录 → 进度条 → 完成），负责把 Electron 壳与随包文件释放到磁盘。
 - **HTML 安装向导**（`webapp/renderer/installer.html`）：**Electron 窗口**，与开发时同一套界面逻辑；负责 **解压 `backend.zip` 到用户所选目录**、**复制 data**、**MuMu/ADB 路径校验**（`install-packaged.cjs` + `mumu-detect.cjs`）。
 
-**默认 portable 流程**：用户**不经过 NSIS**；运行 `AutoScriptor_Zao_Install.exe` 后，首次启动即进入 **HTML 向导**。大体积引擎解压发生在向导内，**不是** NSIS 那一屏。
+**默认 portable 流程**：用户**不经过 NSIS**；运行 `造笔.exe` 后，首次启动即进入 **HTML 向导**。大体积引擎解压发生在向导内，**不是** NSIS 那一屏。
 
 ### 6.2 NSIS 安装阶段很慢或卡在进度条
 

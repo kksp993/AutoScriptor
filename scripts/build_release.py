@@ -3,7 +3,8 @@ AutoScriptor 商业发行版构建脚本
 ================================
 用法:
   python scripts/build_release.py [--clean] [--skip-nuitka] [--skip-electron] [-j N]
-  桌面端默认: 单文件 portable（AutoScriptor_Zao_Install.exe），首次运行即 HTML 安装向导。
+  桌面端默认: 单文件 portable（AutoScriptor_Zao_Install_<version>.exe），仅作 HTML 安装向导；
+  安装完成后在安装目录写入 造笔.exe 作为日常启动器。
   可选: --electron-nsis（系统 NSIS） / --electron-zip（文件夹 zip） / --electron-nsis-fast-install
 
 产物模式（保留两种）:
@@ -457,11 +458,11 @@ def run_nuitka(timings: list[tuple[str, float]] | None = None, jobs: int | None 
         "--nofollow-import-to=distutils",
         # paddle.audio 等会 import wave；nofollow paddle 时静态分析易漏，显式纳入 standalone
         "--include-module=wave",
-        # FastAPI Form/UploadFile 依赖 python-multipart（import 名 multipart，实现包 python_multipart）。
-        # 勿用 --include-package=multipart：Nuitka 4.x 在部分环境下 locateModule finding≠absolute 会 FATAL；
-        # 用 follow-import-to 加入跟随列表即可，且 server.py 已顶层 import multipart。
-        "--follow-import-to=multipart",
-        "--follow-import-to=python_multipart",
+        # FastAPI Form/UploadFile 依赖 python-multipart（import 名 multipart；另有顶层 python_multipart）。
+        # 勿用 --include-package=multipart：Nuitka 4.x 在部分环境下 locateModule finding≠absolute 会 FATAL。
+        # --follow-import-to 在判为 unused 时仍不打包；须 --include-module 强制纳入 standalone。
+        "--include-module=multipart",
+        "--include-module=python_multipart",
         # pypinyin 在包内旁加载 JSON；与 copy_pypinyin_package_data() 一并保证可运行
         "--include-package-data=pypinyin",
         "--include-data-dir=services/webui/static=services/webui/static",
@@ -516,25 +517,30 @@ def run_nuitka(timings: list[tuple[str, float]] | None = None, jobs: int | None 
 def collect_data():
     """收集用户可编辑的数据文件到 dist/data/。"""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    copies = [
-        ("config.json", "config.json"),
-        ("config template.json", "config template.json"),
-    ]
-    for src_name, dst_name in copies:
-        src = PROJECT_ROOT / src_name
-        if src.exists():
-            shutil.copy2(src, DATA_DIR / dst_name)
-            print(f"[data] {src_name}")
-
-    # accounts/
-    accounts_src = PROJECT_ROOT / "accounts"
-    accounts_dst = DATA_DIR / "accounts"
-    if accounts_src.exists():
-        shutil.copytree(accounts_src, accounts_dst, dirs_exist_ok=True)
-        print("[data] accounts/")
+    # 发行包内 config.json 一律来自 config template.json，避免把打包机上的本地账号/路径带入新电脑。
+    tpl = PROJECT_ROOT / "config template.json"
+    dist_cfg = DATA_DIR / "config.json"
+    dist_tpl = DATA_DIR / "config template.json"
+    if tpl.exists():
+        shutil.copy2(tpl, dist_tpl)
+        shutil.copy2(tpl, dist_cfg)
+        print("[data] config template.json -> data/config template.json")
+        print("[data] config template.json -> data/config.json（避免携带打包机本地配置）")
     else:
-        accounts_dst.mkdir(parents=True, exist_ok=True)
+        src_cfg = PROJECT_ROOT / "config.json"
+        if src_cfg.exists():
+            shutil.copy2(src_cfg, dist_cfg)
+            print("[data] config.json（未找到模板，降级使用）")
+
+    # accounts/：仅保留空目录，绝不把仓库内 accounts/*.json 打入发行包（账号仅用户本机生成）
+    accounts_dst = DATA_DIR / "accounts"
+    accounts_dst.mkdir(parents=True, exist_ok=True)
+    for stale in accounts_dst.glob("*.json"):
+        try:
+            stale.unlink()
+        except OSError:
+            pass
+    print("[data] accounts/（空目录，不含 *.json）")
 
     # YAML profiles
     profiles_src = PROJECT_ROOT / "ZmxyOL" / "assets" / "profiles"
@@ -635,7 +641,7 @@ def build_electron(
     elif use_zip:
         mode = "ZIP 文件夹包" 
     else:
-        mode = "portable 单文件（AutoScriptor_Zao_Install.exe）"
+        mode = "portable 单文件（AutoScriptor_Zao_Install_<version>.exe）"
     print(f"[electron] 开始打包 ({mode})...")
     env = os.environ.copy()
     env.setdefault("CSC_IDENTITY_AUTO_DISCOVERY", "false")
@@ -683,7 +689,8 @@ def build_electron(
         )
     else:
         print(
-            "[electron] 提示: 分发 **AutoScriptor_Zao_Install.exe** 即可（单文件，已含 backend.zip）；"
+            "[electron] 提示: 分发 **AutoScriptor_Zao_Install_<version>.exe** 即可（单文件，已含 backend.zip；"
+            "安装后安装目录会有 **造笔.exe** 启动器）；"
             "首次运行即打开安装向导（界面与便携流程一致），解压引擎后请在向导中确认 MuMu/ADB 路径。"
         )
 
@@ -809,7 +816,7 @@ def main():
         elif args.electron_zip:
             kind = "ZIP 文件夹包"
         else:
-            kind = "portable 单文件（AutoScriptor_Zao_Install.exe）"
+            kind = "portable 单文件（AutoScriptor_Zao_Install_<version>.exe + 安装目录 造笔.exe）"
         print(f"  桌面产物 ({kind}):  {DIST_ELECTRON_DIR} (electron-builder，与 dist/ 互不覆盖)")
     print("=" * 60)
     _print_build_timings(timings, time.perf_counter() - t_build)

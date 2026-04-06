@@ -129,18 +129,60 @@ async function removeBackendDirWithRetry(backendDest, send) {
   return new Error(hint + (lastErr && lastErr.message ? lastErr.message : String(lastErr)));
 }
 
-function registerUninstall(installRoot, displayVersion) {
-  const key = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\AutoScriptorZao';
-  const bat = path.join(installRoot, '卸载造笔.bat');
-  const { execSync } = require('child_process');
+/**
+ * 将发行版 portable 安装包本体复制为安装目录下的「造笔.exe」，供用户日常启动（与 AutoScriptor_Zao_Install.exe 安装向导区分）。
+ */
+function copyDailyLauncher(installRoot, portableExePath, send) {
+  if (process.platform !== 'win32') return;
+  const root = path.resolve(installRoot);
+  const dest = path.join(root, '造笔.exe');
+  if (!portableExePath || !fs.existsSync(portableExePath)) {
+    send({
+      type: 'log',
+      message: '[启动器] 未找到安装包可执行文件路径，跳过写入 造笔.exe',
+    });
+    return;
+  }
   try {
-    execSync(`reg add "${key}" /v DisplayName /d "造笔" /f`, { shell: true, windowsHide: true });
-    execSync(`reg add "${key}" /v DisplayVersion /d "${String(displayVersion || '1.0.0')}" /f`, { shell: true, windowsHide: true });
-    execSync(`reg add "${key}" /v InstallLocation /d "${installRoot}" /f`, { shell: true, windowsHide: true });
-    execSync(`reg add "${key}" /v UninstallString /d "${bat}" /f`, { shell: true, windowsHide: true });
-    execSync(`reg add "${key}" /v Publisher /d "AutoScriptor" /f`, { shell: true, windowsHide: true });
+    fs.copyFileSync(portableExePath, dest);
+    send({ type: 'log', message: `[启动器] 已写入日常启动器: ${dest}` });
   } catch (e) {
-    console.warn('[install-packaged] reg 注册失败（可忽略）:', e.message);
+    const msg = e && e.message ? e.message : String(e);
+    send({ type: 'log', message: `[启动器] 写入 造笔.exe 失败: ${msg}` });
+    throw new Error('无法写入安装目录下的 造笔.exe：' + msg);
+  }
+}
+
+function registerUninstall(installRoot, displayVersion) {
+  const ps1 = path.join(installRoot, 'Uninstall.ps1');
+  const { execFileSync } = require('child_process');
+  const sysRoot = process.env.SystemRoot || 'C:\\Windows';
+  const psExe = path.join(sysRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  // 「应用和功能」调 UninstallString：直接填 .bat 在部分系统上无效；用 PowerShell -File 执行卸载脚本最稳
+  const uninstallString = `"${psExe}" -NoProfile -ExecutionPolicy Bypass -File "${ps1}"`;
+  const ver = String(displayVersion || '1.0.0');
+  const iconExe = path.join(installRoot, '造笔.exe');
+  const ps = `
+$ErrorActionPreference = 'Stop'
+$key = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\AutoScriptorZao'
+New-Item -Path $key -Force | Out-Null
+Set-ItemProperty -LiteralPath $key -Name DisplayName -Value '造笔' -Type String
+Set-ItemProperty -LiteralPath $key -Name DisplayVersion -Value ${JSON.stringify(ver)} -Type String
+Set-ItemProperty -LiteralPath $key -Name InstallLocation -Value ${JSON.stringify(installRoot)} -Type String
+Set-ItemProperty -LiteralPath $key -Name UninstallString -Value ${JSON.stringify(uninstallString)} -Type String
+Set-ItemProperty -LiteralPath $key -Name QuietUninstallString -Value ${JSON.stringify(uninstallString)} -Type String
+Set-ItemProperty -LiteralPath $key -Name Publisher -Value 'AutoScriptor' -Type String
+if (Test-Path -LiteralPath ${JSON.stringify(iconExe)}) {
+  Set-ItemProperty -LiteralPath $key -Name DisplayIcon -Value ${JSON.stringify(iconExe)} -Type String
+}
+`;
+  try {
+    execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps], {
+      windowsHide: true,
+      encoding: 'utf8',
+    });
+  } catch (e) {
+    console.warn('[install-packaged] 注册卸载失败（可忽略）:', e && e.message ? e.message : e);
   }
 }
 
@@ -150,6 +192,7 @@ async function runPackagedInstall(opts) {
     resourcesPath,
     zipPath: zipPathOpt,
     exeDir,
+    portableExePath,
     appVersion,
     userDataPath,
     send,
@@ -224,6 +267,9 @@ async function runPackagedInstall(opts) {
   };
   fs.writeFileSync(markerPath, JSON.stringify(manifest, null, 2), 'utf-8');
   send({ type: 'log', message: `[安装] 已记录安装路径: ${markerPath}` });
+
+  send({ type: 'progress', percent: 95, message: '写入日常启动器（造笔.exe）…' });
+  copyDailyLauncher(rootResolved, portableExePath, send);
 
   send({ type: 'progress', percent: 97, message: '写入卸载程序…' });
   writeUninstallPs1(rootResolved, markerPath);

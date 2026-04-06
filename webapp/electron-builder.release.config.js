@@ -4,7 +4,7 @@ const nsisCompression =
 /**
  * AutoScriptor 发行版 Electron Builder 配置（与 electron-builder.staging.config.js 策略一致）
  *
- * 默认：portable 单文件 AutoScriptor_Zao_Install.exe（首次运行 = HTML 安装向导）。
+ * 默认：portable 单文件 AutoScriptor_Zao_Install_${version}.exe（首次运行 = HTML 安装向导；安装目录写入 造笔.exe 启动器）。
  * NSIS：AUTOSCRIPTOR_ELECTRON_NSIS=1
  * ZIP：AUTOSCRIPTOR_ELECTRON_ZIP=1
  *
@@ -52,7 +52,7 @@ const config = {
     {
       from: '../dist/data/',
       to: './data/',
-      filter: ['**/*'],
+      filter: ['**/*', '!**/accounts/**/*.json'],
     },
     {
       from: '../dist/license/',
@@ -79,7 +79,7 @@ const config = {
 
 if (!useNsis && !useZip) {
   config.portable = {
-    artifactName: 'AutoScriptor_Zao_Install.exe',
+    artifactName: 'AutoScriptor_Zao_Install_${version}.exe',
   };
 }
 
@@ -92,7 +92,7 @@ if (useNsis) {
     shortcutName: '造笔',
     installerIcon: 'buildResources/icon.ico',
     uninstallerIcon: 'buildResources/icon.ico',
-    artifactName: 'AutoScriptor_Zao_installer.exe',
+    artifactName: 'AutoScriptor_Zao_installer_${version}.exe',
     compression: nsisCompression,
   };
 }
