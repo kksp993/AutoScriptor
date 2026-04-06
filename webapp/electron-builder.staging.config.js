@@ -64,7 +64,7 @@ const cfg = {
     {
       from: path.join(projectRoot, 'dist', 'data'),
       to: 'data',
-      filter: ['**/*'],
+      filter: ['**/*', '!**/accounts/**/*.json'],
     },
     {
       from: path.join(projectRoot, 'dist', 'license'),
@@ -93,7 +93,7 @@ const cfg = {
 
 if (!useNsis && !useZip) {
   cfg.portable = {
-    artifactName: 'AutoScriptor_Zao_Install.exe',
+    artifactName: 'AutoScriptor_Zao_Install_${version}.exe',
   };
 }
 
@@ -106,7 +106,7 @@ if (useNsis) {
     shortcutName: '造笔',
     installerIcon: winIcon,
     uninstallerIcon: winIcon,
-    artifactName: 'AutoScriptor_Zao_installer.exe',
+    artifactName: 'AutoScriptor_Zao_installer_${version}.exe',
     compression: nsisCompression,
   };
 }

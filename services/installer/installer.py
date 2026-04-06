@@ -45,6 +45,34 @@ COMMON_MUMU_PORTS =[
 ]
 
 
+def _path_ok_for_emulator_key(key: str, val: str) -> bool:
+    """与 Electron installer 路径校验一致：目录/可执行文件须真实存在且类型正确。"""
+    try:
+        s = (val or "").strip()
+        if not s:
+            return False
+        p = Path(s)
+        if not p.exists():
+            return False
+        if key == "mumu_folder":
+            return p.is_dir()
+        if key in ("emu_path", "adb_path"):
+            return p.is_file()
+        return True
+    except OSError:
+        return False
+
+
+def _emulator_paths_need_detect(emulator: dict) -> bool:
+    for key in ("mumu_folder", "emu_path", "adb_path"):
+        val = str(emulator.get(key, "")).strip()
+        if not val or val.startswith("YOUR_"):
+            return True
+        if not _path_ok_for_emulator_key(key, val):
+            return True
+    return False
+
+
 def _detect_security_software() -> list[str]:
     """Detect running security software that may slow down venv file operations."""
     known = {
@@ -290,16 +318,16 @@ def _derive_paths_from_mumu_folder(folder: Path) -> dict:
     if nx_main.exists():
         ep = nx_main / "MuMuManager.exe"
         ap = nx_main / "adb.exe"
-        if ep.exists():
+        if ep.is_file():
             emu_path = ep
-        if ap.exists():
+        if ap.is_file():
             adb_path = ap
     if (emu_path is None or adb_path is None) and shell.exists():
         ep = shell / "MuMuPlayer.exe"
         ap = shell / "adb.exe"
-        if emu_path is None and ep.exists():
+        if emu_path is None and ep.is_file():
             emu_path = ep
-        if adb_path is None and ap.exists():
+        if adb_path is None and ap.is_file():
             adb_path = ap
     return {
         "mumu_folder": str(folder),
@@ -346,13 +374,8 @@ def ensure_config_with_mumu(project_root: Path) -> None:
 
     emulator = data.setdefault("emulator", {})
 
-    # 若缺省或占位符，则尝试自动探测
-    need_detect = False
-    for key in ("mumu_folder", "emu_path", "adb_path"):
-        val = str(emulator.get(key, ""))
-        if not val or val.startswith("YOUR_"):
-            need_detect = True
-            break
+    # 若缺省、占位符，或配置里写了默认路径但本机磁盘上不存在/类型不对，则尝试自动探测
+    need_detect = _emulator_paths_need_detect(emulator)
 
     if need_detect:
         candidates = []
@@ -368,7 +391,11 @@ def ensure_config_with_mumu(project_root: Path) -> None:
         if chosen is not None:
             paths = _derive_paths_from_mumu_folder(chosen)
             for k, v in paths.items():
-                if v and (not emulator.get(k) or str(emulator.get(k, "")).startswith("YOUR_")):
+                if not v:
+                    continue
+                cur = str(emulator.get(k, "") or "").strip()
+                cur_ok = cur and not cur.startswith("YOUR_") and _path_ok_for_emulator_key(k, cur)
+                if not cur_ok:
                     emulator[k] = v
 
     # 自动检测 adb 设备地址

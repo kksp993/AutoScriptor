@@ -659,6 +659,12 @@ ipcMain.handle('installer:run-packaged', async (_event, opts) => {
     resourcesPath: process.resourcesPath,
     zipPath: getBackendZipPath(),
     exeDir: path.dirname(process.execPath),
+    /**
+     * 当前安装包 exe 的完整路径，用于复制为安装目录下的「造笔.exe」。
+     * portable 单文件运行时 process.execPath 常指向临时解压目录，必须用 electron-builder 注入的
+     * PORTABLE_EXECUTABLE_FILE，否则会复制错误文件导致造笔.exe 缺失或无法启动。
+     */
+    portableExePath: process.env.PORTABLE_EXECUTABLE_FILE || process.execPath,
     appVersion: pkg.version,
     userDataPath: app.getPath('userData'),
     send,
@@ -747,8 +753,15 @@ ipcMain.on('installer:launch', () => {
 });
 
 // ── Installer path-verification IPC ─────────────────────────────────────────
+function getInstallerConfigPath() {
+  // 发行引擎实际读取 data/config.json；保留 legacy 根目录 config.json 兜底兼容旧包。
+  const cfgInData = path.join(getRoot(), 'data', 'config.json');
+  if (fs.existsSync(cfgInData)) return cfgInData;
+  return path.join(getRoot(), 'config.json');
+}
+
 ipcMain.handle('installer:read-config-paths', () => {
-  const cfgPath = path.join(getRoot(), 'config.json');
+  const cfgPath = getInstallerConfigPath();
   try {
     const data = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
     return data.emulator || {};
@@ -770,12 +783,29 @@ ipcMain.handle('installer:browse-path', async (_event, opts) => {
   return result.filePaths[0];
 });
 
-ipcMain.handle('installer:validate-path', (_event, p) => {
-  try { return fs.existsSync(p); } catch { return false; }
+/**
+ * 路径校验：仅用 fs.existsSync 会误判（例如 exe 路径实际为已存在的目录、或仅父目录存在）。
+ * kind: 'file' | 'dir' | 'any'
+ */
+ipcMain.handle('installer:validate-path', (_event, p, opts) => {
+  try {
+    if (p == null || typeof p !== 'string') return false;
+    const s = p.trim();
+    if (!s) return false;
+    const normalized = path.normalize(s);
+    if (!fs.existsSync(normalized)) return false;
+    const st = fs.statSync(normalized);
+    const kind = (opts && opts.kind) || 'any';
+    if (kind === 'file') return st.isFile();
+    if (kind === 'dir') return st.isDirectory();
+    return true;
+  } catch {
+    return false;
+  }
 });
 
 ipcMain.handle('installer:save-paths', (_event, paths) => {
-  const cfgPath = path.join(getRoot(), 'config.json');
+  const cfgPath = getInstallerConfigPath();
   try {
     const data = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
     if (!data.emulator) data.emulator = {};

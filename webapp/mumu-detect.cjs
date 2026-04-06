@@ -60,16 +60,41 @@ function deriveFromFolder(folder) {
   if (fs.existsSync(nx)) {
     const ep = path.join(nx, 'MuMuManager.exe');
     const ap = path.join(nx, 'adb.exe');
-    if (fs.existsSync(ep)) emu = ep;
-    if (fs.existsSync(ap)) adb = ap;
+    if (fs.existsSync(ep) && fs.statSync(ep).isFile()) emu = ep;
+    if (fs.existsSync(ap) && fs.statSync(ap).isFile()) adb = ap;
   }
   if ((!emu || !adb) && fs.existsSync(shell)) {
     const ep = path.join(shell, 'MuMuPlayer.exe');
     const ap = path.join(shell, 'adb.exe');
-    if (!emu && fs.existsSync(ep)) emu = ep;
-    if (!adb && fs.existsSync(ap)) adb = ap;
+    if (!emu && fs.existsSync(ep) && fs.statSync(ep).isFile()) emu = ep;
+    if (!adb && fs.existsSync(ap) && fs.statSync(ap).isFile()) adb = ap;
   }
   return { mumu_folder: folder, emu_path: emu, adb_path: adb };
+}
+
+/** 与 Electron installer:validate-path 一致：目录 / 文件需类型正确且真实存在 */
+function pathIsValidForKey(key, p) {
+  try {
+    const s = String(p || '').trim();
+    if (!s) return false;
+    const n = path.normalize(s);
+    if (!fs.existsSync(n)) return false;
+    const st = fs.statSync(n);
+    if (key === 'mumu_folder') return st.isDirectory();
+    if (key === 'emu_path' || key === 'adb_path') return st.isFile();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function emulatorPathsNeedFill(emulator) {
+  for (const k of ['mumu_folder', 'emu_path', 'adb_path']) {
+    const v = String(emulator[k] || '');
+    if (!v || v.startsWith('YOUR_')) return true;
+    if (!pathIsValidForKey(k, v)) return true;
+  }
+  return false;
 }
 
 function adbSerial(adbPath) {
@@ -91,7 +116,9 @@ function adbSerial(adbPath) {
 }
 
 function applyMumuConfig(installRoot, send) {
-  const cfgPath = path.join(installRoot, 'config.json');
+  const cfgInData = path.join(installRoot, 'data', 'config.json');
+  const cfgLegacy = path.join(installRoot, 'config.json');
+  const cfgPath = fs.existsSync(cfgInData) ? cfgInData : cfgLegacy;
   let data = {};
   try {
     if (fs.existsSync(cfgPath)) {
@@ -103,14 +130,7 @@ function applyMumuConfig(installRoot, send) {
   const emulator = data.emulator || {};
   data.emulator = emulator;
 
-  let need = false;
-  for (const k of ['mumu_folder', 'emu_path', 'adb_path']) {
-    const v = String(emulator[k] || '');
-    if (!v || v.startsWith('YOUR_')) {
-      need = true;
-      break;
-    }
-  }
+  const need = emulatorPathsNeedFill(emulator);
 
   if (need) {
     const candidates = searchMumuFolders();
@@ -123,12 +143,24 @@ function applyMumuConfig(installRoot, send) {
     }
     if (chosen) {
       const paths = deriveFromFolder(chosen);
+      const anyDerived = !!(paths.emu_path || paths.adb_path);
+      if (!anyDerived) {
+        send({
+          type: 'log',
+          message: `[MuMu] 目录 ${chosen} 下未找到 MuMuManager/MuMuPlayer 与 adb.exe，请在向导中手动选择有效路径`,
+        });
+      }
       for (const [k, v] of Object.entries(paths)) {
-        if (v && (!emulator[k] || String(emulator[k]).startsWith('YOUR_'))) {
+        if (!v) continue;
+        const cur = String(emulator[k] || '');
+        const curOk = cur && !cur.startsWith('YOUR_') && pathIsValidForKey(k, cur);
+        if (!curOk) {
           emulator[k] = v;
         }
       }
-      send({ type: 'log', message: `[MuMu] 已自动填写: ${chosen}` });
+      if (anyDerived) {
+        send({ type: 'log', message: `[MuMu] 已自动填写: ${chosen}` });
+      }
     } else {
       send({ type: 'log', message: '[MuMu] 未检测到安装目录，请稍后在向导中手动选择' });
     }

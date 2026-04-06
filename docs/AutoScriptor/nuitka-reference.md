@@ -126,7 +126,7 @@
 
 ### 8.4 运行时数据目录（编译产物）
 
-- 数据根目录为 **`dist\data`**（`config.json`、`accounts/`、`profiles/`、`assets/` 等由 **`collect_data()`** 从仓库模板拷入）。
+- 数据根目录为 **`dist\data`**（`config.json`、`profiles/`、`assets/` 等由 **`collect_data()`** 从仓库模板拷入；**`accounts/` 仅空目录**，不打包 `accounts/*.json`）。
 - **`AutoScriptor.utils.paths`**：`is_compiled()` 须能识别打包环境（`__compiled__ in globals()`，并对 **`autoscriptor-engine.exe`** 名称兜底），否则误把 `gui.dist` 当成数据根。
 
 ### 8.5 与「安装包」的关系

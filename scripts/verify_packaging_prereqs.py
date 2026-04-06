@@ -5,7 +5,7 @@
 在跑 `build_release.py`（往往 20+ 分钟）之前，用**同一套**将用于编译的 Python 验证：
 
 - 关键 pip 包能否 import（含 multipart，避免白等一轮）
-- 仓库内是否已包含 Nuitka 对 multipart / python_multipart 的 follow 配置、server 显式 import
+- 仓库内是否已包含 Nuitka 对 multipart / python_multipart 的 include-module 配置、server 显式 import
 
 用法（与打包容器一致）::
 
@@ -48,10 +48,10 @@ def _check_repo_files() -> list[str]:
     errors: list[str] = []
     br = PROJECT_ROOT / "scripts" / "build_release.py"
     text = _read_text(br)
-    if "--follow-import-to=multipart" not in text:
-        errors.append(f"缺少 Nuitka 参数: --follow-import-to=multipart（{br.name}）")
-    if "--follow-import-to=python_multipart" not in text:
-        errors.append(f"缺少 Nuitka 参数: --follow-import-to=python_multipart（{br.name}）")
+    if "--include-module=multipart" not in text:
+        errors.append(f"缺少 Nuitka 参数: --include-module=multipart（{br.name}）")
+    if "--include-module=python_multipart" not in text:
+        errors.append(f"缺少 Nuitka 参数: --include-module=python_multipart（{br.name}）")
     sv = PROJECT_ROOT / "services" / "webui" / "server.py"
     st = _read_text(sv)
     if "\nimport multipart" not in st and not st.startswith("import multipart"):

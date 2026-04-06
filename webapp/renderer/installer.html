@@ -1027,6 +1027,7 @@
           <div class="dot" data-dot="5"></div>
         </div>
         <div class="btn-row">
+          <button class="btn-secondary" id="btnPrev" style="display:none;">← 上一步</button>
           <button class="btn-primary" id="btnNext">开始配置 →</button>
         </div>
       </div>
@@ -1124,6 +1125,7 @@
       document.getElementById('step4'),
     ];
     const dots = document.querySelectorAll('.dot');
+    const btnPrev = document.getElementById('btnPrev');
     const btnNext = document.getElementById('btnNext');
 
     let pathsAllValid = false;
@@ -1153,8 +1155,15 @@
     }
 
     function updateButton() {
+      const setPrev = (visible, onClick = null) => {
+        if (!btnPrev) return;
+        btnPrev.style.display = visible ? '' : 'none';
+        btnPrev.disabled = !visible || !onClick;
+        btnPrev.onclick = onClick;
+      };
       switch (currentStep) {
         case 0:
+          setPrev(false, null);
           if (window._wizardGateActive && !window._wizardGateCanProceed) {
             btnNext.textContent = '请先卸载或刷新状态';
             btnNext.disabled = true;
@@ -1166,26 +1175,31 @@
           }
           break;
         case 1:
+          setPrev(true, () => goToStep(0));
           btnNext.textContent = '开始安装';
           btnNext.disabled = false;
           btnNext.onclick = startInstall;
           break;
         case 2:
+          setPrev(true, () => goToStep(1));
           btnNext.textContent = '确认并继续安装';
           btnNext.disabled = false;
           btnNext.onclick = beginPackagedInstall;
           break;
         case 3:
+          setPrev(false, null);
           btnNext.textContent = '安装中...';
           btnNext.disabled = true;
           btnNext.onclick = null;
           break;
         case 4:
+          setPrev(false, null);
           btnNext.textContent = pathsAllValid ? '完成安装 →' : '验证中...';
           btnNext.disabled = !pathsAllValid;
           btnNext.onclick = pathsAllValid ? confirmAndFinish : null;
           break;
         case 5:
+          setPrev(false, null);
           btnNext.textContent = '启动 造笔';
           btnNext.disabled = false;
           btnNext.onclick = launchApp;
@@ -1484,7 +1498,8 @@
 
         let exists = false;
         try {
-          exists = await window.electron.installer.validatePath(val);
+          const kind = key === 'mumu_folder' ? 'dir' : 'file';
+          exists = await window.electron.installer.validatePath(val, { kind });
         } catch { /* ignore */ }
 
         if (exists) {
@@ -1507,7 +1522,7 @@
       if (allOk) {
         showValidationBar('success', '✓ 所有路径验证通过，可以继续完成安装。');
       } else {
-        showValidationBar('error', '部分路径未找到或无效，请使用「浏览…」按钮手动选择正确路径。');
+        showValidationBar('error', '部分路径无效：MuMu 安装目录须为真实文件夹；模拟器与 ADB 须为磁盘上存在的 .exe 文件（不能仅为示例路径）。请用「浏览…」选择。');
       }
     }
 
@@ -1567,14 +1582,14 @@
         const emuFull = c.dir + c.emu;
         const adbFull = c.dir + c.adb;
         const [emuOk, adbOk] = await Promise.all([
-          window.electron.installer.validatePath(emuFull),
-          window.electron.installer.validatePath(adbFull),
+          window.electron.installer.validatePath(emuFull, { kind: 'file' }),
+          window.electron.installer.validatePath(adbFull, { kind: 'file' }),
         ]);
-        if (emuOk && (!currentPaths.emu_path || !(await window.electron.installer.validatePath(currentPaths.emu_path)))) {
+        if (emuOk && (!currentPaths.emu_path || !(await window.electron.installer.validatePath(currentPaths.emu_path, { kind: 'file' })))) {
           currentPaths.emu_path = emuFull;
           document.getElementById('pvi-emu_path').value = emuFull;
         }
-        if (adbOk && (!currentPaths.adb_path || !(await window.electron.installer.validatePath(currentPaths.adb_path)))) {
+        if (adbOk && (!currentPaths.adb_path || !(await window.electron.installer.validatePath(currentPaths.adb_path, { kind: 'file' })))) {
           currentPaths.adb_path = adbFull;
           document.getElementById('pvi-adb_path').value = adbFull;
         }
