@@ -90,8 +90,9 @@ def way():
 @path("荒古万界", LOC_ENV)
 def way():
     click(B(30,30,30,30))
-    from ZmxyOL.nav.api import locate_region
-    locate_region()
+    # 如果打完荒古副本，出来返回会直接去村庄，否则返回去荒古遗境，欸，官方就是搞
+    from ZmxyOL.nav.api import ensure_in
+    ensure_in("洪荒遗境")
 
 def travel_to_dst_loc(target_env: str):
     click(T("万界穿梭"))

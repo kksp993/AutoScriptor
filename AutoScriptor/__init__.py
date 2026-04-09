@@ -1,4 +1,4 @@
-from AutoScriptor.utils.box import Box
+from AutoScriptor.utils.box import Box, box_cell_in_grid
 from AutoScriptor.core import *
 from AutoScriptor.utils.ui_map import ui
 from AutoScriptor.utils.constant import cfg
@@ -12,7 +12,7 @@ from AutoScriptor.utils.perf import boost as perf_boost
 from AutoScriptor.core.api import dismiss_floating_window
 __all__ = [
     # targets
-    "Box", "Target", "ui", "B", "I", "T", "V",
+    "Box", "box_cell_in_grid", "Target", "ui", "B", "I", "T", "V",
     # utils
     "cfg", "log_flush",
     # api

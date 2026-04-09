@@ -287,27 +287,27 @@ class NemuIpcImpl:
             # MuMuPlayer12 5.0
             os.path.abspath(os.path.join(nemu_folder, './nx_device/12.0/shell/sdk/external_renderer_ipc.dll')),
         ]
-        ipc_dll = ''
-        for ipc_dll in list_dll:
-            if not os.path.exists(ipc_dll):
+        ipc_dll_loaded = ''
+        for candidate in list_dll:
+            if not os.path.exists(candidate):
                 continue
             try:
-                self.lib = ctypes.CDLL(ipc_dll)
+                self.lib = ctypes.CDLL(candidate)
+                ipc_dll_loaded = candidate
                 break
             except OSError as e:
                 logger.error(e)
-                logger.error(f'ipc_dll={ipc_dll} exists, but cannot be loaded')
+                logger.error(f'ipc_dll={candidate} exists, but cannot be loaded')
                 continue
-        if not ipc_dll:
-            # not found
+        if not ipc_dll_loaded:
             raise NemuIpcIncompatible(
                 f'NemuIpc requires MuMu12 version >= 3.8.13, please check your version. '
-                f'None of the following path exists: {list_dll}')
+                f'Could not load external_renderer_ipc.dll from any of: {list_dll}')
         # success
         logger.info(
             f'NemuIpcImpl init, '
             f'nemu_folder={nemu_folder}, '
-            f'ipc_dll={ipc_dll}, '
+            f'ipc_dll={ipc_dll_loaded}, '
             f'instance_id={instance_id}, '
             f'display_id={display_id}'
         )

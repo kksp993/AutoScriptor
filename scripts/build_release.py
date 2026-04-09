@@ -23,7 +23,8 @@ AutoScriptor 商业发行版构建脚本
   1. Nuitka standalone 编译 Web 后端入口（见脚本内入口路径）-> dist/gui.dist/
   2. 收集用户数据文件到 dist/data/
   3. 将 gui.dist 打成 dist/backend.zip（Electron 随包携带，首次运行由应用内向导解压到用户目录）
-  4. (可选) electron-builder 打包（默认 portable 单 exe；--electron-nsis / --electron-zip 见 --help）
+  4. (可选) --incremental-backend-from 上一版 gui.dist 或 backend.zip → dist/backend_incremental.zip（仅变更文件，供已安装用户小体积升级）
+  5. (可选) electron-builder 打包（默认 portable 单 exe；--electron-nsis / --electron-zip 见 --help）
 
 用户文档（参数、产物形态、缓存、排错）:
   docs/AutoScriptor/release-build-and-run.md
@@ -736,6 +737,22 @@ def main():
         action="store_true",
         help="跳过 backend.zip 与 Electron（不装包；适合只验证/迭代 Python 引擎，省大量时间）",
     )
+    parser.add_argument(
+        "--incremental-backend-from",
+        default="",
+        metavar="PATH",
+        help="指定上一版 gui.dist 目录或 backend.zip，额外生成 dist/backend_incremental.zip（文件级增量，体积小）",
+    )
+    parser.add_argument(
+        "--incremental-from-label",
+        default="",
+        help="与 --incremental-backend-from 联用：写入清单的 from 标签（如 1.2.0）",
+    )
+    parser.add_argument(
+        "--incremental-to-label",
+        default="",
+        help="与 --incremental-backend-from 联用：写入清单的 to 标签（如 1.2.1）",
+    )
     parser.add_argument("--clean-only", action="store_true", help="仅清理构建产物")
     parser.add_argument(
         "--electron-nsis",
@@ -769,6 +786,9 @@ def main():
     if args.jobs is not None and args.jobs < 1:
         print("[build] 错误: -j/--jobs 须为 >= 1 的整数")
         sys.exit(2)
+    if (args.incremental_from_label or args.incremental_to_label) and not args.incremental_backend_from:
+        print("[build] 错误: --incremental-from-label / --incremental-to-label 需与 --incremental-backend-from 同时使用")
+        sys.exit(2)
 
     print("=" * 60)
     print("  AutoScriptor 发行版构建")
@@ -796,6 +816,42 @@ def main():
     if not args.skip_electron:
         with timed_step(timings, "打包 backend.zip"):
             zip_backend_tree()
+    elif args.incremental_backend_from:
+        if not NUITKA_OUT.is_dir():
+            print(f"[build] 错误: 缺少 {NUITKA_OUT}，无法生成增量包（勿与 --skip-nuitka 且无现成 gui.dist 联用）")
+            sys.exit(2)
+
+    if args.incremental_backend_from:
+        inc_path = Path(args.incremental_backend_from).resolve()
+        if not inc_path.exists():
+            print(f"[build] 错误: --incremental-backend-from 不存在: {inc_path}")
+            sys.exit(2)
+        if not NUITKA_OUT.is_dir():
+            print(f"[build] 错误: 缺少 {NUITKA_OUT}，无法生成增量包")
+            sys.exit(2)
+        inc_out = DIST_DIR / "backend_incremental.zip"
+        cmd = [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "release_backend_incremental.py"),
+            "create",
+            "--old",
+            str(inc_path),
+            "--new",
+            str(NUITKA_OUT),
+            "--out",
+            str(inc_out),
+        ]
+        if args.incremental_from_label:
+            cmd += ["--from-label", args.incremental_from_label]
+        if args.incremental_to_label:
+            cmd += ["--to-label", args.incremental_to_label]
+        with timed_step(timings, "打包 backend_incremental.zip"):
+            r = subprocess.run(cmd, cwd=str(PROJECT_ROOT))
+        if r.returncode != 0:
+            print("[build] incremental 包生成失败")
+            sys.exit(1)
+
+    if not args.skip_electron:
         build_electron(
             use_nsis=args.electron_nsis,
             timings=timings,
@@ -818,6 +874,8 @@ def main():
         else:
             kind = "portable 单文件（AutoScriptor_Zao_Install_<version>.exe + 安装目录 造笔.exe）"
         print(f"  桌面产物 ({kind}):  {DIST_ELECTRON_DIR} (electron-builder，与 dist/ 互不覆盖)")
+    if args.incremental_backend_from:
+        print(f"  增量包:      {DIST_DIR / 'backend_incremental.zip'}（已安装用户可单独分发此文件升级引擎）")
     print("=" * 60)
     _print_build_timings(timings, time.perf_counter() - t_build)
 

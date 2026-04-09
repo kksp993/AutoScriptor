@@ -17,6 +17,7 @@ from AutoScriptor.utils.logger import setup_task_aware_logging
 from AutoScriptor.utils.tracer import save_debug_screenshot
 from AutoScriptor.utils.logger import logger, setup_logfile
 from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_package_resolve import resolve_app_to_start
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
 from AutoScriptor.utils.edit_img import launch_editor
 from AutoScriptor.utils.cancel import check_cancel_raise, cancellable_sleep
@@ -56,7 +57,17 @@ def ensure_app_running(selected_emulator_index, adb_addr, app_to_start):
     from AutoScriptor.utils.perf import unboost as _unboost
     _unboost()
     mumu = Mumu().select(selected_emulator_index)
-    mumu.power.start(app_to_start) if cfg["app"]["auto_start"] else None
+    # app_to_start 为空或未安装时由 resolve_app_to_start 枚举候选包并写回 config.json
+    if cfg["app"]["auto_start"]:
+        if not mumu.power.is_running():
+            mumu.power.start(None)
+        resolved = resolve_app_to_start(mumu)
+        mumu.app.launch(resolved)
+    else:
+        if mumu.power.is_running():
+            resolve_app_to_start(mumu)
+        else:
+            logger.debug("auto_start 为 false 且模拟器未运行，跳过 app_to_start 解析")
     logger.info("模拟器启动完成")
     mixctrl = MixControl(mumu, serial=adb_addr)
     logger.info("编排器初始化完成.")

@@ -44,7 +44,7 @@
   </style>
   <link rel="stylesheet" href="/vendor/drawflow.min.css" />
   <script src="/vendor/drawflow.min.js"></script>
-  <link rel="stylesheet" href="/static/css/style.css?v=33" />
+  <link rel="stylesheet" href="/static/css/style.css?v=34" />
 </head>
 <body class="app-body overflow-hidden" style="height:100vh;">
   <div id="app" class="flex h-screen overflow-hidden">
@@ -205,11 +205,29 @@
 
     <!-- 编辑任务对话框 -->
     <teleport to="body">
-      <el-dialog v-model="editModalVisible" :title="'编辑任务: '+editTaskPath" width="600px" destroy-on-close>
+      <el-dialog v-model="editModalVisible" :title="'编辑任务: '+editTaskPath" :width="Object.keys(editTaskData.params||{}).some(k => isTableParam(k)) ? '860px' : '600px'" destroy-on-close>
         <el-form :model="editTaskData" label-width="100px">
           <el-form-item label="启用状态"><el-switch v-model="editTaskData.on"></el-switch></el-form-item>
           <template v-for="(val, key) in editTaskData.params" :key="key">
-            <el-form-item :label="paramLabel(key)" v-if="key !== 'profession' && paramEnumOptions[key] && !enumParamIsMultiple(key)">
+            <el-form-item v-if="key !== 'profession' && isTableParam(key)" :label="paramLabel(key)" label-width="80px">
+              <el-table :data="getTableRows(key)" border size="small" style="width:100%" class="table-param-editor">
+                <el-table-column prop="_rowKey" label="关卡" width="100" fixed>
+                  <template #default="{row}"><span style="font-weight:500">{{ row._rowKey }}</span></template>
+                </el-table-column>
+                <el-table-column v-for="(colMeta, colKey) in getTableColumns(key)" :key="colKey"
+                  :label="getTableColumnLabel(key, colKey)" min-width="130" align="center">
+                  <template #default="{row}">
+                    <el-select v-if="colMeta.type==='enum'" v-model="row[colKey]" size="small" style="width:100%">
+                      <el-option v-for="o in getTableEnumOptions(key, colKey)" :key="o.value||o" :label="o.label||o" :value="o.value||o"></el-option>
+                    </el-select>
+                    <el-switch v-else-if="colMeta.type==='bool'" v-model="row[colKey]"></el-switch>
+                    <el-input-number v-else-if="colMeta.type==='number'" v-model="row[colKey]" size="small" :min="0" controls-position="right" style="width:100%"></el-input-number>
+                    <el-input v-else v-model="row[colKey]" size="small"></el-input>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-form-item>
+            <el-form-item :label="paramLabel(key)" v-else-if="key !== 'profession' && paramEnumOptions[key] && !enumParamIsMultiple(key)">
               <el-select v-model="editTaskData.params[key]" placeholder="请选择">
                 <el-option v-for="o in paramEnumOptions[key]" :key="o.value || o" :label="o.label || o" :value="o.value || o"></el-option>
               </el-select>
@@ -429,6 +447,6 @@
   <script src="/static/js/components/canvas/CanvasPanel.js?v=4"></script>
   <script src="/static/js/components/ErrorArchivesPanel.js?v=4"></script>
   <script src="/static/js/task_help_docs.js?v=1"></script>
-  <script src="/static/js/app.js?v=22"></script>
+  <script src="/static/js/app.js?v=23"></script>
 </body>
 </html>

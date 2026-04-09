@@ -33,6 +33,7 @@ const app = createApp({
     const activeGroupPath = ref('');
     const paramEnumOptions = reactive({});
     const PARAM_KEY_LABELS = {
+      battle_config: '战斗配置',
       battle_flow: '战斗招式',
       battle_loop:'战斗循环次数',
       battle_times: '战斗轮数',
@@ -611,6 +612,18 @@ const app = createApp({
       return Array.isArray(v);
     }
 
+    const tableRowsCache = reactive({});
+
+    function _filterParamsToRegisteredKeys(cloned) {
+      const pk = cloned.param_keys;
+      if (!cloned.params || typeof cloned.params !== 'object' || !Array.isArray(pk) || !pk.length) return;
+      const next = {};
+      for (const k of pk) {
+        if (Object.prototype.hasOwnProperty.call(cloned.params, k)) next[k] = cloned.params[k];
+      }
+      cloned.params = next;
+    }
+
     function openEditModal(key, data, path, parent) {
       const cloned = JSON.parse(JSON.stringify(data));
       if (cloned.params && typeof cloned.params === 'object') {
@@ -619,6 +632,7 @@ const app = createApp({
       if (cloned.param_meta && typeof cloned.param_meta === 'object') {
         delete cloned.param_meta.profession;
       }
+      _filterParamsToRegisteredKeys(cloned);
       const meta = (cloned && cloned.param_meta) || {};
       for (const [pk, mp] of Object.entries(meta)) {
         if (mp && typeof mp === 'object' && mp.multiple === false && cloned.params && Array.isArray(cloned.params[pk]) && cloned.params[pk].length === 1) {
@@ -630,21 +644,93 @@ const app = createApp({
       editTaskParent.value = parent || currentTasks.value;
       editTaskKey.value = key;
       Object.keys(paramEnumOptions).forEach(k => delete paramEnumOptions[k]);
+      Object.keys(tableRowsCache).forEach(k => delete tableRowsCache[k]);
       const paths = Object.values(meta).map(_enumMetaPath).filter(Boolean);
-      if (paths.length) {
-        API.post('/enum-options', { paths, task_path: editTaskPath.value || '' }).then(map => {
+      for (const [pk, mp] of Object.entries(meta)) {
+        if (mp && typeof mp === 'object' && mp.type === 'table' && mp.columns) {
+          for (const [col, colMeta] of Object.entries(mp.columns)) {
+            if (colMeta.enum) paths.push(colMeta.enum);
+          }
+        }
+      }
+      const uniquePaths = [...new Set(paths)];
+      if (uniquePaths.length) {
+        API.post('/enum-options', { paths: uniquePaths, task_path: editTaskPath.value || '' }).then(map => {
           Object.entries(meta).forEach(([pk, ep]) => {
-            const p = _enumMetaPath(ep);
-            if (p) paramEnumOptions[pk] = map[p] || [];
+            if (ep && typeof ep === 'object' && ep.type === 'table' && ep.columns) {
+              for (const [col, colMeta] of Object.entries(ep.columns)) {
+                if (colMeta.enum && map[colMeta.enum]) {
+                  paramEnumOptions[pk + '.' + col] = map[colMeta.enum];
+                }
+              }
+            } else {
+              const p = _enumMetaPath(ep);
+              if (p) paramEnumOptions[pk] = map[p] || [];
+            }
           });
+          _initTableRowsCache(meta);
           editModalVisible.value = true;
-        }).catch(() => { editModalVisible.value = true; });
-      } else { editModalVisible.value = true; }
+        }).catch(() => { _initTableRowsCache(meta); editModalVisible.value = true; });
+      } else { _initTableRowsCache(meta); editModalVisible.value = true; }
+    }
+
+    function _initTableRowsCache(meta) {
+      const params = editTaskData.value?.params || {};
+      for (const [pk, mp] of Object.entries(meta)) {
+        if (mp && typeof mp === 'object' && mp.type === 'table') {
+          const dict = params[pk];
+          if (dict && typeof dict === 'object' && !Array.isArray(dict)) {
+            tableRowsCache[pk] = Object.entries(dict).map(([rk, rv]) => ({ _rowKey: rk, ...rv }));
+          }
+        }
+      }
+    }
+
+    function isTableParam(key) {
+      const m = editTaskData.value?.param_meta?.[key];
+      return m && typeof m === 'object' && m.type === 'table';
+    }
+
+    function getTableRows(key) {
+      return tableRowsCache[key] || [];
+    }
+
+    function getTableColumns(key) {
+      const m = editTaskData.value?.param_meta?.[key];
+      return (m && m.columns) || {};
+    }
+
+    function getTableColumnLabel(key, col) {
+      const m = editTaskData.value?.param_meta?.[key];
+      if (m && m.column_labels && m.column_labels[col]) return m.column_labels[col];
+      return PARAM_KEY_LABELS[col] || col;
+    }
+
+    function getTableEnumOptions(key, col) {
+      return paramEnumOptions[key + '.' + col] || [];
+    }
+
+    function _syncTableRowsToParams(key) {
+      const rows = tableRowsCache[key];
+      if (!rows || !editTaskData.value?.params) return;
+      const dict = {};
+      for (const row of rows) {
+        const { _rowKey, ...rest } = row;
+        dict[_rowKey] = rest;
+      }
+      editTaskData.value.params[key] = dict;
     }
 
     function saveTask() {
       if (!(editTaskParent.value && editTaskKey.value)) return;
+      const meta = editTaskData.value?.param_meta || {};
+      for (const [pk, mp] of Object.entries(meta)) {
+        if (mp && typeof mp === 'object' && mp.type === 'table') {
+          _syncTableRowsToParams(pk);
+        }
+      }
       const payload = { ...editTaskData.value };
+      _filterParamsToRegisteredKeys(payload);
       if (payload.params && typeof payload.params === 'object') {
         delete payload.params.profession;
       }
@@ -1268,6 +1354,7 @@ const app = createApp({
       refreshConfig, fetchOverview, fetchSchedulerStatus, refreshOverviewPanel,
       startRun, stopRun, runSingleTask, verifyAccount, resetScheduler,
       openEditModal, enumParamIsMultiple, saveTask, addListItem, removeListItem,
+      isTableParam, getTableRows, getTableColumns, getTableColumnLabel, getTableEnumOptions, tableRowsCache,
       saveTasks, saveSettings, clearLogs,
       openAddAccountDialog: () => { addDialogVisible.value = true; },
       submitAddAccount,

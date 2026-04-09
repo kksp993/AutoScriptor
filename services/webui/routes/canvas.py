@@ -256,6 +256,11 @@ def _node_to_code(d: dict, indent: str) -> str:
         return f'{indent}input("{text}"{field_part})'
     if ntype == "key_event":
         return f"{indent}key_event({d.get('key_code', 4)})"
+    if ntype == "locate":
+        t = d.get("timeout", 0)
+        t_part = f", timeout={t}" if t else ""
+        tgt = d.get("target", 'T("确定")')
+        return f"{indent}locate({tgt}{t_part})"
     if ntype == "wait_for_appear":
         t = d.get("timeout", 30)
         t_part = f", timeout={t}" if t != 30 else ""

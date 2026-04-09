@@ -27,6 +27,7 @@ class TaskRegistry:
         order: int,
         param_meta: dict | None = None,
         *,
+        param_keys: list[str] | None = None,
         beta: bool = False,
         custom: bool = False,
         doc_flow: str = "",
@@ -35,6 +36,7 @@ class TaskRegistry:
             "fn": fn,
             "order": order,
             "param_meta": param_meta or {},
+            "param_keys": list(param_keys) if param_keys else [],
             "beta": bool(beta),
             "custom": bool(custom),
             "doc_flow": (doc_flow or "").strip(),
@@ -51,6 +53,11 @@ class TaskRegistry:
     def get_param_meta(self, path: str) -> dict:
         entry = self._tasks.get(path)
         return entry.get("param_meta", {}) if entry else {}
+
+    def get_param_keys(self, path: str) -> list[str]:
+        """当前任务函数签名中的参数名（不含 * / **），用于丢弃 cfg 中已迁移的旧键。"""
+        entry = self._tasks.get(path)
+        return list(entry.get("param_keys", [])) if entry else []
 
     def get_beta(self, path: str) -> bool:
         entry = self._tasks.get(path)

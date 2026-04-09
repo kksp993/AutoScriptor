@@ -1,4 +1,4 @@
-from typing import Tuple, Union
+from typing import Optional, Tuple, Union
 import collections
 import random
 
@@ -131,13 +131,32 @@ class Box(collections.namedtuple('Box', 'left top width height')):
         
         return merged_boxes
     
-    def __add__(self, other: tuple) -> 'Box':
-        if len(other) == 2:
-            return Box(self.left + other[0], self.top + other[1], self.width, self.height)
-        elif len(other) == 4:
-            return Box(self.left + other[0], self.top + other[1], other[2], other[3])
-        else:
-            raise ValueError("other must be a tuple of length 2 or 4")
+    def __add__(self, other: dict) -> 'Box':
+        """
+        平移/缩放 Box，语义与 ``click(..., offset=..., resize=...)``、``b2p`` 一致。
+
+        右侧须为 ``dict``，键名与 click 一致：``offset``、``resize``（均可省略；亦可显式写
+        ``(0, 0)`` / ``(-1, -1)``）。未出现的键按 ``offset=(0,0)``、``resize=(-1,-1)``（保持宽高）。
+        可与 ``click`` 共用同一 dict：``T(..., box=base + delta)``、``click(..., **delta)``。
+        """
+        if not isinstance(other, dict):
+            raise TypeError('Box + 仅支持 dict，键为 "offset"、"resize"，与 click/b2p 对齐')
+        o = other.get("offset", (0, 0))
+        rz = other.get("resize", (-1, -1))
+        if len(o) != 2 or len(rz) != 2:
+            raise ValueError("dict 中 offset、resize 须为二元组（若缺省键则使用默认）")
+        return box_with_offset_resize(self, (int(o[0]), int(o[1])), (int(rz[0]), int(rz[1])))
+
+    def __sub__(self, other: 'Box') -> dict[str, tuple[int, int]]:
+        """
+        被减数相对减数的变换量：``a - b`` 得到 ``dict``，满足 ``b + (a - b) == a``
+        （与 ``+`` / ``box_with_offset_resize`` 同一套 ``offset``、``resize`` 语义）。
+
+        返回值**固定**含 ``"offset"``、``"resize"`` 两键（不省略），可为 ``(0, 0)``、``(-1, -1)`` 等显式值。
+        """
+        if not isinstance(other, Box):
+            raise TypeError("Box - 仅支持与另一个 Box 相减")
+        return box_sub_as_delta(self, other)
 
     def margin(self, margin: int=20) -> 'Box':
         "扩大box的区域，用于ocr识别（自动裁剪到屏幕范围 0,0,1280,720）"
@@ -146,6 +165,37 @@ class Box(collections.namedtuple('Box', 'left top width height')):
         r = min(1280, self.left + self.width + margin)
         b = min(720, self.top + self.height + margin)
         return Box(l, t, max(0, r - l), max(0, b - t))
+
+
+def box_cell_in_grid(
+    found: Optional[Box],
+    grid: Union[list[list[Box]], list[Box]],
+) -> Optional[Tuple[int, int, Box]]:
+    """
+    判断 found 的中心点落在 grid 的哪一格中。
+    grid 可为二维列表（外层行、内层列），或一维 list[Box]（视为单行，row 恒为 0）。
+    命中则返回 (row, col, 该格 Box)，否则 None。
+    """
+    if found is None or not grid:
+        return None
+    cx, cy = found.center()
+    if isinstance(grid[0], Box):
+        for c, cell in enumerate(grid):
+            if (
+                cell.left <= cx < cell.left + cell.width
+                and cell.top <= cy < cell.top + cell.height
+            ):
+                return (0, c, cell)
+        return None
+    for r, row in enumerate(grid):
+        for c, cell in enumerate(row):
+            if (
+                cell.left <= cx < cell.left + cell.width
+                and cell.top <= cy < cell.top + cell.height
+            ):
+                return (r, c, cell)
+    return None
+
 
 def dp(r: Box) -> Tuple[Union[int, None], Union[int, None]]:
     center_x, center_y = r.center()
@@ -161,6 +211,39 @@ def offset_box(r: Box, offset_x: int, offset_y: int) -> Box:
 
 def resize_box(r: Box, width: int, height: int) -> Box:
     return Box(r.left, r.top, width, height)
+
+
+def box_with_offset_resize(
+    r: Box,
+    offset: Tuple[int, int] = (0, 0),
+    resize: Tuple[int, int] = (-1, -1),
+) -> Box:
+    """
+    先按 offset 平移左上角，再按 resize 调整宽高（分量 <=0 则保留原宽高）。
+    与 ``click(..., offset=..., resize=...)``、``b2p``、``Box + {...}`` 使用同一套参数语义。
+    """
+    return Box(
+        r.left + offset[0],
+        r.top + offset[1],
+        resize[0] if resize[0] > 0 else r.width,
+        resize[1] if resize[1] > 0 else r.height,
+    )
+
+
+def box_sub_as_delta(minuend: Box, subtrahend: Box) -> dict[str, tuple[int, int]]:
+    """
+    求 ``minuend`` 相对 ``subtrahend`` 的 ``offset`` / ``resize``，使得
+    ``subtrahend + delta == minuend``（与 ``+`` / ``box_with_offset_resize`` 一致）。
+
+    返回的 dict **始终**同时包含 ``"offset"``、``"resize"``（可与 ``click(..., **delta)`` 对齐）；
+    无平移时为 ``(0, 0)``，某维宽高与减数相同时该维为 ``-1``（与 ``+`` 缺省 ``resize`` 一致）。
+    """
+    rw = minuend.width if minuend.width != subtrahend.width else -1
+    rh = minuend.height if minuend.height != subtrahend.height else -1
+    off = (minuend.left - subtrahend.left, minuend.top - subtrahend.top)
+    rz = (rw, rh)
+    return {"offset": off, "resize": rz}
+
 
 def b2p(
         r: Box, 
@@ -204,10 +287,4 @@ def b2p(
         b2p(Box(100, 200, 200, 100), offset=(120, 120), resize=(80, 80))  
         # -> 变换后Box: Box(220, 320, 80, 80)，点击新中心附近
     """
-    r_new = Box(
-        r.left+offset[0],
-        r.top+offset[1],
-        resize[0] if resize[0]>0 else r.width,
-        resize[1] if resize[1]>0 else r.height
-    )
-    return dp(r_new)
+    return dp(box_with_offset_resize(r, offset, resize))

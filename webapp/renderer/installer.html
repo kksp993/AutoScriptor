@@ -160,6 +160,7 @@
       flex: 1;
       position: relative;
       overflow: hidden;
+      z-index: 0;
     }
 
     /* ── Steps ─────────────────────────────────────────────── */
@@ -528,6 +529,42 @@
       color: var(--accent);
       background: var(--accent-soft);
     }
+    .pv-help {
+      margin-top: 10px;
+      padding: 12px 14px;
+      background: #f0f9ff;
+      border: 1px solid rgba(59,130,246,0.2);
+      border-radius: 8px;
+      display: none;
+    }
+    .pv-help.show { display: block; }
+    .pv-help-toggle {
+      background: none; border: none; cursor: pointer;
+      width: 22px; height: 22px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; color: #3b82f6;
+      border: 1.5px solid #93c5fd; flex-shrink: 0;
+      transition: background .15s, border-color .15s;
+    }
+    .pv-help-toggle:hover { background: rgba(59,130,246,0.08); border-color: #3b82f6; }
+    .pv-help-title {
+      font-size: 12px; font-weight: 600; color: #1e40af;
+      margin-bottom: 6px;
+    }
+    .pv-help-text {
+      font-size: 11.5px; color: #334155; line-height: 1.7;
+      margin: 0; padding: 0;
+    }
+    .pv-help-text li { margin-bottom: 3px; }
+    .pv-help-text a {
+      color: #2563eb; text-decoration: underline;
+      text-decoration-color: rgba(37,99,235,0.3);
+    }
+    .pv-help-text a:hover { text-decoration-color: #2563eb; }
+    .pv-help-text code {
+      font-size: 11px; background: rgba(0,0,0,0.05);
+      padding: 1px 5px; border-radius: 3px;
+    }
     .pv-validation-bar {
       margin-top: 8px;
       padding: 12px 16px;
@@ -663,6 +700,8 @@
 
     /* ── Bottom Bar ────────────────────────────────────────── */
     .bottom-bar {
+      position: relative;
+      z-index: 20;
       height: 64px;
       padding: 0 48px;
       display: flex;
@@ -726,6 +765,7 @@
       background: linear-gradient(90deg, transparent, rgba(255,255,255,0.22), transparent);
       transform: skewX(-20deg);
       transition: left .5s;
+      pointer-events: none;
     }
     .btn-primary:hover::after { left: 125%; }
 
@@ -886,6 +926,7 @@
               <input class="path-input" id="installPath" readonly placeholder="选择目录…" />
               <button type="button" class="btn-browse" id="btnBrowseInstall">浏览…</button>
             </div>
+            <div class="pv-validation-bar" id="installDirValidation" style="margin-top:10px;"></div>
           </div>
         </div>
 
@@ -944,7 +985,7 @@
         <!-- Step 3: Path Verification -->
         <div class="step" id="step3">
           <h2>环境验证</h2>
-          <p class="subtitle">安装程序已尝试自动检测模拟器路径。请确认以下配置正确，否则程序将无法正常运行。</p>
+          <p class="subtitle">安装程序已尝试自动检测模拟器路径。请确认路径正确后，点击「运行功能检测」验证配置是否可用。</p>
 
           <div class="path-verify-list" id="pathVerifyList">
             <div class="path-verify-item" id="pv-mumu_folder">
@@ -952,12 +993,22 @@
                 <span class="pv-status" id="pvs-mumu_folder">?</span>
                 <div class="pv-info">
                   <div class="pv-label">MuMu 安装目录</div>
-                  <div class="pv-desc">MuMu 模拟器的安装根目录（包含 shell 或 nx_main 子文件夹）</div>
+                  <div class="pv-desc" id="pvd-mumu_folder">MuMu 模拟器的安装根目录（包含 shell 或 nx_main 子文件夹）</div>
                 </div>
+                <button class="pv-help-toggle" data-help="help-mumu_folder" title="查看帮助">i</button>
               </div>
               <div class="pv-path-row">
                 <input class="pv-input" id="pvi-mumu_folder" readonly placeholder="未检测到，请手动选择..." />
                 <button class="btn-browse" data-key="mumu_folder" data-dir="true">浏览…</button>
+              </div>
+              <div class="pv-help" id="help-mumu_folder">
+                <div class="pv-help-title">如何找到 MuMu 安装目录？</div>
+                <ol class="pv-help-text">
+                  <li>右键桌面上的「MuMu模拟器」快捷方式 → 选择「打开文件所在位置」</li>
+                  <li>在弹出的文件夹中向上一级，该目录通常就是安装目录（包含 <code>nx_main</code> 或 <code>shell</code> 子文件夹）</li>
+                  <li>常见安装路径：<code>C:\Program Files\Netease\MuMu</code> 或 <code>D:\MuMu Player 12</code></li>
+                  <li>如果未安装 MuMu，请先下载安装：<a href="https://mumu.163.com/" target="_blank">MuMu 模拟器官网 ↗</a></li>
+                </ol>
               </div>
             </div>
 
@@ -966,12 +1017,24 @@
                 <span class="pv-status" id="pvs-emu_path">?</span>
                 <div class="pv-info">
                   <div class="pv-label">模拟器可执行文件</div>
-                  <div class="pv-desc">MuMuPlayer.exe 或 MuMuManager.exe 的完整路径</div>
+                  <div class="pv-desc" id="pvd-emu_path">MuMuPlayer.exe 或 MuMuManager.exe 的完整路径</div>
                 </div>
+                <button class="pv-help-toggle" data-help="help-emu_path" title="查看帮助">i</button>
               </div>
               <div class="pv-path-row">
                 <input class="pv-input" id="pvi-emu_path" readonly placeholder="未检测到，请手动选择..." />
                 <button class="btn-browse" data-key="emu_path">浏览…</button>
+              </div>
+              <div class="pv-help" id="help-emu_path">
+                <div class="pv-help-title">找不到模拟器可执行文件？</div>
+                <ol class="pv-help-text">
+                  <li>在 MuMu 安装目录下查找以下文件（二选一）：
+                    <br><code>nx_main\MuMuManager.exe</code>（旧版 MuMu）
+                    <br><code>shell\MuMuPlayer.exe</code>（MuMu Player 12）
+                  </li>
+                  <li>选中安装目录后，程序会尝试自动推导此路径。如果推导失败，请用「浏览…」手动选择 exe 文件</li>
+                  <li>如果这些文件都不存在，可能 MuMu 安装不完整，建议重新安装：<a href="https://mumu.163.com/" target="_blank">MuMu 官网下载 ↗</a></li>
+                </ol>
               </div>
             </div>
 
@@ -980,14 +1043,54 @@
                 <span class="pv-status" id="pvs-adb_path">?</span>
                 <div class="pv-info">
                   <div class="pv-label">ADB 可执行文件</div>
-                  <div class="pv-desc">adb.exe 的完整路径（通常在模拟器安装目录的 shell 子文件夹中）</div>
+                  <div class="pv-desc" id="pvd-adb_path">adb.exe 的完整路径（通常在模拟器安装目录的 shell 子文件夹中）</div>
                 </div>
+                <button class="pv-help-toggle" data-help="help-adb_path" title="查看帮助">i</button>
               </div>
               <div class="pv-path-row">
                 <input class="pv-input" id="pvi-adb_path" readonly placeholder="未检测到，请手动选择..." />
                 <button class="btn-browse" data-key="adb_path">浏览…</button>
               </div>
+              <div class="pv-help" id="help-adb_path">
+                <div class="pv-help-title">ADB 是什么？怎么找？</div>
+                <ol class="pv-help-text">
+                  <li>ADB（Android 调试桥）是连接模拟器的工具，MuMu 自带了一份，无需单独安装</li>
+                  <li>在 MuMu 安装目录下查找：
+                    <br><code>nx_main\adb.exe</code>（旧版 MuMu）
+                    <br><code>shell\adb.exe</code>（MuMu Player 12）
+                  </li>
+                  <li>如果文件不存在，可能安装不完整。也可使用 Android SDK 中的 adb：<a href="https://developer.android.com/tools/releases/platform-tools" target="_blank">Android Platform Tools ↗</a></li>
+                </ol>
+              </div>
             </div>
+
+            <div class="path-verify-item" id="pv-adb_device">
+              <div class="pv-header">
+                <span class="pv-status" id="pvs-adb_device">?</span>
+                <div class="pv-info">
+                  <div class="pv-label">模拟器设备连接</div>
+                  <div class="pv-desc" id="pvd-adb_device">通过 ADB 检测模拟器实例是否在线（需要模拟器已启动）</div>
+                </div>
+                <button class="pv-help-toggle" data-help="help-adb_device" title="查看帮助">i</button>
+              </div>
+              <div class="pv-help" id="help-adb_device">
+                <div class="pv-help-title">设备未连接怎么办？</div>
+                <ol class="pv-help-text">
+                  <li><strong>这不影响安装</strong>，只是说明模拟器当前未运行。安装完成后启动模拟器即可</li>
+                  <li>如果模拟器已启动但仍显示未连接：
+                    <br>• 打开 MuMu 多开器，确认实例正在运行
+                    <br>• MuMu 12 默认 ADB 端口为 <code>16384</code>（第 1 个实例），每增加一个实例端口 +32
+                    <br>• 确认防火墙或安全软件未拦截 ADB 通信
+                  </li>
+                  <li>端口对照：实例 0 → <code>16384</code>，实例 1 → <code>16416</code>，实例 2 → <code>16448</code>…</li>
+                </ol>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:12px; margin-bottom:16px;">
+            <button class="btn-primary" id="btnRunValidation" style="background:linear-gradient(135deg,#3b82f6,#2563eb);">运行功能检测</button>
+            <span id="validationSpinner" style="display:none;font-size:13px;color:var(--text-muted);align-self:center;">正在检测，请稍候…</span>
           </div>
 
           <div class="pv-validation-bar" id="pvValidationBar"></div>
@@ -1027,8 +1130,8 @@
           <div class="dot" data-dot="5"></div>
         </div>
         <div class="btn-row">
-          <button class="btn-secondary" id="btnPrev" style="display:none;">← 上一步</button>
-          <button class="btn-primary" id="btnNext">开始配置 →</button>
+          <button type="button" class="btn-secondary" id="btnPrev" style="display:none;">← 上一步</button>
+          <button type="button" class="btn-primary" id="btnNext">开始配置 →</button>
         </div>
       </div>
     </div>
@@ -1338,6 +1441,32 @@
 
     window._installerPackagedMode = false;
 
+    async function validateInstallDirUI(dirPath) {
+      const bar = document.getElementById('installDirValidation');
+      if (!bar) return true;
+      if (!dirPath) {
+        bar.className = 'pv-validation-bar';
+        bar.textContent = '';
+        return false;
+      }
+      if (!window.electron?.installer?.validateInstallDir) return true;
+      try {
+        const r = await window.electron.installer.validateInstallDir(dirPath);
+        if (r.ok) {
+          bar.className = 'pv-validation-bar show success';
+          bar.textContent = '✓ 目录可用';
+          return true;
+        }
+        bar.className = 'pv-validation-bar show error';
+        bar.textContent = r.reason;
+        return false;
+      } catch (e) {
+        bar.className = 'pv-validation-bar show error';
+        bar.textContent = '校验异常：' + (e.message || e);
+        return false;
+      }
+    }
+
     async function refreshPreflightStep() {
       const ex = document.getElementById('preflightBannerExisting');
       const fi = document.getElementById('preflightBannerFirst');
@@ -1382,6 +1511,11 @@
         goToStep(1);
         return;
       }
+      const dirOk = await validateInstallDirUI(root);
+      if (!dirOk) {
+        goToStep(1);
+        return;
+      }
       goToStep(3);
       startElapsedTimer();
       let previousInstallRoot = null;
@@ -1410,22 +1544,29 @@
     }
 
     async function startInstall() {
-      if (window._installerPackagedMode && window.electron?.installer?.runPackagedInstall) {
-        const root = (document.getElementById('installPath').value || '').trim();
-        if (!root) {
-          addLog('请选择安装目录', 'error');
+      try {
+        if (window._installerPackagedMode && window.electron?.installer?.runPackagedInstall) {
+          const root = (document.getElementById('installPath').value || '').trim();
+          if (!root) {
+            addLog('请选择安装目录', 'error');
+            return;
+          }
+          const dirOk = await validateInstallDirUI(root);
+          if (!dirOk) return;
+          await refreshPreflightStep();
+          goToStep(2);
           return;
         }
-        await refreshPreflightStep();
-        goToStep(2);
-        return;
-      }
-      goToStep(3);
-      startElapsedTimer();
-      if (window.electron && window.electron.installer) {
-        window.electron.installer.startInstall({ pipSource: selectedPipSource });
-      } else {
-        addLog('[dev] Electron installer API not available', 'error');
+        goToStep(3);
+        startElapsedTimer();
+        if (window.electron && window.electron.installer) {
+          window.electron.installer.startInstall({ pipSource: selectedPipSource });
+        } else {
+          addLog('[dev] Electron installer API not available', 'error');
+        }
+      } catch (e) {
+        console.error('[installer] startInstall', e);
+        addLog('无法开始安装：' + (e && e.message ? e.message : String(e)), 'error');
       }
     }
 
@@ -1478,51 +1619,124 @@
       await validateAllPaths();
     }
 
+    function setPvState(key, ok, detail) {
+      const item = document.getElementById('pv-' + key);
+      const status = document.getElementById('pvs-' + key);
+      const desc = document.getElementById('pvd-' + key);
+      const input = document.getElementById('pvi-' + key);
+      if (ok === null) {
+        if (item) item.className = 'path-verify-item';
+        if (status) { status.className = 'pv-status'; status.textContent = '?'; }
+      } else if (ok) {
+        if (item) item.className = 'path-verify-item valid';
+        if (status) { status.className = 'pv-status ok'; status.textContent = '✓'; }
+        if (input) input.classList.remove('invalid-input');
+      } else {
+        if (item) item.className = 'path-verify-item invalid';
+        if (status) { status.className = 'pv-status fail'; status.textContent = '✕'; }
+        if (input) input.classList.add('invalid-input');
+      }
+      if (desc && detail) desc.textContent = detail;
+    }
+
     async function validateAllPaths() {
       let allOk = true;
-
       for (const key of PATH_KEYS) {
         const val = currentPaths[key] || '';
-        const item = document.getElementById('pv-' + key);
-        const status = document.getElementById('pvs-' + key);
-        const input = document.getElementById('pvi-' + key);
-
         if (!val) {
-          item.className = 'path-verify-item invalid';
-          status.className = 'pv-status fail';
-          status.textContent = '✕';
-          input.classList.add('invalid-input');
+          setPvState(key, false, key === 'mumu_folder' ? '未配置 MuMu 安装目录' : '未配置，请手动选择');
           allOk = false;
           continue;
         }
-
         let exists = false;
         try {
           const kind = key === 'mumu_folder' ? 'dir' : 'file';
           exists = await window.electron.installer.validatePath(val, { kind });
         } catch { /* ignore */ }
-
         if (exists) {
-          item.className = 'path-verify-item valid';
-          status.className = 'pv-status ok';
-          status.textContent = '✓';
-          input.classList.remove('invalid-input');
+          setPvState(key, true, '路径存在 — 点击「运行功能检测」验证是否可用');
         } else {
-          item.className = 'path-verify-item invalid';
-          status.className = 'pv-status fail';
-          status.textContent = '✕';
-          input.classList.add('invalid-input');
+          setPvState(key, false, '路径不存在或类型不匹配');
           allOk = false;
         }
       }
+      setPvState('adb_device', null, '等待功能检测');
+      pathsAllValid = false;
+      updateButton();
+      if (allOk) {
+        showValidationBar('success', '路径均存在。请点击「运行功能检测」验证可执行文件是否真正可用。');
+      } else {
+        showValidationBar('error', '部分路径无效，请用「浏览…」修正后再检测。');
+      }
+    }
 
-      pathsAllValid = allOk;
+    async function runFunctionalValidation() {
+      const spinner = document.getElementById('validationSpinner');
+      const btn = document.getElementById('btnRunValidation');
+      if (spinner) spinner.style.display = '';
+      if (btn) btn.disabled = true;
+      showValidationBar('success', '正在运行功能检测…');
+
+      try {
+        await window.electron.installer.savePaths(currentPaths);
+      } catch { /* ignore */ }
+
+      let report;
+      try {
+        report = await window.electron.installer.validateSetup();
+      } catch (e) {
+        showValidationBar('error', '功能检测调用失败: ' + (e.message || e));
+        if (spinner) spinner.style.display = 'none';
+        if (btn) btn.disabled = false;
+        return;
+      }
+      if (spinner) spinner.style.display = 'none';
+      if (btn) btn.disabled = false;
+
+      if (!report || report.error) {
+        showValidationBar('error', '检测出错: ' + (report?.error || '未知错误'));
+        return;
+      }
+
+      setPvState('mumu_folder', report.mumu_folder?.exists, report.mumu_folder?.detail || '');
+      const emuOk = report.emu_path?.exists && report.emu_path?.runnable;
+      setPvState('emu_path', emuOk, report.emu_path?.detail || '');
+      const adbOk = report.adb_path?.exists && report.adb_path?.runnable;
+      setPvState('adb_path', adbOk,
+        (report.adb_path?.detail || '') + (report.adb_path?.version ? '' : ''));
+      const deviceOk = report.adb_device?.connected;
+      setPvState('adb_device', deviceOk === true ? true : null,
+        report.adb_device?.detail || '');
+
+      pathsAllValid = !!report.overall;
       updateButton();
 
-      if (allOk) {
-        showValidationBar('success', '✓ 所有路径验证通过，可以继续完成安装。');
+      document.querySelectorAll('.pv-help.show').forEach(h => h.classList.remove('show'));
+
+      if (report.overall) {
+        const parts = ['路径有效', '可执行文件正常'];
+        if (deviceOk) parts.push('设备已连接');
+        showValidationBar('success', '✓ 功能检测通过：' + parts.join('，') + '。可以继续完成安装。');
       } else {
-        showValidationBar('error', '部分路径无效：MuMu 安装目录须为真实文件夹；模拟器与 ADB 须为磁盘上存在的 .exe 文件（不能仅为示例路径）。请用「浏览…」选择。');
+        const issues = [];
+        if (!report.mumu_folder?.exists) {
+          issues.push('MuMu 目录无效');
+          const h = document.getElementById('help-mumu_folder');
+          if (h) h.classList.add('show');
+        }
+        if (!emuOk) {
+          issues.push('模拟器不可执行');
+          const h = document.getElementById('help-emu_path');
+          if (h) h.classList.add('show');
+        }
+        if (!adbOk) {
+          issues.push('ADB 不可执行');
+          const h = document.getElementById('help-adb_path');
+          if (h) h.classList.add('show');
+        }
+        showValidationBar('error',
+          '功能检测未通过：' + issues.join('、') + '。请参考下方展开的帮助信息修正后重新检测。'
+          + (deviceOk === false ? '（设备未连接不影响安装，模拟器可稍后启动）' : ''));
       }
     }
 
@@ -1595,6 +1809,21 @@
         }
       }
     }
+
+    document.getElementById('btnRunValidation').addEventListener('click', () => {
+      runFunctionalValidation();
+    });
+
+    document.querySelectorAll('.pv-help-toggle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const helpId = btn.dataset.help;
+        const el = document.getElementById(helpId);
+        if (!el) return;
+        const isOpen = el.classList.contains('show');
+        document.querySelectorAll('.pv-help.show').forEach(h => h.classList.remove('show'));
+        if (!isOpen) el.classList.add('show');
+      });
+    });
 
     /* ═══════════════════════════════════════════════════════
        Electron IPC
@@ -1710,7 +1939,10 @@
             title: '选择造笔安装目录',
             isDirectory: true,
           });
-          if (chosen) document.getElementById('installPath').value = chosen;
+          if (chosen) {
+            document.getElementById('installPath').value = chosen;
+            await validateInstallDirUI(chosen);
+          }
         });
       }
     } else {

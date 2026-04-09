@@ -39,19 +39,19 @@ def kls_yxd_callback():
     bg.set_signal("Pause_battle", False)
 
 def kunlunshan_battle(num: int = 5, flow_name: str | None = None):
-    # 如果未提供 num 参数，则从上下文中获取 task_num 作为默认值
     if flow_name is None:
-        flow_name = getattr(h, "task_context_battle_flow", None) or "战斗循环"
+        flow_name = getattr(h, "task_context_battle_flow", None) or "昆仑山循环"
     for _ in range(num):
         h.set(has_cd=False, speed_x=3)   
         bg.set_signal("try_exit", False)
+        bg.set_interval(0.4)
         bg.add(
             name="昆仑山-突发事件",
-            identifier=(T("知道了"),T("取消")),
+            identifier=(I("昆仑山-知道了"), T("取消")),
             callback=lambda: [
                 logger.info("昆仑山突发事件"),
                 sleep(0.03),
-                click((T("知道了"),T("取消")), if_exist=True),
+                click((I("昆仑山-知道了"), T("取消")), if_exist=True),
             ],
             once=False,
             allow_concurrent=True

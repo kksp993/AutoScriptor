@@ -20,7 +20,6 @@ import threading
 from enum import Enum
 from AutoScriptor.utils.logger import logger
 
-from AutoScriptor import ensure_app_running
 from services.core.runtime_context import runtime_ctx
 from services.core.notify import notify_from_config
 
@@ -303,7 +302,13 @@ class Scheduler:
                 except Exception as e:
                     logger.warning("配置热重载失败: %s", e)
             if self.state == SchedulerState.RUNNING and self._task_manager:
-                self._check_and_run()
+                try:
+                    self._check_and_run()
+                except Exception as e:
+                    logger.error("📅 调度执行意外崩溃，将在下一轮重试: %s", e, exc_info=True)
+                    self._consecutive_errors += 1
+                    if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                        self.mark_error()
 
     # ── 到期任务收集 ──
 
@@ -456,11 +461,9 @@ class Scheduler:
                 # 导致虚拟化引擎误判权限状态 → "安卓设备无法启动"。
                 unboost()
                 try:
-                    ensure_app_running(
-                        cfg["emulator"]["index"],
-                        cfg["emulator"]["adb_addr"],
-                        cfg["app"]["app_to_start"],
-                    )
+                    # 与 api.init() 不同：ensure_app_running 的返回值必须写入 runtime_ctx，
+                    # 否则 mixctrl 仅存在于栈上，runtime_ctx.mixctrl 仍为 None（例如关机清理后）。
+                    runtime_ctx.refresh()
                 except Exception as e:
                     logger.error("📅 模拟器启动失败: %s", e, exc_info=True)
                     self._consecutive_errors += 1
@@ -480,7 +483,20 @@ class Scheduler:
                     ac = cfg.active_character()
                     self._logged_in_character = (ac.get("server", ""), ac.get("name", ""))
                 else:
-                    self._ensure_character_logged_in(cfg)
+                    try:
+                        self._ensure_character_logged_in(cfg)
+                    except Exception as e:
+                        logger.error("📅 自动登录失败，本轮跳过: %s", e)
+                        self._consecutive_errors += 1
+                        if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                            self.mark_error()
+                            break
+                        delay = min(60, 20 * self._consecutive_errors)
+                        logger.info("📅 %d 秒后重试登录 (%d/%d)",
+                                    delay, self._consecutive_errors, MAX_CONSECUTIVE_ERRORS)
+                        self._wake.clear()
+                        self._wake.wait(delay)
+                        continue
 
                 task_key = due[0]
                 attempted.add(task_key)
@@ -502,8 +518,11 @@ class Scheduler:
                         self.mark_error()
                         break
 
-                cfg.save_config()
-                self._task_manager.reload_tasks()
+                try:
+                    cfg.save_config()
+                    self._task_manager.reload_tasks()
+                except Exception as e:
+                    logger.error("📅 配置保存/重载失败（将在下一轮重新收集任务）: %s", e)
 
         finally:
             unboost()
@@ -521,9 +540,13 @@ class Scheduler:
     # ── 调度模式入口 ──
 
     def _check_and_run(self):
-        """调度模式：清屏 → 共用管线（自动收集到期任务）。"""
+        """调度模式：清屏 → 重置取消标记 → 共用管线（自动收集到期任务）。"""
         if not os.environ.get('UVICORN_LOG_LEVEL'):
             os.system('cls' if os.name == 'nt' else 'clear')
+        # 每个调度周期开始前重置取消标记，防止上一轮中断后残留的取消状态
+        # 阻断后续所有周期（deactivate 已将 state 切回 PENDING，能到这里说明 state 仍为 RUNNING）
+        if self._task_manager:
+            self._task_manager._reset_cancel()
         self._run_task_pipeline(explicit_tasks=None)
 
     # ── 单任务模式入口 ──

@@ -127,7 +127,7 @@ key,text,left,top,width,height,img
 战斗-跳跃,,1117,414,112,117,zhandou-tiaoyue@1127#424#92#97.png
 战斗-无双,,1136,275,125,71,zhandou-wushuang@1146#285#105#51.png
 战斗-前进,前进！！！,500,260,280,80,zhandou-qianjin@522#254#250#74.png
-昆仑山-知道了,知道了,0,0,1280,720,kunlunshan-zhidaole@973#263#167#60.png
+昆仑山-知道了,知道了,973,263,167,60,kunlunshan-zhidaole@973#263#167#60.png
 战斗-离开关卡,站在这里离开关卡,0,0,1280,720,zhandou-likaiguanqia@0#316#1280#90.png
 战斗-离开标记,秒,200,250,600,200,zhandou-likaibiaoji@466#0#112#720.png
 驻地-仙域,仙域,704,0,144,720,
@@ -301,3 +301,4 @@ S,S,0,0,1280,720,S@0#0#1280#720.png
 悬浮窗-下,下,0,660,1280,60,xuanfuchuang-xia@0#0#1280#720.png
 悬浮窗,悬浮窗,0,0,1280,720,xuanfuchuang@0#0#1280#720.png
 极北村庄背景-2,2,951,13,179,144,jibeicunzhuangbeijing-2@961#23#159#124.png
+爆,爆,18,286,467,423,bao@28#296#447#403.png

@@ -29,10 +29,27 @@ class BackgroundMonitor(Thread):
         """返回最近的事件历史列表"""
         return list(self._event_history)
 
+    def _any_callback_eligible_for_scan(self, snapshot: list) -> bool:
+        """本帧是否有至少一个回调已过 throttle、需要截图并 locate（否则不截屏，避免与主线程争 IPC）。"""
+        now = time.time()
+        for _name, info in snapshot:
+            if now - info.get('last', 0) < info.get('throttle', 0):
+                continue
+            return True
+        return False
+
     def run(self):
         from AutoScriptor.core.api import _locate_all, first as _first
         import AutoScriptor.core.api as _core_api
         while not self._stop_event.is_set():
+            with self._lock:
+                snapshot = list(self._callbacks.items())
+
+            # 全部在 throttle 冷却内时：不截屏、不 locate，直接 sleep（主线程 click 不被截图拖慢）
+            if not self._any_callback_eligible_for_scan(snapshot):
+                time.sleep(self._interval)
+                continue
+
             try:
                 mc = _core_api.mixctrl
                 screenshot = mc.screenshot() if mc is not None else None
@@ -45,9 +62,6 @@ class BackgroundMonitor(Thread):
             pending: list[tuple[str, dict, list[Target]]] = []
             all_targets: list[Target] = []
             offsets: list[tuple[int, int]] = []  # (start, end) in all_targets
-
-            with self._lock:
-                snapshot = list(self._callbacks.items())
 
             for name, info in snapshot:
                 if info.get('allow_concurrent'):

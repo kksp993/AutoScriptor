@@ -48,6 +48,10 @@ def run_cli_navigation():
 
 
 if __name__ == "__main__":
+    from services.single_instance import ensure_single_instance
+
+    ensure_single_instance()
+
     _scheduler = None
     try:
         run_cli_navigation()

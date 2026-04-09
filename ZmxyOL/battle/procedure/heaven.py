@@ -26,22 +26,28 @@ def battle_task(
         ]
     )
 
-    def failed_callback():
-        bg.clear()
-        bg.set_signal("try_exit", True)
-        bg.set_signal("bonus_x", 0)
-        bg.set_signal("failed", True)
+
+
+    def battle_fail_callback():
+        # 必须先 set try_exit，再执行耗时 click；否则 battle_loop 在点「取消」整段期间仍在战斗
+        switch_base("mumu")
+        logger.info("战斗失败")
+        bg.set_signal("Failed", True)
+        if cancel_on_failed:
+            bg.clear()
+            bg.set_signal("try_exit", True)
+            bg.set_signal("bonus_x", 0)
+            bg.set_signal("failed", True)
+            switch_base("mumu")
+            click(T("取消"), delay=4, repeat=3)
+        else:
+            switch_base("mumu")
+            click(T("确定"), delay=4, repeat=3)
+
     bg.add(
         name="战斗失败",
-        identifier=((T("198点券"),T("159点券"),T("复活"),T("取消"))),
-        callback=lambda : [
-            switch_base("mumu"),
-            logger.info("战斗结束"),
-            bg.set_signal("Failed", True),
-            switch_base("mumu"),
-            click(T("取消" if cancel_on_failed else "确定"),delay=4,repeat=3),
-            failed_callback() if cancel_on_failed else None,
-        ]
+        identifier=((T("198点券"), T("159点券"), T("复活"), T("取消"))),
+        callback=battle_fail_callback,
     )
     sleep(0.5)
     # 战斗结束不执行

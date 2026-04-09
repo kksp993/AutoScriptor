@@ -170,7 +170,7 @@ def _select_character():
     click(B(1240, 5, 40, 60))
     time.sleep(0.5)
     dismiss_floating_window(max_retries=1, debug=False)
-    if ui_T(T("精彩活动"), 3):
+    if ui_T(T("精彩活动", box=Box(409,0,466,118).margin()), 3):
         click(B(1100, 40, 40, 40))
     logger.info("登录完成")
     return True

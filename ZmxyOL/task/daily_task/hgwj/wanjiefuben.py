@@ -36,7 +36,6 @@ _FAIL_IDF = (
 def _stop_battle():
     bg.set_signal("Pause_battle", True)
     bg.set_signal("try_exit", True)
-    bg.set_signal("all_task_done", True)
 
 
 def _handle_settlement() -> str:
@@ -106,37 +105,31 @@ def task(
     wait_for_appear(T("总灵根值"))
     click(B(960, 510, 90, 90))
 
-    if tgt := locate((T("本次登录不再提醒"), T("都已通关")), timeout=3):
+    if locate((T("本次登录不再提醒"), T("都已通关")), timeout=3):
         click(B(560, 415))
         sleep(0.5)
         click(T("确定"))
 
-    if tgt := locate(T("购买"), timeout=3):
+    if locate(T("购买"), timeout=3):
         click(T("取消"))
         click(B(1225, 150), until=lambda: ui_T(T("定位完成")))
         click(T("关闭定位"))
         logger.info("当前免费任务已经完成，荒古挑战结束")
         return
 
-    if ui_T(I("加载中"), timeout=0.5):
-        wait_for_disappear(I("加载中"))
-
     while not bg.signal("all_task_done", False):
+        if ui_T(I("加载中"), timeout=3):
+            wait_for_disappear(I("加载中"))
+
         bg.set_signal("try_exit", False)
         bg.set_signal("Pause_battle", False)
         bg.add(name="hgwj_settle", identifier=_SETTLE_IDF, callback=_stop_battle)
         bg.add(name="hgwj_fail", identifier=_FAIL_IDF, callback=_stop_battle)
 
-        if ui_T(T("规则", box=Box(551, 43, 144, 56).margin()), 2):
-            bonus_callback()
-            bg.remove("hgwj_settle")
-            bg.remove("hgwj_fail")
-            continue
-
-        if ui_T(I("加载中"), 0.5):
-            wait_for_disappear(I("加载中"))
-
         try:
+            if ui_T(T("规则", box=Box(551, 43, 144, 56).margin()), 2):
+                bonus_callback()
+                continue
             h.set(True, 3).battle_loop()
         finally:
             bg.remove("hgwj_settle")
@@ -144,7 +137,7 @@ def task(
 
         if _handle_settlement() == "done":
             bg.set_signal("all_task_done", True)
-
+            
     click(B(30, 30, 30, 30), until=lambda: ui_T((T("荒古万界"), I("导航-菜单"), T("世界地图"))))
     click(B(1200, 30, 30, 30))
     bg.clear(clear_signals=True)
