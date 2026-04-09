@@ -1,12 +1,10 @@
 """战斗类任务在 WebUI 中的配招参数。
 
-枚举成员由「配招根目录」下各职业「流程」目录内 YAML 顶层键动态生成，
-不写死具体职业名或流程名；仅暴露 YAML「流程」层的顶层键，不包含策略轮替名与技能组件名。
+BattleFlowName 枚举成员由 Hero 子类上 @flow 注册的流程名聚合（见
+ZmxyOL.battle.character.hero.get_registered_flows），与配招 YAML 无关。
 
-目录约定（与 AutoScriptor.utils.flow_yaml_layout 一致）：
-  流程/*.yaml — 兼容旧版，全局可用
-  流程/通用/*.yaml — 任意任务可选
-  流程/<任务叶名>/*.yaml — 仅 cfg 任务路径最后一级与该目录名一致时可选（同名叶任务共用）
+@flow(..., task=None) 的流程对所有任务可选；仅当某流程在所有注册中均带非空 task
+时，才按该 task 与 cfg 任务路径最后一级匹配过滤（见 battle_flow_allowed_for_task）。
 """
 
 from __future__ import annotations
@@ -19,11 +17,6 @@ from typing import Iterable
 
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.paths import get_profiles_dir
-from AutoScriptor.utils.flow_yaml_layout import (
-    flow_yaml_scope_kind,
-    iter_flow_yaml_files,
-    yaml_top_level_keys,
-)
 
 
 def _enum_member_key(raw: str) -> str:
@@ -74,49 +67,30 @@ def _discover_profession_dirs(profiles_dir: Path) -> list[str]:
     return ["default"] + sorted(names)
 
 
-def _discover_flow_top_level_keys(profiles_dir: Path) -> list[str]:
-    """扫描 profiles/*/流程/ 下（含 legacy 扁平、通用、任务子目录）所有 YAML 的顶层键。"""
-    keys: set[str] = set()
-    if not profiles_dir.is_dir():
-        return []
-    for prof_dir in sorted(profiles_dir.iterdir()):
-        if not prof_dir.is_dir() or prof_dir.name.startswith("."):
-            continue
-        flow_root = prof_dir / "流程"
-        if not flow_root.exists():
-            continue
-        for f in iter_flow_yaml_files(flow_root):
-            keys.update(yaml_top_level_keys(f))
-    return sorted(keys, key=lambda s: (len(s), s))
+def _discover_registered_flow_names() -> list[str]:
+    """从 Hero @flow 注册表收集全部流程显示名（跨职业去重）。"""
+    from ZmxyOL.battle.character.hero import get_registered_flows
+
+    names = {e["flow_name"] for e in get_registered_flows()}
+    return sorted(names, key=lambda s: (len(s), s))
 
 
-def _build_flow_scope_map(profiles_dir: Path) -> dict[str, frozenset[str] | None]:
-    """流程名 -> None 表示任意任务可选；否则为允许的任务路径叶名集合。"""
-    global_keys: set[str] = set()
-    restricted: dict[str, set[str]] = {}
+def _build_flow_scope_from_registration() -> dict[str, frozenset[str] | None]:
+    """流程名 -> None 表示任意任务可选；否则为允许的任务路径叶名集合（与 @flow 的 task= 一致）。"""
+    from ZmxyOL.battle.character.hero import get_registered_flows
 
-    for prof_dir in sorted(profiles_dir.iterdir()):
-        if not prof_dir.is_dir() or prof_dir.name.startswith("."):
-            continue
-        flow_root = prof_dir / "流程"
-        if not flow_root.exists():
-            continue
-        for f in iter_flow_yaml_files(flow_root):
-            kind = flow_yaml_scope_kind(f, flow_root)
-            file_keys = yaml_top_level_keys(f)
-            if kind == "global" or kind is None:
-                global_keys.update(file_keys)
-            else:
-                for k in file_keys:
-                    restricted.setdefault(k, set()).add(kind)
+    by_flow: dict[str, set[str | None]] = {}
+    for e in get_registered_flows():
+        fname = e["flow_name"]
+        t = e["task"]
+        by_flow.setdefault(fname, set()).add(t)
 
-    all_keys = global_keys | set(restricted.keys())
     out: dict[str, frozenset[str] | None] = {}
-    for k in all_keys:
-        if k in global_keys:
-            out[k] = None
+    for fname, tasks in by_flow.items():
+        if None in tasks:
+            out[fname] = None
         else:
-            out[k] = frozenset(restricted.get(k, ()))
+            out[fname] = frozenset(x for x in tasks if x is not None)
     return out
 
 
@@ -142,16 +116,16 @@ _profiles_dir = get_profiles_dir()
 _profession_values = _discover_profession_dirs(_profiles_dir)
 _profession_pairs = _dedupe_keys(_profession_values)
 
-_flow_values = _discover_flow_top_level_keys(_profiles_dir)
+_flow_values = _discover_registered_flow_names()
 _flow_pairs = _dedupe_keys(_flow_values)
-_FLOW_SCOPE_FOR_KEY = _build_flow_scope_map(_profiles_dir)
-# 无任何流程 YAML 时的兜底（与旧版行为接近，避免空枚举）
+_FLOW_SCOPE_FOR_KEY = _build_flow_scope_from_registration()
+# 无任何 @flow 注册时的兜底
 if not _flow_pairs:
     _flow_pairs = _dedupe_keys(["战斗循环", "竞技场循环"])
 
 
 def battle_flow_allowed_for_task(flow_value: str, task_path: str | None) -> bool:
-    """给定流程显示名（YAML 顶层键）与 cfg 任务路径，是否应在 WebUI 中展示。"""
+    """给定流程显示名与 cfg 任务路径，是否应在 WebUI 中展示（依 @flow 的 task 作用域）。"""
     if task_path is None or not str(task_path).strip():
         return True
     leaf = str(task_path).strip().rsplit("/", 1)[-1]

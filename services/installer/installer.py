@@ -264,6 +264,13 @@ def _read_registry_mu_mu_paths() -> list[Path]:
     return paths
 
 
+_SKIP_ROOT_DIRS = frozenset({
+    "$recycle.bin", "system volume information", "windows", "recovery",
+    "perflogs", "$winreagent", "$sysreset", "config.msi",
+    "documents and settings", "msocache",
+})
+
+
 def _search_common_mu_mu_paths() -> list[Path]:
     candidates: list[Path] = []
     seen: set[str] = set()
@@ -271,39 +278,46 @@ def _search_common_mu_mu_paths() -> list[Path]:
     pf = os.environ.get("ProgramFiles", r"C:\\Program Files")
     pf86 = os.environ.get("ProgramFiles(x86)", r"C:\\Program Files (x86)")
 
-    # 预置常见的安装目录名称（相对路径）
     common_names = [
         "Netease\\MuMu",
         "Netease\\MuMu Player 12",
         "MuMu",
         "MuMu Player 12",
+        "Netease\\MuMu Player",
+        "Netease\\MuMuPlayer",
     ]
 
-    # 构建所有需要检查的基目录：
-    # - 当前环境变量中的 Program Files 目录（通常是 C 盘）
-    # - 所有存在的盘符根目录，以及对应盘符下的 Program Files 与 Program Files (x86)
     base_dirs: list[Path] = [Path(pf), Path(pf86)]
 
     for code in range(ord('A'), ord('Z') + 1):
         root = f"{chr(code)}:\\"
-        if os.path.exists(root):
-            root_path = Path(root)
-            base_dirs.append(root_path)
-            base_dirs.append(root_path / "Program Files")
-            base_dirs.append(root_path / "Program Files (x86)")
+        if not os.path.exists(root):
+            continue
+        root_path = Path(root)
+        base_dirs.append(root_path)
+        base_dirs.append(root_path / "Program Files")
+        base_dirs.append(root_path / "Program Files (x86)")
+        # 枚举盘符下的一级子目录，覆盖 X:\任意目录\Netease\MuMu 这类非标路径
+        try:
+            for entry in os.scandir(root):
+                if not entry.is_dir():
+                    continue
+                if entry.name.lower() in _SKIP_ROOT_DIRS:
+                    continue
+                base_dirs.append(root_path / entry.name)
+        except OSError:
+            pass
 
-    # 遍历基目录与常见相对路径组合，收集合规存在的候选路径
     for base_dir in base_dirs:
         for name in common_names:
-            path = base_dir / name
+            p = base_dir / name
             try:
-                if path.exists():
-                    norm_key = os.path.normcase(os.path.normpath(str(path)))
+                if p.exists():
+                    norm_key = os.path.normcase(os.path.normpath(str(p)))
                     if norm_key not in seen:
-                        candidates.append(path)
+                        candidates.append(p)
                         seen.add(norm_key)
             except Exception:
-                # 某些路径在个别环境下可能触发异常，忽略继续
                 continue
 
     return candidates
@@ -350,6 +364,95 @@ def _adb_detect_serial(adb_path: str) -> str | None:
         return pairs[0] if pairs else None
     except Exception:
         return None
+
+
+def validate_mumu_setup(emulator: dict) -> dict:
+    """对 emulator 配置做功能性验证，返回结构化检测报告。"""
+    results: dict = {
+        "mumu_folder": {"exists": False, "detail": ""},
+        "emu_path": {"exists": False, "runnable": False, "detail": ""},
+        "adb_path": {"exists": False, "runnable": False, "version": "", "detail": ""},
+        "adb_device": {"connected": False, "serial": "", "detail": ""},
+        "overall": False,
+    }
+
+    folder = str(emulator.get("mumu_folder", "") or "").strip()
+    if folder:
+        p = Path(folder)
+        if p.exists() and p.is_dir():
+            results["mumu_folder"]["exists"] = True
+            has_nx = (p / "nx_main").exists()
+            has_shell = (p / "shell").exists()
+            if has_nx or has_shell:
+                parts = []
+                if has_nx:
+                    parts.append("nx_main")
+                if has_shell:
+                    parts.append("shell")
+                results["mumu_folder"]["detail"] = f"目录结构正常 ({', '.join(parts)})"
+            else:
+                results["mumu_folder"]["detail"] = "目录存在但未找到 nx_main 或 shell 子目录"
+        else:
+            results["mumu_folder"]["detail"] = "路径不存在" if folder else "未配置"
+    else:
+        results["mumu_folder"]["detail"] = "未配置"
+
+    emu_path = str(emulator.get("emu_path", "") or "").strip()
+    if emu_path and Path(emu_path).is_file():
+        results["emu_path"]["exists"] = True
+        try:
+            r = subprocess.run(
+                [emu_path, "-v", "0", "player", "-ld"],
+                capture_output=True, text=True, timeout=8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            results["emu_path"]["runnable"] = True
+            results["emu_path"]["detail"] = f"可执行（返回码 {r.returncode}）"
+        except subprocess.TimeoutExpired:
+            results["emu_path"]["runnable"] = True
+            results["emu_path"]["detail"] = "可执行（响应超时，可能正常）"
+        except Exception as e:
+            results["emu_path"]["detail"] = f"执行失败: {e}"
+    else:
+        results["emu_path"]["detail"] = "文件不存在" if emu_path else "未配置"
+
+    adb_path = str(emulator.get("adb_path", "") or "").strip()
+    if adb_path and Path(adb_path).is_file():
+        results["adb_path"]["exists"] = True
+        try:
+            r = subprocess.run(
+                [adb_path, "version"],
+                capture_output=True, text=True, timeout=5,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            results["adb_path"]["runnable"] = True
+            import re
+            m = re.search(r"Android Debug Bridge version ([\d.]+)", r.stdout or "")
+            ver = m.group(1) if m else ""
+            results["adb_path"]["version"] = ver
+            results["adb_path"]["detail"] = f"ADB {ver}" if ver else "可执行，版本未知"
+        except Exception as e:
+            results["adb_path"]["detail"] = f"执行失败: {e}"
+    else:
+        results["adb_path"]["detail"] = "文件不存在" if adb_path else "未配置"
+
+    if results["adb_path"]["runnable"]:
+        serial = _adb_detect_serial(adb_path)
+        if serial:
+            results["adb_device"]["connected"] = True
+            results["adb_device"]["serial"] = serial
+            results["adb_device"]["detail"] = f"已连接设备 {serial}"
+        else:
+            results["adb_device"]["detail"] = "未检测到已连接设备（模拟器可能未运行）"
+    else:
+        results["adb_device"]["detail"] = "ADB 不可用，跳过设备检测"
+
+    results["overall"] = (
+        results["mumu_folder"]["exists"]
+        and results["emu_path"]["exists"] and results["emu_path"]["runnable"]
+        and results["adb_path"]["exists"] and results["adb_path"]["runnable"]
+    )
+    return results
 
 
 def ensure_config_with_mumu(project_root: Path) -> None:
@@ -405,17 +508,17 @@ def ensure_config_with_mumu(project_root: Path) -> None:
         if serial:
             emulator["adb_addr"] = serial
         else:
-            index_text = _prompt_text("Please enter the Mumu port (e.g. 0):", default="0")
+            index_text = _prompt_text("请输入 MuMu 实例序号 (0-7，默认 0):", default="0")
             try:
                 index = int(index_text) if index_text else 0
             except Exception:
                 index = 0
-            if index in COMMON_MUMU_PORTS:
+            if 0 <= index < len(COMMON_MUMU_PORTS):
                 emulator["index"] = index
                 emulator["adb_addr"] = f"127.0.0.1:{COMMON_MUMU_PORTS[index]}"
             else:
-                emulator["index"] = 16384
-                emulator["adb_addr"] = "127.0.0.1:16384"
+                emulator["index"] = 0
+                emulator["adb_addr"] = f"127.0.0.1:{COMMON_MUMU_PORTS[0]}"
 
     # 回写
     try:

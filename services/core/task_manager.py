@@ -247,7 +247,7 @@ class TaskManager:
             return fn, self._resolve_params(task, task_data, fn)
 
     def _resolve_params(self, task_path: str, task_data: dict, fn) -> dict:
-        """解析任务参数（枚举恢复）。"""
+        """解析任务参数（枚举恢复，TableParam 重建）。"""
         raw = task_data.get('params', {})
         meta = task_registry.get_param_meta(task_path)
         sig = inspect.signature(fn)
@@ -256,8 +256,12 @@ class TaskManager:
         for k, v in raw.items():
             if not has_var_kw and k not in sig.parameters:
                 continue
-            enum_cls = self._get_enum_class(k, meta, sig)
-            params[k] = self._coerce_enum(v, enum_cls) if enum_cls else v
+            k_meta = meta.get(k)
+            if isinstance(k_meta, dict) and k_meta.get("type") == "table":
+                params[k] = self._coerce_table_param(v, k_meta)
+            else:
+                enum_cls = self._get_enum_class(k, meta, sig)
+                params[k] = self._coerce_enum(v, enum_cls) if enum_cls else v
         return params
 
     @staticmethod
@@ -288,6 +292,18 @@ class TaskManager:
         if isinstance(value, str):
             return enum_cls[value]
         return value
+
+    @staticmethod
+    def _coerce_table_param(value, meta: dict):
+        """将 JSON dict-of-dicts 还原为 TableParam（含枚举恢复）。"""
+        from AutoScriptor.utils.table_param import TableParam
+        if isinstance(value, TableParam):
+            return value
+        if not isinstance(value, dict):
+            return value
+        columns = meta.get("columns", {})
+        column_labels = meta.get("column_labels", {})
+        return TableParam.from_json_data(value, columns, column_labels)
 
     # ── 执行后更新 ──
 
@@ -332,6 +348,9 @@ class TaskManager:
         if not cfg["app"].get("restart_on_error"):
             return False
         app_name = cfg["app"]["app_to_start"]
+        if runtime_ctx.mixctrl is None:
+            logger.warning("🔄 mixctrl 不可用，跳过应用重启恢复")
+            return False
         from AutoScriptor.utils.perf import mumu_safe_subprocess
         with mumu_safe_subprocess():
             try:

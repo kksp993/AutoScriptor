@@ -240,27 +240,38 @@ VENDOR_SOURCES = {
 
 
 def _ensure_vendor_files():
+    """确保 vendor 目录和字体子目录存在；缺失文件放到后台线程下载，不阻塞启动。"""
     try:
         os.makedirs(VENDOR_DIR, exist_ok=True)
         os.makedirs(os.path.join(VENDOR_DIR, 'fonts'), exist_ok=True)
-        for name, url in VENDOR_SOURCES.items():
-            path = os.path.join(VENDOR_DIR, name)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            if os.path.exists(path) and os.path.getsize(path) > 1024:
-                continue
+    except Exception as e:
+        logger.warning("ensure vendor dir failed: %s", e)
+        return
+    missing = []
+    for name, url in VENDOR_SOURCES.items():
+        fpath = os.path.join(VENDOR_DIR, name)
+        os.makedirs(os.path.dirname(fpath), exist_ok=True)
+        if os.path.exists(fpath) and os.path.getsize(fpath) > 1024:
+            continue
+        missing.append((name, url, fpath))
+    if not missing:
+        return
+    import threading
+    def _download_missing():
+        for name, url, fpath in missing:
             try:
                 logger.info("downloading vendor: %s", url)
-                with urllib.request.urlopen(url, timeout=10) as resp, open(path, 'wb') as f:
+                with urllib.request.urlopen(url, timeout=10) as resp, open(fpath, 'wb') as f:
                     shutil.copyfileobj(resp, f)
             except Exception as e:
                 try:
-                    if os.path.exists(path) and os.path.getsize(path) <= 1024:
-                        os.remove(path)
+                    if os.path.exists(fpath) and os.path.getsize(fpath) <= 1024:
+                        os.remove(fpath)
                 except Exception:
                     pass
-                logger.warning("download vendor failed: %s -> %s (%s)", url, path, e)
-    except Exception as e:
-        logger.warning("ensure vendor dir failed: %s", e)
+                logger.warning("download vendor failed: %s -> %s (%s)", url, fpath, e)
+    t = threading.Thread(target=_download_missing, daemon=True)
+    t.start()
 
 
 # ── 辅助函数 ──
@@ -300,6 +311,11 @@ def _inject_param_meta_into_tasks(node: dict, prefix: str = "") -> None:
                 val["param_meta"] = meta
             else:
                 val.pop("param_meta", None)
+            pkeys = task_registry.get_param_keys(path)
+            if pkeys:
+                val["param_keys"] = pkeys
+            else:
+                val.pop("param_keys", None)
             if task_registry.get_beta(path):
                 val["beta"] = True
             else:
@@ -322,6 +338,7 @@ def _strip_runtime_tasks_fields(node: dict) -> None:
             continue
         if TaskTree.is_leaf(val):
             val.pop("param_meta", None)
+            val.pop("param_keys", None)
             val.pop("beta", None)
             val.pop("custom", None)
             val.pop("fn", None)
@@ -540,13 +557,14 @@ app.include_router(canvas_router)
 from services.webui.routes.news import router as news_router
 app.include_router(news_router)
 
-# 开发环境：对 /static/ 下的 JS/CSS 禁用浏览器缓存，改文件后刷新即生效
 @app.middleware("http")
-async def no_cache_static_js_css(request: Request, call_next):
+async def static_cache_headers(request: Request, call_next):
     response = await call_next(request)
-    path = request.url.path
-    if path.startswith("/static/") and path.endswith((".js", ".css")):
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    rpath = request.url.path
+    if rpath.startswith("/vendor/") or rpath.startswith("/fonts/"):
+        response.headers["Cache-Control"] = "public, max-age=86400"
+    elif rpath.startswith("/static/") and rpath.endswith((".js", ".css")):
+        response.headers["Cache-Control"] = "no-cache"
     return response
 
 # 静态文件挂载
@@ -604,9 +622,56 @@ async def _log_broadcaster():
         await asyncio.sleep(0.5)
 
 
+_init_done = False
+
+
 @app.on_event("startup")
 async def _on_startup():
     asyncio.create_task(_log_broadcaster())
+    asyncio.create_task(_deferred_heavy_init())
+
+
+async def _deferred_heavy_init():
+    """在 uvicorn 已开始监听后，后台执行重量级初始化。"""
+    global _init_done
+    loop = asyncio.get_event_loop()
+    try:
+        logger.info("后台初始化：设备/运行时/任务加载...")
+        await loop.run_in_executor(None, _do_heavy_init)
+        _init_done = True
+        logger.info("后台初始化完成")
+    except Exception as e:
+        logger.error("后台初始化失败: %s", e)
+        _init_done = True
+
+
+def _do_heavy_init():
+    """同步版的重量级初始化，在线程池中执行。"""
+    try:
+        from AutoScriptor.core.api import init as _init_env
+        _init_env()
+    except Exception as e:
+        logger.error("设备初始化失败: %s", e)
+
+    try:
+        from services.core.runtime_context import runtime_ctx
+        from AutoScriptor.core.api import mixctrl, mumu
+        runtime_ctx.init(mixctrl, mumu)
+        runtime_ctx.init_bg()
+        runtime_ctx.init_vlm()
+    except Exception as e:
+        logger.error("运行时上下文初始化失败: %s", e)
+
+    try:
+        from ZmxyOL.task import load_tasks
+        load_tasks()
+    except Exception as e:
+        logger.error("任务加载失败: %s", e)
+
+
+@app.get("/api/init-status")
+async def init_status():
+    return {"ready": _init_done}
 
 
 @app.on_event("shutdown")
@@ -631,10 +696,18 @@ async def favicon():
 
 # ── API 路由 ──
 
+_last_refresh_reload_ts = 0.0
+
+
 @app.get("/api/refresh")
 async def refresh_config_api():
+    global _last_refresh_reload_ts
     try:
-        TASK_MANAGER.reload_tasks()
+        import time as _time
+        now = _time.monotonic()
+        if now - _last_refresh_reload_ts > 2.0:
+            TASK_MANAGER.reload_tasks()
+            _last_refresh_reload_ts = now
         read_config()
         _apply_webui_log_level_from_config()
         return make_public_config()
@@ -1634,19 +1707,6 @@ def run_webui(restart_event=None):
     global _server
     import uvicorn
 
-    # ── 设备 / 运行时初始化（与 run.py CLI 入口对齐） ──
-    from AutoScriptor.core.api import init as _init_env
-    _init_env()
-
-    from services.core.runtime_context import runtime_ctx
-    from AutoScriptor.core.api import mixctrl, mumu
-    runtime_ctx.init(mixctrl, mumu)
-    runtime_ctx.init_bg()
-    runtime_ctx.init_vlm()
-
-    from ZmxyOL.task import load_tasks
-    load_tasks()
-
     _ensure_vendor_files()
     read_config()
     _apply_webui_log_level_from_config()
@@ -1716,6 +1776,10 @@ def shutdown_webui():
 
 
 if __name__ == '__main__':
+    from services.single_instance import ensure_single_instance
+
+    ensure_single_instance()
+
     try:
         run_webui()
     except Exception as e:

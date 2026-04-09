@@ -216,6 +216,17 @@ const EditorPanel = {
         <el-tooltip placement="top" :show-after="0">
           <template #content>
             <div class="max-w-[260px] text-xs leading-relaxed text-left space-y-1">
+              <p>在当前画面上查找左侧名称对应的 <strong>T / I 目标</strong>，返回 <strong>Box</strong> 或 None（不阻塞等待出现，可与超时配合）。</p>
+              <p class="font-mono text-[11px] opacity-90">locate(目标)</p>
+            </div>
+          </template>
+          <span class="inline-flex"><el-button size="small" plain @click="appendLocate" :disabled="!optimizedSel">
+            定位
+          </el-button></span>
+        </el-tooltip>
+        <el-tooltip placement="top" :show-after="0">
+          <template #content>
+            <div class="max-w-[260px] text-xs leading-relaxed text-left space-y-1">
               <p>阻塞直到左侧名称对应的 <strong>T / I 目标</strong>在画面上出现（依赖当前选区与名称）。</p>
               <p class="font-mono text-[11px] opacity-90">wait_for_appear(目标)</p>
             </div>
@@ -416,6 +427,13 @@ const EditorPanel = {
         return { ok: false };
       }
       return { ok: true, tgt };
+    }
+
+    function appendLocate() {
+      const r = requireTOrITarget();
+      if (!r.ok) return;
+      appendCode(`locate(${r.tgt})`);
+      ElementPlus.ElMessage.success('已添加「定位」');
     }
 
     function appendWaitAppear() {
@@ -907,23 +925,24 @@ const EditorPanel = {
           ElementPlus.ElMessage({
             message: '执行完成（无返回值）。最后一行写表达式，或赋值如 info = …（会返回 info），或 __result__ = …',
             type: 'info',
-            duration: 9000,
+            duration: 4200,
             showClose: true,
+            offset: 72,
           });
           return;
         }
         let body = '';
         if (hasResult) body += String(res.result);
         if (stdout) body += (body ? '\n\n' : '') + '【标准输出】\n' + stdout;
-        const tb = res.traceback ? String(res.traceback) : '';
-        ElementPlus.ElNotification({
-          title: hasResult ? '返回值 (repr)' : '输出',
-          message: body.length > 12000 ? body.slice(0, 12000) + '\n…（已截断）' : body,
+        const msgText = body.length > 12000 ? body.slice(0, 12000) + '\n…（已截断）' : body;
+        const title = hasResult ? '返回值 (repr)' : '输出';
+        ElementPlus.ElMessage({
+          message: title + '\n' + msgText,
           type: 'success',
-          duration: 0,
-          position: 'bottom-right',
+          duration: 3800,
           showClose: true,
-          customClass: 'editor-exec-result-notification',
+          customClass: 'editor-exec-result-message',
+          offset: 72,
         });
       } catch (e) {
         ElementPlus.ElMessage.error('请求失败: ' + e);
@@ -947,7 +966,7 @@ const EditorPanel = {
       saveSelection, onCopy, remoteClick, remoteSwipe,
       onCanvasRemoteClick, onCanvasRemoteSwipe,
       copyRecordedCode, executeCustomCode,
-      appendWaitAppear, appendWaitDisappear, appendSleepWait, appendExtractInfo,
+      appendLocate, appendWaitAppear, appendWaitDisappear, appendSleepWait, appendExtractInfo,
     };
   },
 };

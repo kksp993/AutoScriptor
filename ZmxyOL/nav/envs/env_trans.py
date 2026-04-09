@@ -40,13 +40,6 @@ def way():
     click(B(1200, 30, 30, 30))
     mm.set_region("天庭")
 
-# @path(HAS_SHIJIEDITU, "天庭")
-# def way():
-#     click(I("导航-世界地图"), until=lambda: ui_T(I("世界地图-极北")))
-#     click(I("世界地图-天庭"))
-#     click(T("确定"))
-#     wait_for_appear(T("神兽森林"))
-#     mm.set_region("天庭")
     
 "=======================    登录    ======================="
 @path(HAS_SHEZHI, "登录")
@@ -73,26 +66,6 @@ def way():
     wait_for_appear(I("极寒深渊背景"))
     mm.set_region("极寒深渊")
     time.sleep(1)
-
-# "=======================    地狱    ======================="
-# @path(HAS_SHIJIEDITU, "地狱")
-# def way():
-#     click(I("导航-世界地图"), until=lambda: ui_T(I("世界地图-极北")))
-#     click(I("世界地图-炼狱"))
-#     click(T("确定"))
-#     wait_for_appear(I("地狱鬼城"))
-#     mm.set_region("地狱")
-#     time.sleep(1)
-
-# "=======================    极北    ======================="
-# @path(HAS_SHIJIEDITU, "极北")
-# def way():
-#     click(I("导航-世界地图"), until=lambda: ui_T(I("世界地图-极北")))
-#     click(I("世界地图-极北"))
-#     click(T("确定"))
-#     wait_for_appear(I("极北背景"))
-#     mm.set_region("极北")
-#     time.sleep(1)
 
 @path("极寒深渊", "极北")
 def way():

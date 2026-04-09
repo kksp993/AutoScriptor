@@ -72,7 +72,7 @@ def task(
             click(B(363,219,125,195),delay=0.5),
             click(T("确定"), delay=0.5)
         bingku_battle()
-    click(T("返回主界面"))
+    click(T("返回主界面", box=Box(398,460,192,81).margin()), until=lambda:ui_F(T("返回主界面", box=Box(398,460,192,81).margin())))
     wear_shizhuang_choice(Changgui_WuQi)
     wear_shizhuang_choice(Changgui_YiFu)
     wear_shizhuang_choice(Changgui_ChiBang)

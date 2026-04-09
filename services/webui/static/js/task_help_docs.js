@@ -8,6 +8,7 @@
   ]);
 
   const PARAM_KEY_LABELS = {
+    battle_config: '战斗配置',
     battle_flow: '战斗招式',
     battle_loop: '战斗循环次数',
     battle_times: '战斗轮数',

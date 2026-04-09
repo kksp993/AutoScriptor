@@ -7,6 +7,7 @@ import enum
 from AutoScriptor.utils.constant import cfg
 from AutoScriptor.utils.task_registry import task_registry
 from AutoScriptor.utils.logger import logger
+from AutoScriptor.utils.table_param import TableParam
 from ZmxyOL.task.translations import normalize_cfg_key, normalize_to_cn
 from ZmxyOL.nav.api import locate_region
 
@@ -45,8 +46,8 @@ def register_task(
         到期但不在允许日时，调度器会推迟 next_exec_time 至下一允许日的 5:00
       - 任务函数若声明参数 battle_flow（BattleFlowName）：执行前由框架注入 get_battle_profile(h)，
         并把所选流程名写入 h.task_context_battle_flow；battle_loop / jjc_battle / battle_task 等
-        在未显式传入 flow_name 时将使用该值。WebUI 下拉按任务路径过滤：profiles/*/流程/通用 与 legacy 扁平
-        为全局；profiles/*/流程/<任务叶名>/ 仅对 cfg 路径最后一级同名的任务显示（见 battle_task_params）。
+        在未显式传入 flow_name 时将使用该值。WebUI 下拉选项来自 Hero @flow 注册名；若某流程仅带 task= 注册，
+        则仅对 cfg 路径最后一级与该 task 名一致的任务显示（见 battle_task_params.battle_flow_allowed_for_task）。
       - 其他任意元数据参数 (key=value): 写入 cfg 配置节点
 
     用法示例：
@@ -162,7 +163,10 @@ def register_task(
             if param.kind in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL):
                 continue
             default = param.default if param.default is not inspect._empty else None
-            if isinstance(default, enum.Enum):
+            if isinstance(default, TableParam):
+                defaults[name] = default.to_json_data()
+                param_meta[name] = default.get_param_meta()
+            elif isinstance(default, enum.Enum):
                 defaults[name] = default.name
                 enum_path = default.__class__.__module__ + '.' + default.__class__.__qualname__
                 param_meta[name] = {"enum": enum_path, "multiple": False}
@@ -178,7 +182,8 @@ def register_task(
         existing_params = task_cfg.get('params', {})
         merged_params = defaults.copy()
         merged_params.update(existing_params)
-        task_cfg['params'] = merged_params
+        # 仅保留当前签名中的参数名，丢弃已迁移的旧键（如独立难度、battle_flow 等）
+        task_cfg['params'] = {k: merged_params[k] for k in defaults}
 
         # 8. fn / order / param_meta 注册到 TaskRegistry（运行时数据，不写入 JSON）
         task_path = "/".join(keys)
@@ -187,6 +192,7 @@ def register_task(
             task_wrapper(func),
             reg_order,
             param_meta,
+            param_keys=list(defaults.keys()),
             beta=beta,
             custom=is_custom,
             doc_flow=doc_flow,

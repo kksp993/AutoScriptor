@@ -232,6 +232,10 @@ const CanvasPanel = {
       key_event:         { label: '按键',       icon: 'fa-keyboard-o',     color: '#6366f1', category: 'action', inputs: 1, outputs: 1, params: [
         { key: 'key_code', label: '键码', type: 'number', default: 4 },
       ]},
+      locate:            { label: '定位',       icon: 'fa-crosshairs',     color: '#06b6d4', category: 'detect', inputs: 1, outputs: 1, params: [
+        { key: 'target',  label: '目标', type: 'string', default: 'T("确定")' },
+        { key: 'timeout', label: '超时(秒)', type: 'number', default: 0, min: 0 },
+      ]},
       wait_for_appear:   { label: '等待出现',   icon: 'fa-eye',            color: '#10b981', category: 'detect', inputs: 1, outputs: 1, params: [
         { key: 'target',  label: '目标', type: 'string', default: 'T("确定")' },
         { key: 'timeout', label: '超时(秒)', type: 'number', default: 30, min: 0 },
@@ -285,6 +289,7 @@ const CanvasPanel = {
         { type: 'key_event',  ...NODE_DEFS.key_event },
       ]},
       { label: '检测', nodes: [
+        { type: 'locate',             ...NODE_DEFS.locate },
         { type: 'wait_for_appear',    ...NODE_DEFS.wait_for_appear },
         { type: 'wait_for_disappear', ...NODE_DEFS.wait_for_disappear },
         { type: 'extract_info',       ...NODE_DEFS.extract_info },
@@ -345,6 +350,7 @@ const CanvasPanel = {
           return trunc(d.text);
         case 'key_event':
           return `key ${d.key_code ?? ''}`;
+        case 'locate':
         case 'wait_for_appear':
         case 'wait_for_disappear':
           return trunc(d.target);
@@ -614,6 +620,8 @@ const CanvasPanel = {
         }
         case 'key_event':
           return `${indent}key_event(${d.key_code ?? 4})`;
+        case 'locate':
+          return `${indent}locate(${d.target || 'T("确定")'}${d.timeout !== undefined && d.timeout !== 0 ? ', timeout=' + d.timeout : ''})`;
         case 'wait_for_appear':
           return `${indent}wait_for_appear(${d.target || 'T("确定")'}${d.timeout !== 30 ? ', timeout=' + d.timeout : ''})`;
         case 'wait_for_disappear':

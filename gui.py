@@ -127,6 +127,10 @@ def _webui_worker(restart_event):
 
 
 if __name__ == '__main__':
+    from services.single_instance import ensure_single_instance
+
+    ensure_single_instance()
+
     import multiprocessing
     import signal
 

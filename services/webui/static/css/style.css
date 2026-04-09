@@ -509,13 +509,20 @@ html.light .app-body {
   color: #94a3b8 !important;
 }
 
-/* 自定义代码执行结果通知：repr 多行、等宽 */
-.editor-exec-result-notification .el-notification__content {
+/* 自定义代码执行结果（顶部 Message）：repr 多行、等宽 */
+.editor-exec-result-message.el-message {
+  align-items: flex-start;
+  min-width: min(92vw, 640px);
+  max-width: min(92vw, 720px);
+  padding: 12px 19px;
+}
+.editor-exec-result-message .el-message__content {
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 48vh;
+  max-height: 36vh;
   overflow-y: auto;
   font-size: 12px;
+  line-height: 1.45;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
@@ -1825,3 +1832,7 @@ html.light .bg-white {
   -moz-user-drag: none;
   pointer-events: auto;
 }
+
+/* TableParam 表格编辑器 */
+.table-param-editor .el-table__cell { padding: 4px 0; }
+.table-param-editor .cell { padding: 0 6px; }

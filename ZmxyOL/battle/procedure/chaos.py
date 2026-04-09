@@ -43,6 +43,8 @@ def task_way_to_diff(self:Hero, task: str, expect_difficulty: str, task_type: st
     from ZmxyOL.nav import ensure_in
     ensure_in(*get_task_table(task)["location"])
     click(get_task_table(task)["target"], until=lambda: extract_info(B(648,6,132,78), lambda x: len(x.strip())==2))
+    remains = extract_info(B(619,283,107,43), post_process=lambda s: int(s.strip()[-2]), ensure_not_empty=True)
+    if remains == 0: return remains
     # 开始挑战
     sleep(1)
     # 进入混沌本，获取剩余次数

@@ -63,6 +63,18 @@ function getBackendZipPath() {
   return inResources;
 }
 
+/** 可选：用户下载的 backend_incremental.zip，与 backend.zip 查找顺序一致。 */
+function getBackendIncrementalZipPath() {
+  if (!app.isPackaged) {
+    const p = path.join(process.resourcesPath, 'backend_incremental.zip');
+    return fs.existsSync(p) ? p : '';
+  }
+  const besideExe = path.join(path.dirname(process.execPath), 'backend_incremental.zip');
+  if (fs.existsSync(besideExe)) return besideExe;
+  const inResources = path.join(process.resourcesPath, 'backend_incremental.zip');
+  return fs.existsSync(inResources) ? inResources : '';
+}
+
 const ICON_PATH = path.join(__dirname, 'icon.ico');
 const ICON_PNG = path.join(__dirname, 'icon.png');
 const LOAD_HTML = path.join(__dirname, 'renderer', 'loading.html');
@@ -531,7 +543,7 @@ ipcMain.handle('installer:get-wizard-context', () => {
     const bat = path.join(existing.installRoot, '卸载造笔.bat');
     if (fs.existsSync(bat)) uninstallBatPath = bat;
   }
-  const needsUninstallGate = isWizard && packaged && engineOk;
+  const needsUninstallGate = packaged && (engineOk || existing.hasExisting);
   return {
     isWizard,
     packaged,
@@ -625,10 +637,59 @@ Get-CimInstance Win32_Process | ForEach-Object {
 
 ipcMain.handle('installer:release-install-locks', async (_event, opts) => releaseInstallLocks(opts));
 
+function validateInstallDir(dirPath) {
+  if (!dirPath || dirPath.length < 4) return { ok: false, reason: '请选择有效的安装目录' };
+  const resolved = path.resolve(dirPath);
+  if (process.platform === 'win32') {
+    const low = resolved.toLowerCase();
+    if (/^[a-z]:\\windows$/i.test(low) || low.includes(':\\windows\\system32')) {
+      return { ok: false, reason: '请勿安装到 Windows 系统目录' };
+    }
+    if (/^[a-z]:\\program files/i.test(low)) {
+      return { ok: false, reason: 'Program Files 目录需要管理员权限，建议选择其他位置（如 D:\\造笔）' };
+    }
+  }
+  try {
+    if (fs.existsSync(resolved)) {
+      const st = fs.statSync(resolved);
+      if (!st.isDirectory()) return { ok: false, reason: '所选路径已被文件占用，请选择一个空目录' };
+      let entries;
+      try {
+        entries = fs.readdirSync(resolved);
+      } catch (e) {
+        return { ok: false, reason: '无法读取目录（可能被其他程序占用或权限不足）：' + e.message };
+      }
+      if (entries.length > 0) {
+        return { ok: false, reason: `目录不为空（含 ${entries.length} 个项目）。请选择一个空目录，或创建新目录` };
+      }
+    }
+    const parent = path.dirname(resolved);
+    if (!fs.existsSync(parent)) {
+      return { ok: false, reason: '父目录不存在：' + parent };
+    }
+    try {
+      fs.mkdirSync(resolved, { recursive: true });
+      const testFile = path.join(resolved, '.install_test_' + Date.now());
+      fs.writeFileSync(testFile, 'test', 'utf-8');
+      fs.unlinkSync(testFile);
+    } catch (e) {
+      return { ok: false, reason: '无法写入该目录（权限不足或磁盘已满）：' + e.message };
+    }
+    return { ok: true, reason: '' };
+  } catch (e) {
+    return { ok: false, reason: '校验异常：' + e.message };
+  }
+}
+
+ipcMain.handle('installer:validate-install-dir', (_event, dirPath) => {
+  return validateInstallDir(String(dirPath || '').trim());
+});
+
 ipcMain.handle('installer:run-packaged', async (_event, opts) => {
   const installRoot = path.resolve(String(opts && opts.installRoot ? opts.installRoot : '').trim());
-  if (installRoot.length < 4) {
-    throw new Error('请选择有效的安装目录');
+  const dirCheck = validateInstallDir(installRoot);
+  if (!dirCheck.ok) {
+    throw new Error(dirCheck.reason);
   }
   let previousInstallRoot = null;
   try {
@@ -641,12 +702,6 @@ ipcMain.handle('installer:run-packaged', async (_event, opts) => {
     }
   } catch (_) {}
   releaseInstallLocks({ installRoot, previousInstallRoot });
-  if (process.platform === 'win32') {
-    const low = installRoot.toLowerCase();
-    if (/^[a-z]:\\windows$/i.test(low) || low.includes(':\\windows\\system32')) {
-      throw new Error('请勿安装到 Windows 系统目录，请选择其他盘符或用户目录下的文件夹');
-    }
-  }
   const { runPackagedInstall } = require('./install-packaged.cjs');
   const pkg = require('./package.json');
   const send = (data) => {
@@ -671,6 +726,49 @@ ipcMain.handle('installer:run-packaged', async (_event, opts) => {
   });
   invalidateRootCache();
 });
+
+ipcMain.handle('installer:apply-backend-incremental', async (_event, opts) => {
+  const installRoot = path.resolve(String(opts && opts.installRoot ? opts.installRoot : '').trim());
+  const dirCheck = validateInstallDir(installRoot);
+  if (!dirCheck.ok) {
+    throw new Error(dirCheck.reason);
+  }
+  let previousInstallRoot = null;
+  try {
+    const marker = path.join(app.getPath('userData'), 'install.json');
+    if (fs.existsSync(marker)) {
+      const j = JSON.parse(fs.readFileSync(marker, 'utf8'));
+      if (j.installRoot && typeof j.installRoot === 'string') {
+        previousInstallRoot = path.resolve(j.installRoot);
+      }
+    }
+  } catch (_) {}
+  releaseInstallLocks({ installRoot, previousInstallRoot });
+
+  let zipPath = String((opts && opts.zipPath) || '').trim();
+  if (!zipPath || !fs.existsSync(zipPath)) {
+    zipPath = getBackendIncrementalZipPath();
+  }
+  if (!zipPath || !fs.existsSync(zipPath)) {
+    throw new Error(
+      '找不到 backend_incremental.zip。请将下载的增量包放在安装程序同目录，或在调用时传入 zipPath。'
+    );
+  }
+
+  const { applyBackendIncremental } = require('./install-packaged.cjs');
+  const send = (data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('installer:progress', data);
+    }
+  };
+  await applyBackendIncremental({
+    installRoot,
+    zipPath,
+    send,
+  });
+  invalidateRootCache();
+});
+
 ipcMain.on('installer:start', (event, config) => {
   const pythonPath = findPython();
   const args = [installStepScriptPath(), '--project-root', getRoot()];
@@ -801,6 +899,18 @@ ipcMain.handle('installer:validate-path', (_event, p, opts) => {
     return true;
   } catch {
     return false;
+  }
+});
+
+ipcMain.handle('installer:validate-setup', (_event) => {
+  const cfgPath = getInstallerConfigPath();
+  try {
+    const data = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    const emulator = data.emulator || {};
+    const { validateMumuSetup } = require('./mumu-detect.cjs');
+    return validateMumuSetup(emulator);
+  } catch (e) {
+    return { overall: false, error: e.message };
   }
 });
 
