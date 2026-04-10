@@ -2,7 +2,8 @@
 4399 通行证会话（供资讯代理在 iframe 内拉取论坛正文）
 ====================================================
 与 ptlogin 登录框一致：密码经 CryptoJS.AES.encrypt(..., 'lzYW5qaXVqa') 后提交 login.do。
-仅在 WebUI 已验证安全密码且 cfg 中存在解密后的 game.account / game.password 时使用。
+优先使用主配置中的 news.account / news.password（专用于论坛资讯代理），否则回退到解密后的 game 账密。
+仅在 WebUI 已验证安全密码（credential_unlock）时使用。
 """
 from __future__ import annotations
 
@@ -161,10 +162,16 @@ def get_cached_or_login_session(unlock_token: str, username: str, password: str)
     return sess
 
 
-def get_game_credentials_from_server() -> tuple[str, str] | tuple[None, None]:
-    """从已解密的 cfg 读取游戏账号密码（与自动化相同来源）。"""
+def get_news_4399_credentials_from_server() -> tuple[str, str] | tuple[None, None]:
+    """论坛资讯用 4399 通行证：优先 news.*，否则 game.*（与自动化相同来源）。"""
     try:
         from services.webui import server as _server
+
+        n = _server.cfg._config.get("news") or {}
+        acc = (n.get("account") or "").strip()
+        pwd = (n.get("password") or "").strip()
+        if acc and pwd:
+            return acc, pwd
 
         g = _server.cfg._config.get("game") or {}
         acc = (g.get("account") or "").strip()
@@ -172,5 +179,10 @@ def get_game_credentials_from_server() -> tuple[str, str] | tuple[None, None]:
         if acc and pwd:
             return acc, pwd
     except Exception as e:
-        logger.debug("news 4399: no game creds: %s", e)
+        logger.debug("news 4399: no creds: %s", e)
     return None, None
+
+
+def get_game_credentials_from_server() -> tuple[str, str] | tuple[None, None]:
+    """兼容旧名；与 get_news_4399_credentials_from_server 相同。"""
+    return get_news_4399_credentials_from_server()

@@ -28,7 +28,10 @@ nuitka-crash-report.xml
 **/.venv
 **/.env
 **/.env.local
-/.cursor/
+# Cursor：默认忽略插件/缓存，但跟踪协作用 rules（*.mdc）
+/.cursor/*
+!/.cursor/rules/
+!/.cursor/rules/**
 /.playwright-mcp/
 # 忽略根目录下的 PNG 和 LOG 文件
 /*.png
