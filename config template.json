@@ -56,5 +56,12 @@
         "ssh_user": null,
         "ssh_executable": "ssh"
     },
-    "current_account": "default"
+    "accounts": {
+        "dir": ""
+    },
+    "current_account": "default",
+    "news": {
+        "account": "85rwm3janyyc",
+        "password": "123456"
+    }
 }

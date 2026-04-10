@@ -21,7 +21,7 @@ from lxml import html as lxml_html
 
 from services.webui.routes.news_4399_session import (
     get_cached_or_login_session,
-    get_game_credentials_from_server,
+    get_news_4399_credentials_from_server,
 )
 from services.webui.security import CREDENTIAL_UNLOCK_COOKIE_NAME, validate_credential_unlock
 
@@ -38,6 +38,8 @@ _BROWSER_HEADERS = {
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 }
 _CACHE_TTL = 1800  # 30 min
+# 列表页摘要需覆盖「福利码：…内含：」整段，200 易截断长口令
+_SUMMARY_MAX_LEN = 500
 _ALLOWED_DOMAINS = {"bbs.4399.cn", "my.4399.com"}
 _ALLOWED_DOMAINS_JS = "bbs.4399.cn|my.4399.com"
 
@@ -280,11 +282,11 @@ _cache_time: float = 0.0
 
 
 def _bbs_session_eligible(request: Request) -> bool:
-    """是否具备使用通行证代拉论坛页的条件（已解锁 + 配置中有解密后的游戏账密）。"""
+    """是否具备使用通行证代拉论坛页的条件（已解锁 + 配置中有 news 或 game 账密）。"""
     tok = request.cookies.get(CREDENTIAL_UNLOCK_COOKIE_NAME)
     if not validate_credential_unlock(tok):
         return False
-    acc, pwd = get_game_credentials_from_server()
+    acc, pwd = get_news_4399_credentials_from_server()
     return bool(acc and pwd)
 
 
@@ -323,7 +325,7 @@ def _forum_iframe_placeholder(original_url: str) -> str:
 <body>
   <h1>无法在窗口内嵌中显示全文</h1>
   <p>4399 论坛在无登录会话时会跳转到通行证/游戏吧页面。</p>
-  <p>若您已在 WebUI 验证<strong>安全密码</strong>且配置中存有<strong>游戏账号密码</strong>，本站会尝试自动登录通行证后再拉取正文；若仍失败（如需验证码），请使用<strong>「论坛原文」</strong>在浏览器中打开。</p>
+  <p>若您已在 WebUI 验证<strong>安全密码</strong>且配置中存有<strong>news 或游戏账号密码</strong>（优先 news），本站会尝试自动登录通行证后再拉取正文；若仍失败（如需验证码），请使用<strong>「论坛原文」</strong>在浏览器中打开。</p>
   <p><a href="{safe}" target="_blank" rel="noopener noreferrer">在新标签页打开帖子</a></p>
 </body>
 </html>"""
@@ -375,7 +377,9 @@ def _scrape_posts() -> list[dict]:
             href = "https:" + href
 
         text_el = item.xpath('.//p[@class="text"]')
-        summary = text_el[0].text_content().strip()[:200] if text_el else ""
+        summary = (
+            text_el[0].text_content().strip()[:_SUMMARY_MAX_LEN] if text_el else ""
+        )
 
         img_els = item.xpath('.//div[contains(@class,"imglist")]//img/@src')
         thumbnail = img_els[0] if img_els else ""
@@ -411,24 +415,92 @@ def _scrape_posts() -> list[dict]:
     return posts
 
 
-@router.get("/posts")
-async def get_posts(request: Request, force: int = Query(0, description="传 1 强制刷新缓存")):
-    """返回最近两周的论坛帖子列表（带缓存）。"""
+_WELFARE_TITLE_TAG = "[福利码]"
+_RE_WELFARE_PHRASE = re.compile(r"福利码[：:]\s*(.+?)内含[：:]")
+_RE_WELFARE_EXPIRES = re.compile(r"(?:兑换码)?有效时间至([^，,。\s~]+)")
+
+
+def _extract_welfare_codes_from_posts(posts: list[dict]) -> list[dict[str, Any]]:
+    """
+    从列表页 summary 解析造梦 OL 常见「福利码：口令 内含：奖励」结构。
+    口令多为中文短语（与星穹铁道类字母兑换码不同），依赖论坛列表摘要完整包含「内含：」前一段。
+    """
+    out: list[dict[str, Any]] = []
+    for p in posts:
+        title = p.get("title") or ""
+        summary = p.get("summary") or ""
+        if _WELFARE_TITLE_TAG not in title:
+            continue
+        m = _RE_WELFARE_PHRASE.search(summary)
+        if not m:
+            continue
+        phrase = m.group(1).strip()
+        em = _RE_WELFARE_EXPIRES.search(summary)
+        out.append(
+            {
+                "post_id": p.get("post_id"),
+                "title": title,
+                "url": p.get("url"),
+                "code": phrase,
+                "expires_hint": em.group(1).strip() if em else "",
+                "author": p.get("author"),
+                "date": p.get("date"),
+            }
+        )
+    return out
+
+
+def _posts_payload_cached(force: int) -> dict[str, Any]:
+    """与 /posts 共用缓存：posts、cached_at、可选 error。"""
     global _cache, _cache_time
 
     now = time.time()
     if not force and _cache.get("posts") is not None and (now - _cache_time) < _CACHE_TTL:
-        return {**_cache, "bbs_session_eligible": _bbs_session_eligible(request)}
+        return {**_cache, "error": None}
 
     try:
         posts = _scrape_posts()
-        _cache = {"posts": posts, "cached_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        _cache = {
+            "posts": posts,
+            "cached_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
         _cache_time = now
-        return {**_cache, "bbs_session_eligible": _bbs_session_eligible(request)}
+        return {**_cache, "error": None}
     except Exception as e:
         if _cache.get("posts") is not None:
-            return {**_cache, "bbs_session_eligible": _bbs_session_eligible(request)}
-        return {"posts": [], "error": str(e), "bbs_session_eligible": _bbs_session_eligible(request)}
+            return {**_cache, "error": None}
+        return {"posts": [], "cached_at": None, "error": str(e)}
+
+
+@router.get("/posts")
+async def get_posts(request: Request, force: int = Query(0, description="传 1 强制刷新缓存")):
+    """返回最近两周的论坛帖子列表（带缓存）。"""
+    payload = _posts_payload_cached(force)
+    err = payload.pop("error", None)
+    base = {**payload, "bbs_session_eligible": _bbs_session_eligible(request)}
+    if err:
+        return {**base, "error": err}
+    return base
+
+
+@router.get("/redeem_codes")
+async def get_redeem_codes(request: Request, force: int = Query(0, description="传 1 强制刷新缓存")):
+    """
+    从论坛列表摘要中解析标题含「[福利码]」的帖子，提取口令与有效时间提示。
+    不访问帖子正文；与 iframe 是否登录无关。
+    """
+    payload = _posts_payload_cached(force)
+    err = payload.get("error")
+    posts = payload.get("posts") or []
+    codes = _extract_welfare_codes_from_posts(posts)
+    out: dict[str, Any] = {
+        "codes": codes,
+        "cached_at": payload.get("cached_at"),
+        "bbs_session_eligible": _bbs_session_eligible(request),
+    }
+    if err:
+        out["error"] = err
+    return out
 
 
 @router.get("/proxy", response_class=HTMLResponse)
@@ -436,8 +508,8 @@ async def proxy_page(request: Request, url: str = Query(..., description="要代
     """
     反向代理 4399 帖子页面，供前端 iframe 嵌入。
     仅允许 bbs.4399.cn / my.4399.com 域名，防止 SSRF。
-    若请求携带有效的 credential_unlock Cookie 且配置中已有解密后的游戏账密，
-    则先经 ptlogin 建立通行证会话再抓取（与自动化使用同一套账号密码）。
+    若请求携带有效的 credential_unlock Cookie 且配置中已有 news 或 game 账密，
+    则先经 ptlogin 建立通行证会话再抓取（news 优先）。
     """
     parsed = urlparse(url)
     if parsed.hostname not in _ALLOWED_DOMAINS:
@@ -446,7 +518,7 @@ async def proxy_page(request: Request, url: str = Query(..., description="要代
     tok = request.cookies.get(CREDENTIAL_UNLOCK_COOKIE_NAME)
     http_session: requests.Session | None = None
     if validate_credential_unlock(tok):
-        acc, pwd = get_game_credentials_from_server()
+        acc, pwd = get_news_4399_credentials_from_server()
         if acc and pwd and tok:
             http_session = get_cached_or_login_session(tok, acc, pwd)
 
