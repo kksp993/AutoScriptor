@@ -31,6 +31,19 @@ _STUBS = {
 # 需要提供真实的子模块（nemu_ipc.py 实际 import 的）
 _BASE = os.path.join(os.path.dirname(__file__), os.pardir)
 
+_PACKAGE_PATHS = {
+    "AutoScriptor": ("AutoScriptor",),
+    "AutoScriptor.control": ("AutoScriptor", "control"),
+    "AutoScriptor.control.NemuIpc": ("AutoScriptor", "control", "NemuIpc"),
+    "AutoScriptor.control.NemuIpc.base": ("AutoScriptor", "control", "NemuIpc", "base"),
+    "AutoScriptor.control.NemuIpc.device": ("AutoScriptor", "control", "NemuIpc", "device"),
+    "AutoScriptor.control.NemuIpc.device.method": ("AutoScriptor", "control", "NemuIpc", "device", "method"),
+    "AutoScriptor.control.NemuIpc.config": ("AutoScriptor", "control", "NemuIpc", "config"),
+    "AutoScriptor.utils": ("AutoScriptor", "utils"),
+}
+for name, rel_path in _PACKAGE_PATHS.items():
+    _STUBS[name].__path__ = [os.path.normpath(os.path.join(_BASE, *rel_path))]
+
 def _load_real(dotted: str, file_rel: str):
     """从文件加载真实模块，挂到 sys.modules"""
     fpath = os.path.normpath(os.path.join(_BASE, file_rel))

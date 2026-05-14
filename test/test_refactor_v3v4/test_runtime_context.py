@@ -8,11 +8,53 @@ RuntimeContext 单元测试
 import sys
 import os
 import threading
+import types
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from services.core.runtime_context import RuntimeContext, runtime_ctx
+
+def import_runtime_context_for_test():
+    autoscriptor = types.ModuleType("AutoScriptor")
+    autoscriptor.__path__ = [os.path.join(os.path.dirname(__file__), "..", "..", "AutoScriptor")]
+    utils = types.ModuleType("AutoScriptor.utils")
+    utils.__path__ = [os.path.join(os.path.dirname(__file__), "..", "..", "AutoScriptor", "utils")]
+    logger_module = types.ModuleType("AutoScriptor.utils.logger")
+    logger_module.logger = SimpleNamespace(
+        debug=lambda *args, **kwargs: None,
+        info=lambda *args, **kwargs: None,
+        warning=lambda *args, **kwargs: None,
+        error=lambda *args, **kwargs: None,
+    )
+    with patch.dict(sys.modules, {
+        "AutoScriptor": autoscriptor,
+        "AutoScriptor.utils": utils,
+        "AutoScriptor.utils.logger": logger_module,
+    }):
+        sys.modules.pop("services.core.runtime_context", None)
+        import services.core.runtime_context as module
+    return module
+
+
+def app_config_stub(get_value=False):
+    autoscriptor = types.ModuleType("AutoScriptor")
+    autoscriptor.__path__ = [os.path.join(os.path.dirname(__file__), "..", "..", "AutoScriptor")]
+    utils = types.ModuleType("AutoScriptor.utils")
+    utils.__path__ = [os.path.join(os.path.dirname(__file__), "..", "..", "AutoScriptor", "utils")]
+    app_config = types.ModuleType("AutoScriptor.utils.app_config")
+    app_config.cfg = SimpleNamespace(get=lambda *args, **kwargs: get_value)
+    return {
+        "AutoScriptor": autoscriptor,
+        "AutoScriptor.utils": utils,
+        "AutoScriptor.utils.app_config": app_config,
+    }
+
+
+runtime_context_module = import_runtime_context_for_test()
+RuntimeContext = runtime_context_module.RuntimeContext
+runtime_ctx = runtime_context_module.runtime_ctx
 
 
 class TestSingleton(unittest.TestCase):
@@ -57,13 +99,15 @@ class TestInitShutdown(unittest.TestCase):
     def test_init_sets_attributes(self):
         mock_mix = object()
         mock_mumu = object()
-        runtime_ctx.init(mock_mix, mock_mumu)
+        with patch.object(runtime_ctx, "_sync_globals"):
+            runtime_ctx.init(mock_mix, mock_mumu)
         self.assertIs(runtime_ctx.mixctrl, mock_mix)
         self.assertIs(runtime_ctx.mumu, mock_mumu)
         self.assertTrue(runtime_ctx.is_initialized)
 
     def test_shutdown_clears(self):
-        runtime_ctx.init(object(), object())
+        with patch.object(runtime_ctx, "_sync_globals"):
+            runtime_ctx.init(object(), object())
         runtime_ctx.vlm_client = object()
         runtime_ctx.shutdown()
         self.assertIsNone(runtime_ctx.mixctrl)
@@ -102,7 +146,8 @@ class TestStatusDict(unittest.TestCase):
         self.assertFalse(d["has_vlm"])
 
     def test_after_init(self):
-        runtime_ctx.init(object(), object())
+        with patch.object(runtime_ctx, "_sync_globals"):
+            runtime_ctx.init(object(), object())
         d = runtime_ctx.status_dict()
         self.assertTrue(d["initialized"])
         self.assertTrue(d["has_mixctrl"])
@@ -161,9 +206,7 @@ class TestInitVlm(unittest.TestCase):
 
     def test_skips_when_use_agent_false(self):
         runtime_ctx.vlm_client = None
-        from unittest.mock import patch
-        with patch("AutoScriptor.utils.app_config.cfg") as mock_cfg:
-            mock_cfg.get.return_value = False
+        with patch.dict(sys.modules, app_config_stub(get_value=False)):
             runtime_ctx.init_vlm()
         self.assertIsNone(runtime_ctx.vlm_client)
 
