@@ -146,6 +146,42 @@ TASK_MANAGER = TaskManager()
 RUN_THREAD: Thread | None = None
 scheduler.set_task_manager(TASK_MANAGER)
 
+
+def _direct_run_alive() -> bool:
+    return RUN_THREAD is not None and RUN_THREAD.is_alive()
+
+
+def _runtime_busy_reason() -> str | None:
+    if _direct_run_alive():
+        return "direct_run"
+    if scheduler.state == SchedulerState.RUNNING:
+        return "scheduler"
+    return None
+
+
+def _is_runtime_busy() -> bool:
+    return _runtime_busy_reason() is not None
+
+
+def _busy_response(action: str = "modify runtime config") -> JSONResponse:
+    reason = _runtime_busy_reason() or "runtime"
+    reason_label = {"direct_run": "直接执行任务", "scheduler": "调度器"}.get(reason, "运行任务")
+    return JSONResponse(
+        status_code=409,
+        content={
+            "status": "error",
+            "error": "runtime_busy",
+            "reason": reason,
+            "message": f"当前{reason_label}正在运行，请先点击「终止执行」再继续操作。",
+        },
+    )
+
+
+def _guard_runtime_idle(action: str = "modify runtime config") -> JSONResponse | None:
+    if _is_runtime_busy():
+        return _busy_response(action)
+    return None
+
 # ── 安全模块 ──
 
 from services.webui.security import (
@@ -210,15 +246,15 @@ def _clear_credential_unlock_cookie(response: JSONResponse) -> JSONResponse:
 
 def _require_credential_unlock(request: Request) -> JSONResponse | None:
     """执行自动化前仅依据 cfg 中是否已有已解密账密判断。"""
-    # if not cfg.has_decrypted_credentials():
-    #     return JSONResponse(
-    #         status_code=403,
-    #         content={
-    #             "status": "error",
-    #             "message": "请先验证安全密码后再执行任务",
-    #             "need_credential_unlock": True,
-    #         },
-    #     )
+    if not cfg.has_decrypted_credentials():
+        return JSONResponse(
+            status_code=403,
+            content={
+                "status": "error",
+                "message": "请先验证账号密码后再执行任务",
+                "need_credential_unlock": True,
+            },
+        )
     return None
 
 
@@ -390,6 +426,27 @@ def _game_professions_by_character() -> dict[str, dict[str, str]]:
                 gp = node.get("game_profession")
             out[srv][name] = normalize_game_profession(gp)
     return out
+
+
+def _normalize_dispatch_queue(queue) -> list[dict[str, str]]:
+    chars = cfg._account_data.get("characters", {}) or {}
+    result: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    if not isinstance(queue, list):
+        return result
+    for item in queue:
+        if not isinstance(item, dict):
+            continue
+        server = (item.get("server") or "").strip()
+        name = (item.get("name") or "").strip()
+        key = (server, name)
+        if not server or not name or key in seen:
+            continue
+        if server not in chars or name not in chars[server]:
+            continue
+        seen.add(key)
+        result.append({"server": server, "name": name})
+    return result
 
 
 def _task_leaf_status(node: dict, path: str, now_ts: float) -> str:
@@ -662,6 +719,13 @@ async def _deferred_heavy_init():
         logger.info("后台初始化：设备/运行时/任务加载...")
         await loop.run_in_executor(None, _do_heavy_init)
         _init_done = True
+        if cfg.get("scheduler.auto_start", False):
+            if cfg.has_decrypted_credentials():
+                scheduler.activate()
+                scheduler.wake()
+                logger.info("Scheduler auto-started from config")
+            else:
+                logger.info("Scheduler auto-start is enabled but account is not verified yet")
         logger.info("后台初始化完成")
     except Exception as e:
         logger.error("后台初始化失败: %s", e)
@@ -719,18 +783,9 @@ async def favicon():
 
 # ── API 路由 ──
 
-_last_refresh_reload_ts = 0.0
-
-
 @app.get("/api/refresh")
 async def refresh_config_api():
-    global _last_refresh_reload_ts
     try:
-        import time as _time
-        now = _time.monotonic()
-        if now - _last_refresh_reload_ts > 2.0:
-            TASK_MANAGER.reload_tasks()
-            _last_refresh_reload_ts = now
         read_config()
         _apply_webui_log_level_from_config()
         return make_public_config()
@@ -739,10 +794,29 @@ async def refresh_config_api():
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+@app.post("/api/tasks/reload")
+async def reload_tasks_api():
+    busy = _guard_runtime_idle("reload tasks")
+    if busy is not None:
+        return busy
+    try:
+        TASK_MANAGER.reload_tasks()
+        read_config()
+        return make_public_config()
+    except Exception as e:
+        logger.error("reload_tasks error: %s", e)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @app.post("/api/config")
 async def save_config_api(request: Request):
+    busy = _guard_runtime_idle("save config")
+    if busy is not None:
+        return busy
     data = await request.json()
     cfg["app"] = data["app"]
+    if "scheduler" in data and isinstance(data["scheduler"], dict):
+        cfg["scheduler"] = data["scheduler"]
     cfg["emulator"] = data["emulator"]
     cfg["ocr"] = data["ocr"]
     cfg.save_config()
@@ -751,23 +825,21 @@ async def save_config_api(request: Request):
 
 @app.post("/api/tasks")
 async def save_tasks_api(request: Request):
+    busy = _guard_runtime_idle("save tasks")
+    if busy is not None:
+        return busy
     try:
         payload = await request.json()
         tasks = payload.get('tasks', payload)
         if not isinstance(tasks, dict):
             return JSONResponse(status_code=400, content={"error": "invalid tasks payload"})
         _strip_runtime_tasks_fields(tasks)
-        try:
-            TASK_MANAGER._cfg_lock.acquire()
+        with TASK_MANAGER._cfg_lock:
             cfg._config.setdefault('tasks', {})
             cfg._config['tasks'] = tasks
             cfg.save_config()
             TASK_MANAGER.reload_tasks()
-        finally:
-            try:
-                TASK_MANAGER._cfg_lock.release()
-            except Exception:
-                pass
+        scheduler.wake()
         read_config()
         return make_public_config()
     except Exception as e:
@@ -790,6 +862,7 @@ def _apply_run_character_from_body(body: dict):
             cfg.switch_character(server, character)
             TASK_MANAGER.reload_tasks()
         scheduler.invalidate_login()
+        logger.info("Selected role for execution: %s/%s", server, character)
     except (KeyError, ValueError) as e:
         return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
     except Exception as e:
@@ -817,6 +890,30 @@ async def run_tasks_api(request: Request):
     if err is not None:
         return err
 
+    activate_sched = bool(body.get("activate_scheduler", True))
+    direct_busy = _direct_run_alive()
+    if activate_sched:
+        if _is_runtime_busy():
+            return _busy_response("start scheduler")
+        if scheduler.state == SchedulerState.ERROR:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "status": "error",
+                    "message": "调度器处于错误状态，请先恢复调度后再启动",
+                },
+            )
+        if not _normalize_dispatch_queue(cfg._account_data.get("dispatch_queue", [])):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "error",
+                    "message": "调度队列为空，请先添加要参与调度的角色",
+                },
+            )
+    elif _is_runtime_busy():
+        return _busy_response("run task")
+
     err = _apply_run_character_from_body(body)
     if err is not None:
         return err
@@ -827,12 +924,10 @@ async def run_tasks_api(request: Request):
                             content={'status': 'error', 'message': '请先验证账号密码后再执行任务'})
 
     tasks = body.get("tasks", [])
-    activate_sched = body.get("activate_scheduler", True)
 
     logger.debug("Received tasks: %s, activate_scheduler: %s", tasks, activate_sched)
     sorted_tasks = sorted(tasks, key=lambda x: ORDER_MAP.get(x, float('inf')))
 
-    direct_busy = RUN_THREAD is not None and RUN_THREAD.is_alive()
     if activate_sched:
         if direct_busy:
             return JSONResponse(
@@ -901,6 +996,7 @@ async def stop_tasks_api():
         # （PyThreadState_SetAsyncExc 在 C 扩展阻塞时不可靠，必须双保险）
         TASK_MANAGER.request_cancel()
         scheduler.deactivate()
+        scheduler.invalidate_login()
         if alive and RUN_THREAD.ident:
             _async_raise(RUN_THREAD.ident, KeyboardInterrupt)
         logger.info("⏹ 已发送终止信号")
@@ -973,6 +1069,10 @@ async def verify_account_api(request: Request):
     old_tok = _credential_unlock_from_request(request)
     _revoke_credential_unlock(old_tok)
     tok = _grant_credential_unlock()
+    if cfg.get("scheduler.auto_start", False) and scheduler.state == SchedulerState.PENDING:
+        scheduler.activate()
+        scheduler.wake()
+        logger.info("Scheduler auto-started after account verification")
     resp = JSONResponse(
         content={
             "character_name": character_name,
@@ -985,6 +1085,9 @@ async def verify_account_api(request: Request):
 @app.post("/api/account")
 async def update_account_credentials_api(request: Request):
     """Update the encryption (account/password) for the current account."""
+    busy = _guard_runtime_idle("update account credentials")
+    if busy is not None:
+        return busy
     data = await request.json()
     if not _check_request_freshness(data):
         return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
@@ -1114,6 +1217,9 @@ async def scheduler_status_api():
 
 @app.post("/api/scheduler/reset")
 async def scheduler_reset_api():
+    busy = _guard_runtime_idle("reset scheduler")
+    if busy is not None:
+        return busy
     scheduler.reset()
     return scheduler.status_dict()
 
@@ -1331,6 +1437,9 @@ async def accounts_list_api():
 
 @app.post("/api/accounts/switch")
 async def accounts_switch_api(request: Request):
+    busy = _guard_runtime_idle("switch account")
+    if busy is not None:
+        return busy
     data = await request.json()
     if not _check_request_freshness(data):
         return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
@@ -1372,6 +1481,9 @@ async def accounts_switch_api(request: Request):
 
 @app.post("/api/accounts/add")
 async def accounts_add_api(request: Request):
+    busy = _guard_runtime_idle("add account")
+    if busy is not None:
+        return busy
     data = await request.json()
     name = str(data.get("name", "") or "").strip()
     account = str(data.get("account", "") or "").strip()
@@ -1403,6 +1515,9 @@ async def accounts_add_api(request: Request):
 
 @app.post("/api/accounts/delete")
 async def accounts_delete_api(request: Request):
+    busy = _guard_runtime_idle("delete account")
+    if busy is not None:
+        return busy
     data = await request.json()
     name = data.get("name", "")
     try:
@@ -1424,6 +1539,9 @@ async def characters_list_api():
 
 @app.post("/api/characters/switch")
 async def characters_switch_api(request: Request):
+    busy = _guard_runtime_idle("switch character")
+    if busy is not None:
+        return busy
     data = await request.json()
     if not _check_request_freshness(data):
         return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
@@ -1447,6 +1565,9 @@ async def characters_switch_api(request: Request):
 
 @app.post("/api/characters/add")
 async def characters_add_api(request: Request):
+    busy = _guard_runtime_idle("add character")
+    if busy is not None:
+        return busy
     data = await request.json()
     server = data.get("server", "")
     character = data.get("character", "")
@@ -1462,6 +1583,9 @@ async def characters_add_api(request: Request):
 
 @app.post("/api/characters/delete")
 async def characters_delete_api(request: Request):
+    busy = _guard_runtime_idle("delete character")
+    if busy is not None:
+        return busy
     data = await request.json()
     server = data.get("server", "")
     character = data.get("character", "")
@@ -1477,6 +1601,9 @@ async def characters_delete_api(request: Request):
 
 @app.post("/api/characters/game_profession")
 async def characters_game_profession_api(request: Request):
+    busy = _guard_runtime_idle("change character profession")
+    if busy is not None:
+        return busy
     """写入指定角色的游戏职业（存账号 JSON），当前角色同步 cfg.game。"""
     data = await request.json()
     if not _check_request_freshness(data):
@@ -1511,14 +1638,17 @@ async def characters_all_tasks_summary_api():
 
 @app.get("/api/dispatch/queue")
 async def dispatch_queue_get_api():
-    queue = cfg._account_data.get("dispatch_queue", [])
+    queue = _normalize_dispatch_queue(cfg._account_data.get("dispatch_queue", []))
     return {"queue": queue}
 
 
 @app.post("/api/dispatch/queue")
 async def dispatch_queue_save_api(request: Request):
+    busy = _guard_runtime_idle("save dispatch queue")
+    if busy is not None:
+        return busy
     data = await request.json()
-    queue = data.get("queue", [])
+    queue = _normalize_dispatch_queue(data.get("queue", []))
     cfg._account_data["dispatch_queue"] = queue
     cfg._save_account_file()
     return {"queue": queue}
@@ -1536,6 +1666,9 @@ async def profiles_list_api():
 
 @app.post("/api/profiles/switch")
 async def profiles_switch_api(request: Request):
+    busy = _guard_runtime_idle("switch account")
+    if busy is not None:
+        return busy
     data = await request.json()
     if not _check_request_freshness(data):
         return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
@@ -1582,6 +1715,9 @@ async def config_export_api():
 
 @app.post("/api/config/import")
 async def config_import_api(request: Request):
+    busy = _guard_runtime_idle("import config")
+    if busy is not None:
+        return busy
     try:
         data = await request.json()
         if not isinstance(data, dict):
@@ -1597,7 +1733,7 @@ async def config_import_api(request: Request):
             data["deploy"].pop("password", None)
             data["deploy"].pop("ssl_key", None)
             data["deploy"].pop("ssl_cert", None)
-        for key in ("app", "emulator", "ocr", "llm", "tasks", "deploy", "notify", "update", "remote_access"):
+        for key in ("app", "emulator", "ocr", "llm", "scheduler", "tasks", "deploy", "notify", "update", "remote_access"):
             if key in data:
                 val = data[key]
                 if key == "tasks" and isinstance(val, dict):
@@ -1695,6 +1831,9 @@ async def deploy_get_api():
 
 @app.post("/api/deploy")
 async def deploy_save_api(request: Request):
+    busy = _guard_runtime_idle("save deploy settings")
+    if busy is not None:
+        return busy
     data = await request.json()
     for section in ("deploy", "notify", "update", "remote_access"):
         if section in data:
