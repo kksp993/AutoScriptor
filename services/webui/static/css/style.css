@@ -375,8 +375,8 @@
   color: #1e293b;
   flex: 1;
 }
-/* 顶栏档案/图标：深色与浅色主题下右侧均为白底，样式一致 */
-.topbar-profile {
+/* 顶栏账号/图标：深色与浅色主题下右侧均为白底，样式一致 */
+.topbar-account {
   color: #475569 !important;
 }
 .topbar-icon-btn {
@@ -588,8 +588,8 @@ html.light .bg-white {
   background-color: #ffffff !important;
 }
 
-/* ── 档案下拉 ── */
-.profile-dropdown {
+/* ── 账号下拉 ── */
+.account-dropdown {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -598,7 +598,7 @@ html.light .bg-white {
   border-radius: 6px;
   transition: background 0.15s;
 }
-.profile-dropdown:hover {
+.account-dropdown:hover {
   background: rgba(34,197,94,0.1);
 }
 

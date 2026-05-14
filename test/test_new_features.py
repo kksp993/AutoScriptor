@@ -43,7 +43,7 @@ class TestConfigTemplate(unittest.TestCase):
         path = ROOT / "config template.json"
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        for section in ("deploy", "notify", "update", "remote_access", "current_profile"):
+        for section in ("deploy", "notify", "update", "remote_access", "current_account"):
             self.assertIn(section, data, f"缺少 config 段: {section}")
 
     def test_deploy_fields(self):
@@ -54,12 +54,12 @@ class TestConfigTemplate(unittest.TestCase):
         for key in ("theme", "password", "ssl_key", "ssl_cert", "language", "cdn"):
             self.assertIn(key, deploy, f"deploy 缺少字段: {key}")
 
-    def test_current_profile_field(self):
+    def test_current_account_field(self):
         path = ROOT / "config template.json"
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        self.assertIn("current_profile", data)
-        self.assertEqual(data["current_profile"], "default")
+        self.assertIn("current_account", data)
+        self.assertEqual(data["current_account"], "default")
 
     def test_post_execution_is_lowercase(self):
         path = ROOT / "config template.json"
@@ -70,17 +70,19 @@ class TestConfigTemplate(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════
-# 阶段 1: AutoConfig 多档案管理
+# 阶段 1: AutoConfig 账号文件管理
 # ═══════════════════════════════════════════════
 
-class TestAutoConfigProfiles(unittest.TestCase):
-    """测试文件级多档案管理（跳过 load_config 的加密依赖）"""
+class TestAutoConfigAccounts(unittest.TestCase):
+    """测试账号文件管理（跳过 load_config 的加密依赖）"""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.config_path = os.path.join(self.tmpdir, "config.json")
+        self.accounts_dir = os.path.join(self.tmpdir, "accounts")
         self._write_json(self.config_path, {
-            "current_profile": "default",
+            "current_account": "default",
+            "accounts": {"dir": self.accounts_dir},
             "encryption": {},
             "game": {},
             "tasks": {},
@@ -99,8 +101,8 @@ class TestAutoConfigProfiles(unittest.TestCase):
             return json.load(f)
 
     def _make_config(self):
-        """构造一个可测试的配置对象，绑定文件级档案方法"""
-        import types, glob, shutil, copy
+        """构造一个可测试的配置对象，绑定账号文件方法"""
+        import types, glob, copy
 
         class _TestConfig:
             CONFIG_PATH = self.config_path
@@ -108,7 +110,7 @@ class TestAutoConfigProfiles(unittest.TestCase):
             def save_config(self):
                 import copy as cp
                 safe = cp.deepcopy(self._config)
-                for key in ("game", "year", "month", "day", "weekday", "profiles"):
+                for key in ("game", "year", "month", "day", "weekday"):
                     safe.pop(key, None)
                 with open(self.CONFIG_PATH, "w", encoding="utf-8") as f:
                     json.dump(safe, f, ensure_ascii=False, indent=4)
@@ -125,89 +127,85 @@ class TestAutoConfigProfiles(unittest.TestCase):
 
         cfg = _TestConfig()
 
-        def _profile_path(self, name):
-            return os.path.join(os.path.dirname(self.CONFIG_PATH), f"config_{name}.json")
-        def list_profiles(self):
-            pattern = os.path.join(os.path.dirname(self.CONFIG_PATH), "config_*.json")
-            return sorted(os.path.basename(f)[7:-5] for f in glob.glob(pattern) if os.path.basename(f)[7:-5])
-        def current_profile(self):
-            return self._config.get("current_profile", "default")
-        def switch_profile(self, target, security_key=""):
-            tp = self._profile_path(target)
-            if not os.path.exists(tp):
-                raise KeyError(f"档案 '{target}' 不存在")
-            current = self.current_profile()
+        def _account_path(self, name):
+            return os.path.join(self._config["accounts"]["dir"], f"{name}.json")
+        def list_accounts(self):
+            pattern = os.path.join(self._config["accounts"]["dir"], "*.json")
+            return sorted(os.path.splitext(os.path.basename(f))[0] for f in glob.glob(pattern))
+        def current_account(self):
+            return self._config.get("current_account", "default")
+        def switch_account(self, target, security_key=""):
+            if not os.path.exists(self._account_path(target)):
+                raise KeyError(f"account '{target}' does not exist")
+            self._config["current_account"] = target
             self.save_config()
-            shutil.copy2(self.CONFIG_PATH, self._profile_path(current))
-            shutil.copy2(tp, self.CONFIG_PATH)
-            self.load_config(security_key)
-            self._config["current_profile"] = target
-            self.save_config()
-        def add_profile(self, name, account="", password="", character_name="", security_key=""):
+        def add_account(self, name, account="", password="", server="s1", character_name="c1", security_key=""):
             safe = copy.deepcopy(self._config)
-            for k in ("game", "year", "month", "day", "weekday", "profiles"):
+            for k in ("game", "year", "month", "day", "weekday"):
                 safe.pop(k, None)
             safe["encryption"] = {"test_account": account, "test_password": password}
-            safe["current_profile"] = name
-            with open(self._profile_path(name), "w", encoding="utf-8") as f:
+            safe["active_character"] = {"server": server, "name": character_name}
+            safe["characters"] = {server: {character_name: {"tasks": {}, "status": {}}}}
+            os.makedirs(self._config["accounts"]["dir"], exist_ok=True)
+            with open(self._account_path(name), "w", encoding="utf-8") as f:
                 json.dump(safe, f, ensure_ascii=False, indent=4)
-        def delete_profile(self, name):
-            if name == self.current_profile():
-                raise ValueError("不能删除当前正在使用的档案")
-            tp = self._profile_path(name)
-            if os.path.exists(tp):
-                os.remove(tp)
+        def delete_account(self, name):
+            if name == self.current_account():
+                raise ValueError("cannot delete current account")
+            target = self._account_path(name)
+            if os.path.exists(target):
+                os.remove(target)
 
-        for fn in (_profile_path, list_profiles, current_profile, switch_profile, add_profile, delete_profile):
+        for fn in (_account_path, list_accounts, current_account, switch_account, add_account, delete_account):
             setattr(cfg, fn.__name__, types.MethodType(fn, cfg))
         return cfg
 
-    def test_list_profiles_empty(self):
+    def test_list_accounts_empty(self):
         cfg = self._make_config()
-        self.assertEqual(cfg.list_profiles(), [])
+        self.assertEqual(cfg.list_accounts(), [])
 
-    def test_current_profile(self):
+    def test_current_account(self):
         cfg = self._make_config()
-        self.assertEqual(cfg.current_profile(), "default")
+        self.assertEqual(cfg.current_account(), "default")
 
     def test_add_creates_file(self):
         cfg = self._make_config()
-        cfg.add_profile("alt", account="a2", password="p2", character_name="c2")
-        self.assertTrue(os.path.exists(os.path.join(self.tmpdir, "config_alt.json")))
-        self.assertIn("alt", cfg.list_profiles())
+        cfg.add_account("alt", account="a2", password="p2", character_name="c2")
+        self.assertTrue(os.path.exists(os.path.join(self.accounts_dir, "alt.json")))
+        self.assertIn("alt", cfg.list_accounts())
 
     def test_add_and_list_multiple(self):
         cfg = self._make_config()
-        cfg.add_profile("alt1")
-        cfg.add_profile("alt2")
-        profiles = cfg.list_profiles()
-        self.assertEqual(len(profiles), 2)
-        self.assertIn("alt1", profiles)
-        self.assertIn("alt2", profiles)
+        cfg.add_account("alt1")
+        cfg.add_account("alt2")
+        accounts = cfg.list_accounts()
+        self.assertEqual(len(accounts), 2)
+        self.assertIn("alt1", accounts)
+        self.assertIn("alt2", accounts)
 
-    def test_switch_profile_swaps_files(self):
+    def test_switch_account_sets_current(self):
         cfg = self._make_config()
-        cfg.add_profile("alt")
-        cfg.switch_profile("alt")
-        self.assertEqual(cfg.current_profile(), "alt")
-        self.assertTrue(os.path.exists(os.path.join(self.tmpdir, "config_default.json")))
+        cfg.add_account("alt")
+        cfg.switch_account("alt")
+        self.assertEqual(cfg.current_account(), "alt")
+        self.assertTrue(os.path.exists(os.path.join(self.accounts_dir, "alt.json")))
 
     def test_switch_nonexistent_raises(self):
         cfg = self._make_config()
         with self.assertRaises(KeyError):
-            cfg.switch_profile("no_such_profile")
+            cfg.switch_account("no_such_account")
 
-    def test_delete_profile_removes_file(self):
+    def test_delete_account_removes_file(self):
         cfg = self._make_config()
-        cfg.add_profile("alt")
-        cfg.delete_profile("alt")
-        self.assertNotIn("alt", cfg.list_profiles())
-        self.assertFalse(os.path.exists(os.path.join(self.tmpdir, "config_alt.json")))
+        cfg.add_account("alt")
+        cfg.delete_account("alt")
+        self.assertNotIn("alt", cfg.list_accounts())
+        self.assertFalse(os.path.exists(os.path.join(self.accounts_dir, "alt.json")))
 
     def test_delete_current_raises(self):
         cfg = self._make_config()
         with self.assertRaises(ValueError):
-            cfg.delete_profile("default")
+            cfg.delete_account("default")
 
 
 # ═══════════════════════════════════════════════
@@ -397,10 +395,10 @@ class TestServerAPIs(unittest.TestCase):
             '"/api/update/check"',
             '"/api/update/run"',
             '"/api/remote-access"',
-            '"/api/profiles"',
-            '"/api/profiles/switch"',
-            '"/api/profiles/add"',
-            '"/api/profiles/delete"',
+            '"/api/accounts"',
+            '"/api/accounts/switch"',
+            '"/api/accounts/add"',
+            '"/api/accounts/delete"',
             '"/api/config/export"',
             '"/api/config/import"',
             '"/api/deploy"',
@@ -500,24 +498,24 @@ class TestFrontend(unittest.TestCase):
         self.assertIn("exportConfig", content)
         self.assertIn("importConfig", content)
         self.assertIn("goto_main", content)
-        self.assertTrue(content.strip().endswith("};"))
+        self.assertIn("const SettingsPanel = {", content)
+        self.assertIn("template:", content)
 
-    def test_app_js_profiles(self):
+    def test_app_js_accounts(self):
         path = ROOT / "services" / "webui" / "static" / "js" / "app.js"
         content = path.read_text(encoding="utf-8")
-        self.assertIn("profiles", content)
-        self.assertIn("currentProfile", content)
-        self.assertIn("fetchProfiles", content)
-        self.assertIn("switchProfile", content)
-        self.assertIn("addProfile", content)
-        self.assertIn("deleteProfile", content)
-        self.assertIn("profileDialogVisible", content)
+        self.assertIn("accounts", content)
+        self.assertIn("currentAccount", content)
+        self.assertIn("switchAccount", content)
+        self.assertIn("addAccount", content)
+        self.assertIn("deleteAccount", content)
+        self.assertIn("accountDialogVisible", content)
 
     def test_css_theme(self):
         path = ROOT / "services" / "webui" / "static" / "css" / "style.css"
         content = path.read_text(encoding="utf-8")
         self.assertIn("html.light", content)
-        self.assertIn("profile-dropdown", content)
+        self.assertIn("account-dropdown", content)
 
     def test_post_execution_options_updated(self):
         path = ROOT / "services" / "webui" / "static" / "js" / "components" / "Settings.js"
@@ -565,8 +563,8 @@ class TestCrossModuleConsistency(unittest.TestCase):
 
     def test_config_sections_in_make_public(self):
         """make_public_config 应该删除 account/password"""
-        server_path = ROOT / "services" / "webui" / "server.py"
-        content = server_path.read_text(encoding="utf-8")
+        service_path = ROOT / "services" / "webui" / "task_tree_service.py"
+        content = service_path.read_text(encoding="utf-8")
         self.assertIn("**/account", content)
         self.assertIn("**/password", content)
 

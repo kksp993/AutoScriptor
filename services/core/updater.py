@@ -44,8 +44,12 @@ class Updater:
                 continue
         return "git"
 
+    def _git_cmd(self, *args) -> list[str]:
+        safe_root = os.path.abspath(self._root).replace("\\", "/")
+        return [self._git, "-c", f"safe.directory={safe_root}", *args]
+
     def _run_git(self, *args, timeout: int = 30, allow_failure: bool = False) -> str:
-        cmd = [self._git] + list(args)
+        cmd = self._git_cmd(*args)
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True,
@@ -60,7 +64,7 @@ class Updater:
             return ""
 
     def _run_git_ok(self, *args, timeout: int = 30) -> bool:
-        cmd = [self._git] + list(args)
+        cmd = self._git_cmd(*args)
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True,
