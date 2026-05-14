@@ -2,6 +2,7 @@ const SettingsPanel = {
   name: 'SettingsPanel',
   props: {
     filteredConfig: { type: Object, required: true },
+    executionBusy: { type: Boolean, default: false },
   },
   emits: ['save-settings'],
   data() {
@@ -73,12 +74,16 @@ const SettingsPanel = {
       return base;
     },
     saveAllSettings() {
+      if (this.executionBusy) {
+        ElementPlus.ElMessage.warning('执行中不能保存设置，请先终止当前任务');
+        return;
+      }
       this.$emit('save-settings');
     },
   },
   template: `
 <div class="bg-white rounded-xl shadow-md p-6 h-full overflow-y-auto">
-  <el-form :model="filteredConfig" label-width="130px">
+  <el-form :model="filteredConfig" label-width="130px" :disabled="executionBusy">
     <!-- 基础设置 -->
     <div v-for="(section, secKey) in visibleSections" :key="secKey" class="mb-6">
       <el-card shadow="hover">
@@ -213,7 +218,7 @@ const SettingsPanel = {
   </el-form>
 
   <div class="flex justify-center sticky bottom-0 bg-white pt-4 pb-2">
-    <el-button type="primary" size="large" class="w-2/5 min-w-[200px]" @click="saveAllSettings">
+    <el-button type="primary" size="large" class="w-2/5 min-w-[200px]" @click="saveAllSettings" :disabled="executionBusy">
       <span style="font-size:18px">保存设置</span>
     </el-button>
   </div>

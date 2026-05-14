@@ -162,7 +162,7 @@ const OverviewPanel = {
       return this.expandedDispatchKey === this.dispatchCharKey(server, name);
     },
     onDragStartDispatch(e, idx) {
-      if (this.isDispatchRunning) {
+      if (this.executionBusy) {
         e.preventDefault();
         return;
       }
@@ -173,13 +173,13 @@ const OverviewPanel = {
       } catch (_) { /* ignore */ }
     },
     onDragOverDispatchCard(e, idx) {
-      if (this.isDispatchRunning) return;
+      if (this.executionBusy) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
       this.dragOverIndex = idx;
     },
     onDropDispatchCard(e, idx) {
-      if (this.isDispatchRunning) return;
+      if (this.executionBusy) return;
       this.dragOverIndex = null;
       let raw = e.dataTransfer.getData('text/plain');
       if (!raw) raw = e.dataTransfer.getData('application/x-dispatch-index');

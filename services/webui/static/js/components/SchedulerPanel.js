@@ -82,6 +82,7 @@ const SchedulerPanel = {
           :model-value="professionFor(activeCharacter.server, activeCharacter.name)"
           placeholder="游戏职业"
           filterable
+          :disabled="executionBusy"
           @change="v => $emit('set-game-profession', activeCharacter.server, activeCharacter.name, v)"
         >
           <el-option v-for="p in gameProfessionOptions" :key="p" :label="p" :value="p"></el-option>
@@ -106,7 +107,7 @@ const SchedulerPanel = {
         <el-button type="primary" size="large" @click="$emit('start-run')" :disabled="!characterName || executionBusy"><i class="fa fa-play mr-1.5"></i>开始运行</el-button>
         <el-button type="danger" size="large" @click="$emit('stop-run')"><i class="fa fa-stop mr-1.5"></i>终止执行</el-button>
       </div>
-      <el-button v-if="overviewData.scheduler.state==='error'" type="danger" size="large" @click="$emit('reset-scheduler')" class="sched-btn-full"><i class="fa fa-refresh mr-1.5"></i>恢复调度</el-button>
+      <el-button v-if="overviewData.scheduler.state==='error'" type="danger" size="large" @click="$emit('reset-scheduler')" :disabled="executionBusy" class="sched-btn-full"><i class="fa fa-refresh mr-1.5"></i>恢复调度</el-button>
     </div>
 
     <div v-if="overviewData.scheduler.consecutive_errors > 0" class="mb-4 px-3.5 py-2.5 bg-red-50 text-red-700 rounded-lg text-sm">

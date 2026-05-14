@@ -199,6 +199,7 @@ class Scheduler:
         self._stop = threading.Event()
         self._wake = threading.Event()
         self._tasks_updated = threading.Event()
+        self._pipeline_active = threading.Event()
         self._consecutive_errors = 0
         self._logged_in_character: tuple[str, str] | None = None  # (server, name)
 
@@ -265,6 +266,10 @@ class Scheduler:
             self._tasks_updated.clear()
             return True
         return False
+
+    @property
+    def is_executing(self) -> bool:
+        return self._pipeline_active.is_set()
 
     # ── 结果反馈 ──
 
@@ -434,7 +439,7 @@ class Scheduler:
         统一的任务执行管线，调度模式和单任务模式共用。
 
         explicit_tasks=None  → 调度模式，由 _collect_due() 动态收集到期任务
-        explicit_tasks=[...] → 单任务模式，执行外部传入的固定列表（不跑自动登录，假定当前角色正确）
+        explicit_tasks=[...] → 单任务模式，执行外部传入的固定列表（仍复用登录确认与中断控制）
         """
         from AutoScriptor.utils.app_config import cfg
         from AutoScriptor.utils.perf import boost, unboost
@@ -445,6 +450,7 @@ class Scheduler:
 
         total_success = total_failed = 0
         attempted: set[tuple[str, str, str]] = set()
+        self._pipeline_active.set()
 
         try:
             while True:
@@ -525,6 +531,7 @@ class Scheduler:
                     logger.error("📅 配置保存/重载失败（将在下一轮重新收集任务）: %s", e)
 
         finally:
+            self._pipeline_active.clear()
             unboost()
 
         if total_success > 0 or total_failed > 0:
@@ -702,6 +709,8 @@ class Scheduler:
             "label": self.state_label,
             "color": _STATE_COLORS.get(self.state.value, "gray"),
             "consecutive_errors": self._consecutive_errors,
+            "executing": self.is_executing,
+            "busy": self.state == SchedulerState.RUNNING or self.is_executing,
         }
 
 

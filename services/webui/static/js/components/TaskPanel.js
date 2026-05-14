@@ -59,7 +59,8 @@ const TaskPanel = {
           调度: {{ schedulerStatus.label || '未知' }}
         </span>
         <button v-if="schedulerStatus.state==='error'"
-                class="px-3 py-1.5 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200 transition-colors font-medium shrink-0"
+                class="px-3 py-1.5 bg-red-100 text-red-700 rounded text-sm hover:bg-red-200 transition-colors font-medium shrink-0 disabled:opacity-50 disabled:pointer-events-none"
+                :disabled="executionBusy"
                 @click="$emit('reset-scheduler')">
           <i class="fa fa-refresh mr-1"></i>恢复调度
         </button>
