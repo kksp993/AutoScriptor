@@ -154,7 +154,7 @@ def _direct_run_alive() -> bool:
 def _runtime_busy_reason() -> str | None:
     if _direct_run_alive():
         return "direct_run"
-    if scheduler.state == SchedulerState.RUNNING:
+    if scheduler.state == SchedulerState.RUNNING or getattr(scheduler, "is_executing", False):
         return "scheduler"
     return None
 
@@ -992,6 +992,7 @@ async def stop_tasks_api():
             return True
 
         alive = RUN_THREAD.is_alive() if RUN_THREAD else False
+        scheduler_alive = scheduler.state == SchedulerState.RUNNING or getattr(scheduler, "is_executing", False)
         # 无论线程注入是否成功，都要设置取消事件 + 让调度器回到 PENDING
         # （PyThreadState_SetAsyncExc 在 C 扩展阻塞时不可靠，必须双保险）
         TASK_MANAGER.request_cancel()
@@ -1000,7 +1001,7 @@ async def stop_tasks_api():
         if alive and RUN_THREAD.ident:
             _async_raise(RUN_THREAD.ident, KeyboardInterrupt)
         logger.info("⏹ 已发送终止信号")
-        return {'status': 'stopping' if alive else 'idle'}
+        return {'status': 'stopping' if (alive or scheduler_alive) else 'idle'}
     except Exception as e:
         logger.error("stop error: %s", e)
         return JSONResponse(status_code=500, content={'error': str(e)})
@@ -1026,6 +1027,10 @@ async def verify_account_api(request: Request):
     client_ip = request.client.host if request.client else "unknown"
     if _is_verify_rate_limited(client_ip):
         return JSONResponse(status_code=429, content={"error": "验证尝试过多，请5分钟后再试"})
+
+    busy = _guard_runtime_idle("verify account")
+    if busy is not None:
+        return busy
 
     data = await request.json()
     if not _check_request_freshness(data):

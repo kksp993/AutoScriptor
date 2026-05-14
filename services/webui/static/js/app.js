@@ -107,15 +107,11 @@ const app = createApp({
     }
 
     async function setGameProfession(server, character, game_profession) {
-      if (executionBusy.value) {
-        ElementPlus.ElMessage.warning('执行中不能修改角色职业，请先终止当前任务');
-        return;
-      }
+      if (!ensureIdle('执行中不能修改角色职业，请先终止当前任务')) return;
       try {
-        const res = await API.postRaw('/characters/game_profession', { server, character, game_profession });
-        const payload = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          ElementPlus.ElMessage.error((payload && payload.error) || '保存职业失败');
+        const { ok, data: payload } = await API.request('POST', '/characters/game_profession', { server, character, game_profession });
+        if (!ok) {
+          showApiError(payload, '保存职业失败');
           return;
         }
         mergeGameProfessionsFromPayload(payload);
@@ -139,7 +135,7 @@ const app = createApp({
     /** 总调度 / 调度模式 / 单任务互斥：任一路径占用即禁止其它入口 */
     const executionBusy = computed(() => {
       if (directRunRunning.value) return true;
-      return schedulerStatus.state === 'running';
+      return schedulerStatus.state === 'running' || schedulerStatus.busy === true || schedulerStatus.executing === true;
     });
 
     // ── 密码保护 ──
@@ -236,25 +232,73 @@ const app = createApp({
     // ── API helpers ──
     const API = {
       async get(url) {
-        return (await fetch('/api' + url, { credentials: 'same-origin' })).json();
+        return (await this.request('GET', url)).data;
       },
       async post(url, body) {
-        return (await fetch('/api' + url, {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...body, _timestamp: Date.now() / 1000 }),
-        })).json();
+        return (await this.request('POST', url, body)).data;
       },
-      async postRaw(url, body) {
-        return fetch('/api' + url, {
-          method: 'POST',
+      async request(method, url, body) {
+        const options = {
+          method,
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...body, _timestamp: Date.now() / 1000 }),
-        });
+        };
+        if (method !== 'GET') {
+          options.body = JSON.stringify({ ...(body || {}), _timestamp: Date.now() / 1000 });
+        }
+        const res = await fetch('/api' + url, options);
+        let data = {};
+        if (res.status !== 204) {
+          data = await res.json().catch(() => ({}));
+        }
+        return { ok: res.ok, status: res.status, data, res };
       },
     };
+
+    function apiErrorMessage(data, fallback) {
+      if (data && (data.message || data.error)) return data.message || data.error;
+      return fallback || '操作失败';
+    }
+
+    function showApiError(data, fallback, level = 'error') {
+      const text = apiErrorMessage(data, fallback);
+      ElementPlus.ElMessage({ type: level, message: text });
+    }
+
+    function ensureIdle(message = '执行中不能修改配置，请先终止当前任务') {
+      if (!executionBusy.value) return true;
+      ElementPlus.ElMessage.warning(message);
+      return false;
+    }
+
+    function syncCharactersPayload(data) {
+      if (!data || typeof data !== 'object') return;
+      if (data.active_character) Object.assign(activeCharacter, { server: '', name: '' }, data.active_character);
+      if (data.characters) {
+        Object.keys(charactersTree).forEach(k => delete charactersTree[k]);
+        Object.assign(charactersTree, data.characters);
+      }
+      if (data.accounts) accounts.value = data.accounts || [];
+      if (data.current_account !== undefined) currentAccount.value = data.current_account || '';
+      if (data.character_name !== undefined) {
+        characterName.value = data.character_name || '';
+        if (!configData.game) configData.game = {};
+        configData.game.character_name = characterName.value;
+      }
+      mergeGameProfessionsFromPayload(data);
+    }
+
+    async function refreshRuntimePanels({ config = false, accounts = false } = {}) {
+      if (config) await refreshConfig(true);
+      await Promise.all([
+        fetchOverview(),
+        fetchSchedulerStatus(),
+        fetchRunStatus(),
+        fetchAllTasksSummary(),
+        accounts ? fetchAccounts() : Promise.resolve(),
+        loadDispatchQueue(),
+      ]);
+    }
 
     // ── data fetching ──
     let _lastRefreshAt = 0;
@@ -279,23 +323,20 @@ const app = createApp({
     async function refreshConfig(force = false) {
       const now = Date.now();
       if (!force && now - _lastRefreshAt < REFRESH_COOLDOWN) return;
-      _lastRefreshAt = now;
       try {
         const data = await API.get('/refresh');
-        applyPublicConfigPayload(data);
+        if (applyPublicConfigPayload(data)) {
+          _lastRefreshAt = now;
+        }
       } catch (e) { console.error('Refresh failed:', e); }
     }
 
     async function reloadTasks() {
-      if (executionBusy.value) {
-        ElementPlus.ElMessage.warning('执行中不能重载任务，请先终止当前任务');
-        return;
-      }
+      if (!ensureIdle('执行中不能重载任务，请先终止当前任务')) return;
       try {
-        const res = await API.postRaw('/tasks/reload', {});
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          ElementPlus.ElMessage.error((data && (data.message || data.error)) || '重载任务失败');
+        const { ok, data } = await API.request('POST', '/tasks/reload', {});
+        if (!ok) {
+          showApiError(data, '重载任务失败');
           return;
         }
         applyPublicConfigPayload(data);
@@ -317,10 +358,7 @@ const app = createApp({
           }
           overviewData.upcoming = data.upcoming || [];
           if (data.runtime) Object.assign(overviewData.runtime, data.runtime);
-          Object.assign(schedulerStatus, {
-            state: data.scheduler.state, label: data.scheduler.label,
-            color: data.scheduler.color, consecutive_errors: data.scheduler.consecutive_errors,
-          });
+          Object.assign(schedulerStatus, data.scheduler);
         }
       } catch (e) { /* ignore */ }
     }
@@ -328,7 +366,7 @@ const app = createApp({
     async function fetchSchedulerStatus() {
       try {
         const data = await API.get('/scheduler/status');
-        Object.assign(schedulerStatus, data);
+        if (data && !data.error) Object.assign(schedulerStatus, data);
       } catch (e) { /* ignore */ }
     }
 
@@ -426,6 +464,58 @@ const app = createApp({
     }
 
     // ── actions ──
+    async function handleRunStartResponse(result, fallbackMessage) {
+      const data = result.data || {};
+      if (result.status === 409) {
+        showApiError(data, '执行冲突，请先终止当前任务', 'warning');
+        await refreshRuntimePanels();
+        return null;
+      }
+      if (result.status === 400) {
+        showApiError(data, fallbackMessage || '启动失败');
+        await refreshRuntimePanels();
+        return null;
+      }
+      if (result.status === 403) {
+        if (data && data.need_credential_unlock) await fetchCredentialStatus();
+        showApiError(data, '请先验证安全密码后再执行任务', 'warning');
+        await refreshRuntimePanels();
+        return null;
+      }
+      if (!result.ok) {
+        showApiError(data, fallbackMessage || '启动失败');
+        await refreshRuntimePanels();
+        return null;
+      }
+      await refreshRuntimePanels();
+      return data || {};
+    }
+
+    async function startSchedulerRun(successMessage = '调度器已启动，到期任务将自动执行') {
+      if (!overviewSecurityUnlocked.value) {
+        ElementPlus.ElMessage.warning('请先验证安全密码后再执行任务');
+        return false;
+      }
+      if (!dispatchQueue.value.length) {
+        ElementPlus.ElMessage.info('调度队列为空');
+        return false;
+      }
+      if (executionBusy.value) {
+        ElementPlus.ElMessage.warning('当前仍有任务在运行或停止中，请先终止或稍候再试');
+        return false;
+      }
+      try {
+        const result = await API.request('POST', '/run', { tasks: [], activate_scheduler: true });
+        const data = await handleRunStartResponse(result, '启动调度失败');
+        if (!data) return false;
+        ElementPlus.ElMessage.success(successMessage);
+        return true;
+      } catch (e) {
+        ElementPlus.ElMessage.error('启动调度失败: ' + e);
+        return false;
+      }
+    }
+
     async function startRun() {
       if (!overviewSecurityUnlocked.value) {
         ElementPlus.ElMessage.warning('请先验证安全密码后再执行任务');
@@ -435,13 +525,17 @@ const app = createApp({
         ElementPlus.ElMessage.warning('请先验证账号密码后再执行任务');
         return;
       }
-      if (directRunRunning.value) {
-        ElementPlus.ElMessage.warning('单任务或队列正在执行中，请先终止');
-        return;
-      }
       const tasks = [];
 
       const isSchedulerView = activeTab.value === 'overview' || activeTab.value === 'scheduler';
+      if (isSchedulerView) {
+        await startSchedulerRun('调度器已启动，到期任务将自动执行');
+        return;
+      }
+      if (executionBusy.value) {
+        ElementPlus.ElMessage.warning('当前仍有任务在运行或停止中，请先终止或稍候再试');
+        return;
+      }
       if (!isSchedulerView) {
         const base = (activeTabLabel.value ? activeTabLabel.value + '/' : '') +
                      (activeGroupPath.value ? activeGroupPath.value + '/' : '');
@@ -468,32 +562,14 @@ const app = createApp({
         return;
       }
       try {
-        const res = await API.postRaw('/run', {
+        const result = await API.request('POST', '/run', {
           tasks,
-          activate_scheduler: isSchedulerView,
-          ...(isSchedulerView ? {} : runCharacterPayload()),
+          activate_scheduler: false,
+          ...runCharacterPayload(),
         });
-        const data = await res.json();
-        if (res.status === 409) {
-          ElementPlus.ElMessage.warning((data && data.message) || '执行冲突，请先终止其它任务');
-          await fetchRunStatus();
-          return;
-        }
-        if (res.status === 400) { ElementPlus.ElMessage.error(data.message || '角色切换失败'); return; }
-        if (res.status === 403) {
-          if (data && data.need_credential_unlock) await fetchCredentialStatus();
-          ElementPlus.ElMessage.warning((data && data.message) || '请先验证安全密码后再执行任务');
-          return;
-        }
-        fetchSchedulerStatus();
-        fetchOverview();
-        fetchRunStatus();
-        if (res.ok) {
-          ElementPlus.ElMessage.success(
-            isSchedulerView ? '调度器已启动，到期任务将自动执行' : '已开始执行当前任务列表'
-          );
-        }
-      } catch (e) { console.error('Run error:', e); }
+        const data = await handleRunStartResponse(result, '启动执行失败');
+        if (data) ElementPlus.ElMessage.success('已开始执行当前任务列表');
+      } catch (e) { ElementPlus.ElMessage.error('执行失败: ' + e); }
     }
 
     async function runSingleTask(taskPath) {
@@ -505,46 +581,28 @@ const app = createApp({
         ElementPlus.ElMessage.warning('请先验证账号密码后再执行任务');
         return;
       }
-      if (directRunRunning.value) {
-        ElementPlus.ElMessage.warning('已有任务正在执行，请先终止');
-        return;
-      }
-      if (schedulerStatus.state === 'running') {
-        ElementPlus.ElMessage.warning('调度器运行中，请先停止调度再跑单任务');
+      if (executionBusy.value) {
+        if (directRunRunning.value) ElementPlus.ElMessage.warning('已有任务正在执行，请先终止');
+        else if (schedulerStatus.state === 'running') ElementPlus.ElMessage.warning('调度器运行中，请先停止调度再跑单任务');
+        else ElementPlus.ElMessage.warning('当前任务正在停止中，请稍候再试');
         return;
       }
       const fullPath = (activeTabLabel.value ? activeTabLabel.value + '/' : '') + taskPath;
       try {
-        const res = await API.postRaw('/run', { tasks: [fullPath], activate_scheduler: false, ...runCharacterPayload() });
-        const data = await res.json();
-        if (res.status === 409) {
-          ElementPlus.ElMessage.warning((data && data.message) || '执行冲突，请先终止其它任务');
-          await fetchRunStatus();
-          return;
-        }
-        if (res.status === 400) { ElementPlus.ElMessage.error(data.message || '角色切换失败'); return; }
-        if (res.status === 403) {
-          if (data && data.need_credential_unlock) await fetchCredentialStatus();
-          ElementPlus.ElMessage.warning((data && data.message) || '请先验证安全密码后再执行任务');
-          return;
-        }
-        ElementPlus.ElMessage.success('已加入队列: ' + taskPath.split('/').pop());
-        fetchSchedulerStatus();
-        fetchOverview();
-        fetchRunStatus();
+        const result = await API.request('POST', '/run', { tasks: [fullPath], activate_scheduler: false, ...runCharacterPayload() });
+        const data = await handleRunStartResponse(result, '执行失败');
+        if (data) ElementPlus.ElMessage.success('已加入队列: ' + taskPath.split('/').pop());
       } catch (e) { ElementPlus.ElMessage.error('执行失败: ' + e); }
     }
 
     async function unifiedStop() {
       try {
-        await API.post('/stop', {});
+        const { ok, data } = await API.request('POST', '/stop', {});
+        if (!ok) showApiError(data, '终止失败');
       } catch (e) {
         console.error('Stop error:', e);
       }
-      await fetchSchedulerStatus();
-      await fetchRunStatus();
-      await fetchOverview();
-      await fetchAllTasksSummary();
+      await refreshRuntimePanels();
     }
 
     function stopRun() {
@@ -552,6 +610,7 @@ const app = createApp({
     }
 
     async function verifyAccount(securityKeyDirect) {
+      if (!ensureIdle('执行中不能验证账号，请先终止当前任务')) return;
       try {
         let key = securityKeyDirect;
         if (!key) {
@@ -560,9 +619,8 @@ const app = createApp({
             { inputType: 'password', confirmButtonText: '验证', cancelButtonText: '取消' });
           key = value;
         }
-        const res = await API.postRaw('/verify', { security_key: key });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok && data && !data.error) {
+        const { ok, data } = await API.request('POST', '/verify', { security_key: key });
+        if (ok && data && !data.error) {
           characterName.value = data.character_name || '';
           if (data.active_character) Object.assign(activeCharacter, data.active_character);
           if (!configData.game) configData.game = {};
@@ -574,15 +632,21 @@ const app = createApp({
           loadDispatchQueue();
           fetchAccounts();
           markOverviewSecurityUnlocked();
-        } else if (!res.ok) {
-          ElementPlus.ElMessage.error(data.error || '验证失败，请检查安全密码');
+        } else if (!ok) {
+          showApiError(data, '验证失败，请检查安全密码');
         }
       } catch (e) { /* cancelled */ }
     }
 
     async function resetScheduler() {
+      if (!ensureIdle('执行中不能恢复调度，请先终止当前任务')) return;
       try {
-        const data = await API.post('/scheduler/reset', {});
+        const { ok, data } = await API.request('POST', '/scheduler/reset', {});
+        if (!ok) {
+          showApiError(data, '恢复失败');
+          await refreshRuntimePanels();
+          return;
+        }
         Object.assign(schedulerStatus, data);
         Object.assign(overviewData.scheduler, data);
         ElementPlus.ElMessage.success('调度器已恢复');
@@ -742,10 +806,9 @@ const app = createApp({
     }
 
     async function persistTasks(tasks, successMessage = '任务已保存') {
-      const res = await API.postRaw('/tasks', { tasks });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        ElementPlus.ElMessage.error('保存失败: ' + ((data && (data.message || data.error)) || '未知错误'));
+      const { ok, data } = await API.request('POST', '/tasks', { tasks });
+      if (!ok) {
+        ElementPlus.ElMessage.error('保存失败: ' + apiErrorMessage(data, '未知错误'));
         return false;
       }
       if (!applyPublicConfigPayload(data)) {
@@ -760,10 +823,7 @@ const app = createApp({
 
     async function saveTask() {
       if (!editTaskKey.value) return;
-      if (executionBusy.value) {
-        ElementPlus.ElMessage.warning('执行中不能修改任务配置，请先终止当前任务');
-        return;
-      }
+      if (!ensureIdle('执行中不能修改任务配置，请先终止当前任务')) return;
       const meta = editTaskData.value?.param_meta || {};
       for (const [pk, mp] of Object.entries(meta)) {
         if (mp && typeof mp === 'object' && mp.type === 'table') {
@@ -810,26 +870,19 @@ const app = createApp({
     }
 
     async function saveTasks() {
-      if (executionBusy.value) {
-        ElementPlus.ElMessage.warning('执行中不能保存任务配置，请先终止当前任务');
-        return;
-      }
+      if (!ensureIdle('执行中不能保存任务配置，请先终止当前任务')) return;
       try {
         await persistTasks(configData.tasks || {});
       } catch (e) { ElementPlus.ElMessage.error('保存失败: ' + e); }
     }
 
     async function saveSettings() {
-      if (executionBusy.value) {
-        ElementPlus.ElMessage.warning('执行中不能保存设置，请先终止当前任务');
-        return;
-      }
+      if (!ensureIdle('执行中不能保存设置，请先终止当前任务')) return;
       try {
         await loadTheme();
-        const res = await API.postRaw('/config', configData);
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          ElementPlus.ElMessage.error('保存失败: ' + ((data && (data.message || data.error)) || '未知错误'));
+        const { ok, data } = await API.request('POST', '/config', configData);
+        if (!ok) {
+          ElementPlus.ElMessage.error('保存失败: ' + apiErrorMessage(data, '未知错误'));
           return;
         }
         ElementPlus.ElMessage.success('保存成功');
@@ -846,12 +899,18 @@ const app = createApp({
       }
     }
 
+    function openAddAccountDialog() {
+      if (!ensureIdle('执行中不能修改账号密码，请先终止当前任务')) return;
+      addDialogVisible.value = true;
+    }
+
     async function submitAddAccount() {
+      if (!ensureIdle('执行中不能修改账号密码，请先终止当前任务')) return;
       try {
         const payload = { ...addForm };
 
-        const res1 = await API.postRaw('/account', payload);
-        const data1 = await res1.json();
+        const res1 = await API.request('POST', '/account', payload);
+        const data1 = res1.data || {};
 
         if (data1.need_current_key) {
           try {
@@ -860,8 +919,8 @@ const app = createApp({
               { inputType: 'password', confirmButtonText: '验证', cancelButtonText: '取消' });
             payload.current_security_key = curKey;
           } catch { return; }
-          const res1b = await API.postRaw('/account', payload);
-          const data1b = await res1b.json();
+          const res1b = await API.request('POST', '/account', payload);
+          const data1b = res1b.data || {};
           if (!res1b.ok) {
             ElementPlus.ElMessage.error(data1b.error || '验证失败');
             return;
@@ -872,8 +931,8 @@ const app = createApp({
                 confirmButtonText: '继续', cancelButtonText: '取消', type: 'warning' });
             } catch { return; }
             payload.confirmed = true;
-            const res2 = await API.postRaw('/account', payload);
-            const data2 = await res2.json();
+            const res2 = await API.request('POST', '/account', payload);
+            const data2 = res2.data || {};
             if (!res2.ok) { ElementPlus.ElMessage.error(data2.error || '更新失败'); return; }
             characterName.value = data2.character_name || '';
           } else {
@@ -885,8 +944,8 @@ const app = createApp({
               confirmButtonText: '继续', cancelButtonText: '取消', type: 'warning' });
           } catch { return; }
           payload.confirmed = true;
-          const res2 = await API.postRaw('/account', payload);
-          const data2 = await res2.json();
+          const res2 = await API.request('POST', '/account', payload);
+          const data2 = res2.data || {};
           if (!res2.ok) { ElementPlus.ElMessage.error(data2.error || '更新失败'); return; }
           characterName.value = data2.character_name || '';
         } else {
@@ -955,22 +1014,31 @@ const app = createApp({
     async function fetchAccounts() {
       try {
         const data = await API.get('/accounts');
-        accounts.value = data.accounts || [];
-        currentAccount.value = data.current_account || '';
-        if (data.active_character) Object.assign(activeCharacter, data.active_character);
-        if (data.characters) {
-          Object.keys(charactersTree).forEach(k => delete charactersTree[k]);
-          Object.assign(charactersTree, data.characters);
-        }
+        syncCharactersPayload(data);
       } catch (e) { console.error('fetchAccounts', e); }
+    }
+
+    function openAccountDialog() {
+      if (!ensureIdle('执行中不能新增账号，请先终止当前任务')) return;
+      accountDialogVisible.value = true;
+    }
+
+    function openCharacterDialog() {
+      if (!ensureIdle('执行中不能新增角色，请先终止当前任务')) return;
+      characterDialogVisible.value = true;
+    }
+
+    function handleAccountCommand(command) {
+      if (command === '__new__') {
+        openAccountDialog();
+        return;
+      }
+      switchAccount(command);
     }
 
     async function switchAccount(name, securityKeyDirect) {
       if (name === '__new__') return;
-      if (executionBusy.value) {
-        ElementPlus.ElMessage.warning('执行中不能切换账号，请先终止当前任务');
-        return;
-      }
+      if (!ensureIdle('执行中不能切换账号，请先终止当前任务')) return;
       try {
         let securityKey = securityKeyDirect;
         if (!securityKey) {
@@ -980,16 +1048,9 @@ const app = createApp({
           securityKey = value;
         }
         if (!securityKey) return;
-        const res = await API.postRaw('/accounts/switch', { name, security_key: securityKey });
-        const data = await res.json();
-        if (res.ok) {
-          currentAccount.value = name;
-          characterName.value = data.character_name || '';
-          if (data.active_character) Object.assign(activeCharacter, data.active_character);
-          if (data.characters) {
-            Object.keys(charactersTree).forEach(k => delete charactersTree[k]);
-            Object.assign(charactersTree, data.characters);
-          }
+        const { ok, data } = await API.request('POST', '/accounts/switch', { name, security_key: securityKey });
+        if (ok) {
+          syncCharactersPayload({ ...data, current_account: name });
           ElementPlus.ElMessage.success('已切换到账号: ' + name);
           await refreshConfig(true);
           await fetchCredentialStatus();
@@ -997,16 +1058,13 @@ const app = createApp({
           loadDispatchQueue();
           markOverviewSecurityUnlocked();
         } else {
-          ElementPlus.ElMessage.error(data.error || '切换失败');
+          showApiError(data, '切换失败');
         }
       } catch { /* cancelled */ }
     }
 
     async function addAccount() {
-      if (executionBusy.value) {
-        ElementPlus.ElMessage.warning('执行中不能新增账号，请先终止当前任务');
-        return;
-      }
+      if (!ensureIdle('执行中不能新增账号，请先终止当前任务')) return;
       const name = (newAccountForm.name || '').trim();
       const account = (newAccountForm.account || '').trim();
       const password = (newAccountForm.password || '').trim();
@@ -1020,108 +1078,83 @@ const app = createApp({
       if (!character_name) { ElementPlus.ElMessage.warning('请输入角色名'); return; }
       if (!security_key) { ElementPlus.ElMessage.warning('请输入安全密码'); return; }
       try {
-        const res = await API.postRaw('/accounts/add', { name, account, password, server, character_name, security_key });
-        const data = await res.json();
-        if (res.ok) {
+        const { ok, data } = await API.request('POST', '/accounts/add', { name, account, password, server, character_name, security_key });
+        if (ok) {
           accounts.value = data.accounts || [];
           accountDialogVisible.value = false;
           Object.assign(newAccountForm, { name: '', account: '', password: '', server: '', character_name: '', security_key: '' });
           ElementPlus.ElMessage.success('账号已创建');
         } else {
-          ElementPlus.ElMessage.error(data.error || '创建失败');
+          showApiError(data, '创建失败');
         }
       } catch (e) { ElementPlus.ElMessage.error('创建失败: ' + e); }
     }
 
     async function deleteAccount(name) {
-      if (executionBusy.value) {
-        ElementPlus.ElMessage.warning('执行中不能删除账号，请先终止当前任务');
-        return;
-      }
+      if (!ensureIdle('执行中不能删除账号，请先终止当前任务')) return;
       try {
         await ElementPlus.ElMessageBox.confirm(
           `确定删除账号 "${name}" 吗？该账号下所有角色数据将被删除，此操作不可恢复。`, '删除账号',
           { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' });
-        const res = await API.postRaw('/accounts/delete', { name });
-        const data = await res.json();
-        if (res.ok) {
-          accounts.value = data.accounts || [];
-          currentAccount.value = data.current_account || '';
+        const { ok, data } = await API.request('POST', '/accounts/delete', { name });
+        if (ok) {
+          syncCharactersPayload(data);
           ElementPlus.ElMessage.success('账号已删除');
         } else {
-          ElementPlus.ElMessage.error(data.error || '删除失败');
+          showApiError(data, '删除失败');
         }
       } catch { /* cancelled */ }
     }
 
     // ── 角色管理 ──
     async function switchCharacter(server, character) {
-      if (executionBusy.value) {
-        ElementPlus.ElMessage.warning('执行中不能切换角色，请先终止当前任务');
-        return;
-      }
+      if (!ensureIdle('执行中不能切换角色，请先终止当前任务')) return;
       try {
-        const res = await API.postRaw('/characters/switch', { server, character });
-        const data = await res.json();
-        if (res.ok) {
-          characterName.value = data.character_name || character;
-          if (data.active_character) Object.assign(activeCharacter, data.active_character);
+        const { ok, data } = await API.request('POST', '/characters/switch', { server, character });
+        if (ok) {
+          syncCharactersPayload({ ...data, character_name: data.character_name || character });
           ElementPlus.ElMessage.success('已切换到角色: ' + server + '/' + character);
           refreshConfig(true);
           fetchAllTasksSummary();
         } else {
-          ElementPlus.ElMessage.error(data.error || '切换失败');
+          showApiError(data, '切换失败');
         }
       } catch (e) { ElementPlus.ElMessage.error('切换角色失败: ' + e); }
     }
 
     async function addCharacter() {
-      if (executionBusy.value) {
-        ElementPlus.ElMessage.warning('执行中不能新增角色，请先终止当前任务');
-        return;
-      }
+      if (!ensureIdle('执行中不能新增角色，请先终止当前任务')) return;
       if (!newCharacterForm.server) { ElementPlus.ElMessage.warning('请输入服务器名称'); return; }
       if (!newCharacterForm.character) { ElementPlus.ElMessage.warning('请输入角色名称'); return; }
       try {
-        const res = await API.postRaw('/characters/add', { ...newCharacterForm });
-        const data = await res.json();
-        if (res.ok) {
-          if (data.characters) {
-            Object.keys(charactersTree).forEach(k => delete charactersTree[k]);
-            Object.assign(charactersTree, data.characters);
-          }
+        const { ok, data } = await API.request('POST', '/characters/add', { ...newCharacterForm });
+        if (ok) {
+          syncCharactersPayload(data);
           characterDialogVisible.value = false;
           Object.assign(newCharacterForm, { server: '', character: '' });
           ElementPlus.ElMessage.success('角色已添加');
           await refreshConfig(true);
           fetchAccounts();
         } else {
-          ElementPlus.ElMessage.error(data.error || '添加失败');
+          showApiError(data, '添加失败');
         }
       } catch (e) { ElementPlus.ElMessage.error('添加失败: ' + e); }
     }
 
     async function deleteCharacter(server, character) {
-      if (executionBusy.value) {
-        ElementPlus.ElMessage.warning('执行中不能删除角色，请先终止当前任务');
-        return;
-      }
+      if (!ensureIdle('执行中不能删除角色，请先终止当前任务')) return;
       try {
         await ElementPlus.ElMessageBox.confirm(
           `确定删除角色 "${server}/${character}" 吗？该角色的任务数据将被删除，此操作不可恢复。`, '删除角色',
           { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' });
-        const res = await API.postRaw('/characters/delete', { server, character });
-        const data = await res.json();
-        if (res.ok) {
-          if (data.characters) {
-            Object.keys(charactersTree).forEach(k => delete charactersTree[k]);
-            Object.assign(charactersTree, data.characters);
-          }
+        const { ok, data } = await API.request('POST', '/characters/delete', { server, character });
+        if (ok) {
+          syncCharactersPayload(data);
           ElementPlus.ElMessage.success('角色已删除');
           await refreshConfig(true);
           fetchAccounts();
         } else {
-          ElementPlus.ElMessage.error(data.error || '删除失败');
+          showApiError(data, '删除失败');
         }
       } catch { /* cancelled */ }
     }
@@ -1140,101 +1173,62 @@ const app = createApp({
     async function loadDispatchQueue() {
       try {
         const data = await API.get('/dispatch/queue');
-        dispatchQueue.value = data.queue || [];
+        if (data && Array.isArray(data.queue)) dispatchQueue.value = data.queue;
       } catch (e) { console.error('loadDispatchQueue', e); }
     }
 
     async function saveDispatchQueue() {
-      if (executionBusy.value) {
-        ElementPlus.ElMessage.warning('执行中不能修改调度队列，请先终止当前任务');
-        return;
-      }
+      return persistDispatchQueue(dispatchQueue.value);
+    }
+
+    async function persistDispatchQueue(nextQueue) {
+      if (!ensureIdle('执行中不能修改调度队列，请先终止当前任务')) return false;
       try {
-        const data = await API.post('/dispatch/queue', { queue: dispatchQueue.value });
+        const { ok, data } = await API.request('POST', '/dispatch/queue', { queue: nextQueue });
+        if (!ok) {
+          showApiError(data, '保存调度队列失败');
+          await loadDispatchQueue();
+          return false;
+        }
         if (data && Array.isArray(data.queue)) {
           dispatchQueue.value = data.queue;
+          return true;
         }
-      } catch (e) { console.error('saveDispatchQueue', e); }
+        await loadDispatchQueue();
+        return true;
+      } catch (e) {
+        ElementPlus.ElMessage.error('保存调度队列失败: ' + e);
+        await loadDispatchQueue();
+        return false;
+      }
     }
 
-    function addToDispatch(server, name) {
-      if (executionBusy.value) {
-        ElementPlus.ElMessage.warning('执行中不能修改调度队列，请先终止当前任务');
-        return;
-      }
+    async function addToDispatch(server, name) {
+      if (!ensureIdle('执行中不能修改调度队列，请先终止当前任务')) return;
       const exists = dispatchQueue.value.some(c => c.server === server && c.name === name);
       if (!exists) {
-        dispatchQueue.value.push({ server, name });
-        saveDispatchQueue();
+        await persistDispatchQueue([...dispatchQueue.value, { server, name }]);
       }
     }
 
-    function removeFromDispatch(server, name) {
-      if (executionBusy.value) {
-        ElementPlus.ElMessage.warning('执行中不能修改调度队列，请先终止当前任务');
-        return;
-      }
-      dispatchQueue.value = dispatchQueue.value.filter(c => !(c.server === server && c.name === name));
-      saveDispatchQueue();
+    async function removeFromDispatch(server, name) {
+      if (!ensureIdle('执行中不能修改调度队列，请先终止当前任务')) return;
+      const nextQueue = dispatchQueue.value.filter(c => !(c.server === server && c.name === name));
+      await persistDispatchQueue(nextQueue);
     }
 
-    function reorderDispatchQueue(fromIndex, toIndex) {
-      if (executionBusy.value) {
-        ElementPlus.ElMessage.warning('执行中不能调整调度队列，请先终止当前任务');
-        return;
-      }
+    async function reorderDispatchQueue(fromIndex, toIndex) {
+      if (!ensureIdle('执行中不能调整调度队列，请先终止当前任务')) return;
       const q = [...dispatchQueue.value];
       if (fromIndex < 0 || fromIndex >= q.length || toIndex < 0 || toIndex >= q.length) return;
       if (fromIndex === toIndex) return;
       const [item] = q.splice(fromIndex, 1);
       q.splice(toIndex, 0, item);
-      dispatchQueue.value = q;
-      saveDispatchQueue();
+      await persistDispatchQueue(q);
     }
 
     async function runAllDispatchTasks() {
-      if (isDispatchRunning.value) return;
-      if (!overviewSecurityUnlocked.value) {
-        ElementPlus.ElMessage.warning('请先验证安全密码后再执行队列');
-        return;
-      }
-      if (!dispatchQueue.value.length) {
-        ElementPlus.ElMessage.info('调度队列为空');
-        return;
-      }
-      if (directRunRunning.value) {
-        ElementPlus.ElMessage.warning('单任务或上一段执行尚未结束，请先终止');
-        return;
-      }
-      if (schedulerStatus.state === 'running') {
-        ElementPlus.ElMessage.warning('调度器已在运行，请先停止调度再执行总览队列');
-        return;
-      }
-      try {
-        const res = await API.postRaw('/run', { tasks: [], activate_scheduler: true });
-        const data = await res.json().catch(() => ({}));
-        if (res.status === 409) {
-          ElementPlus.ElMessage.warning((data && data.message) || '执行冲突，请先终止当前任务');
-          await fetchRunStatus();
-          return;
-        }
-        if (res.status === 403) {
-          if (data && data.need_credential_unlock) await fetchCredentialStatus();
-          ElementPlus.ElMessage.warning((data && data.message) || '请先验证账号密码后再执行任务');
-          return;
-        }
-        if (!res.ok) {
-          ElementPlus.ElMessage.error((data && (data.message || data.error)) || '启动调度失败');
-          return;
-        }
-        ElementPlus.ElMessage.success('调度已启动，将按队列顺序自动执行到期任务');
-        await fetchAllTasksSummary();
-        await fetchRunStatus();
-        await fetchSchedulerStatus();
-        await fetchOverview();
-      } catch (e) {
-        ElementPlus.ElMessage.error('启动调度失败: ' + e);
-      }
+      await startSchedulerRun('调度已启动，将按队列顺序自动执行到期任务');
     }
 
     function stopDispatch() {
@@ -1301,8 +1295,8 @@ const app = createApp({
       gameProfessionsByCharacter, gameProfessionOptions, setGameProfession,
       dispatchQueue, allTasksSummary, isDispatchRunning,
       directRunRunning, executionBusy, fetchRunStatus,
-      fetchAccounts, switchAccount, addAccount, deleteAccount,
-      switchCharacter, addCharacter, deleteCharacter,
+      fetchAccounts, handleAccountCommand, openAccountDialog, switchAccount, addAccount, deleteAccount,
+      openCharacterDialog, switchCharacter, addCharacter, deleteCharacter,
       addToDispatch, removeFromDispatch, reorderDispatchQueue, runAllDispatchTasks, stopDispatch, unifiedStop,
       overviewSecurityUnlocked, clearOverviewSecurityUnlocked,
       fetchAllTasksSummary, loadDispatchQueue, saveDispatchQueue,
@@ -1314,7 +1308,7 @@ const app = createApp({
       openEditModal, enumParamIsMultiple, saveTask, addListItem, removeListItem,
       isTableParam, getTableRows, getTableColumns, getTableColumnLabel, getTableEnumOptions, tableRowsCache,
       saveTasks, saveSettings, clearLogs, reloadTasks,
-      openAddAccountDialog: () => { addDialogVisible.value = true; },
+      openAddAccountDialog,
       submitAddAccount,
       isElectron, minimizeToTray,
       pendingEditorImportUrl, goToEditorWithImage, onEditorImported,

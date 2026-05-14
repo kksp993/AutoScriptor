@@ -76,7 +76,7 @@
           </button>
 
           <!-- 账号切换下拉 -->
-          <el-dropdown trigger="click" @command="switchAccount">
+          <el-dropdown trigger="click" @command="handleAccountCommand" :disabled="executionBusy">
             <span class="profile-dropdown topbar-profile text-sm font-medium">
               <i class="fa fa-id-card-o"></i>
               {{ currentAccount || '无账号' }}
@@ -89,11 +89,11 @@
                   <i class="fa fa-check" v-if="a === currentAccount" style="margin-right:6px;color:#22c55e"></i>
                   {{ a }}
                   <el-button v-if="a !== currentAccount" type="danger" link size="small"
-                    style="margin-left:12px" @click.stop="deleteAccount(a)">
+                    style="margin-left:12px" :disabled="executionBusy" @click.stop="deleteAccount(a)">
                     <i class="fa fa-trash-o"></i>
                   </el-button>
                 </el-dropdown-item>
-                <el-dropdown-item divided :command="'__new__'" @click="accountDialogVisible=true">
+                <el-dropdown-item divided :command="'__new__'" :disabled="executionBusy">
                   <i class="fa fa-plus" style="margin-right:6px"></i>新建账号
                 </el-dropdown-item>
               </el-dropdown-menu>
@@ -101,7 +101,7 @@
           </el-dropdown>
 
           <!-- 角色切换下拉 -->
-          <el-dropdown v-if="currentAccount && charactersList.length" trigger="click">
+          <el-dropdown v-if="currentAccount && charactersList.length" trigger="click" :disabled="executionBusy">
             <span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 rounded-full text-sm font-medium cursor-pointer">
               <i class="fa fa-user text-sm flex-shrink-0"></i>
               <span v-if="activeCharacter.server && activeCharacter.name">{{ activeCharacter.server }}/{{ activeCharacter.name }}</span>
@@ -118,11 +118,12 @@
                   <span>{{ c.server }}/{{ c.name }}</span>
                   <el-button v-if="!(c.server === activeCharacter.server && c.name === activeCharacter.name)"
                     type="danger" link size="small" style="margin-left:12px"
+                    :disabled="executionBusy"
                     @click.stop="deleteCharacter(c.server, c.name)">
                     <i class="fa fa-trash-o"></i>
                   </el-button>
                 </el-dropdown-item>
-                <el-dropdown-item divided @click="characterDialogVisible=true">
+                <el-dropdown-item divided @click="openCharacterDialog" :disabled="executionBusy">
                   <i class="fa fa-plus" style="margin-right:6px"></i>添加角色
                 </el-dropdown-item>
               </el-dropdown-menu>
@@ -135,6 +136,7 @@
           </span>
           <button v-if="!characterName && !activeCharacter.name"
                   class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-700 rounded-full text-sm font-medium hover:bg-amber-100 transition-colors"
+                  :disabled="executionBusy"
                   @click="verifyAccount">
             <i class="fa fa-key text-sm"></i>验证账号
           </button>
@@ -193,6 +195,7 @@
 
         <settings-panel v-if="activeTab==='settings'"
           :filtered-config="filteredConfig"
+          :execution-busy="executionBusy"
           @save-settings="saveSettings"></settings-panel>
 
         <about-panel v-if="activeTab==='about'"></about-panel>
@@ -218,7 +221,7 @@
         </div>
         <p v-if="editTaskData.custom" class="task-doc-custom-line mb-3">*自定义任务：任意 Python 与主程序同进程运行；请仅使用可信来源脚本，风险自负。</p>
         <p v-if="editTaskData.beta" class="task-doc-beta-line mb-3">*该任务为 Beta 实验功能：自动化流程、界面识别或参数含义可能随版本快速调整，不保证与当前游戏完全一致；请谨慎启用并及时反馈问题。</p>
-        <el-form :model="editTaskData" label-width="100px">
+        <el-form :model="editTaskData" label-width="100px" :disabled="executionBusy">
           <el-form-item label="启用状态"><el-switch v-model="editTaskData.on"></el-switch></el-form-item>
           <template v-for="(val, key) in editTaskData.params" :key="key">
             <el-form-item v-if="key !== 'profession' && isTableParam(key)" :label="paramLabel(key)" label-width="80px">
@@ -267,7 +270,7 @@
         </el-form>
         <template #footer>
           <el-button @click="editModalVisible=false">取 消</el-button>
-          <el-button type="primary" @click="saveTask">保 存</el-button>
+          <el-button type="primary" @click="saveTask" :disabled="executionBusy">保 存</el-button>
         </template>
       </el-dialog>
     </teleport>
@@ -275,7 +278,7 @@
     <!-- 修改账密对话框 -->
     <teleport to="body">
       <el-dialog v-model="addDialogVisible" title="修改账号密码" width="500px">
-        <el-form :model="addForm" label-width="100px">
+        <el-form :model="addForm" label-width="100px" :disabled="executionBusy">
           <el-form-item>
             <template #label>
               <span class="inline-flex items-center gap-1">
@@ -327,7 +330,7 @@
         </el-form>
         <template #footer>
           <el-button @click="addDialogVisible=false">取 消</el-button>
-          <el-button type="primary" @click="submitAddAccount">确 定</el-button>
+          <el-button type="primary" @click="submitAddAccount" :disabled="executionBusy">确 定</el-button>
         </template>
       </el-dialog>
     </teleport>
@@ -337,7 +340,7 @@
       <el-dialog v-model="accountDialogVisible" title="新建账号" width="500px">
         <el-alert type="info" :closable="false" style="margin-bottom:16px"
           description="每个账号存储独立的游戏凭据和角色数据。创建后可在账号下添加多个服务器和角色，每个角色拥有独立的任务列表。"></el-alert>
-        <el-form :model="newAccountForm" label-width="100px">
+        <el-form :model="newAccountForm" label-width="100px" :disabled="executionBusy">
           <el-form-item label="账号名称" required>
             <el-input v-model="newAccountForm.name" placeholder="如: 大号、小号"></el-input>
           </el-form-item>
@@ -398,7 +401,7 @@
         </el-form>
         <template #footer>
           <el-button @click="accountDialogVisible=false">取 消</el-button>
-          <el-button type="primary" @click="addAccount">创 建</el-button>
+          <el-button type="primary" @click="addAccount" :disabled="executionBusy">创 建</el-button>
         </template>
       </el-dialog>
     </teleport>
@@ -408,7 +411,7 @@
       <el-dialog v-model="characterDialogVisible" title="添加角色" width="450px">
         <el-alert type="info" :closable="false" style="margin-bottom:16px"
           description="在当前账号下添加新角色。每个角色按「服务器 + 角色名」唯一标识，拥有独立的任务列表。"></el-alert>
-        <el-form :model="newCharacterForm" label-width="90px">
+        <el-form :model="newCharacterForm" label-width="90px" :disabled="executionBusy">
           <el-form-item label="服务器" required>
             <el-input v-model="newCharacterForm.server" placeholder="如：水帘洞"></el-input>
           </el-form-item>
@@ -418,7 +421,7 @@
         </el-form>
         <template #footer>
           <el-button @click="characterDialogVisible=false">取 消</el-button>
-          <el-button type="primary" @click="addCharacter">添 加</el-button>
+          <el-button type="primary" @click="addCharacter" :disabled="executionBusy">添 加</el-button>
         </template>
       </el-dialog>
     </teleport>
@@ -447,10 +450,10 @@
   <script src="/static/js/components/NewsPanel.js?v=3"></script>
   <script src="/static/js/components/AppSidebar.js?v=13"></script>
   <script src="/static/js/components/TaskTree.js?v=12"></script>
-  <script src="/static/js/components/Overview.js?v=17"></script>
-  <script src="/static/js/components/SchedulerPanel.js?v=13"></script>
-  <script src="/static/js/components/TaskPanel.js?v=10"></script>
-  <script src="/static/js/components/Settings.js?v=8"></script>
+  <script src="/static/js/components/Overview.js?v=18"></script>
+  <script src="/static/js/components/SchedulerPanel.js?v=14"></script>
+  <script src="/static/js/components/TaskPanel.js?v=11"></script>
+  <script src="/static/js/components/Settings.js?v=9"></script>
   <script src="/static/js/components/AboutPanel.js?v=1"></script>
   <script src="/static/js/components/UpdatePanel.js?v=1"></script>
   <script src="/static/js/components/editor/EditorCanvas.js?v=10"></script>
@@ -459,6 +462,6 @@
   <script src="/static/js/components/canvas/CanvasPanel.js?v=4"></script>
   <script src="/static/js/components/ErrorArchivesPanel.js?v=4"></script>
   <script src="/static/js/task_help_docs.js?v=1"></script>
-  <script src="/static/js/app.js?v=24"></script>
+  <script src="/static/js/app.js?v=25"></script>
 </body>
 </html>
