@@ -37,7 +37,6 @@ const TaskTreeTaskRow = {
     taskKey: { type: String, required: true },
     item: { type: Object, required: true },
     taskPath: { type: String, required: true },
-    parentTree: { type: Object, required: true },
     runTaskDisabled: { type: Boolean, default: false },
   },
   emits: ['edit-task', 'run-task'],
@@ -152,7 +151,7 @@ const TaskTreeTaskRow = {
         ElementPlus.ElMessage.warning('执行中不能编辑任务配置，请先终止当前任务');
         return;
       }
-      this.$emit('edit-task', this.taskKey, this.item, this.taskPath, this.parentTree);
+      this.$emit('edit-task', this.taskKey, this.item, this.taskPath);
     },
     toggleTask(taskItem) {
       if (this.runTaskDisabled) {
@@ -219,9 +218,8 @@ const TaskTree = {
       :task-key="key"
       :item="treeData[key]"
       :task-path="childBasePath(key)"
-      :parent-tree="treeData"
       :run-task-disabled="runTaskDisabled"
-      @edit-task="(childKey, item, path, parent) => $emit('edit-task', childKey, item, path, parent)"
+      @edit-task="(childKey, item, path) => $emit('edit-task', childKey, item, path)"
       @run-task="path => $emit('run-task', path)">
     </task-tree-task-row>
     <!-- 一级分组 (depth=0) -->
@@ -243,7 +241,7 @@ const TaskTree = {
           <task-tree
             :tree-data="treeData[key]" :base-path="childBasePath(key)" :depth="depth + 1"
             :run-task-disabled="runTaskDisabled"
-            @edit-task="(childKey, item, path, parent) => $emit('edit-task', childKey, item, path, parent)"
+            @edit-task="(childKey, item, path) => $emit('edit-task', childKey, item, path)"
             @expanded-change="$emit('expanded-change', $event)"
             @run-task="path => $emit('run-task', path)">
           </task-tree>
@@ -269,7 +267,7 @@ const TaskTree = {
           <task-tree
             :tree-data="treeData[key]" :base-path="childBasePath(key)" :depth="depth + 1"
             :run-task-disabled="runTaskDisabled"
-            @edit-task="(childKey, item, path, parent) => $emit('edit-task', childKey, item, path, parent)"
+            @edit-task="(childKey, item, path) => $emit('edit-task', childKey, item, path)"
             @expanded-change="$emit('expanded-change', $event)"
             @run-task="path => $emit('run-task', path)">
           </task-tree>

@@ -18,9 +18,10 @@ STATIC_DIR = os.path.join(WEBUI_DIR, "static")
 
 try:
     from services.webui.server import (
-        _get_ordered_paths, make_public_config, app as fastapi_app,
+        make_public_config, app as fastapi_app,
         run_webui, shutdown_webui, scheduler, TASK_MANAGER,
     )
+    from services.webui.task_tree_service import task_tree_service
     _SERVER_AVAILABLE = True
 except Exception:
     _SERVER_AVAILABLE = False
@@ -53,17 +54,17 @@ class TestCredentialUnlock(unittest.TestCase):
 
 @unittest.skipUnless(_SERVER_AVAILABLE, "server dependencies not installed")
 class TestGetOrderedPaths(unittest.TestCase):
-    """_get_ordered_paths 任务路径排序"""
+    """TaskTreeService.ordered_paths 任务路径排序"""
 
     def test_empty_dict(self):
-        self.assertEqual(_get_ordered_paths({}), [])
+        self.assertEqual(task_tree_service.ordered_paths({}), [])
 
     def test_flat_tasks(self):
         data = {
             "任务A": {"on": True, "next_exec_time": 0},
             "任务B": {"on": False, "next_exec_time": 100},
         }
-        result = _get_ordered_paths(data)
+        result = task_tree_service.ordered_paths(data)
         self.assertEqual(result, ["任务A", "任务B"])
 
     def test_nested_tasks(self):
@@ -75,7 +76,7 @@ class TestGetOrderedPaths(unittest.TestCase):
                 },
             },
         }
-        result = _get_ordered_paths(data)
+        result = task_tree_service.ordered_paths(data)
         self.assertEqual(len(result), 2)
         self.assertIn("每日任务/村庄/宠物培养", result)
         self.assertIn("每日任务/村庄/仙盟建设", result)
@@ -87,7 +88,7 @@ class TestGetOrderedPaths(unittest.TestCase):
                 "子任务": {"on": True, "next_exec_time": 0},
             },
         }
-        result = _get_ordered_paths(data)
+        result = task_tree_service.ordered_paths(data)
         self.assertEqual(len(result), 2)
         self.assertIn("顶级任务", result)
         self.assertIn("分组/子任务", result)
@@ -406,8 +407,9 @@ class TestAppJsContent(unittest.TestCase):
     def test_mounts_to_app(self):
         self.assertIn("mount('#app')", self.content)
 
-    def test_has_overview_fetch(self):
-        self.assertIn("fetchOverview", self.content)
+    def test_has_runtime_snapshot_fetch(self):
+        self.assertIn("fetchRuntimeSnapshot", self.content)
+        self.assertIn("/runtime/snapshot", self.content)
 
     def test_has_polling(self):
         self.assertIn("setInterval", self.content)

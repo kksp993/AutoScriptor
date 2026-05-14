@@ -147,14 +147,6 @@ scheduler.set_task_manager(TASK_MANAGER)
 runtime_controller = RuntimeController(scheduler, TASK_MANAGER)
 
 
-def _is_runtime_busy() -> bool:
-    return runtime_controller.is_busy()
-
-
-def _busy_response(action: str = "modify runtime config") -> JSONResponse:
-    return runtime_controller.busy_response(action)
-
-
 def _guard_runtime_idle(action: str = "modify runtime config") -> JSONResponse | None:
     return runtime_controller.guard_idle(action)
 
@@ -292,18 +284,6 @@ def read_config():
     ORDER_MAP = task_tree_service.read_order_map()
 
 
-def _get_ordered_paths(data_dict, prefix=''):
-    return task_tree_service.ordered_paths(data_dict, prefix)
-
-
-def _inject_param_meta_into_tasks(node: dict, prefix: str = "") -> None:
-    task_tree_service.inject_public_task_fields(node, prefix)
-
-
-def _strip_runtime_tasks_fields(node: dict) -> None:
-    task_tree_service.strip_runtime_fields_inplace(node)
-
-
 def make_public_config():
     data = task_tree_service.public_config()
     data["config_version"] = current_version()
@@ -320,38 +300,6 @@ def _consume_runtime_config_updates() -> bool:
     read_config()
     _mark_config_changed("runtime tasks updated")
     return True
-
-
-def _characters_summary() -> dict:
-    return task_tree_service.characters_summary()
-
-
-def _game_professions_by_character() -> dict[str, dict[str, str]]:
-    return task_tree_service.game_professions_by_character()
-
-
-def _normalize_dispatch_queue(queue) -> list[dict[str, str]]:
-    return task_tree_service.normalize_dispatch_queue(queue)
-
-
-def _task_leaf_status(node: dict, path: str, now_ts: float) -> str:
-    return task_tree_service.task_leaf_status(node, path, now_ts)
-
-
-def _flatten_tasks(node: dict, now_ts: float, prefix: str = '') -> list:
-    return task_tree_service.flatten_tasks(node, now_ts, prefix)
-
-
-def _aggregate_stats_all_characters(now_ts: float) -> dict:
-    return task_tree_service.aggregate_stats_all_characters(now_ts)
-
-
-def _overall_next_execution_all_characters() -> float | None:
-    return task_tree_service.overall_next_execution_all_characters()
-
-
-def _all_characters_tasks_summary() -> dict:
-    return task_tree_service.all_characters_tasks_summary()
 
 
 # ── FastAPI 应用 ──
@@ -618,7 +566,7 @@ async def save_tasks_api(request: Request):
         tasks = payload.get('tasks', payload)
         if not isinstance(tasks, dict):
             return api_error(400, "invalid tasks payload", code="invalid_payload")
-        _strip_runtime_tasks_fields(tasks)
+        task_tree_service.strip_runtime_fields_inplace(tasks)
         with TASK_MANAGER._cfg_lock:
             cfg._config.setdefault('tasks', {})
             cfg._config['tasks'] = tasks
@@ -678,8 +626,8 @@ async def run_tasks_api(request: Request):
     activate_sched = bool(body.get("activate_scheduler", True))
     direct_busy = runtime_controller.direct_run_alive()
     if activate_sched:
-        if _is_runtime_busy():
-            return _busy_response("start scheduler")
+        if runtime_controller.is_busy():
+            return runtime_controller.busy_response("start scheduler")
         if scheduler.state == SchedulerState.ERROR:
             return JSONResponse(
                 status_code=409,
@@ -688,7 +636,7 @@ async def run_tasks_api(request: Request):
                     "message": "调度器处于错误状态，请先恢复调度后再启动",
                 },
             )
-        if not _normalize_dispatch_queue(cfg._account_data.get("dispatch_queue", [])):
+        if not task_tree_service.normalize_dispatch_queue(cfg._account_data.get("dispatch_queue", [])):
             return JSONResponse(
                 status_code=400,
                 content={
@@ -696,8 +644,8 @@ async def run_tasks_api(request: Request):
                     "message": "调度队列为空，请先添加要参与调度的角色",
                 },
             )
-    elif _is_runtime_busy():
-        return _busy_response("run task")
+    elif runtime_controller.is_busy():
+        return runtime_controller.busy_response("run task")
 
     err = _apply_run_character_from_body(body)
     if err is not None:
@@ -750,7 +698,7 @@ async def run_tasks_api(request: Request):
 
 @app.get("/api/run/status")
 async def run_status_api():
-    """兼容旧前端：running 仅表示直接执行线程；runtime 是统一运行态。"""
+    """轻量运行状态接口；统一前端状态以 /api/runtime/snapshot 为准。"""
     return {"running": runtime_controller.direct_run_alive(), "runtime": runtime_controller.status()}
 
 
@@ -1041,8 +989,8 @@ def _build_overview_payload(now_ts: float | None = None) -> dict:
             'total': total, 'enabled': enabled, 'pending': pending,
             'scheduled': scheduled, 'disabled': disabled,
         },
-        'stats_all': _aggregate_stats_all_characters(now_ts),
-        'overall_next_execution': _overall_next_execution_all_characters(),
+        'stats_all': task_tree_service.aggregate_stats_all_characters(now_ts),
+        'overall_next_execution': task_tree_service.overall_next_execution_all_characters(),
         'upcoming': upcoming[:30],
         'runtime': runtime_ctx.status_dict(),
     }
@@ -1064,7 +1012,7 @@ async def runtime_snapshot_api(request: Request):
         _consume_runtime_config_updates()
         now_ts = _time.time()
         overview = _build_overview_payload(now_ts)
-        queue = _normalize_dispatch_queue(cfg._account_data.get("dispatch_queue", []))
+        queue = task_tree_service.normalize_dispatch_queue(cfg._account_data.get("dispatch_queue", []))
         return api_ok(
             config_version=current_version(),
             credential={"unlocked": cfg.has_decrypted_credentials()},
@@ -1072,11 +1020,11 @@ async def runtime_snapshot_api(request: Request):
             accounts=cfg.list_accounts(),
             active_character=cfg.active_character(),
             character_name=cfg._config.get("game", {}).get("character_name", ""),
-            characters=_characters_summary(),
-            game_professions_by_character=_game_professions_by_character(),
+            characters=task_tree_service.characters_summary(),
+            game_professions_by_character=task_tree_service.game_professions_by_character(),
             game_profession_options=list(GAME_PROFESSIONS),
             dispatch_queue=queue,
-            all_tasks_summary=_all_characters_tasks_summary(),
+            all_tasks_summary=task_tree_service.all_characters_tasks_summary(),
             overview=overview,
             scheduler=overview["scheduler"],
             runtime=runtime_controller.status(),
@@ -1220,7 +1168,7 @@ async def accounts_list_api():
         "current_account": cfg.current_account(),
         "accounts": cfg.list_accounts(),
         "active_character": cfg.active_character(),
-        "characters": _characters_summary(),
+        "characters": task_tree_service.characters_summary(),
     }
 
 
@@ -1258,7 +1206,7 @@ async def accounts_switch_api(request: Request):
                 "current_account": name,
                 "character_name": character_name,
                 "active_character": ac,
-                "characters": _characters_summary(),
+                "characters": task_tree_service.characters_summary(),
                 "config_version": version,
             }
         )
@@ -1328,7 +1276,7 @@ async def accounts_delete_api(request: Request):
 async def characters_list_api():
     return {
         "active_character": cfg.active_character(),
-        "characters": _characters_summary(),
+        "characters": task_tree_service.characters_summary(),
     }
 
 
@@ -1350,7 +1298,7 @@ async def characters_switch_api(request: Request):
         return {
             "active_character": cfg.active_character(),
             "character_name": character,
-            "characters": _characters_summary(),
+            "characters": task_tree_service.characters_summary(),
             "config_version": version,
         }
     except (KeyError, ValueError) as e:
@@ -1373,7 +1321,7 @@ async def characters_add_api(request: Request):
         version = _mark_config_changed("add character")
         return {
             "active_character": cfg.active_character(),
-            "characters": _characters_summary(),
+            "characters": task_tree_service.characters_summary(),
             "config_version": version,
         }
     except (ValueError, KeyError) as e:
@@ -1393,7 +1341,7 @@ async def characters_delete_api(request: Request):
         version = _mark_config_changed("delete character")
         return {
             "active_character": cfg.active_character(),
-            "characters": _characters_summary(),
+            "characters": task_tree_service.characters_summary(),
             "config_version": version,
         }
     except (ValueError, KeyError) as e:
@@ -1417,7 +1365,7 @@ async def characters_game_profession_api(request: Request):
             cfg.set_character_game_profession(server, character, profession)
         version = _mark_config_changed("change character profession")
         return {
-            "game_professions_by_character": _game_professions_by_character(),
+            "game_professions_by_character": task_tree_service.game_professions_by_character(),
             "game": {"game_profession": cfg._config.get("game", {}).get("game_profession", "")},
             "config_version": version,
         }
@@ -1431,7 +1379,7 @@ async def characters_game_profession_api(request: Request):
 @app.get("/api/characters/all_tasks_summary")
 async def characters_all_tasks_summary_api():
     try:
-        return {"characters": _all_characters_tasks_summary()}
+        return {"characters": task_tree_service.all_characters_tasks_summary()}
     except Exception as e:
         logger.error("all_tasks_summary error: %s", e)
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -1441,7 +1389,7 @@ async def characters_all_tasks_summary_api():
 
 @app.get("/api/dispatch/queue")
 async def dispatch_queue_get_api():
-    queue = _normalize_dispatch_queue(cfg._account_data.get("dispatch_queue", []))
+    queue = task_tree_service.normalize_dispatch_queue(cfg._account_data.get("dispatch_queue", []))
     return {"queue": queue}
 
 
@@ -1451,56 +1399,10 @@ async def dispatch_queue_save_api(request: Request):
     if busy is not None:
         return busy
     data = await request.json()
-    queue = _normalize_dispatch_queue(data.get("queue", []))
+    queue = task_tree_service.normalize_dispatch_queue(data.get("queue", []))
     cfg._account_data["dispatch_queue"] = queue
     cfg._save_account_file()
     return {"queue": queue, "config_version": _mark_config_changed("save dispatch queue")}
-
-
-# ── 兼容旧前端的 profiles API（转发到 accounts） ──
-
-@app.get("/api/profiles")
-async def profiles_list_api():
-    return {
-        "current": cfg.current_account(),
-        "profiles": cfg.list_accounts(),
-    }
-
-
-@app.post("/api/profiles/switch")
-async def profiles_switch_api(request: Request):
-    busy = _guard_runtime_idle("switch account")
-    if busy is not None:
-        return busy
-    data = await request.json()
-    if not _check_request_freshness(data):
-        return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
-    name = data.get("name", "")
-    security_key = data.get("security_key", "")
-    client_ip = request.client.host if request.client else "unknown"
-    if not security_key:
-        return JSONResponse(status_code=400, content={
-            "error": "请输入安全密码以切换账号", "need_security_key": True,
-        })
-    if not cfg.verify_account_security_key(name, security_key):
-        _record_verify_failure(client_ip)
-        return JSONResponse(status_code=401, content={"error": "安全密码错误"})
-    try:
-        cfg.switch_account(name, security_key)
-        TASK_MANAGER.reload_tasks(security_key)
-        scheduler.invalidate_login()
-        version = _mark_config_changed("switch profile")
-        character_name = cfg._config.get("game", {}).get("character_name", "")
-        old_tok = _credential_unlock_from_request(request)
-        _revoke_credential_unlock(old_tok)
-        tok = _grant_credential_unlock()
-        resp = JSONResponse(content={"current": name, "character_name": character_name, "config_version": version})
-        return _attach_credential_unlock_cookie(resp, tok)
-    except KeyError as e:
-        return JSONResponse(status_code=404, content={"error": str(e)})
-    except Exception as e:
-        logger.error("switch profile error: %s", e)
-        return JSONResponse(status_code=500, content={"error": "切换失败，请检查安全密码是否正确"})
 
 
 # ── 配置导入导出 API ──
@@ -1541,7 +1443,7 @@ async def config_import_api(request: Request):
             if key in data:
                 val = data[key]
                 if key == "tasks" and isinstance(val, dict):
-                    _strip_runtime_tasks_fields(val)
+                    task_tree_service.strip_runtime_fields_inplace(val)
                 cfg._config[key] = val
         cfg.save_config()
         TASK_MANAGER.reload_tasks()

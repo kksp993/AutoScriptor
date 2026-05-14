@@ -30,8 +30,9 @@
       if (!state.configData.game) state.configData.game = {};
       state.configData.game.character_name = state.characterName.value;
     }
-    if (payload.characters) {
-      replaceReactiveObject(state.charactersTree, payload.characters);
+    const characters = payload.characters || payload.characters_summary;
+    if (characters) {
+      replaceReactiveObject(state.charactersTree, characters);
     }
     if (payload.game_professions_by_character) {
       replaceReactiveObject(state.gameProfessionsByCharacter, payload.game_professions_by_character);
@@ -62,9 +63,6 @@
     if (payload.runtime) {
       state.directRunRunning.value = !!payload.runtime.direct_running;
       if (payload.runtime.scheduler) assignObject(state.schedulerStatus, payload.runtime.scheduler);
-    }
-    if (typeof payload.config_version === 'number') {
-      state.configVersion.value = payload.config_version;
     }
     return true;
   }

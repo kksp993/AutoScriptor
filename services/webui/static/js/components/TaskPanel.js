@@ -29,7 +29,7 @@ const TaskPanel = {
     </div>
     <div class="task-panel-tasklist flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden">
       <task-tree :tree-data="currentTasks" :run-task-disabled="executionBusy"
-        @edit-task="(k,d,p,par)=>$emit('edit-task',k,d,p,par)"
+        @edit-task="(k,d,p)=>$emit('edit-task',k,d,p)"
         @expanded-change="v=>$emit('expanded-change',v)"
         @run-task="p=>$emit('run-task',p)">
       </task-tree>
