@@ -131,6 +131,7 @@ const app = createApp({
 
     /** 后台 /api/run 直接执行线程是否存活（单任务、队列逐步执行） */
     const directRunRunning = ref(false);
+    const configVersion = ref(0);
 
     /** 总调度 / 调度模式 / 单任务互斥：任一路径占用即禁止其它入口 */
     const executionBusy = computed(() => {
@@ -230,34 +231,10 @@ const app = createApp({
     });
 
     // ── API helpers ──
-    const API = {
-      async get(url) {
-        return (await this.request('GET', url)).data;
-      },
-      async post(url, body) {
-        return (await this.request('POST', url, body)).data;
-      },
-      async request(method, url, body) {
-        const options = {
-          method,
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-        };
-        if (method !== 'GET') {
-          options.body = JSON.stringify({ ...(body || {}), _timestamp: Date.now() / 1000 });
-        }
-        const res = await fetch('/api' + url, options);
-        let data = {};
-        if (res.status !== 204) {
-          data = await res.json().catch(() => ({}));
-        }
-        return { ok: res.ok, status: res.status, data, res };
-      },
-    };
+    const API = window.WebUIApi;
 
     function apiErrorMessage(data, fallback) {
-      if (data && (data.message || data.error)) return data.message || data.error;
-      return fallback || '操作失败';
+      return API.errorMessage(data, fallback);
     }
 
     function showApiError(data, fallback, level = 'error') {
@@ -288,16 +265,32 @@ const app = createApp({
       mergeGameProfessionsFromPayload(data);
     }
 
+    const runtimeSnapshotState = {
+      configData,
+      configVersion,
+      accounts,
+      currentAccount,
+      activeCharacter,
+      charactersTree,
+      characterName,
+      gameProfessionsByCharacter,
+      gameProfessionOptions,
+      dispatchQueue,
+      allTasksSummary,
+      overviewData,
+      schedulerStatus,
+      directRunRunning,
+      overviewSecurityUnlocked,
+    };
+
+    function applyRuntimeSnapshotPayload(data) {
+      return window.WebUIRuntimeStore.applySnapshot(runtimeSnapshotState, data);
+    }
+
     async function refreshRuntimePanels({ config = false, accounts = false } = {}) {
       if (config) await refreshConfig(true);
-      await Promise.all([
-        fetchOverview(),
-        fetchSchedulerStatus(),
-        fetchRunStatus(),
-        fetchAllTasksSummary(),
-        accounts ? fetchAccounts() : Promise.resolve(),
-        loadDispatchQueue(),
-      ]);
+      await fetchRuntimeSnapshot({ refreshConfigIfChanged: true });
+      if (accounts) await fetchAccounts();
     }
 
     // ── data fetching ──
@@ -308,6 +301,7 @@ const app = createApp({
       if (!data || data.error) return false;
       Object.keys(configData).forEach(k => delete configData[k]);
       Object.assign(configData, data);
+      if (typeof data.config_version === 'number') configVersion.value = data.config_version;
       mergeGameProfessionsFromPayload(data);
       if (data.game) characterName.value = data.game.character_name || '';
       if (data.active_character) {
@@ -331,6 +325,22 @@ const app = createApp({
       } catch (e) { console.error('Refresh failed:', e); }
     }
 
+    async function fetchRuntimeSnapshot({ refreshConfigIfChanged = true } = {}) {
+      const publicVersion = Number(configData.config_version || 0);
+      try {
+        const data = await API.get('/runtime/snapshot');
+        if (!applyRuntimeSnapshotPayload(data)) return false;
+        const nextVersion = Number(data.config_version || 0);
+        if (refreshConfigIfChanged && nextVersion && nextVersion !== publicVersion) {
+          await refreshConfig(true);
+        }
+        return true;
+      } catch (e) {
+        console.error('runtime snapshot failed:', e);
+        return false;
+      }
+    }
+
     async function reloadTasks() {
       if (!ensureIdle('执行中不能重载任务，请先终止当前任务')) return;
       try {
@@ -347,34 +357,15 @@ const app = createApp({
     }
 
     async function fetchOverview() {
-      try {
-        const data = await API.get('/overview');
-        if (data && !data.error) {
-          Object.assign(overviewData.scheduler, data.scheduler);
-          Object.assign(overviewData.stats, data.stats);
-          if (data.stats_all) Object.assign(overviewData.statsAll, data.stats_all);
-          if (data.overall_next_execution !== undefined) {
-            overviewData.overall_next_execution = data.overall_next_execution;
-          }
-          overviewData.upcoming = data.upcoming || [];
-          if (data.runtime) Object.assign(overviewData.runtime, data.runtime);
-          Object.assign(schedulerStatus, data.scheduler);
-        }
-      } catch (e) { /* ignore */ }
+      await fetchRuntimeSnapshot({ refreshConfigIfChanged: true });
     }
 
     async function fetchSchedulerStatus() {
-      try {
-        const data = await API.get('/scheduler/status');
-        if (data && !data.error) Object.assign(schedulerStatus, data);
-      } catch (e) { /* ignore */ }
+      await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
     }
 
     async function fetchRunStatus() {
-      try {
-        const st = await API.get('/run/status');
-        directRunRunning.value = !!(st && st.running);
-      } catch (e) { /* ignore */ }
+      await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
     }
 
     // ── WebSocket for logs (native WS, not Socket.IO) ──
@@ -443,8 +434,7 @@ const app = createApp({
         }
         if (needTaskConfigRefresh) {
           scheduleTaskConfigRefresh();
-          fetchOverview();
-          fetchAllTasksSummary();
+          fetchRuntimeSnapshot({ refreshConfigIfChanged: true });
         }
         if (!scheduled) {
           scheduled = true;
@@ -626,11 +616,7 @@ const app = createApp({
           if (!configData.game) configData.game = {};
           configData.game.character_name = characterName.value;
           await refreshConfig(true);
-          await fetchCredentialStatus();
-          fetchOverview();
-          fetchAllTasksSummary();
-          loadDispatchQueue();
-          fetchAccounts();
+          await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
           markOverviewSecurityUnlocked();
         } else if (!ok) {
           showApiError(data, '验证失败，请检查安全密码');
@@ -816,8 +802,7 @@ const app = createApp({
         return false;
       }
       ElementPlus.ElMessage.success(successMessage);
-      fetchOverview();
-      fetchAllTasksSummary();
+      fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
       return true;
     }
 
@@ -956,6 +941,9 @@ const app = createApp({
         if (!configData.game) configData.game = {};
         configData.game.character_name = characterName.value;
         addDialogVisible.value = false;
+        await refreshConfig(true);
+        await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
+        markOverviewSecurityUnlocked();
         ElementPlus.ElMessage.success('账号信息已更新');
       } catch (e) { ElementPlus.ElMessage.error('更新失败: ' + e); }
     }
@@ -996,8 +984,7 @@ const app = createApp({
           loginPassword.value = '';
           ElementPlus.ElMessage.success('登录成功');
           await refreshConfig(true);
-          await fetchCredentialStatus();
-          fetchOverview();
+          await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
           setupWebSocket();
         } else {
           const data = await res.json().catch(() => ({}));
@@ -1053,9 +1040,7 @@ const app = createApp({
           syncCharactersPayload({ ...data, current_account: name });
           ElementPlus.ElMessage.success('已切换到账号: ' + name);
           await refreshConfig(true);
-          await fetchCredentialStatus();
-          fetchAllTasksSummary();
-          loadDispatchQueue();
+          await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
           markOverviewSecurityUnlocked();
         } else {
           showApiError(data, '切换失败');
@@ -1114,8 +1099,8 @@ const app = createApp({
         if (ok) {
           syncCharactersPayload({ ...data, character_name: data.character_name || character });
           ElementPlus.ElMessage.success('已切换到角色: ' + server + '/' + character);
-          refreshConfig(true);
-          fetchAllTasksSummary();
+          await refreshConfig(true);
+          await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
         } else {
           showApiError(data, '切换失败');
         }
@@ -1134,7 +1119,7 @@ const app = createApp({
           Object.assign(newCharacterForm, { server: '', character: '' });
           ElementPlus.ElMessage.success('角色已添加');
           await refreshConfig(true);
-          fetchAccounts();
+          await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
         } else {
           showApiError(data, '添加失败');
         }
@@ -1152,7 +1137,7 @@ const app = createApp({
           syncCharactersPayload(data);
           ElementPlus.ElMessage.success('角色已删除');
           await refreshConfig(true);
-          fetchAccounts();
+          await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
         } else {
           showApiError(data, '删除失败');
         }
@@ -1238,9 +1223,7 @@ const app = createApp({
     // ── init ──
     async function refreshOverviewPanel() {
       await refreshConfig(true);
-      await fetchOverview();
-      await fetchAllTasksSummary();
-      await fetchSchedulerStatus();
+      await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
     }
 
     watch(activeTab, (v) => {
@@ -1258,15 +1241,8 @@ const app = createApp({
       if (!ok) return;
       setupWebSocket();
       await refreshConfig(true);
-      await fetchCredentialStatus();
-      fetchOverview();
-      fetchSchedulerStatus();
-      fetchRunStatus();
-      fetchAccounts();
-      loadDispatchQueue();
-      fetchAllTasksSummary();
-      setInterval(() => { fetchOverview(); fetchSchedulerStatus(); }, 15000);
-      setInterval(fetchRunStatus, 4000);
+      await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
+      setInterval(() => { fetchRuntimeSnapshot({ refreshConfigIfChanged: true }); }, 5000);
     }
 
     // ── Electron 窗口控制 ──

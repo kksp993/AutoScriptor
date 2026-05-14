@@ -8,7 +8,6 @@ static files served from ./static and ./vendor.
 from __future__ import annotations
 
 import asyncio
-import ctypes
 import importlib
 import json
 import logging
@@ -18,22 +17,23 @@ import time as _time
 import traceback
 import urllib.request
 import webbrowser
-from copy import deepcopy
 from queue import Queue, Empty
-from threading import Thread
 from typing import Set
 
-import dpath
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger, _TaskFilter as _LogTaskFilter
 
 from AutoScriptor.utils.app_config import cfg
-from AutoScriptor.utils.game_profession import GAME_PROFESSIONS, normalize_game_profession
+from AutoScriptor.utils.game_profession import GAME_PROFESSIONS
 from ZmxyOL.task.battle_task_params import battle_flow_allowed_for_task
 from services.core.task_manager import TaskManager
 from services.core.banner import _print_banner
 from services.core.scheduler import scheduler, SchedulerState
 from AutoScriptor.utils.perf import set_thread_high_priority as _set_thread_high_priority
+from services.webui.api_response import api_error, api_ok
+from services.webui.runtime_controller import RuntimeController
+from services.webui.state_version import bump_version, current_version
+from services.webui.task_tree_service import task_tree_service
 
 # FastAPI Form/UploadFile 运行时依赖；Nuitka 不会从 fastapi 静态跟到该包，须显式 import 以打入 standalone
 import multipart  # noqa: F401
@@ -143,44 +143,20 @@ _apply_webui_log_level_from_config()
 CONFIG = cfg
 ORDER_MAP: dict[str, int] = {}
 TASK_MANAGER = TaskManager()
-RUN_THREAD: Thread | None = None
 scheduler.set_task_manager(TASK_MANAGER)
-
-
-def _direct_run_alive() -> bool:
-    return RUN_THREAD is not None and RUN_THREAD.is_alive()
-
-
-def _runtime_busy_reason() -> str | None:
-    if _direct_run_alive():
-        return "direct_run"
-    if scheduler.state == SchedulerState.RUNNING or getattr(scheduler, "is_executing", False):
-        return "scheduler"
-    return None
+runtime_controller = RuntimeController(scheduler, TASK_MANAGER)
 
 
 def _is_runtime_busy() -> bool:
-    return _runtime_busy_reason() is not None
+    return runtime_controller.is_busy()
 
 
 def _busy_response(action: str = "modify runtime config") -> JSONResponse:
-    reason = _runtime_busy_reason() or "runtime"
-    reason_label = {"direct_run": "直接执行任务", "scheduler": "调度器"}.get(reason, "运行任务")
-    return JSONResponse(
-        status_code=409,
-        content={
-            "status": "error",
-            "error": "runtime_busy",
-            "reason": reason,
-            "message": f"当前{reason_label}正在运行，请先点击「终止执行」再继续操作。",
-        },
-    )
+    return runtime_controller.busy_response(action)
 
 
 def _guard_runtime_idle(action: str = "modify runtime config") -> JSONResponse | None:
-    if _is_runtime_busy():
-        return _busy_response(action)
-    return None
+    return runtime_controller.guard_idle(action)
 
 # ── 安全模块 ──
 
@@ -247,13 +223,11 @@ def _clear_credential_unlock_cookie(response: JSONResponse) -> JSONResponse:
 def _require_credential_unlock(request: Request) -> JSONResponse | None:
     """执行自动化前仅依据 cfg 中是否已有已解密账密判断。"""
     if not cfg.has_decrypted_credentials():
-        return JSONResponse(
-            status_code=403,
-            content={
-                "status": "error",
-                "message": "请先验证账号密码后再执行任务",
-                "need_credential_unlock": True,
-            },
+        return api_error(
+            403,
+            "请先验证账号密码后再执行任务",
+            code="credential_locked",
+            need_credential_unlock=True,
         )
     return None
 
@@ -315,264 +289,69 @@ def _ensure_vendor_files():
 
 def read_config():
     global ORDER_MAP
-    ordered_paths = _get_ordered_paths(CONFIG['tasks'])
-    ORDER_MAP = {path: i for i, path in enumerate(ordered_paths)}
+    ORDER_MAP = task_tree_service.read_order_map()
 
 
 def _get_ordered_paths(data_dict, prefix=''):
-    paths = []
-    for key, value in data_dict.items():
-        current_path = f"{prefix}/{key}" if prefix else key
-        if isinstance(value, dict) and 'next_exec_time' not in value:
-            paths.extend(_get_ordered_paths(value, prefix=current_path))
-        else:
-            paths.append(current_path)
-    return paths
+    return task_tree_service.ordered_paths(data_dict, prefix)
 
 
 def _inject_param_meta_into_tasks(node: dict, prefix: str = "") -> None:
-    """将 TaskRegistry 中的 param_meta / beta / custom / _due 挂到任务叶节点（仅用于 API 返回副本）。"""
-    from AutoScriptor.utils.task_registry import task_registry
-    from services.core.task_tree import TaskTree
-    from services.core.scheduler import is_task_due
-    import time as _t
-
-    now_ts = _t.time()
-    for key, val in node.items():
-        if not isinstance(val, dict):
-            continue
-        path = f"{prefix}/{key}" if prefix else key
-        if TaskTree.is_leaf(val):
-            meta = task_registry.get_param_meta(path)
-            if meta:
-                val["param_meta"] = meta
-            else:
-                val.pop("param_meta", None)
-            pkeys = task_registry.get_param_keys(path)
-            if pkeys:
-                val["param_keys"] = pkeys
-            else:
-                val.pop("param_keys", None)
-            if task_registry.get_beta(path):
-                val["beta"] = True
-            else:
-                val.pop("beta", None)
-            if task_registry.get_custom(path):
-                val["custom"] = True
-            else:
-                val.pop("custom", None)
-            val["task_description"] = task_registry.get_description(path)
-            val["task_doc_flow"] = task_registry.get_doc_flow(path)
-            val["_due"] = is_task_due(val, path, now_ts)
-        else:
-            _inject_param_meta_into_tasks(val, path)
+    task_tree_service.inject_public_task_fields(node, prefix)
 
 
 def _strip_runtime_tasks_fields(node: dict) -> None:
-    """保存配置前移除仅运行期使用的字段，避免写入 JSON。"""
-    from services.core.task_tree import TaskTree
-
-    for key, val in list(node.items()):
-        if not isinstance(val, dict):
-            continue
-        if TaskTree.is_leaf(val):
-            val.pop("param_meta", None)
-            val.pop("param_keys", None)
-            val.pop("beta", None)
-            val.pop("custom", None)
-            val.pop("task_description", None)
-            val.pop("task_doc_flow", None)
-            val.pop("fn", None)
-            val.pop("order", None)
-            val.pop("_due", None)
-        else:
-            _strip_runtime_tasks_fields(val)
+    task_tree_service.strip_runtime_fields_inplace(node)
 
 
 def make_public_config():
-    config_data = deepcopy(cfg._config)
-    for pattern in ["**/fn", "**/encryption", "**/weekday", "**/month",
-                     "**/day", "**/year", "**/account", "**/password",
-                     "**/security_key"]:
-        try:
-            dpath.delete(config_data, pattern)
-        except Exception:
-            pass
-    tasks = config_data.get("tasks")
-    if isinstance(tasks, dict):
-        _inject_param_meta_into_tasks(tasks)
-    config_data["active_character"] = cfg.active_character()
-    config_data["characters_summary"] = _characters_summary()
-    config_data["game_professions_by_character"] = _game_professions_by_character()
-    config_data["game_profession_options"] = list(GAME_PROFESSIONS)
-    return config_data
+    data = task_tree_service.public_config()
+    data["config_version"] = current_version()
+    return data
+
+
+def _mark_config_changed(reason: str) -> int:
+    return bump_version(reason)
+
+
+def _consume_runtime_config_updates() -> bool:
+    if not scheduler.consume_tasks_updated():
+        return False
+    read_config()
+    _mark_config_changed("runtime tasks updated")
+    return True
 
 
 def _characters_summary() -> dict:
-    """Return { server: [char_name, ...] } without heavy tasks/status data."""
-    tree = cfg.list_characters()
-    return {srv: list(chars.keys()) for srv, chars in tree.items()} if tree else {}
+    return task_tree_service.characters_summary()
 
 
 def _game_professions_by_character() -> dict[str, dict[str, str]]:
-    """{ server: { 角色名: 职业 } }，供 WebUI 展示与编辑。"""
-    tree = cfg.list_characters()
-    out: dict[str, dict[str, str]] = {}
-    for srv, chars in (tree or {}).items():
-        out[srv] = {}
-        for name, node in chars.items():
-            gp = None
-            if isinstance(node, dict):
-                gp = node.get("game_profession")
-            out[srv][name] = normalize_game_profession(gp)
-    return out
+    return task_tree_service.game_professions_by_character()
 
 
 def _normalize_dispatch_queue(queue) -> list[dict[str, str]]:
-    chars = cfg._account_data.get("characters", {}) or {}
-    result: list[dict[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    if not isinstance(queue, list):
-        return result
-    for item in queue:
-        if not isinstance(item, dict):
-            continue
-        server = (item.get("server") or "").strip()
-        name = (item.get("name") or "").strip()
-        key = (server, name)
-        if not server or not name or key in seen:
-            continue
-        if server not in chars or name not in chars[server]:
-            continue
-        seen.add(key)
-        result.append({"server": server, "name": name})
-    return result
+    return task_tree_service.normalize_dispatch_queue(queue)
 
 
 def _task_leaf_status(node: dict, path: str, now_ts: float) -> str:
-    from services.core.scheduler import is_task_due
-    if not node.get('on'):
-        return 'disabled'
-    if node.get('error'):
-        return 'error'
-    return 'pending' if is_task_due(node, path, now_ts) else 'scheduled'
+    return task_tree_service.task_leaf_status(node, path, now_ts)
 
 
 def _flatten_tasks(node: dict, now_ts: float, prefix: str = '') -> list:
-    """Recursively flatten a tasks tree into a list of {path, name, status, beta, custom}."""
-    from AutoScriptor.utils.task_registry import task_registry
-
-    result = []
-    for key, val in node.items():
-        if not isinstance(val, dict):
-            continue
-        path = f"{prefix}/{key}" if prefix else key
-        if 'on' in val and 'next_exec_time' in val:
-            row = {
-                'path': path,
-                'name': key,
-                'status': _task_leaf_status(val, path, now_ts),
-                'beta': task_registry.get_beta(path),
-                'task_description': task_registry.get_description(path),
-                'task_doc_flow': task_registry.get_doc_flow(path),
-            }
-            if task_registry.get_custom(path):
-                row['custom'] = True
-            result.append(row)
-        else:
-            result.extend(_flatten_tasks(val, now_ts, path))
-    return result
+    return task_tree_service.flatten_tasks(node, now_ts, prefix)
 
 
 def _aggregate_stats_all_characters(now_ts: float) -> dict:
-    """汇总当前账号下所有角色的任务统计（与单角色 stats 结构一致）。"""
-    ac = cfg.active_character()
-    active_server = ac.get('server', '')
-    active_name = ac.get('name', '')
-    chars = cfg._account_data.get('characters', {})
-    total = pending = scheduled = error = disabled = 0
-    for srv, srv_chars in chars.items():
-        for char_name, char_data in srv_chars.items():
-            if srv == active_server and char_name == active_name:
-                tasks_tree = cfg._config.get('tasks', {})
-            else:
-                tasks_tree = char_data.get('tasks', {})
-            flat = _flatten_tasks(tasks_tree, now_ts)
-            for t in flat:
-                total += 1
-                st = t['status']
-                if st == 'disabled':
-                    disabled += 1
-                elif st == 'pending':
-                    pending += 1
-                elif st == 'scheduled':
-                    scheduled += 1
-                elif st == 'error':
-                    error += 1
-    enabled = pending + scheduled + error
-    return {
-        'total': total, 'enabled': enabled, 'pending': pending,
-        'scheduled': scheduled, 'error': error, 'disabled': disabled,
-    }
+    return task_tree_service.aggregate_stats_all_characters(now_ts)
 
 
 def _overall_next_execution_all_characters() -> float | None:
-    """当前账号下所有角色中，最早一次「有效」计划执行时间（含 sched_window 等）。"""
-    from services.core.scheduler import (
-        collect_active_times_from_tasks_tree,
-        next_display_timestamp_from_times,
-    )
-
-    ac = cfg.active_character()
-    active_server = ac.get('server', '')
-    active_name = ac.get('name', '')
-    chars = cfg._account_data.get('characters', {})
-    candidates: list[float] = []
-    for srv, srv_chars in chars.items():
-        for char_name, char_data in srv_chars.items():
-            if srv == active_server and char_name == active_name:
-                tasks_tree = cfg._config.get('tasks', {})
-            else:
-                tasks_tree = char_data.get('tasks', {})
-            times = collect_active_times_from_tasks_tree(tasks_tree)
-            nxt = next_display_timestamp_from_times(times)
-            if nxt is not None:
-                candidates.append(nxt)
-    if not candidates:
-        return None
-    return min(candidates)
+    return task_tree_service.overall_next_execution_all_characters()
 
 
 def _all_characters_tasks_summary() -> dict:
-    """Build task summary for every character in the current account."""
-    from services.core.scheduler import (
-        collect_active_times_from_tasks_tree,
-        next_display_timestamp_from_times,
-    )
-
-    now_ts = _time.time()
-    ac = cfg.active_character()
-    active_server = ac.get('server', '')
-    active_name = ac.get('name', '')
-    chars = cfg._account_data.get('characters', {})
-    result = {}
-    for srv, srv_chars in chars.items():
-        srv_result = {}
-        for char_name, char_data in srv_chars.items():
-            if srv == active_server and char_name == active_name:
-                tasks_tree = cfg._config.get('tasks', {})
-            else:
-                tasks_tree = char_data.get('tasks', {})
-            flat = _flatten_tasks(tasks_tree, now_ts)
-            counts = {'total': 0, 'pending': 0, 'scheduled': 0, 'error': 0, 'disabled': 0}
-            for t in flat:
-                counts['total'] += 1
-                counts[t['status']] += 1
-            times = collect_active_times_from_tasks_tree(tasks_tree)
-            next_exec = next_display_timestamp_from_times(times)
-            srv_result[char_name] = {**counts, 'tasks_flat': flat, 'next_execution': next_exec}
-        result[srv] = srv_result
-    return result
+    return task_tree_service.all_characters_tasks_summary()
 
 
 # ── FastAPI 应用 ──
@@ -607,6 +386,7 @@ async def auth_api(request: Request):
         if stored and not stored.startswith("pbkdf2$"):
             cfg._config.setdefault("deploy", {})["password"] = _hash_deploy_password(raw)
             cfg.save_config()
+            _mark_config_changed("upgrade deploy password hash")
         old_cred = _credential_unlock_from_request(request)
         _revoke_credential_unlock(old_cred)
         session_token = _create_session()
@@ -786,12 +566,13 @@ async def favicon():
 @app.get("/api/refresh")
 async def refresh_config_api():
     try:
+        _consume_runtime_config_updates()
         read_config()
         _apply_webui_log_level_from_config()
         return make_public_config()
     except Exception as e:
         logger.error("refresh error: %s", e)
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return api_error(500, str(e), code="refresh_failed")
 
 
 @app.post("/api/tasks/reload")
@@ -802,10 +583,11 @@ async def reload_tasks_api():
     try:
         TASK_MANAGER.reload_tasks()
         read_config()
+        _mark_config_changed("reload tasks")
         return make_public_config()
     except Exception as e:
         logger.error("reload_tasks error: %s", e)
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return api_error(500, str(e), code="reload_tasks_failed")
 
 
 @app.post("/api/config")
@@ -814,13 +596,16 @@ async def save_config_api(request: Request):
     if busy is not None:
         return busy
     data = await request.json()
+    if not isinstance(data, dict):
+        return api_error(400, "invalid config payload", code="invalid_payload")
     cfg["app"] = data["app"]
     if "scheduler" in data and isinstance(data["scheduler"], dict):
         cfg["scheduler"] = data["scheduler"]
     cfg["emulator"] = data["emulator"]
     cfg["ocr"] = data["ocr"]
     cfg.save_config()
-    return JSONResponse(status_code=204, content=None)
+    _apply_webui_log_level_from_config()
+    return api_ok(config_version=_mark_config_changed("save config"))
 
 
 @app.post("/api/tasks")
@@ -832,7 +617,7 @@ async def save_tasks_api(request: Request):
         payload = await request.json()
         tasks = payload.get('tasks', payload)
         if not isinstance(tasks, dict):
-            return JSONResponse(status_code=400, content={"error": "invalid tasks payload"})
+            return api_error(400, "invalid tasks payload", code="invalid_payload")
         _strip_runtime_tasks_fields(tasks)
         with TASK_MANAGER._cfg_lock:
             cfg._config.setdefault('tasks', {})
@@ -841,10 +626,11 @@ async def save_tasks_api(request: Request):
             TASK_MANAGER.reload_tasks()
         scheduler.wake()
         read_config()
+        _mark_config_changed("save tasks")
         return make_public_config()
     except Exception as e:
         logger.error("save_tasks error: %s", e)
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return api_error(500, str(e), code="save_tasks_failed")
 
 
 def _apply_run_character_from_body(body: dict):
@@ -862,6 +648,7 @@ def _apply_run_character_from_body(body: dict):
             cfg.switch_character(server, character)
             TASK_MANAGER.reload_tasks()
         scheduler.invalidate_login()
+        _mark_config_changed("select run character")
         logger.info("Selected role for execution: %s/%s", server, character)
     except (KeyError, ValueError) as e:
         return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
@@ -876,8 +663,6 @@ def _apply_run_character_from_body(body: dict):
 
 @app.post("/api/run")
 async def run_tasks_api(request: Request):
-    global RUN_THREAD
-
     raw = await request.json()
     if isinstance(raw, list):
         body = {"tasks": raw, "activate_scheduler": True}
@@ -891,7 +676,7 @@ async def run_tasks_api(request: Request):
         return err
 
     activate_sched = bool(body.get("activate_scheduler", True))
-    direct_busy = _direct_run_alive()
+    direct_busy = runtime_controller.direct_run_alive()
     if activate_sched:
         if _is_runtime_busy():
             return _busy_response("start scheduler")
@@ -930,81 +715,52 @@ async def run_tasks_api(request: Request):
 
     if activate_sched:
         if direct_busy:
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "status": "error",
-                    "message": "单任务或队列正在直接执行中，请先终止后再启动调度",
-                },
+            return api_error(
+                409,
+                "单任务或队列正在直接执行中，请先终止后再启动调度",
+                code="runtime_busy",
+                reason="direct_run",
             )
         scheduler.activate()
         scheduler.wake()
-        return {'status': 'ok', 'tasks': sorted_tasks, 'mode': 'scheduler'}
+        return api_ok(status='ok', tasks=sorted_tasks, mode='scheduler')
 
     if direct_busy:
-        return JSONResponse(
-            status_code=409,
-            content={
-                "status": "error",
-                "message": "已有任务正在执行，请先终止后再试",
-            },
+        return api_error(
+            409,
+            "已有任务正在执行，请先终止后再试",
+            code="runtime_busy",
+            reason="direct_run",
         )
     if scheduler.state == SchedulerState.RUNNING:
-        return JSONResponse(
-            status_code=409,
-            content={
-                "status": "error",
-                "message": "调度器运行中，请先停止调度或结束当前调度周期后再执行单任务",
-            },
+        return api_error(
+            409,
+            "调度器运行中，请先停止调度或结束当前调度周期后再执行单任务",
+            code="runtime_busy",
+            reason="scheduler",
         )
 
     def _run(ts):
         scheduler.run_direct(ts)
         logger.info("========== 所有任务执行完成 ==========")
 
-    RUN_THREAD = Thread(target=_run, args=(sorted_tasks,), daemon=True)
-    RUN_THREAD.start()
-    _set_thread_high_priority(RUN_THREAD)
-    return {'status': 'ok', 'tasks': sorted_tasks, 'mode': 'direct'}
+    runtime_controller.start_direct(_run, sorted_tasks, _set_thread_high_priority)
+    return api_ok(status='ok', tasks=sorted_tasks, mode='direct')
 
 
 @app.get("/api/run/status")
 async def run_status_api():
-    """直接执行任务使用的后台线程是否仍在运行（与调度器 state 无关）。"""
-    alive = RUN_THREAD is not None and RUN_THREAD.is_alive()
-    return {"running": alive}
+    """兼容旧前端：running 仅表示直接执行线程；runtime 是统一运行态。"""
+    return {"running": runtime_controller.direct_run_alive(), "runtime": runtime_controller.status()}
 
 
 @app.post("/api/stop")
 async def stop_tasks_api():
-    global RUN_THREAD
     try:
-        def _async_raise(tid, exctype):
-            if not isinstance(exctype, type):
-                raise TypeError("Only types can be raised (not instances)")
-            res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
-                ctypes.c_long(tid), ctypes.py_object(exctype))
-            if res == 0:
-                return False
-            if res != 1:
-                ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(tid), None)
-                return False
-            return True
-
-        alive = RUN_THREAD.is_alive() if RUN_THREAD else False
-        scheduler_alive = scheduler.state == SchedulerState.RUNNING or getattr(scheduler, "is_executing", False)
-        # 无论线程注入是否成功，都要设置取消事件 + 让调度器回到 PENDING
-        # （PyThreadState_SetAsyncExc 在 C 扩展阻塞时不可靠，必须双保险）
-        TASK_MANAGER.request_cancel()
-        scheduler.deactivate()
-        scheduler.invalidate_login()
-        if alive and RUN_THREAD.ident:
-            _async_raise(RUN_THREAD.ident, KeyboardInterrupt)
-        logger.info("⏹ 已发送终止信号")
-        return {'status': 'stopping' if (alive or scheduler_alive) else 'idle'}
+        return api_ok(status=runtime_controller.request_stop(), runtime=runtime_controller.status())
     except Exception as e:
         logger.error("stop error: %s", e)
-        return JSONResponse(status_code=500, content={'error': str(e)})
+        return api_error(500, str(e), code="stop_failed")
 
 
 @app.get("/api/credential/status")
@@ -1078,10 +834,12 @@ async def verify_account_api(request: Request):
         scheduler.activate()
         scheduler.wake()
         logger.info("Scheduler auto-started after account verification")
+    version = _mark_config_changed("verify account")
     resp = JSONResponse(
         content={
             "character_name": character_name,
             "active_character": cfg.active_character(),
+            "config_version": version,
         }
     )
     return _attach_credential_unlock_cookie(resp, tok)
@@ -1133,13 +891,14 @@ async def update_account_credentials_api(request: Request):
         cfg._save_account_file()
         TASK_MANAGER.reload_tasks(security_key)
         character_name = cfg._config.get("game", {}).get("character_name", "")
+        version = _mark_config_changed("update account credentials")
     except Exception as e:
         logger.error("update_account error: %s", e)
         return JSONResponse(status_code=500, content={"error": str(e)})
     old_tok = _credential_unlock_from_request(request)
     _revoke_credential_unlock(old_tok)
     tok = _grant_credential_unlock()
-    resp = JSONResponse(content={"character_name": character_name})
+    resp = JSONResponse(content={"character_name": character_name, "config_version": version})
     return _attach_credential_unlock_cookie(resp, tok)
 
 
@@ -1236,70 +995,95 @@ async def scheduler_deactivate_api():
     return scheduler.status_dict()
 
 
+def _build_overview_payload(now_ts: float | None = None) -> dict:
+    from services.core.scheduler import is_task_due, calc_effective_next_time
+
+    now_ts = now_ts or _time.time()
+    total = enabled = pending = scheduled = disabled = 0
+    upcoming = []
+
+    def _walk(node, prefix=''):
+        nonlocal total, enabled, pending, scheduled, disabled
+        for key, val in node.items():
+            if not isinstance(val, dict):
+                continue
+            path = f"{prefix}/{key}" if prefix else key
+            if 'on' in val and 'next_exec_time' in val:
+                total += 1
+                if not val.get('on'):
+                    disabled += 1
+                else:
+                    enabled += 1
+                    due = is_task_due(val, path, now_ts)
+                    if due:
+                        pending += 1
+                    else:
+                        scheduled += 1
+                    upcoming.append({
+                        'path': path,
+                        'on': True,
+                        'next_exec_time': calc_effective_next_time(val, now_ts),
+                        'status': 'pending' if due else 'scheduled',
+                    })
+            else:
+                _walk(val, path)
+
+    _walk(cfg._config.get('tasks', {}))
+    upcoming.sort(key=lambda x: (0 if x['status'] == 'pending' else 1, x['next_exec_time']))
+
+    sched = scheduler.status_dict()
+    sched['next_execution'] = scheduler.get_next_execution_timestamp()
+
+    from services.core.runtime_context import runtime_ctx
+    return {
+        'scheduler': sched,
+        'stats': {
+            'total': total, 'enabled': enabled, 'pending': pending,
+            'scheduled': scheduled, 'disabled': disabled,
+        },
+        'stats_all': _aggregate_stats_all_characters(now_ts),
+        'overall_next_execution': _overall_next_execution_all_characters(),
+        'upcoming': upcoming[:30],
+        'runtime': runtime_ctx.status_dict(),
+    }
+
+
 @app.get("/api/overview")
 async def overview_data_api():
     try:
-        from services.core.scheduler import is_task_due, calc_effective_next_time
-
-        now_ts = _time.time()
-        total = enabled = pending = scheduled = disabled = 0
-        upcoming = []
-
-        def _walk(node, prefix=''):
-            nonlocal total, enabled, pending, scheduled, disabled
-            for key, val in node.items():
-                if not isinstance(val, dict):
-                    continue
-                path = f"{prefix}/{key}" if prefix else key
-                if 'on' in val and 'next_exec_time' in val:
-                    total += 1
-                    if not val.get('on'):
-                        disabled += 1
-                    else:
-                        enabled += 1
-                        due = is_task_due(val, path, now_ts)
-                        if due:
-                            pending += 1
-                        else:
-                            scheduled += 1
-                        nxt_display = calc_effective_next_time(val, now_ts)
-                        upcoming.append({
-                            'path': path,
-                            'on': True,
-                            'next_exec_time': nxt_display,
-                            'status': 'pending' if due else 'scheduled',
-                        })
-                else:
-                    _walk(val, path)
-
-        _walk(cfg._config.get('tasks', {}))
-        upcoming.sort(key=lambda x: (0 if x['status'] == 'pending' else 1, x['next_exec_time']))
-
-        next_ts = scheduler.get_next_execution_timestamp()
-        sched = scheduler.status_dict()
-        sched['next_execution'] = next_ts
-
-        stats_all = _aggregate_stats_all_characters(now_ts)
-        overall_next = _overall_next_execution_all_characters()
-
-        runtime_status = {}
-        from services.core.runtime_context import runtime_ctx
-        runtime_status = runtime_ctx.status_dict()
-
-        return {
-            'scheduler': sched,
-            'stats': {
-                'total': total, 'enabled': enabled, 'pending': pending,
-                'scheduled': scheduled, 'disabled': disabled,
-            },
-            'stats_all': stats_all,
-            'overall_next_execution': overall_next,
-            'upcoming': upcoming[:30],
-            'runtime': runtime_status,
-        }
+        _consume_runtime_config_updates()
+        return _build_overview_payload()
     except Exception as e:
         logger.error("overview error: %s", e)
-        return JSONResponse(status_code=500, content={'error': str(e)})
+        return api_error(500, str(e), code="overview_failed")
+
+
+@app.get("/api/runtime/snapshot")
+async def runtime_snapshot_api(request: Request):
+    try:
+        _consume_runtime_config_updates()
+        now_ts = _time.time()
+        overview = _build_overview_payload(now_ts)
+        queue = _normalize_dispatch_queue(cfg._account_data.get("dispatch_queue", []))
+        return api_ok(
+            config_version=current_version(),
+            credential={"unlocked": cfg.has_decrypted_credentials()},
+            current_account=cfg.current_account(),
+            accounts=cfg.list_accounts(),
+            active_character=cfg.active_character(),
+            character_name=cfg._config.get("game", {}).get("character_name", ""),
+            characters=_characters_summary(),
+            game_professions_by_character=_game_professions_by_character(),
+            game_profession_options=list(GAME_PROFESSIONS),
+            dispatch_queue=queue,
+            all_tasks_summary=_all_characters_tasks_summary(),
+            overview=overview,
+            scheduler=overview["scheduler"],
+            runtime=runtime_controller.status(),
+        )
+    except Exception as e:
+        logger.error("runtime snapshot error: %s", e)
+        return api_error(500, str(e), code="snapshot_failed")
 
 
 # ── 通知 API ──
@@ -1322,7 +1106,7 @@ async def notify_save_api(request: Request):
     cfg["notify.enabled"] = data.get("enabled", False)
     cfg["notify.config_yaml"] = data.get("config_yaml", "provider: null")
     cfg.save_config()
-    return {"status": "ok"}
+    return api_ok(status="ok", config_version=_mark_config_changed("save notify settings"))
 
 
 # ── 更新 API ──
@@ -1463,6 +1247,7 @@ async def accounts_switch_api(request: Request):
         cfg.switch_account(name, security_key)
         TASK_MANAGER.reload_tasks(security_key)
         scheduler.invalidate_login()
+        version = _mark_config_changed("switch account")
         character_name = cfg._config.get("game", {}).get("character_name", "")
         ac = cfg.active_character()
         old_tok = _credential_unlock_from_request(request)
@@ -1474,6 +1259,7 @@ async def accounts_switch_api(request: Request):
                 "character_name": character_name,
                 "active_character": ac,
                 "characters": _characters_summary(),
+                "config_version": version,
             }
         )
         return _attach_credential_unlock_cookie(resp, tok)
@@ -1512,7 +1298,7 @@ async def accounts_add_api(request: Request):
 
     try:
         cfg.add_account(name, account, password, server, character_name, security_key)
-        return {"accounts": cfg.list_accounts()}
+        return {"accounts": cfg.list_accounts(), "config_version": _mark_config_changed("add account")}
     except Exception as e:
         logger.error("add account error: %s", e)
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -1527,7 +1313,11 @@ async def accounts_delete_api(request: Request):
     name = data.get("name", "")
     try:
         cfg.delete_account(name)
-        return {"accounts": cfg.list_accounts(), "current_account": cfg.current_account()}
+        return {
+            "accounts": cfg.list_accounts(),
+            "current_account": cfg.current_account(),
+            "config_version": _mark_config_changed("delete account"),
+        }
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
 
@@ -1556,10 +1346,12 @@ async def characters_switch_api(request: Request):
         cfg.switch_character(server, character)
         TASK_MANAGER.reload_tasks()
         scheduler.invalidate_login()
+        version = _mark_config_changed("switch character")
         return {
             "active_character": cfg.active_character(),
             "character_name": character,
             "characters": _characters_summary(),
+            "config_version": version,
         }
     except (KeyError, ValueError) as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
@@ -1578,9 +1370,11 @@ async def characters_add_api(request: Request):
     character = data.get("character", "")
     try:
         cfg.add_character(server, character)
+        version = _mark_config_changed("add character")
         return {
             "active_character": cfg.active_character(),
             "characters": _characters_summary(),
+            "config_version": version,
         }
     except (ValueError, KeyError) as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
@@ -1596,9 +1390,11 @@ async def characters_delete_api(request: Request):
     character = data.get("character", "")
     try:
         cfg.delete_character(server, character)
+        version = _mark_config_changed("delete character")
         return {
             "active_character": cfg.active_character(),
             "characters": _characters_summary(),
+            "config_version": version,
         }
     except (ValueError, KeyError) as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
@@ -1619,9 +1415,11 @@ async def characters_game_profession_api(request: Request):
     try:
         with TASK_MANAGER._cfg_lock:
             cfg.set_character_game_profession(server, character, profession)
+        version = _mark_config_changed("change character profession")
         return {
             "game_professions_by_character": _game_professions_by_character(),
             "game": {"game_profession": cfg._config.get("game", {}).get("game_profession", "")},
+            "config_version": version,
         }
     except (KeyError, ValueError) as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
@@ -1656,7 +1454,7 @@ async def dispatch_queue_save_api(request: Request):
     queue = _normalize_dispatch_queue(data.get("queue", []))
     cfg._account_data["dispatch_queue"] = queue
     cfg._save_account_file()
-    return {"queue": queue}
+    return {"queue": queue, "config_version": _mark_config_changed("save dispatch queue")}
 
 
 # ── 兼容旧前端的 profiles API（转发到 accounts） ──
@@ -1691,11 +1489,12 @@ async def profiles_switch_api(request: Request):
         cfg.switch_account(name, security_key)
         TASK_MANAGER.reload_tasks(security_key)
         scheduler.invalidate_login()
+        version = _mark_config_changed("switch profile")
         character_name = cfg._config.get("game", {}).get("character_name", "")
         old_tok = _credential_unlock_from_request(request)
         _revoke_credential_unlock(old_tok)
         tok = _grant_credential_unlock()
-        resp = JSONResponse(content={"current": name, "character_name": character_name})
+        resp = JSONResponse(content={"current": name, "character_name": character_name, "config_version": version})
         return _attach_credential_unlock_cookie(resp, tok)
     except KeyError as e:
         return JSONResponse(status_code=404, content={"error": str(e)})
@@ -1747,7 +1546,7 @@ async def config_import_api(request: Request):
         cfg.save_config()
         TASK_MANAGER.reload_tasks()
         read_config()
-        return {"status": "ok"}
+        return api_ok(status="ok", config_version=_mark_config_changed("import config"))
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -1862,7 +1661,7 @@ async def deploy_save_api(request: Request):
             cfg._config[section] = data[section]
     cfg.save_config()
     _apply_webui_log_level_from_config()
-    return {"status": "ok"}
+    return api_ok(status="ok", config_version=_mark_config_changed("save deploy settings"))
 
 
 # ── 入口 ──
