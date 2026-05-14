@@ -15,7 +15,7 @@ from AutoScriptor.utils.logger import logger
 from AutoScriptor.control.NemuIpc.device.method.utils import RETRY_TRIES, retry_sleep
 from AutoScriptor.control.NemuIpc.device.method.pool import WORKER_POOL
 from AutoScriptor.control.NemuIpc.config.deep import deep_get
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
 
 class RequestHumanTakeover(Exception):
     pass

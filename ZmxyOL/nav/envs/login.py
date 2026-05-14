@@ -159,7 +159,10 @@ def _select_character():
     assert g.get("server_name") and g.get("character_name"), "请先配置服务器和角色"
     ensure_server(g["server_name"])
     ensure_character(g["character_name"])
-    
+
+    # 部分客户端，需要每次请求才给登录
+    if first(get_colors(B(277,686,6,13))) != "绿色": click(B(277,686,6,13))
+
     click(T("进入游戏", color="橙色"), timeout=10)
 
     if ui_T(T("确定"), 3):
@@ -170,7 +173,7 @@ def _select_character():
     click(B(1240, 5, 40, 60))
     time.sleep(0.5)
     dismiss_floating_window(max_retries=1, debug=False)
-    if ui_T(T("精彩活动", box=Box(409,0,466,118).margin()), 3):
+    if ui_T(T("精彩活动"), 3):
         click(B(1100, 40, 40, 40))
     logger.info("登录完成")
     return True

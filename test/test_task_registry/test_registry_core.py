@@ -66,6 +66,11 @@ class TestRegisterAndQuery(unittest.TestCase):
     def test_get_param_meta_missing_returns_empty(self):
         self.assertEqual(task_registry.get_param_meta("missing"), {})
 
+    def test_get_description(self):
+        task_registry.register("d/a", lambda: None, order=1, description="简介")
+        self.assertEqual(task_registry.get_description("d/a"), "简介")
+        self.assertEqual(task_registry.get_description("missing"), "")
+
     def test_get_param_meta_default_empty(self):
         task_registry.register("no_meta", lambda: None, order=1)
         self.assertEqual(task_registry.get_param_meta("no_meta"), {})
@@ -165,6 +170,7 @@ class TestCollections(unittest.TestCase):
         self.assertIs(entry["fn"], fn)
         self.assertEqual(entry["order"], 5)
         self.assertEqual(entry["param_meta"], {"k": "v"})
+        self.assertEqual(entry.get("description"), "")
 
 
 if __name__ == "__main__":

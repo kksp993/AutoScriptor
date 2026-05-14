@@ -24,12 +24,17 @@ const OverviewPanel = {
     logs: { type: Array, default: () => [] },
     /** 本浏览器会话内是否已通过安全密码解锁总览（与 characterName 无关） */
     overviewSecurityUnlocked: { type: Boolean, default: false },
+    /** 游戏职业下拉选项（悟空、唐僧…） */
+    gameProfessionOptions: { type: Array, default: () => [] },
+    /** { 服务器: { 角色名: 职业 } } */
+    gameProfessionsByCharacter: { type: Object, default: () => ({}) },
   },
   emits: [
     'verify-account', 'switch-character', 'add-to-dispatch', 'remove-from-dispatch',
     'reorder-dispatch',
     'run-all-dispatch', 'stop-dispatch', 'switch-account', 'refresh-overview',
     'lock-overview-security',
+    'set-game-profession',
   ],
   data() {
     return {
@@ -39,8 +44,8 @@ const OverviewPanel = {
       /** 至多展开一个角色详情：'server/name' 或 null */
       expandedDispatchKey: null,
       dragOverIndex: null,
-      /** 总览任务说明折叠 key = server + '|' + name + '|' + path */
-      expandedTaskHelp: {},
+      taskDetailVisible: false,
+      taskDetail: null,
       loginLoading: false,
     };
   },
@@ -225,28 +230,9 @@ const OverviewPanel = {
       if (d.toDateString() === tmr.toDateString()) return `明天 ${time}`;
       return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${time}`;
     },
-    taskHelpKey(server, name, path) {
-      return `${server}|${name}|${path || ''}`;
-    },
-    toggleTaskHelp(server, name, path) {
-      const k = this.taskHelpKey(server, name, path);
-      this.expandedTaskHelp[k] = !this.expandedTaskHelp[k];
-    },
-    isTaskHelpExpanded(server, name, path) {
-      return !!this.expandedTaskHelp[this.taskHelpKey(server, name, path)];
-    },
-    taskHelpDoc(t) {
-      if (typeof getTaskHelpDoc !== 'function') return { flow: '', params: {} };
-      return getTaskHelpDoc(t.name, t.path);
-    },
-    taskHelpParamRows(t) {
-      if (typeof getTaskHelpParamRows !== 'function') return [];
-      return getTaskHelpParamRows(t.name, t.path, undefined);
-    },
-    formatParamValOv(v) {
-      if (v === null || v === undefined) return '';
-      if (typeof v === 'object') return JSON.stringify(v);
-      return String(v);
+    openTaskDetail(t) {
+      this.taskDetail = t;
+      this.taskDetailVisible = true;
     },
     formatCountdown(ts) {
       if (!ts || ts <= 0) return '';
@@ -261,6 +247,11 @@ const OverviewPanel = {
     },
     refreshOverview() {
       this.$emit('refresh-overview');
+    },
+    professionFor(server, name) {
+      const srv = this.gameProfessionsByCharacter && this.gameProfessionsByCharacter[server];
+      const v = srv && srv[name];
+      return v || '悟空';
     },
   },
   template: `
@@ -302,6 +293,19 @@ const OverviewPanel = {
           </div>
           <div class="ov-avatar-info">
             <div class="ov-avatar-name">{{ characterName }}</div>
+            <div v-if="activeCharacter.server && activeCharacter.name && gameProfessionOptions.length" class="ov-avatar-profession">
+              <span class="ov-avatar-profession-label">职业</span>
+              <el-select
+                size="small"
+                class="ov-avatar-profession-select"
+                :model-value="professionFor(activeCharacter.server, activeCharacter.name)"
+                placeholder="职业"
+                filterable
+                @change="v => $emit('set-game-profession', activeCharacter.server, activeCharacter.name, v)"
+              >
+                <el-option v-for="p in gameProfessionOptions" :key="p" :label="p" :value="p"></el-option>
+              </el-select>
+            </div>
             <div class="ov-avatar-status">
               <span class="ov-status-dot"></span>在线
             </div>
@@ -327,24 +331,35 @@ const OverviewPanel = {
               <transition name="ov-collapse">
                 <div v-show="expandedServers[srv]" class="ov-char-items">
                   <div v-for="name in (Array.isArray(chars) ? chars : Object.keys(chars))" :key="name"
-                       class="ov-char-item" :class="{ 'ov-char-active': isActiveChar(srv, name) }">
-                    <div class="ov-char-item-left">
+                       class="ov-char-item"
+                       :class="{ 'ov-char-active': isActiveChar(srv, name), 'ov-char-item--no-prof': !gameProfessionOptions.length }">
+                    <div class="ov-char-item-name">
                       <span class="ov-char-name">{{ name }}</span>
                       <span v-if="getCharPending(srv, name) > 0" class="ov-char-pending-badge">
                         {{ getCharPending(srv, name) }}
                       </span>
                     </div>
-                    <div class="ov-char-item-actions">
-                      <el-button size="small" :type="isActiveChar(srv, name) ? 'success' : 'primary'" text
-                                 @click.stop="$emit('switch-character', srv, name)"
-                                 :disabled="isActiveChar(srv, name)">
-                        {{ isActiveChar(srv, name) ? '当前' : '上号' }}
-                      </el-button>
-                      <el-button size="small" text :type="isInDispatch(srv, name) ? 'info' : 'warning'"
-                                 @click.stop="isInDispatch(srv, name) ? $emit('remove-from-dispatch', srv, name) : $emit('add-to-dispatch', srv, name)">
-                        <i class="fa" :class="isInDispatch(srv, name) ? 'fa-check' : 'fa-plus'"></i>
-                      </el-button>
+                    <div v-if="gameProfessionOptions.length" class="ov-char-item-prof">
+                      <el-select
+                        size="small"
+                        class="ov-char-profession-select"
+                        :model-value="professionFor(srv, name)"
+                        placeholder="职业"
+                        filterable
+                        @change="v => $emit('set-game-profession', srv, name, v)"
+                      >
+                        <el-option v-for="p in gameProfessionOptions" :key="p" :label="p" :value="p"></el-option>
+                      </el-select>
                     </div>
+                    <el-button class="ov-char-btn" size="small" :type="isActiveChar(srv, name) ? 'success' : 'primary'" text
+                               @click.stop="$emit('switch-character', srv, name)"
+                               :disabled="isActiveChar(srv, name)">
+                      {{ isActiveChar(srv, name) ? '当前' : '上号' }}
+                    </el-button>
+                    <el-button class="ov-char-btn" size="small" text :type="isInDispatch(srv, name) ? 'info' : 'warning'"
+                               @click.stop="isInDispatch(srv, name) ? $emit('remove-from-dispatch', srv, name) : $emit('add-to-dispatch', srv, name)">
+                      <i class="fa" :class="isInDispatch(srv, name) ? 'fa-check' : 'fa-plus'"></i>
+                    </el-button>
                   </div>
                 </div>
               </transition>
@@ -452,30 +467,15 @@ const OverviewPanel = {
               <div v-show="isDispatchCharExpanded(char.server, char.name)" class="ov-dispatch-card-body">
                 <div class="ov-dispatch-task-grid">
                   <div v-for="(t, i) in getCharTasks(char.server, char.name)" :key="(t.path || t.name) + '-' + i" class="ov-dispatch-task-block">
-                    <div class="ov-dispatch-task-cell" @click="toggleTaskHelp(char.server, char.name, t.path)">
+                    <div class="ov-dispatch-task-cell" @click="openTaskDetail(t)">
                       <span class="ov-task-dot-char ov-task-dot-char--cell" :style="{ color: dotColor(t.status) }" :title="t.name + ' - ' + dotLabel(t.status)">●</span>
                       <div class="flex-1 min-w-0 flex items-center gap-1">
                         <span class="ov-dispatch-task-name ov-dispatch-task-name--cell flex-1 min-w-0">{{ t.name }}</span>
                         <span v-if="t.custom" class="task-custom-tag flex-shrink-0">自定义</span>
                         <span v-if="t.beta" class="task-beta-tag flex-shrink-0">Beta</span>
                       </div>
-                      <i class="fa ov-task-help-chev" :class="isTaskHelpExpanded(char.server, char.name, t.path) ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
+                      <i class="fa fa-info-circle ov-task-help-chev text-gray-400" title="任务简介"></i>
                     </div>
-                    <transition name="ov-collapse">
-                      <div v-show="isTaskHelpExpanded(char.server, char.name, t.path)" class="ov-task-help-panel">
-                        <p v-if="t.custom" class="task-doc-custom-line">*自定义任务：任意 Python 与主程序同进程运行；请仅使用可信来源脚本，风险自负。</p>
-                        <p v-if="t.beta" class="task-doc-beta-line">*该任务为 Beta 实验功能：自动化流程、界面识别或参数含义可能随版本快速调整，不保证与当前游戏完全一致；请谨慎启用并及时反馈问题。</p>
-                        <p class="ov-task-help-flow">{{ taskHelpDoc(t).flow }}</p>
-                        <dl v-if="taskHelpParamRows(t).length" class="ov-task-help-params">
-                          <dt>可变参数</dt>
-                          <dd v-for="row in taskHelpParamRows(t)" :key="row.key">
-                            <span class="task-doc-k">{{ row.key }}</span>
-                            <span class="task-doc-d">{{ row.desc }}</span>
-                            <span v-if="row.value !== undefined" class="task-doc-v">当前：{{ formatParamValOv(row.value) }}</span>
-                          </dd>
-                        </dl>
-                      </div>
-                    </transition>
                   </div>
                 </div>
                 <div v-if="!getCharTasks(char.server, char.name).length" class="ov-dispatch-no-tasks">暂无任务数据</div>
@@ -486,5 +486,14 @@ const OverviewPanel = {
       </div>
     </div>
   </transition>
+  <el-dialog v-model="taskDetailVisible" :title="taskDetail ? taskDetail.name : ''" width="520px" destroy-on-close align-center @closed="taskDetail = null">
+    <div v-if="taskDetail" class="space-y-3 text-sm">
+      <p v-if="taskDetail.custom" class="task-doc-custom-line">*自定义任务：任意 Python 与主程序同进程运行；请仅使用可信来源脚本，风险自负。</p>
+      <p v-if="taskDetail.beta" class="task-doc-beta-line">*该任务为 Beta 实验功能：自动化流程、界面识别或参数含义可能随版本快速调整，不保证与当前游戏完全一致；请谨慎启用并及时反馈问题。</p>
+      <p v-if="taskDetail.task_description" class="text-gray-700 leading-relaxed">{{ taskDetail.task_description }}</p>
+      <p v-if="taskDetail.task_doc_flow" class="text-xs text-gray-500 leading-relaxed whitespace-pre-wrap">{{ taskDetail.task_doc_flow }}</p>
+      <p v-if="taskDetail.path" class="text-xs text-gray-400 font-mono break-all">路径：{{ taskDetail.path }}</p>
+    </div>
+  </el-dialog>
 </div>`,
 };

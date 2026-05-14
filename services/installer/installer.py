@@ -350,6 +350,29 @@ def _derive_paths_from_mumu_folder(folder: Path) -> dict:
     }
 
 
+def _format_subprocess_exit_code(code: int | None) -> str:
+    """将 Windows 上常见的无符号退出码（如 4294967295）显示为有符号整数，便于理解。"""
+    if code is None:
+        return "?"
+    c = int(code)
+    if c > 0x7FFFFFFF:
+        c -= 0x100000000
+    return str(c)
+
+
+def _parse_mumu_manager_version_stdout(text: str) -> str:
+    """解析 MuMuManager version 子命令输出的 JSON。"""
+    if not (text or "").strip():
+        return ""
+    try:
+        data = json.loads(text.strip())
+        if isinstance(data, dict) and data.get("version"):
+            return str(data["version"])
+    except Exception:
+        pass
+    return ""
+
+
 def _adb_detect_serial(adb_path: str) -> str | None:
     try:
         # 启动 ADB 服务并读取设备
@@ -401,16 +424,35 @@ def validate_mumu_setup(emulator: dict) -> dict:
     if emu_path and Path(emu_path).is_file():
         results["emu_path"]["exists"] = True
         try:
+            # 新版 MuMu（nx_main\MuMuManager.exe）：`version` 返回 0 且 stdout 为 JSON。
+            # 旧安装器使用的 `-v 0 player -ld` 在新 CLI 下会打印帮助并以 -1（显示为 4294967295）退出，易误判。
             r = subprocess.run(
-                [emu_path, "-v", "0", "player", "-ld"],
+                [emu_path, "version"],
                 capture_output=True, text=True, timeout=8,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
-            results["emu_path"]["runnable"] = True
-            results["emu_path"]["detail"] = f"可执行（返回码 {r.returncode}）"
+            rc_disp = _format_subprocess_exit_code(r.returncode)
+            ver = _parse_mumu_manager_version_stdout(r.stdout or "")
+            if r.returncode == 0:
+                results["emu_path"]["runnable"] = True
+                if ver:
+                    results["emu_path"]["detail"] = (
+                        f"可执行（MuMuManager {ver}，返回码 {rc_disp}）"
+                    )
+                else:
+                    results["emu_path"]["detail"] = f"可执行（返回码 {rc_disp}）"
+            else:
+                results["emu_path"]["runnable"] = False
+                tail = (r.stderr or r.stdout or "").strip().splitlines()
+                hint = tail[0][:120] if tail else ""
+                extra = f" {hint}" if hint else ""
+                results["emu_path"]["detail"] = (
+                    f"MuMuManager version 失败（返回码 {rc_disp}）。"
+                    f"请确认路径为 nx_main\\MuMuManager.exe 或 shell\\MuMuPlayer.exe，且 MuMu 为较新版本。{extra}"
+                )
         except subprocess.TimeoutExpired:
-            results["emu_path"]["runnable"] = True
-            results["emu_path"]["detail"] = "可执行（响应超时，可能正常）"
+            results["emu_path"]["runnable"] = False
+            results["emu_path"]["detail"] = "执行 version 超时，请检查 MuMu 是否卡死或路径错误"
         except Exception as e:
             results["emu_path"]["detail"] = f"执行失败: {e}"
     else:

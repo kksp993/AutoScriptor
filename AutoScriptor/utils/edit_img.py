@@ -9,7 +9,7 @@ from paddleocr import PaddleOCR
 from pypinyin import lazy_pinyin
 import pandas as pd
 from AutoScriptor.recognition.rec import get_box_color
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.box import Box
 import traceback
 

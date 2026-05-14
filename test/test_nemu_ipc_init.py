@@ -50,9 +50,9 @@ _logger_mod.logger = MagicMock()
 sys.modules["AutoScriptor.utils.logger"] = _logger_mod
 
 # 提供 cfg stub
-_const_mod = types.ModuleType("AutoScriptor.utils.constant")
+_const_mod = types.ModuleType("AutoScriptor.utils.app_config")
 _const_mod.cfg = {"emulator": {"mumu_folder": "C:/FakeNemu"}}
-sys.modules["AutoScriptor.utils.constant"] = _const_mod
+sys.modules["AutoScriptor.utils.app_config"] = _const_mod
 
 # 加载真实依赖子模块
 _load_real("AutoScriptor.control.NemuIpc.base.decorator",

@@ -76,11 +76,11 @@ class RuntimeContext:
         """Lazily create a VLM client if llm.use_agent is enabled."""
         if self.vlm_client is not None:
             return
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         if not cfg.get("llm.use_agent", False):
             return
         try:
-            from AutoScriptor.vlm.vlm import VLMClient
+            from AutoScriptor.vlm.vlm import VLMCliient
             self.vlm_client = VLMClient()
             logger.info("RuntimeContext: VLM client 初始化完成")
         except Exception as e:
@@ -94,7 +94,7 @@ class RuntimeContext:
         and sync back to module-level globals.
         Returns the new (mixctrl, mumu) pair.
         """
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         from AutoScriptor import ensure_app_running
 
         self._release_nemu_ipc()

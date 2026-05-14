@@ -448,9 +448,11 @@ def run_nuitka(timings: list[tuple[str, float]] | None = None, jobs: int | None 
         "--output-filename=autoscriptor-engine.exe",
         "--follow-import-to=AutoScriptor",
         "--follow-import-to=ZmxyOL",
+        "--follow-import-to=battle_character",
         "--follow-import-to=services",
         "--include-package=AutoScriptor",
         "--include-package=ZmxyOL",
+        "--include-package=battle_character",
         "--include-package=services",
         # setuptools 依赖；仅复制 setuptools 目录时，冻结环境需能解析该子模块
         "--include-package=_distutils_hack",
@@ -543,12 +545,12 @@ def collect_data():
             pass
     print("[data] accounts/（空目录，不含 *.json）")
 
-    # YAML profiles
-    profiles_src = PROJECT_ROOT / "ZmxyOL" / "assets" / "profiles"
-    profiles_dst = DATA_DIR / "profiles"
-    if profiles_src.exists():
-        shutil.copytree(profiles_src, profiles_dst, dirs_exist_ok=True)
-        print("[data] profiles/")
+    # battle_character：可编辑职业 .py（与仓库 battle_character/ 同源；发行版 data 下覆盖内置逻辑）
+    bc_src = PROJECT_ROOT / "battle_character"
+    bc_dst = DATA_DIR / "battle_character"
+    if bc_src.is_dir():
+        shutil.copytree(bc_src, bc_dst, dirs_exist_ok=True)
+        print("[data] battle_character/")
 
     # assets/config (ui_map.csv 等)
     assets_config_src = PROJECT_ROOT / "ZmxyOL" / "assets" / "config"

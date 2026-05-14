@@ -209,7 +209,7 @@ def _apply_cpu_affinity():
     global _original_affinity_mask
 
     try:
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         cpu_cores = cfg.get("app.cpu_cores", 0)
     except Exception:
         cpu_cores = 0

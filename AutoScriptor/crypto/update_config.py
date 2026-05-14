@@ -14,7 +14,7 @@ def mask_string(text: str, show_first: int = 1, show_last: int = 1) -> str:
 
 
 def set_config():
-    from AutoScriptor.utils.constant import cfg
+    from AutoScriptor.utils.app_config import cfg
     if not cfg.current_account():
         logger.info("当前没有加载任何账号，请先通过 WebUI 创建账号")
         return
@@ -35,7 +35,7 @@ def set_config():
 
 def verify_config() -> dict | None:
     """验证并返回解密后的配置，失败返回 None"""
-    from AutoScriptor.utils.constant import cfg
+    from AutoScriptor.utils.app_config import cfg
 
     os.system('cls' if os.name == 'nt' else 'clear')
     logger.info("\n验证解密：")

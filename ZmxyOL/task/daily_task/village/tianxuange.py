@@ -25,7 +25,7 @@ def task(
         return
     ensure_in("村庄")
     click(I("导航-挑战"))
-    click(T("天选阁"),repeat=3)
+    click(T("天选阁"),repeat=1)
     if ui_T(T("没有报名"),timeout=2):
         logger.critical("没有报名天选阁，请下周再来！")
         return

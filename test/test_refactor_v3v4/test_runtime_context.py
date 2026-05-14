@@ -162,7 +162,7 @@ class TestInitVlm(unittest.TestCase):
     def test_skips_when_use_agent_false(self):
         runtime_ctx.vlm_client = None
         from unittest.mock import patch
-        with patch("AutoScriptor.utils.constant.cfg") as mock_cfg:
+        with patch("AutoScriptor.utils.app_config.cfg") as mock_cfg:
             mock_cfg.get.return_value = False
             runtime_ctx.init_vlm()
         self.assertIsNone(runtime_ctx.vlm_client)

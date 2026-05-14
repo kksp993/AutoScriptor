@@ -161,18 +161,25 @@
           :is-dispatch-running="isDispatchRunning" :execution-busy="executionBusy"
           :dispatch-progress="dispatchProgress"
           :logs="logs" :overview-security-unlocked="overviewSecurityUnlocked"
+          :game-profession-options="gameProfessionOptions"
+          :game-professions-by-character="gameProfessionsByCharacter"
           @verify-account="verifyAccount" @switch-character="switchCharacter"
           @add-to-dispatch="addToDispatch" @remove-from-dispatch="removeFromDispatch"
           @reorder-dispatch="reorderDispatchQueue"
           @run-all-dispatch="runAllDispatchTasks" @stop-dispatch="stopDispatch"
           @switch-account="switchAccount" @refresh-overview="refreshOverviewPanel"
-          @lock-overview-security="clearOverviewSecurityUnlocked"></overview-panel>
+          @lock-overview-security="clearOverviewSecurityUnlocked"
+          @set-game-profession="(srv, name, p) => setGameProfession(srv, name, p)"></overview-panel>
 
         <scheduler-panel v-if="activeTab==='scheduler'"
           :overview-data="overviewData" :logs="logs" :character-name="characterName"
           :scheduler-status="schedulerStatus" :execution-busy="executionBusy"
+          :active-character="activeCharacter"
+          :game-profession-options="gameProfessionOptions"
+          :game-professions-by-character="gameProfessionsByCharacter"
           @start-run="startRun" @stop-run="stopRun" @reset-scheduler="resetScheduler"
-          @clear-logs="clearLogs"></scheduler-panel>
+          @clear-logs="clearLogs"
+          @set-game-profession="(srv, name, p) => setGameProfession(srv, name, p)"></scheduler-panel>
 
         <canvas-panel v-if="featureScriptCanvas && activeTab==='canvas'"></canvas-panel>
 
@@ -206,6 +213,12 @@
     <!-- 编辑任务对话框 -->
     <teleport to="body">
       <el-dialog v-model="editModalVisible" :title="'编辑任务: '+editTaskPath" :width="Object.keys(editTaskData.params||{}).some(k => isTableParam(k)) ? '860px' : '600px'" destroy-on-close>
+        <div v-if="editTaskData.task_description || editTaskData.task_doc_flow" class="mb-4 space-y-2 -mt-1">
+          <p v-if="editTaskData.task_description" class="text-sm text-gray-600 leading-relaxed">{{ editTaskData.task_description }}</p>
+          <p v-if="editTaskData.task_doc_flow" class="text-xs text-gray-500 leading-relaxed whitespace-pre-wrap">{{ editTaskData.task_doc_flow }}</p>
+        </div>
+        <p v-if="editTaskData.custom" class="task-doc-custom-line mb-3">*自定义任务：任意 Python 与主程序同进程运行；请仅使用可信来源脚本，风险自负。</p>
+        <p v-if="editTaskData.beta" class="task-doc-beta-line mb-3">*该任务为 Beta 实验功能：自动化流程、界面识别或参数含义可能随版本快速调整，不保证与当前游戏完全一致；请谨慎启用并及时反馈问题。</p>
         <el-form :model="editTaskData" label-width="100px">
           <el-form-item label="启用状态"><el-switch v-model="editTaskData.on"></el-switch></el-form-item>
           <template v-for="(val, key) in editTaskData.params" :key="key">

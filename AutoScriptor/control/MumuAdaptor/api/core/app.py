@@ -20,7 +20,7 @@ def _is_not_handle_cmd(retval) -> bool:
 
 def _adb_app_close(package: str) -> bool:
     """ADB 回退：强制关闭应用（MuMu 6 等不支持 MuMuManager app close 时使用）"""
-    from AutoScriptor.utils.constant import cfg
+    from AutoScriptor.utils.app_config import cfg
     adb = cfg["emulator"]["adb_path"]
     addr = str(cfg["emulator"].get("adb_addr", ""))
     args = [adb]
@@ -33,7 +33,7 @@ def _adb_app_close(package: str) -> bool:
 
 def _adb_app_launch(package: str) -> bool:
     """ADB 回退：通过 monkey 启动应用（MuMu 6 等不支持 MuMuManager app launch 时使用）"""
-    from AutoScriptor.utils.constant import cfg
+    from AutoScriptor.utils.app_config import cfg
     adb = cfg["emulator"]["adb_path"]
     addr = str(cfg["emulator"].get("adb_addr", ""))
     args = [adb]
@@ -46,7 +46,7 @@ def _adb_app_launch(package: str) -> bool:
 
 def _adb_app_state(package: str) -> str:
     """ADB 回退：通过 pidof 判断应用是否在运行"""
-    from AutoScriptor.utils.constant import cfg
+    from AutoScriptor.utils.app_config import cfg
     adb = cfg["emulator"]["adb_path"]
     addr = str(cfg["emulator"].get("adb_addr", ""))
     args = [adb]

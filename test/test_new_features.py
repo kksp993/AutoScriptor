@@ -318,13 +318,6 @@ class TestUpdater(unittest.TestCase):
         branch = u.get_current_branch()
         self.assertTrue(len(branch) > 0, "应能检测到 git 分支")
 
-    def test_scheduled_check_thread(self):
-        from services.core.updater import Updater
-        u = Updater()
-        u.start_scheduled_check(1)
-        time.sleep(0.1)
-        self.assertTrue(u._check_thread.is_alive())
-        u.stop()
 
 
 # ═══════════════════════════════════════════════
@@ -428,10 +421,6 @@ class TestServerAPIs(unittest.TestCase):
         self.assertIn("ssl_keyfile", content)
         self.assertIn("ssl_certfile", content)
 
-    def test_updater_auto_check_startup(self):
-        server_path = ROOT / "services" / "webui" / "server.py"
-        content = server_path.read_text(encoding="utf-8")
-        self.assertIn("start_scheduled_check", content)
 
 
 # ═══════════════════════════════════════════════

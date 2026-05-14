@@ -56,7 +56,7 @@ class utils:
         """
         try:
             if mumu:
-                from AutoScriptor.utils.constant import cfg
+                from AutoScriptor.utils.app_config import cfg
                 command_extend = [cfg["emulator"]["emu_path"]]
 
                 if self.__OPERATE is not None:

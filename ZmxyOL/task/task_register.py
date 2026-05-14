@@ -4,7 +4,7 @@ import os
 import traceback
 from ZmxyOL import *
 import enum
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.task_registry import task_registry
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.table_param import TableParam
@@ -24,6 +24,7 @@ def register_task(
     beta=False,
     path_cn=None,
     task_doc=None,
+    description=None,
     **task_kwargs,
 ):
     """
@@ -36,7 +37,8 @@ def register_task(
     支持以下可选参数（仅对指定任务生效）：
       - default_offset_hours (int): 任务执行后延迟 N 小时再调度
       - beta (bool): 为 True 时 WebUI 任务名旁显示 Beta 标记，说明区首行提示实验性任务
-      - task_doc (str): 可选。WebUI 任务展开说明中的「执行流程」正文；不传则从任务函数 docstring 首段提取
+      - task_doc (str): 可选。WebUI 中「补充说明」正文；不传则从任务函数 docstring 首段提取
+      - description (str): 可选。WebUI 任务简介（一句话）；不传则按任务名自动生成占位简介
       - path_cn (str): **仅 custom_task 目录下脚本必填**。斜杠分隔的 cfg 任务路径（中文键），
         首段一般为「自定义任务」或与目录对应的英文名（如 custom_task 会规范为「自定义任务」）。
         示例：path_cn="自定义任务/示例/hello_custom"
@@ -63,6 +65,7 @@ def register_task(
                 beta=beta,
                 path_cn=path_cn,
                 task_doc=task_doc,
+                description=description,
                 **task_kwargs,
             )
         return wrapper
@@ -187,6 +190,9 @@ def register_task(
 
         # 8. fn / order / param_meta 注册到 TaskRegistry（运行时数据，不写入 JSON）
         task_path = "/".join(keys)
+        desc = (description or "").strip() if description is not None else ""
+        if not desc:
+            desc = f"自动执行「{last_key}」相关流程。"
         task_registry.register(
             task_path,
             task_wrapper(func),
@@ -196,6 +202,7 @@ def register_task(
             beta=beta,
             custom=is_custom,
             doc_flow=doc_flow,
+            description=desc,
         )
         # print(f"✅ 【{'/'.join(keys)}】 => {a}")
     except Exception as e:

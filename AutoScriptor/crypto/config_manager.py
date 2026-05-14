@@ -37,7 +37,7 @@ class ConfigManager:
 
     def _save_config(self):
         """保存加密配置到当前账号文件"""
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         if cfg._account_data:
             cfg._account_data["encryption"] = self.config["encryption"]
             cfg._save_account_file()

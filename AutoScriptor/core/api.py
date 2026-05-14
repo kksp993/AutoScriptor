@@ -16,7 +16,7 @@ from AutoScriptor.utils.box import Box, b2p
 from AutoScriptor.utils.logger import setup_task_aware_logging
 from AutoScriptor.utils.tracer import save_debug_screenshot
 from AutoScriptor.utils.logger import logger, setup_logfile
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.app_package_resolve import resolve_app_to_start
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
 from AutoScriptor.utils.edit_img import launch_editor

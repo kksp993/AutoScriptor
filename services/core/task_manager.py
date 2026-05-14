@@ -22,7 +22,7 @@ from AutoScriptor.utils.logger import logger
 from ZmxyOL import *
 from AutoScriptor import *
 import AutoScriptor.core.api as _core_api
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.task_registry import task_registry
 from AutoScriptor import TaskRequireReTry
 from AutoScriptor.utils.logger import set_current_task
@@ -153,6 +153,12 @@ class TaskManager:
                 # 清除 ZmxyOL 子模块缓存，强制重新导入
                 for name in [m for m in sys.modules if m.startswith('ZmxyOL.')]:
                     sys.modules.pop(name, None)
+                try:
+                    from battle_character.hero import reload_battle_character_modules
+
+                    reload_battle_character_modules()
+                except Exception as e:
+                    logger.warning("职业脚本热重载失败（将使用已缓存职业）: %s", e)
                 try:
                     import ZmxyOL
                     importlib.reload(ZmxyOL)

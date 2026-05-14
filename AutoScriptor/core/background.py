@@ -8,10 +8,16 @@ from AutoScriptor.core.targets import Target
 
 DEFAULT_INTERVAL = 1.0
 
+# 常规回调 (allow_concurrent=False) 的 priority：数值越大越先被尝试匹配/触发；
+# 内置「前进」(_builtin_advance) 使用最低档，避免先于任务注册的其它常规回调置位。
+BG_PRIORITY_DEFAULT = 0
+BG_PRIORITY_BUILTIN_ADVANCE = -1_000_000
+
+
 class BackgroundMonitor(Thread):
     def __init__(self):
         super().__init__(daemon=True)
-        self._callbacks = {}  # name -> {idf, cb, once, throttle, last, allow_concurrent}
+        self._callbacks = {}  # name -> {idf, cb, once, throttle, last, allow_concurrent, priority}
         self._signals = {}
         self._interval = DEFAULT_INTERVAL
         self._lock = RLock()
@@ -58,11 +64,17 @@ class BackgroundMonitor(Thread):
                 time.sleep(self._interval)
                 continue
 
+            # 先扫描 allow_concurrent（如「知道了」、爆 等），再扫描常规回调（如 _builtin_advance「前进」）。
+            # 若顺序相反，同一帧内内置前进会先置位 _builtin_advance，战斗主循环优先 travel()，弹窗无法及时关闭。
+            if screenshot is not None:
+                self._check_concurrent(screenshot=screenshot)
+
             # Build a batch of (name, info, flat_targets) for ONE shared locate call
             pending: list[tuple[str, dict, list[Target]]] = []
             all_targets: list[Target] = []
             offsets: list[tuple[int, int]] = []  # (start, end) in all_targets
 
+            rows: list[tuple[int, str, dict, list[Target]]] = []
             for name, info in snapshot:
                 if info.get('allow_concurrent'):
                     continue
@@ -71,6 +83,10 @@ class BackgroundMonitor(Thread):
                     continue
                 idf = info['idf']
                 targets = list(idf) if isinstance(idf, (list, tuple)) else [idf]
+                pr = info.get('priority', BG_PRIORITY_DEFAULT)
+                rows.append((pr, name, info, targets))
+            rows.sort(key=lambda r: -r[0])
+            for _pr, name, info, targets in rows:
                 start = len(all_targets)
                 all_targets.extend(targets)
                 offsets.append((start, len(all_targets)))
@@ -108,7 +124,6 @@ class BackgroundMonitor(Thread):
                     if info.get('once', True):
                         self.remove(name)
 
-            self._check_concurrent(screenshot=screenshot)
             time.sleep(self._interval)
 
     # ── allow_concurrent 支持 ──
@@ -176,16 +191,35 @@ class BackgroundMonitor(Thread):
             if info.get('once', True):
                 self.remove(name)
 
-    def add(self, name: str, identifier, callback: Callable[[], None], once: bool = True, throttle: float = 0, allow_concurrent: bool = False):
+    def add(
+        self,
+        name: str,
+        identifier,
+        callback: Callable[[], None],
+        once: bool = True,
+        throttle: float = 0,
+        allow_concurrent: bool = False,
+        priority: int = BG_PRIORITY_DEFAULT,
+    ):
         """
         添加后台监控事件。
         allow_concurrent: 若为 True，即使其他 callback 正在执行，此 callback 也会被检测并触发。
                           适用于"知道了"等全局弹窗，默认 False。
+        priority: 仅对常规回调 (allow_concurrent=False) 生效；数值越大越先匹配。
+                  内置「前进」使用 BG_PRIORITY_BUILTIN_ADVANCE（最低）。
         """
         if isinstance(identifier, Target):
             identifier = (identifier,)
         with self._lock:
-            self._callbacks[name] = {'idf': identifier, 'cb': callback, 'once': once, 'throttle': throttle, 'last': 0, 'allow_concurrent': allow_concurrent}
+            self._callbacks[name] = {
+                'idf': identifier,
+                'cb': callback,
+                'once': once,
+                'throttle': throttle,
+                'last': 0,
+                'allow_concurrent': allow_concurrent,
+                'priority': priority,
+            }
         logger.info('✅ 添加监控事件: %s', name)
 
     def remove(self, name: str):

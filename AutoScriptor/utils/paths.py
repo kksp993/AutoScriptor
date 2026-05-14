@@ -99,10 +99,15 @@ def get_error_archives_dir() -> Path:
 
 
 def get_profiles_dir() -> Path:
-    """配招 YAML 目录 (用户可编辑)。"""
+    """已弃用：旧 YAML 配招目录。职业逻辑请改 battle_character / data/battle_character。"""
     if is_compiled():
         return get_data_root() / "profiles"
     return get_data_root() / "ZmxyOL" / "assets" / "profiles"
+
+
+def get_battle_character_dir() -> Path:
+    """战斗职业 .py 目录（发行版为 data/battle_character，与内置 battle_character 包同名可覆盖）。"""
+    return get_data_root() / "battle_character"
 
 
 def get_assets_dir() -> Path:

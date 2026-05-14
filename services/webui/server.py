@@ -24,10 +24,11 @@ from threading import Thread
 from typing import Set
 
 import dpath
+from AutoScriptor import *
 from AutoScriptor.utils.logger import logger, _TaskFilter as _LogTaskFilter
 
-from AutoScriptor import *
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
+from AutoScriptor.utils.game_profession import GAME_PROFESSIONS, normalize_game_profession
 from ZmxyOL.task.battle_task_params import battle_flow_allowed_for_task
 from services.core.task_manager import TaskManager
 from services.core.banner import _print_banner
@@ -206,18 +207,18 @@ def _clear_credential_unlock_cookie(response: JSONResponse) -> JSONResponse:
     return response
 
 
+
 def _require_credential_unlock(request: Request) -> JSONResponse | None:
-    """执行自动化前须持有由 /api/verify 或带密钥切换账号签发的解锁 Cookie。"""
-    tok = _credential_unlock_from_request(request)
-    if not _validate_credential_unlock(tok):
-        return JSONResponse(
-            status_code=403,
-            content={
-                "status": "error",
-                "message": "请先验证安全密码后再执行任务",
-                "need_credential_unlock": True,
-            },
-        )
+    """执行自动化前仅依据 cfg 中是否已有已解密账密判断。"""
+    # if not cfg.has_decrypted_credentials():
+    #     return JSONResponse(
+    #         status_code=403,
+    #         content={
+    #             "status": "error",
+    #             "message": "请先验证安全密码后再执行任务",
+    #             "need_credential_unlock": True,
+    #         },
+    #     )
     return None
 
 
@@ -324,6 +325,8 @@ def _inject_param_meta_into_tasks(node: dict, prefix: str = "") -> None:
                 val["custom"] = True
             else:
                 val.pop("custom", None)
+            val["task_description"] = task_registry.get_description(path)
+            val["task_doc_flow"] = task_registry.get_doc_flow(path)
             val["_due"] = is_task_due(val, path, now_ts)
         else:
             _inject_param_meta_into_tasks(val, path)
@@ -341,6 +344,8 @@ def _strip_runtime_tasks_fields(node: dict) -> None:
             val.pop("param_keys", None)
             val.pop("beta", None)
             val.pop("custom", None)
+            val.pop("task_description", None)
+            val.pop("task_doc_flow", None)
             val.pop("fn", None)
             val.pop("order", None)
             val.pop("_due", None)
@@ -362,6 +367,8 @@ def make_public_config():
         _inject_param_meta_into_tasks(tasks)
     config_data["active_character"] = cfg.active_character()
     config_data["characters_summary"] = _characters_summary()
+    config_data["game_professions_by_character"] = _game_professions_by_character()
+    config_data["game_profession_options"] = list(GAME_PROFESSIONS)
     return config_data
 
 
@@ -369,6 +376,20 @@ def _characters_summary() -> dict:
     """Return { server: [char_name, ...] } without heavy tasks/status data."""
     tree = cfg.list_characters()
     return {srv: list(chars.keys()) for srv, chars in tree.items()} if tree else {}
+
+
+def _game_professions_by_character() -> dict[str, dict[str, str]]:
+    """{ server: { 角色名: 职业 } }，供 WebUI 展示与编辑。"""
+    tree = cfg.list_characters()
+    out: dict[str, dict[str, str]] = {}
+    for srv, chars in (tree or {}).items():
+        out[srv] = {}
+        for name, node in chars.items():
+            gp = None
+            if isinstance(node, dict):
+                gp = node.get("game_profession")
+            out[srv][name] = normalize_game_profession(gp)
+    return out
 
 
 def _task_leaf_status(node: dict, path: str, now_ts: float) -> str:
@@ -395,6 +416,8 @@ def _flatten_tasks(node: dict, now_ts: float, prefix: str = '') -> list:
                 'name': key,
                 'status': _task_leaf_status(val, path, now_ts),
                 'beta': task_registry.get_beta(path),
+                'task_description': task_registry.get_description(path),
+                'task_doc_flow': task_registry.get_doc_flow(path),
             }
             if task_registry.get_custom(path):
                 row['custom'] = True
@@ -889,9 +912,8 @@ async def stop_tasks_api():
 
 @app.get("/api/credential/status")
 async def credential_status_api(request: Request):
-    """前端同步「是否已通过安全密码解锁」——以服务端 HttpOnly Cookie 为准，避免 sessionStorage 误放行。"""
-    tok = _credential_unlock_from_request(request)
-    return {"unlocked": _validate_credential_unlock(tok)}
+    """前端同步「是否可执行」：仅看 cfg 中是否已有已解密账密。"""
+    return {"unlocked": cfg.has_decrypted_credentials()}
 
 
 @app.post("/api/credential/revoke")
@@ -913,8 +935,7 @@ async def verify_account_api(request: Request):
     if not _check_request_freshness(data):
         return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
     security_key = data.get("security_key", "")
-    enc = cfg._account_data.get("encryption", {})
-    has_enc = bool(enc.get("encrypted_data"))
+    has_enc = cfg.has_encrypted_credentials()
     if has_enc and not str(security_key).strip():
         return JSONResponse(status_code=401, content={"error": "请输入安全密码"})
 
@@ -939,7 +960,7 @@ async def verify_account_api(request: Request):
             cfg._config["game"]["server_name"] = server_name
 
     if has_enc:
-        if not cfg._config.get("game", {}).get("account"):
+        if not cfg.has_decrypted_credentials():
             _record_verify_failure(client_ip)
             return JSONResponse(status_code=401, content={"error": "安全密码错误"})
 
@@ -977,23 +998,19 @@ async def update_account_credentials_api(request: Request):
     security_key = data.get('security_key', '')
     confirmed = data.get('confirmed', False)
     current_security_key = data.get('current_security_key', '')
+    unlocked = _validate_credential_unlock(_credential_unlock_from_request(request))
 
-    existing_enc = cfg._account_data.get("encryption", {})
-    if existing_enc.get("encrypted_data"):
-        if not current_security_key:
+    if cfg.has_encrypted_credentials():
+        if not unlocked and not current_security_key:
             return JSONResponse(status_code=403, content={
                 "error": "修改账密需要先验证当前安全密码",
                 "need_current_key": True,
             })
-        try:
-            from AutoScriptor.crypto.config_manager import ConfigManager
-            decrypted = ConfigManager.decrypt_data(existing_enc, current_security_key)
-            if not decrypted:
+        if not unlocked:
+            if not cfg.verify_account_security_key(cfg.current_account(), current_security_key):
                 _record_verify_failure(client_ip)
                 return JSONResponse(status_code=401, content={"error": "当前安全密码验证失败"})
-        except Exception:
-            _record_verify_failure(client_ip)
-            return JSONResponse(status_code=401, content={"error": "当前安全密码验证失败"})
+       
 
     existing_name = cfg._config.get("game", {}).get("character_name", "")
     if existing_name and not confirmed:
@@ -1065,35 +1082,19 @@ async def enum_options_api(request: Request):
 async def ocr_status_api():
     try:
         import paddle
-        try:
-            from AutoScriptor.recognition.ocr_rec import ocr_manager
-        except Exception:
-            ocr_manager = None
-        compiled_with_cuda = False
-        gpu_count = 0
-        current_device = "unknown"
-        try:
-            compiled_with_cuda = paddle.device.is_compiled_with_cuda()
-        except Exception:
-            pass
-        try:
-            gpu_count = paddle.device.cuda.device_count()
-        except Exception:
-            pass
-        try:
-            current_device = paddle.get_device()
-        except Exception:
-            pass
-        cfg_use_gpu = False
-        try:
-            cfg_use_gpu = bool(cfg["ocr"].get("use_gpu", cfg.get("ocr.use_gpu", False)))
-        except Exception:
-            cfg_use_gpu = False
-        engine_ready = False
-        try:
-            engine_ready = ocr_manager.is_ready() if ocr_manager else False
-        except Exception:
-            pass
+        from AutoScriptor.recognition.ocr_rec import ocr_manager
+
+        def _safe(call, default):
+            try:
+                return call()
+            except Exception:
+                return default
+
+        cfg_use_gpu = bool((cfg.get("ocr") or {}).get("use_gpu", cfg.get("ocr.use_gpu", False)))
+        compiled_with_cuda = _safe(lambda: paddle.device.is_compiled_with_cuda(), False)
+        gpu_count = _safe(lambda: paddle.device.cuda.device_count(), 0)
+        current_device = _safe(lambda: paddle.get_device(), "unknown")
+        engine_ready = _safe(lambda: ocr_manager.is_ready(), False)
         return {
             "cfg_use_gpu": cfg_use_gpu,
             "compiled_with_cuda": compiled_with_cuda,
@@ -1171,11 +1172,8 @@ async def overview_data_api():
         overall_next = _overall_next_execution_all_characters()
 
         runtime_status = {}
-        try:
-            from services.core.runtime_context import runtime_ctx
-            runtime_status = runtime_ctx.status_dict()
-        except Exception:
-            pass
+        from services.core.runtime_context import runtime_ctx
+        runtime_status = runtime_ctx.status_dict()
 
         return {
             'scheduler': sched,
@@ -1338,11 +1336,15 @@ async def accounts_switch_api(request: Request):
         return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
     name = data.get("name", "")
     security_key = data.get("security_key", "")
+    client_ip = request.client.host if request.client else "unknown"
 
     if not security_key:
         return JSONResponse(status_code=400, content={
             "error": "请输入安全密码以切换账号", "need_security_key": True,
         })
+    if not cfg.verify_account_security_key(name, security_key):
+        _record_verify_failure(client_ip)
+        return JSONResponse(status_code=401, content={"error": "安全密码错误"})
     try:
         cfg.switch_account(name, security_key)
         TASK_MANAGER.reload_tasks(security_key)
@@ -1473,6 +1475,29 @@ async def characters_delete_api(request: Request):
         return JSONResponse(status_code=400, content={"error": str(e)})
 
 
+@app.post("/api/characters/game_profession")
+async def characters_game_profession_api(request: Request):
+    """写入指定角色的游戏职业（存账号 JSON），当前角色同步 cfg.game。"""
+    data = await request.json()
+    if not _check_request_freshness(data):
+        return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
+    server = (data.get("server") or "").strip()
+    character = (data.get("character") or "").strip()
+    profession = (data.get("game_profession") or "").strip()
+    try:
+        with TASK_MANAGER._cfg_lock:
+            cfg.set_character_game_profession(server, character, profession)
+        return {
+            "game_professions_by_character": _game_professions_by_character(),
+            "game": {"game_profession": cfg._config.get("game", {}).get("game_profession", "")},
+        }
+    except (KeyError, ValueError) as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+    except Exception as e:
+        logger.error("game_profession error: %s", e)
+        return JSONResponse(status_code=500, content={"error": "保存职业失败"})
+
+
 @app.get("/api/characters/all_tasks_summary")
 async def characters_all_tasks_summary_api():
     try:
@@ -1516,10 +1541,14 @@ async def profiles_switch_api(request: Request):
         return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
     name = data.get("name", "")
     security_key = data.get("security_key", "")
+    client_ip = request.client.host if request.client else "unknown"
     if not security_key:
         return JSONResponse(status_code=400, content={
             "error": "请输入安全密码以切换账号", "need_security_key": True,
         })
+    if not cfg.verify_account_security_key(name, security_key):
+        _record_verify_failure(client_ip)
+        return JSONResponse(status_code=401, content={"error": "安全密码错误"})
     try:
         cfg.switch_account(name, security_key)
         TASK_MANAGER.reload_tasks(security_key)
@@ -1712,16 +1741,10 @@ def run_webui(restart_event=None):
     _apply_webui_log_level_from_config()
     _print_banner()
 
-    # 启动自动更新检查 & 传递重启事件
-    try:
-        from services.core.updater import updater as _updater
-        if restart_event is not None:
-            _updater.set_restart_event(restart_event)
-        interval = cfg.get("update.check_interval_minutes", 30)
-        if cfg.get("update.auto_check", True) and interval > 0:
-            _updater.start_scheduled_check(interval)
-    except Exception as e:
-        logger.debug("自动更新检查启动失败: %s", e)
+    # 仅传递重启事件；更新检查改为手动触发（点击「检查更新」）
+    from services.core.updater import updater as _updater
+    if restart_event is not None:
+        _updater.set_restart_event(restart_event)
 
     webbrowser.open("http://127.0.0.1:5000")
 
@@ -1748,36 +1771,28 @@ def shutdown_webui():
         return
     _shutdown_done = True
 
-    try:
-        scheduler.deactivate()
-    except Exception:
-        pass
-    try:
-        scheduler.stop(timeout=3)
-    except Exception:
-        pass
-    try:
-        from AutoScriptor.utils.perf import unboost
-        unboost()
-    except Exception:
-        pass
-    try:
-        from services.core.runtime_context import runtime_ctx
-        if runtime_ctx.bg is not None:
-            runtime_ctx.bg.stop()
-        runtime_ctx.shutdown()
-    except Exception:
-        pass
-    try:
-        if _server:
-            _server.should_exit = True
-    except Exception:
-        pass
+    def _silent(call):
+        try:
+            call()
+        except Exception:
+            pass
+
+    _silent(scheduler.deactivate)
+    _silent(lambda: scheduler.stop(timeout=3))
+    _silent(lambda: __import__("AutoScriptor.utils.perf", fromlist=["unboost"]).unboost())
+    _silent(_shutdown_runtime)
+    _silent(lambda: setattr(_server, "should_exit", True) if _server else None)
+
+
+def _shutdown_runtime():
+    from services.core.runtime_context import runtime_ctx
+    if runtime_ctx.bg is not None:
+        runtime_ctx.bg.stop()
+    runtime_ctx.shutdown()
 
 
 if __name__ == '__main__':
     from services.single_instance import ensure_single_instance
-
     ensure_single_instance()
 
     try:

@@ -17,7 +17,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from AutoScriptor.utils.task_registry import task_registry
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
 
 
 # ---------------------------------------------------------------------------

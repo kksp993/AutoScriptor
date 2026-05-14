@@ -70,7 +70,7 @@ class TestCustomTaskDynamicImport(unittest.TestCase):
         import copy
         from unittest.mock import patch
 
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         from AutoScriptor.utils.task_registry import task_registry
         from ZmxyOL.task import force_reload_tasks
 

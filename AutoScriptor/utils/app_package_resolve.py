@@ -2,6 +2,7 @@
 """造梦西游 OL 包名解析：在 app_to_start 为空或未安装时按顺序匹配已安装包，并写回 config.json。"""
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
@@ -73,7 +74,7 @@ def resolve_app_to_start(mumu) -> str:
     - 已填写：优先该包名；若未安装则继续按上述顺序匹配。
     解析结果与配置不一致时写入 config.json。
     """
-    from AutoScriptor.utils.constant import cfg
+    from AutoScriptor.utils.app_config import cfg
 
     raw = _normalize_raw(cfg["app"].get("app_to_start"))
     installed = _fetch_installed_with_retry(mumu)
@@ -84,8 +85,10 @@ def resolve_app_to_start(mumu) -> str:
 
     chosen = _choose_package(installed, raw, ZMXY_PACKAGE_FALLBACK_ORDER)
     if not chosen:
+        config_abs = os.path.abspath(cfg.CONFIG_PATH)
         raise RuntimeError(
-            "未检测到已安装的造梦西游 OL 包。请安装游戏或在 config.json 的 app.app_to_start 中填写正确包名。"
+            "未检测到已安装的造梦西游 OL 包。请安装游戏，或在配置文件中设置 app.app_to_start 为正确包名。"
+            f" 配置文件（绝对路径）：{config_abs}"
         )
 
     prev = _normalize_raw(cfg["app"].get("app_to_start"))
