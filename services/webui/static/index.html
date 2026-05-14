@@ -159,7 +159,6 @@
           :characters-tree="charactersTree" :active-character="activeCharacter"
           :dispatch-queue="dispatchQueue" :all-tasks-summary="allTasksSummary"
           :is-dispatch-running="isDispatchRunning" :execution-busy="executionBusy"
-          :dispatch-progress="dispatchProgress"
           :logs="logs" :overview-security-unlocked="overviewSecurityUnlocked"
           :game-profession-options="gameProfessionOptions"
           :game-professions-by-character="gameProfessionsByCharacter"
@@ -204,7 +203,7 @@
           :scheduler-status="schedulerStatus" :execution-busy="executionBusy"
           @edit-task="openEditModal" @expanded-change="setActiveGroup"
           @start-run="startRun" @stop-run="stopRun" @save-tasks="saveTasks"
-          @clear-logs="clearLogs" @refresh-config="refreshConfig" @reset-scheduler="resetScheduler"
+          @clear-logs="clearLogs" @refresh-config="reloadTasks" @reset-scheduler="resetScheduler"
           @run-task="runSingleTask"></task-panel>
 
       </main>
@@ -447,9 +446,9 @@
   <!-- Vue 组件 -->
   <script src="/static/js/components/NewsPanel.js?v=3"></script>
   <script src="/static/js/components/AppSidebar.js?v=13"></script>
-  <script src="/static/js/components/TaskTree.js?v=11"></script>
-  <script src="/static/js/components/Overview.js?v=16"></script>
-  <script src="/static/js/components/SchedulerPanel.js?v=12"></script>
+  <script src="/static/js/components/TaskTree.js?v=12"></script>
+  <script src="/static/js/components/Overview.js?v=17"></script>
+  <script src="/static/js/components/SchedulerPanel.js?v=13"></script>
   <script src="/static/js/components/TaskPanel.js?v=10"></script>
   <script src="/static/js/components/Settings.js?v=8"></script>
   <script src="/static/js/components/AboutPanel.js?v=1"></script>
@@ -460,6 +459,6 @@
   <script src="/static/js/components/canvas/CanvasPanel.js?v=4"></script>
   <script src="/static/js/components/ErrorArchivesPanel.js?v=4"></script>
   <script src="/static/js/task_help_docs.js?v=1"></script>
-  <script src="/static/js/app.js?v=23"></script>
+  <script src="/static/js/app.js?v=24"></script>
 </body>
 </html>

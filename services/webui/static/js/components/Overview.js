@@ -12,15 +12,6 @@ const OverviewPanel = {
     isDispatchRunning: { type: Boolean, default: false },
     /** 总调度 / 调度模式 / 单任务 任一路径占用 */
     executionBusy: { type: Boolean, default: false },
-    dispatchProgress: {
-      type: Object,
-      default: () => ({
-        currentChar: '',
-        totalTaskCount: 0,
-        /** 已消化黄点数（与总览圆点一致，执行过程中动态更新） */
-        completedTaskCount: 0,
-      }),
-    },
     logs: { type: Array, default: () => [] },
     /** 本浏览器会话内是否已通过安全密码解锁总览（与 characterName 无关） */
     overviewSecurityUnlocked: { type: Boolean, default: false },
@@ -203,21 +194,7 @@ const OverviewPanel = {
       return { scheduled: '#22c55e', pending: '#f59e0b', error: '#ef4444', disabled: '#cbd5e1' }[status] || '#cbd5e1';
     },
     dotLabel(status) {
-      return { scheduled: '待执行', pending: '待执行', error: '错误', disabled: '未启用' }[status] || '未知';
-    },
-    formatProgress() {
-      if (!this.isDispatchRunning) return '';
-      const t = this.dispatchProgress.totalTaskCount || 0;
-      const eff = this.dispatchProgress.completedTaskCount || 0;
-      const effStr = Number.isInteger(eff) ? String(eff) : eff.toFixed(1);
-      return `(${effStr}/${t}) ${this.dispatchProgress.currentChar}`;
-    },
-    dispatchProgressPercent() {
-      if (!this.isDispatchRunning) return 0;
-      const t = this.dispatchProgress.totalTaskCount || 0;
-      if (!t) return 0;
-      const eff = this.dispatchProgress.completedTaskCount || 0;
-      return Math.min(100, Math.round((100 * eff) / t));
+      return { scheduled: '已完成', pending: '待执行', error: '错误', disabled: '未启用' }[status] || '未知';
     },
     formatTimestamp(ts) {
       if (!ts || ts <= 0) return '\u2014';
@@ -301,6 +278,7 @@ const OverviewPanel = {
                 :model-value="professionFor(activeCharacter.server, activeCharacter.name)"
                 placeholder="职业"
                 filterable
+                :disabled="executionBusy"
                 @change="v => $emit('set-game-profession', activeCharacter.server, activeCharacter.name, v)"
               >
                 <el-option v-for="p in gameProfessionOptions" :key="p" :label="p" :value="p"></el-option>
@@ -346,6 +324,7 @@ const OverviewPanel = {
                         :model-value="professionFor(srv, name)"
                         placeholder="职业"
                         filterable
+                        :disabled="executionBusy"
                         @change="v => $emit('set-game-profession', srv, name, v)"
                       >
                         <el-option v-for="p in gameProfessionOptions" :key="p" :label="p" :value="p"></el-option>
@@ -353,11 +332,12 @@ const OverviewPanel = {
                     </div>
                     <el-button class="ov-char-btn" size="small" :type="isActiveChar(srv, name) ? 'success' : 'primary'" text
                                @click.stop="$emit('switch-character', srv, name)"
-                               :disabled="isActiveChar(srv, name)">
+                               :disabled="executionBusy || isActiveChar(srv, name)">
                       {{ isActiveChar(srv, name) ? '当前' : '上号' }}
                     </el-button>
                     <el-button class="ov-char-btn" size="small" text :type="isInDispatch(srv, name) ? 'info' : 'warning'"
-                               @click.stop="isInDispatch(srv, name) ? $emit('remove-from-dispatch', srv, name) : $emit('add-to-dispatch', srv, name)">
+                               @click.stop="isInDispatch(srv, name) ? $emit('remove-from-dispatch', srv, name) : $emit('add-to-dispatch', srv, name)"
+                               :disabled="executionBusy">
                       <i class="fa" :class="isInDispatch(srv, name) ? 'fa-check' : 'fa-plus'"></i>
                     </el-button>
                   </div>
@@ -375,7 +355,7 @@ const OverviewPanel = {
         <div class="ov-dispatch-control">
           <div class="ov-dispatch-header">
             <span class="ov-section-label"><i class="fa fa-play-circle mr-1.5"></i>全角色调度</span>
-            <span v-if="isDispatchRunning" class="ov-dispatch-progress">{{ formatProgress() }}</span>
+            <span v-if="isDispatchRunning" class="ov-dispatch-progress"><i class="fa fa-spinner fa-spin"></i> 调度运行中</span>
           </div>
           <div class="ov-dispatch-sched-meta">
             <span class="ov-dispatch-meta-label">调度状态</span>
@@ -405,10 +385,6 @@ const OverviewPanel = {
               队列: <strong>{{ dispatchQueue.length }}</strong> 个角色
             </span>
           </div>
-          <div v-if="isDispatchRunning" class="ov-dispatch-progress-bar">
-            <el-progress :percentage="dispatchProgressPercent()"
-                         :stroke-width="6" color="#22c55e"></el-progress>
-          </div>
         </div>
 
         <!-- 下区：角色任务状态 -->
@@ -420,13 +396,13 @@ const OverviewPanel = {
 
           <div v-for="(char, dIdx) in dispatchQueue" :key="char.server + '/' + char.name"
                class="ov-dispatch-card"
-               :class="{ 'ov-dispatch-card--drag-over': dragOverIndex === dIdx && !isDispatchRunning }"
+               :class="{ 'ov-dispatch-card--drag-over': dragOverIndex === dIdx && !executionBusy }"
                @dragover="onDragOverDispatchCard($event, dIdx)"
                @drop="onDropDispatchCard($event, dIdx)">
             <div class="ov-dispatch-card-top">
               <span class="ov-dispatch-drag-handle"
-                    :class="{ 'ov-dispatch-drag-handle--disabled': isDispatchRunning }"
-                    :draggable="!isDispatchRunning"
+                    :class="{ 'ov-dispatch-drag-handle--disabled': executionBusy }"
+                    :draggable="!executionBusy"
                     title="拖拽排序执行顺序"
                     @dragstart="onDragStartDispatch($event, dIdx)"
                     @dragend="onDragEndDispatch"
@@ -440,8 +416,6 @@ const OverviewPanel = {
                     <span class="ov-dispatch-card-server">{{ char.server }}</span>
                     <span class="ov-dispatch-card-character">{{ char.name }}</span>
                   </span>
-                  <span v-if="isDispatchRunning && dispatchProgress.currentChar === char.server + '/' + char.name"
-                        class="ov-dispatch-running-tag"><i class="fa fa-spinner fa-spin"></i> 执行中</span>
                 </div>
                 <div class="ov-dispatch-card-right">
                   <div class="ov-task-dots">
@@ -457,7 +431,7 @@ const OverviewPanel = {
                     </span>
                   </template>
                   <el-button size="small" type="danger" text @click.stop="$emit('remove-from-dispatch', char.server, char.name)"
-                             :disabled="isDispatchRunning">
+                             :disabled="executionBusy">
                     <i class="fa fa-minus"></i>
                   </el-button>
                 </div>

@@ -132,7 +132,7 @@ const SchedulerPanel = {
             </td>
             <td class="py-2 text-center">
               <span v-if="t.status==='pending'" class="inline-block px-2 py-0.5 text-sm rounded-full bg-amber-100 text-amber-700">待执行</span>
-              <span v-else class="inline-block px-2 py-0.5 text-sm rounded-full bg-green-100 text-green-700">待执行</span>
+              <span v-else class="inline-block px-2 py-0.5 text-sm rounded-full bg-green-100 text-green-700">已完成</span>
             </td>
             <td class="py-2 text-right text-gray-500 text-sm whitespace-nowrap">{{ t.next_exec_time > 0 ? formatTimestamp(t.next_exec_time) : '立即' }}</td>
           </tr>

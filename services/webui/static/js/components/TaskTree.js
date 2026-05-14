@@ -54,7 +54,7 @@ const TaskTreeTaskRow = {
       statusLabels: {
         disabled: '未启用',
         pending: '待执行',
-        scheduled: '待执行',
+        scheduled: '已完成',
         error: '错误',
       },
     };
@@ -81,8 +81,12 @@ const TaskTreeTaskRow = {
   template: `
 <div class="task-tree-item bg-gray-50 px-3.5 py-2.5 rounded-lg border border-gray-200 hover:border-primary/40 hover:bg-gray-100 transition-colors flex flex-col gap-1 min-w-0 max-w-full">
   <div class="flex items-center gap-2 min-w-0 w-full">
-    <span class="inline-flex items-start gap-1 min-w-0 max-w-[min(46%,11rem)] shrink cursor-pointer"
-          @click.stop="$emit('edit-task', taskKey, item, taskPath, parentTree)">
+    <span :class="[
+            'inline-flex items-start gap-1 min-w-0 max-w-[min(46%,11rem)] shrink',
+            runTaskDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+          ]"
+          :title="runTaskDisabled ? '执行中不能编辑任务配置' : '编辑任务配置'"
+          @click.stop="openTaskEditor">
       <span class="font-medium text-sm text-dark truncate">{{ taskKey }}</span>
       <span v-if="item.custom" class="task-custom-tag">自定义</span>
       <span v-if="item.beta" class="task-beta-tag">Beta</span>
@@ -104,7 +108,12 @@ const TaskTreeTaskRow = {
       </div>
     </div>
     <div class="flex items-center gap-2 flex-shrink-0">
-      <span :class="['text-sm px-3 py-0.5 rounded-full cursor-pointer whitespace-nowrap font-medium', statusClasses[getTaskStatus(item)]]"
+      <span :class="[
+              'text-sm px-3 py-0.5 rounded-full whitespace-nowrap font-medium',
+              runTaskDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+              statusClasses[getTaskStatus(item)]
+            ]"
+            :title="runTaskDisabled ? '执行中不能修改任务状态' : '点击切换启用状态'"
             @click.stop="toggleTask(item)">
         {{ statusLabels[getTaskStatus(item)] }}
       </span>
@@ -138,7 +147,18 @@ const TaskTreeTaskRow = {
       if (taskItem.error) return 'error';
       return taskItem._due ? 'pending' : 'scheduled';
     },
+    openTaskEditor() {
+      if (this.runTaskDisabled) {
+        ElementPlus.ElMessage.warning('执行中不能编辑任务配置，请先终止当前任务');
+        return;
+      }
+      this.$emit('edit-task', this.taskKey, this.item, this.taskPath, this.parentTree);
+    },
     toggleTask(taskItem) {
+      if (this.runTaskDisabled) {
+        ElementPlus.ElMessage.warning('执行中不能修改任务状态，请先终止当前任务');
+        return;
+      }
       taskItem.on = !taskItem.on;
       if (taskItem.on) { taskItem.next_exec_time = 0; taskItem._due = true; }
       else { taskItem._due = false; }
@@ -186,7 +206,7 @@ const TaskTree = {
       statusLabels: {
         disabled: '未启用',
         pending: '待执行',
-        scheduled: '待执行',
+        scheduled: '已完成',
         error: '错误',
       },
     };
@@ -279,8 +299,13 @@ const TaskTree = {
       this.$emit('expanded-change', willOpen ? path : this.basePath);
     },
     toggleTask(item) {
+      if (this.runTaskDisabled) {
+        ElementPlus.ElMessage.warning('执行中不能修改任务状态，请先终止当前任务');
+        return;
+      }
       item.on = !item.on;
-      if (item.on) item.next_exec_time = 0;
+      if (item.on) { item.next_exec_time = 0; item._due = true; }
+      else { item._due = false; }
     },
     getTaskStatus(item) {
       if (!item.on) return 'disabled';

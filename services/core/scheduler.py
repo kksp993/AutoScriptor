@@ -76,20 +76,45 @@ def collect_active_times_from_tasks_tree(tasks: dict) -> list[float]:
     return result
 
 
-def collect_active_times_from_all_characters(cfg) -> list[float]:
+def iter_dispatch_characters(cfg):
+    """Yield valid dispatch queue characters in the exact configured order."""
+    chars = cfg._account_data.get("characters", {}) or {}
+    seen: set[tuple[str, str]] = set()
+    for item in cfg._account_data.get("dispatch_queue", []) or []:
+        server = (item.get("server") or "").strip()
+        name = (item.get("name") or "").strip()
+        if not server or not name:
+            continue
+        key = (server, name)
+        if key in seen:
+            continue
+        if server not in chars or name not in chars[server]:
+            continue
+        seen.add(key)
+        yield key
+
+
+def collect_active_times_from_all_characters(cfg, dispatch_only: bool = False) -> list[float]:
     """当前账号下所有角色的「有效」下次执行时间（与总览 / all_tasks_summary 一致）。"""
     ac = cfg.active_character()
     active_server = ac.get("server", "")
     active_name = ac.get("name", "")
     chars = cfg._account_data.get("characters", {}) or {}
     result: list[float] = []
-    for srv, srv_chars in chars.items():
-        for char_name, char_data in srv_chars.items():
-            if srv == active_server and char_name == active_name:
-                tasks_tree = cfg._config.get("tasks", {})
-            else:
-                tasks_tree = char_data.get("tasks", {}) or {}
-            result.extend(collect_active_times_from_tasks_tree(tasks_tree))
+    if dispatch_only:
+        char_keys = list(iter_dispatch_characters(cfg))
+    else:
+        char_keys = [
+            (srv, char_name)
+            for srv, srv_chars in chars.items()
+            for char_name in srv_chars.keys()
+        ]
+    for srv, char_name in char_keys:
+        if srv == active_server and char_name == active_name:
+            tasks_tree = cfg._config.get("tasks", {})
+        else:
+            tasks_tree = chars.get(srv, {}).get(char_name, {}).get("tasks", {}) or {}
+        result.extend(collect_active_times_from_tasks_tree(tasks_tree))
     return result
 
 
@@ -257,7 +282,7 @@ class Scheduler:
         """收集当前账号下所有角色的 on=True 任务的「有效」下次执行时间（含 sched_window 等）。"""
         from AutoScriptor.utils.app_config import cfg
 
-        return collect_active_times_from_all_characters(cfg)
+        return collect_active_times_from_all_characters(cfg, dispatch_only=True)
 
     def _get_wait_interval(self) -> float:
         times = self._collect_active_times()
@@ -367,25 +392,7 @@ class Scheduler:
         """调度顺序：优先账号内 dispatch_queue，其余按服务器名、角色名排序。"""
         from AutoScriptor.utils.app_config import cfg
 
-        chars = cfg._account_data.get("characters", {}) or {}
-        seen: set[tuple[str, str]] = set()
-        for item in cfg._account_data.get("dispatch_queue", []) or []:
-            s = (item.get("server") or "").strip()
-            n = (item.get("name") or "").strip()
-            if not s or not n:
-                continue
-            key = (s, n)
-            if key in seen:
-                continue
-            if s not in chars or n not in chars[s]:
-                continue
-            seen.add(key)
-            yield key
-        for srv in sorted(chars.keys()):
-            for name in sorted(chars[srv].keys()):
-                key = (srv, name)
-                if key not in seen:
-                    yield key
+        yield from iter_dispatch_characters(cfg)
 
     def _collect_due_cross_character(self) -> list[str]:
         """
@@ -394,26 +401,28 @@ class Scheduler:
         """
         from AutoScriptor.utils.app_config import cfg
 
-        due = self._collect_due(cfg.get("tasks") or {}, "", time.time())
-        if due:
-            return due
-        ac = cfg.active_character()
-        cur = (ac.get("server", ""), ac.get("name", ""))
-        for server, name in self._iter_characters_schedule_order():
+        dispatch_order = list(self._iter_characters_schedule_order())
+        if not dispatch_order:
+            logger.info("📅 dispatch_queue is empty; scheduler has no characters to run")
+            return []
+        for server, name in dispatch_order:
+            ac = cfg.active_character()
+            cur = (ac.get("server", ""), ac.get("name", ""))
             if (server, name) == cur:
-                continue
-            try:
-                if self._task_manager:
-                    with self._task_manager._cfg_lock:
+                due = self._collect_due(cfg.get("tasks") or {}, "", time.time())
+            else:
+                try:
+                    if self._task_manager:
+                        with self._task_manager._cfg_lock:
+                            cfg.switch_character(server, name)
+                            self._task_manager.reload_tasks()
+                    else:
                         cfg.switch_character(server, name)
-                        self._task_manager.reload_tasks()
-                else:
-                    cfg.switch_character(server, name)
-            except (KeyError, ValueError) as e:
-                logger.warning("📅 切换角色跳过 %s/%s: %s", server, name, e)
-                continue
-            self.invalidate_login()
-            due = self._collect_due(cfg.get("tasks") or {}, "", time.time())
+                except (KeyError, ValueError) as e:
+                    logger.warning("📅 切换角色跳过 %s/%s: %s", server, name, e)
+                    continue
+                self.invalidate_login()
+                due = self._collect_due(cfg.get("tasks") or {}, "", time.time())
             if due:
                 return due
         return []
@@ -435,7 +444,7 @@ class Scheduler:
             return
 
         total_success = total_failed = 0
-        attempted: set[str] = set()
+        attempted: set[tuple[str, str, str]] = set()
 
         try:
             while True:
@@ -447,9 +456,18 @@ class Scheduler:
                     break
 
                 if explicit_tasks is not None:
-                    due = [t for t in explicit_tasks if t not in attempted]
+                    ac = cfg.active_character()
+                    char_key = (ac.get("server", ""), ac.get("name", ""))
+                    due = [t for t in explicit_tasks if (*char_key, t) not in attempted]
                 else:
-                    due = [t for t in self._collect_due_cross_character() if t not in attempted]
+                    collected_due = self._collect_due_cross_character()
+                    ac = cfg.active_character()
+                    char_key = (ac.get("server", ""), ac.get("name", ""))
+                    due = [
+                        t
+                        for t in collected_due
+                        if (*char_key, t) not in attempted
+                    ]
                 if not due:
                     break
 
@@ -478,15 +496,10 @@ class Scheduler:
                     continue
                 boost()
 
-                if explicit_tasks is not None:
-                    # 单任务 / 直接执行：不触发换号与自动登录流程，假定当前游戏内角色与配置一致
-                    ac = cfg.active_character()
-                    self._logged_in_character = (ac.get("server", ""), ac.get("name", ""))
-                else:
-                    self._ensure_character_logged_in(cfg)
+                self._ensure_character_logged_in(cfg)
 
                 task_key = due[0]
-                attempted.add(task_key)
+                attempted.add((*char_key, task_key))
                 try:
                     success, failed = self._task_manager.execute_tasks([task_key])
                     total_success += success
@@ -542,6 +555,7 @@ class Scheduler:
         """单任务模式：执行外部指定的任务列表，共用管线，不激活调度器。"""
         if self._task_manager:
             self._task_manager._reset_cancel()
+        self.invalidate_login()
         self._run_task_pipeline(explicit_tasks=tasks)
 
     def task_call(self, task_path: str):
@@ -650,8 +664,6 @@ class Scheduler:
     # ── 角色登录检查 ──
 
     def _ensure_character_logged_in(self, cfg):
-        # 暂时不检查角色登录状态，直接执行自动登录
-        return
         """检查当前游戏中登录的角色是否与 cfg 中的一致，不一致则自动登录。"""
         ac = cfg.active_character()
         server = ac.get("server", "")

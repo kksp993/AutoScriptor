@@ -14,7 +14,7 @@ from AutoScriptor.utils.game_profession import DEFAULT_GAME_PROFESSION, normaliz
 from AutoScriptor.utils.logger import logger
 
 _GLOBAL_KEYS = (
-    "app", "ocr", "emulator", "llm", "deploy", "notify",
+    "app", "ocr", "emulator", "llm", "scheduler", "deploy", "notify",
     "update", "remote_access", "accounts",
 )
 
@@ -45,8 +45,11 @@ class Character:
     @staticmethod
     def clean_tasks_inplace(data: Any) -> None:
         if isinstance(data, dict):
-            data.pop("fn", None)
-            data.pop("order", None)
+            for key in (
+                "fn", "order", "param_meta", "param_keys", "beta", "custom",
+                "task_description", "task_doc_flow", "_due",
+            ):
+                data.pop(key, None)
             for v in data.values():
                 Character.clean_tasks_inplace(v)
 
@@ -112,6 +115,12 @@ class Account:
     def prepare_for_save(self, flat: dict[str, Any] | None) -> None:
         ch = self.get_active_character()
         if flat and ch:
+            tasks = flat.get("tasks")
+            if isinstance(tasks, dict):
+                ch._data["tasks"] = copy.deepcopy(tasks)
+            status = flat.get("status")
+            if isinstance(status, dict):
+                ch._data["status"] = copy.deepcopy(status)
             gp = (flat.get("game") or {}).get("game_profession")
             ch._data["game_profession"] = normalize_game_profession(gp)
         for c in self.characters.values():
@@ -200,6 +209,8 @@ class ConfigManager:
         self.global_cfg.setdefault("tasks", {})
         self.global_cfg.setdefault("status", {})
         self.global_cfg.setdefault("game", {})
+        self.global_cfg.setdefault("scheduler", {})
+        self.global_cfg["scheduler"].setdefault("auto_start", False)
         self.global_cfg.setdefault("accounts", {})
         self.global_cfg["accounts"].setdefault("dir", "")
         acc_name = self.global_cfg.get("current_account", "")

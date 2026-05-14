@@ -22,7 +22,8 @@ const TaskPanel = {
     </p>
     <div class="flex justify-between items-center mb-4 flex-shrink-0">
       <h2 class="text-lg font-semibold text-dark">任务列表</h2>
-      <button class="text-primary hover:text-primary/80 text-sm" @click="$emit('refresh-config')">
+      <button class="text-primary hover:text-primary/80 text-sm disabled:opacity-50 disabled:pointer-events-none"
+              @click="$emit('refresh-config')" :disabled="executionBusy">
         <i class="fa fa-refresh mr-1"></i>刷新
       </button>
     </div>
@@ -46,7 +47,8 @@ const TaskPanel = {
         <button class="px-4 py-2.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors text-sm font-medium shrink-0" @click="$emit('stop-run')">
           <i class="fa fa-stop mr-1.5"></i>终止执行
         </button>
-        <button class="px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium shrink-0" @click="$emit('save-tasks')">
+        <button class="px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium shrink-0 disabled:opacity-50 disabled:pointer-events-none"
+                @click="$emit('save-tasks')" :disabled="executionBusy">
           <i class="fa fa-save mr-1.5"></i>保存任务
         </button>
         <span v-if="characterName" class="px-3 py-1.5 bg-secondary/10 text-secondary rounded text-sm shrink-0">角色ID：{{ characterName }}</span>

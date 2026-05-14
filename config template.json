@@ -25,6 +25,9 @@
         "url": "http://localhost:11434/v1",
         "model": "hf.co/bartowski/UI-TARS-2B-SFT-GGUF"
     },
+    "scheduler": {
+        "auto_start": false
+    },
     "deploy": {
         "log_level": "info",
         "theme": "dark",
