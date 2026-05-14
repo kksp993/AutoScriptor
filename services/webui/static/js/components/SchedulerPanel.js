@@ -6,8 +6,11 @@ const SchedulerPanel = {
     characterName: { type: String, default: '' },
     schedulerStatus: { type: Object, required: true },
     executionBusy: { type: Boolean, default: false },
+    activeCharacter: { type: Object, default: () => ({ server: '', name: '' }) },
+    gameProfessionOptions: { type: Array, default: () => [] },
+    gameProfessionsByCharacter: { type: Object, default: () => ({}) },
   },
-  emits: ['start-run', 'stop-run', 'reset-scheduler', 'clear-logs'],
+  emits: ['start-run', 'stop-run', 'reset-scheduler', 'clear-logs', 'set-game-profession'],
   computed: {
     /** 当前调度状态的文字说明，告知用户该状态的含义 */
     schedStateHint() {
@@ -50,6 +53,11 @@ const SchedulerPanel = {
     schedColor(color) {
       return { green: '#22c55e', orange: '#f59e0b', red: '#ef4444' }[color] || '#94a3b8';
     },
+    professionFor(server, name) {
+      const srv = this.gameProfessionsByCharacter && this.gameProfessionsByCharacter[server];
+      const v = srv && srv[name];
+      return v || '悟空';
+    },
   },
   template: `
 <div class="flex flex-col lg:flex-row gap-5 h-full min-h-0">
@@ -66,6 +74,19 @@ const SchedulerPanel = {
         <span v-else class="ml-auto text-xs px-2.5 py-1 bg-red-50 text-red-600 rounded">未验证</span>
       </div>
       <div class="text-xs text-gray-400 mb-2" style="line-height:1.4">{{ schedStateHint }}</div>
+      <div v-if="activeCharacter.server && activeCharacter.name && gameProfessionOptions.length" class="flex items-center gap-2 mb-3 px-1">
+        <span class="text-xs text-gray-500 shrink-0">职业</span>
+        <el-select
+          size="small"
+          class="flex-1 min-w-0"
+          :model-value="professionFor(activeCharacter.server, activeCharacter.name)"
+          placeholder="游戏职业"
+          filterable
+          @change="v => $emit('set-game-profession', activeCharacter.server, activeCharacter.name, v)"
+        >
+          <el-option v-for="p in gameProfessionOptions" :key="p" :label="p" :value="p"></el-option>
+        </el-select>
+      </div>
       <div class="text-xs text-gray-500 mt-1 text-center">下次执行（当前角色）</div>
       <div class="text-lg font-semibold text-dark mt-0.5 text-center">
         <template v-if="!isSchedulerRunning">-- --</template>

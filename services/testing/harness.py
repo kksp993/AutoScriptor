@@ -277,7 +277,7 @@ class TestHarness:
             json.dump(safe, f, ensure_ascii=False, indent=2)
 
         # 3. 注入 cfg
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         self._original_cfg_config = copy.deepcopy(cfg._config)
         cfg._config = test_config
         cfg.CONFIG_PATH = config_path
@@ -326,7 +326,7 @@ class TestHarness:
 
         # 恢复 cfg
         if self._original_cfg_config is not None:
-            from AutoScriptor.utils.constant import cfg
+            from AutoScriptor.utils.app_config import cfg
             cfg._config = self._original_cfg_config
             cfg.CONFIG_PATH = os.path.join(os.getcwd(), "config.json")
 

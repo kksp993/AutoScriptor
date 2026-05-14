@@ -370,7 +370,7 @@ async def editor_save(request: Request):
         if _last_screenshot is None:
             return JSONResponse(status_code=400, content={"error": "请先获取截图"})
 
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         from pypinyin import lazy_pinyin
         import pandas as pd
 

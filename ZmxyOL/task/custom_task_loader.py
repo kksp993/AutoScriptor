@@ -9,7 +9,7 @@ from pathlib import Path
 
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.paths import get_custom_task_dir
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.task_registry import task_registry
 from services.core.task_tree import TaskTree
 

@@ -107,7 +107,7 @@ class StabilityTestRunner:
 
     def test_01_single_task_success(self):
         """单任务成功执行，next_exec_time 应被更新。"""
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         tm = self._make_task_manager()
         task_key = "每日任务/测试村庄/立即成功"
 
@@ -130,7 +130,7 @@ class StabilityTestRunner:
 
     def test_03_task_retry_exhaust(self):
         """TaskRequireReTry 重试耗尽后应标记失败。"""
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         tm = self._make_task_manager()
         max_retry = cfg["app"]["max_retry"]
         task_key = "每日任务/测试村庄/重试耗尽"
@@ -150,7 +150,7 @@ class StabilityTestRunner:
 
     def test_05_task_human_takeover(self):
         """RequestHumanTakeover 应立即失败且更新 next_exec_time。"""
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         tm = self._make_task_manager()
         task_key = "每日任务/测试村庄/人工接管"
 
@@ -172,7 +172,7 @@ class StabilityTestRunner:
 
     def test_07_general_task_turns_off(self):
         """一般任务执行后 on 应变为 False。"""
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         tm = self._make_task_manager()
         task_key = "一般任务/一次性任务"
 
@@ -202,7 +202,7 @@ class StabilityTestRunner:
         t = threading.Thread(target=_cancel_after_delay, daemon=True)
 
         # 使用慢任务来确保有时间触发取消
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         cfg["tasks"]["每日任务"]["测试村庄"]["慢速成功"]["next_exec_time"] = 0
         tasks = [
             "每日任务/测试村庄/慢速成功",  # 0.2s
@@ -224,7 +224,7 @@ class StabilityTestRunner:
             "每日任务/测试村庄/立即成功",
         ]
         # 重置 next_exec_time
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         for t in ["立即成功", "总是失败"]:
             cfg["tasks"]["每日任务"]["测试村庄"][t]["next_exec_time"] = 0
 
@@ -235,7 +235,7 @@ class StabilityTestRunner:
 
     def test_10_max_retry_respected(self):
         """重试次数严格等于 max_retry（不多不少）。"""
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         from AutoScriptor.utils.task_registry import task_registry
         cfg["app"]["max_retry"] = 3
         tm = self._make_task_manager()
@@ -298,7 +298,7 @@ class StabilityTestRunner:
 
     def test_14_scheduler_collect_due(self):
         """调度器应正确收集到期任务。"""
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         sched = self._make_scheduler()
         now = time.time()
 
@@ -314,7 +314,7 @@ class StabilityTestRunner:
 
     def test_15_scheduler_auth_check(self):
         """未验证账号时调度器应跳过执行。"""
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         sched = self._make_scheduler()
         tm = self._make_task_manager()
         sched.set_task_manager(tm)
@@ -407,7 +407,7 @@ class StabilityTestRunner:
     def test_22_task_tree_collect_leaves(self):
         """TaskTree.collect_all_leaves 应收集所有叶子路径。"""
         from services.core.task_tree import TaskTree
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         leaves = TaskTree.collect_all_leaves(cfg["tasks"])
         paths = ["/".join(p) for p, _ in leaves]
         assert any("立即成功" in p for p in paths), f"should find 立即成功, got {paths}"
@@ -415,7 +415,7 @@ class StabilityTestRunner:
     def test_23_task_tree_get_node(self):
         """TaskTree.get_node 应按路径获取节点。"""
         from services.core.task_tree import TaskTree
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         node = TaskTree.get_node(cfg["tasks"], ["每日任务", "测试村庄", "立即成功"])
         assert "on" in node
         assert node["on"] is True
@@ -434,7 +434,7 @@ class StabilityTestRunner:
 
     def test_25_scheduler_full_cycle(self):
         """调度器完整循环：activate → 执行到期任务 → 更新配置。"""
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         from services.core.scheduler import SchedulerState
         sched = self._make_scheduler()
         tm = self._make_task_manager()
@@ -461,7 +461,7 @@ class StabilityTestRunner:
 
     def test_26_scheduler_no_reexecute_failed(self):
         """调度器不应在同一轮重复执行失败任务。"""
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         from AutoScriptor.utils.task_registry import task_registry
         from services.core.scheduler import SchedulerState
         sched = self._make_scheduler()

@@ -44,7 +44,6 @@ const TaskTreeTaskRow = {
   data() {
     return {
       collapsed: false,
-      docExpanded: false,
       resizeObserver: null,
       statusClasses: {
         disabled: 'bg-gray-200 text-gray-600',
@@ -70,16 +69,6 @@ const TaskTreeTaskRow = {
     hasTags() {
       return Object.keys(this.displayParamsObj).length > 0;
     },
-    helpDoc() {
-      return typeof getTaskHelpDoc === 'function'
-        ? getTaskHelpDoc(this.taskKey, this.taskPath)
-        : { flow: '', params: {} };
-    },
-    paramHelpRows() {
-      return typeof getTaskHelpParamRows === 'function'
-        ? getTaskHelpParamRows(this.taskKey, this.taskPath, this.item.params)
-        : [];
-    },
   },
   watch: {
     item: {
@@ -92,11 +81,6 @@ const TaskTreeTaskRow = {
   template: `
 <div class="task-tree-item bg-gray-50 px-3.5 py-2.5 rounded-lg border border-gray-200 hover:border-primary/40 hover:bg-gray-100 transition-colors flex flex-col gap-1 min-w-0 max-w-full">
   <div class="flex items-center gap-2 min-w-0 w-full">
-    <button type="button" class="task-doc-chevron flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-md text-gray-500 hover:text-primary hover:bg-primary/10 transition-colors"
-            :title="docExpanded ? '收起说明' : '执行流程与参数说明'"
-            @click.stop="docExpanded = !docExpanded">
-      <i class="fa text-xs transition-transform" :class="docExpanded ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
-    </button>
     <span class="inline-flex items-start gap-1 min-w-0 max-w-[min(46%,11rem)] shrink cursor-pointer"
           @click.stop="$emit('edit-task', taskKey, item, taskPath, parentTree)">
       <span class="font-medium text-sm text-dark truncate">{{ taskKey }}</span>
@@ -133,21 +117,6 @@ const TaskTreeTaskRow = {
       </button>
     </div>
   </div>
-  <transition name="expand">
-    <div v-show="docExpanded" class="task-doc-panel">
-      <p v-if="item.custom" class="task-doc-custom-line">*自定义任务：任意 Python 与主程序同进程运行，可访问本机与游戏自动化接口；请仅使用可信来源脚本，风险自负。</p>
-      <p v-if="item.beta" class="task-doc-beta-line">*该任务为 Beta 实验功能：自动化流程、界面识别或参数含义可能随版本快速调整，不保证与当前游戏完全一致；请谨慎启用并及时反馈问题。</p>
-      <p class="task-doc-flow">{{ helpDoc.flow }}</p>
-      <dl v-if="paramHelpRows.length" class="task-doc-params">
-        <dt>可变参数</dt>
-        <dd v-for="row in paramHelpRows" :key="row.key">
-          <span class="task-doc-k">{{ row.key }}</span>
-          <span class="task-doc-d">{{ row.desc }}</span>
-          <span v-if="row.value !== undefined" class="task-doc-v">当前：{{ formatParamVal(row.value) }}</span>
-        </dd>
-      </dl>
-    </div>
-  </transition>
 </div>`,
   mounted() {
     this.setupResizeObserver();
@@ -191,11 +160,6 @@ const TaskTreeTaskRow = {
       const need = mw.scrollWidth;
       const avail = pc.clientWidth;
       this.collapsed = need > avail + 1;
-    },
-    formatParamVal(v) {
-      if (v === null || v === undefined) return '';
-      if (typeof v === 'object') return JSON.stringify(v);
-      return String(v);
     },
   },
 };

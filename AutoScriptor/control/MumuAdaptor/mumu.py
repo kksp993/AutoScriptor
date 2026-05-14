@@ -31,7 +31,7 @@ gui = None
 
 class Mumu:
     def __init__(self):
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         if not os.path.exists(cfg["emulator"]["emu_path"]):
             raise RuntimeError(f"MuMuManager.exe not found in {cfg['emulator']['emu_path']}")
         if not os.path.exists(cfg["emulator"]["adb_path"]):

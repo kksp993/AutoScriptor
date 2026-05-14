@@ -30,7 +30,7 @@ def hundunlianyaota():
             for tgt in target_available:
                 click(tgt, delay=1)
                 confirm_btn=wait_for_appear(T("确定"))
-                swipe(B(505,440),B(800,440))
+                swipe(B(502,439,1,1), B(779,439,1,1))
                 click(B(*confirm_btn))
                 wait_for_disappear(T("购买成功"))
             swipe(B(660,480),B(660,205))

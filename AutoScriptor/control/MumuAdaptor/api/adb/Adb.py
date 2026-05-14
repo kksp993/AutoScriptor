@@ -4,7 +4,7 @@
 # @Author : wlkjyy
 # @File : Adb.py
 # @Software: PyCharm
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
 import json
 import os.path
 import warnings

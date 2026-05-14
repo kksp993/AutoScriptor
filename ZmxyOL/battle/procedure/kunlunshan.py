@@ -18,7 +18,7 @@ def kls_yxd_callback():
     cfg.set("status.kunlunshan.has_YuxuDian_ticket", False)
     
     bg.set_signal("Pause_battle", True),
-    h.battle(),
+    h.move_right().travel(),
     cur, pre = 0,99999
     while True:
         cur = extract_info(B(990,114,238,62), lambda x: int(x.strip().replace("：", ":").split(":")[1][:-1]))
@@ -45,16 +45,18 @@ def kunlunshan_battle(num: int = 5, flow_name: str | None = None):
         h.set(has_cd=False, speed_x=3)   
         bg.set_signal("try_exit", False)
         bg.set_interval(0.4)
+        # 「知道了」弹窗：once=False → 同一局 battle_loop 内每次识别到都会触发（可多次）。
+        # 外层 for 每轮结束会 bg.remove，下一轮循环会再次 add，故多轮战斗每轮都会重新注册。
         bg.add(
             name="昆仑山-突发事件",
-            identifier=(I("昆仑山-知道了"), T("取消")),
+            identifier=(T("知道了"), T("取消")),
             callback=lambda: [
                 logger.info("昆仑山突发事件"),
                 sleep(0.03),
-                click((I("昆仑山-知道了"), T("取消")), if_exist=True),
+                click((T("知道了"), T("取消")), if_exist=True),
             ],
             once=False,
-            allow_concurrent=True
+            allow_concurrent=True,
         )
         # 每次迭代开始时重新读取门票状态，只有在config中has_YuxuDian_ticket为True时才添加玉虚殿监控
         has_ticket = cfg.get("status.kunlunshan.has_YuxuDian_ticket", False)
@@ -65,6 +67,7 @@ def kunlunshan_battle(num: int = 5, flow_name: str | None = None):
                 callback=kls_yxd_callback,
                 once=False
             )
+        # 与「知道了」不同：once=True → 本局内首次识别到「站在这里」后回调一次即移除，避免重复 try_exit。
         bg.add(
             name="昆仑山-战斗结束",
             identifier=(T("站在这里"), 
@@ -76,7 +79,7 @@ def kunlunshan_battle(num: int = 5, flow_name: str | None = None):
                 h.set(has_cd=False, speed_x=1 if ui_T((B(803,546,46,19, color="白色"),B(1022,535,7,27, color="白色")),2) else 3),
                 bg.set_signal("try_exit", True)
             ],
-            once=True
+            once=True,
         )
         h.set(has_cd=False, speed_x=3).battle_loop(flow_name=flow_name, max_duration=1000)
         sleep(1)

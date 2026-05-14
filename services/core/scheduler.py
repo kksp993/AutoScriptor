@@ -255,7 +255,7 @@ class Scheduler:
 
     def _collect_active_times(self) -> list[float]:
         """收集当前账号下所有角色的 on=True 任务的「有效」下次执行时间（含 sched_window 等）。"""
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
 
         return collect_active_times_from_all_characters(cfg)
 
@@ -282,7 +282,7 @@ class Scheduler:
 
     def _loop(self):
         from services.core.watcher import ConfigWatcher
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         watcher = ConfigWatcher(cfg.CONFIG_PATH)
         watcher.start_watching()
         while True:
@@ -314,7 +314,7 @@ class Scheduler:
 
     def _collect_due(self, node: dict, prefix: str, now_ts: float) -> list[str]:
         from AutoScriptor.utils.task_registry import task_registry
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         from services.core.task_manager import (
             parse_sched_window_hours,
             clamp_to_sched_window,
@@ -365,7 +365,7 @@ class Scheduler:
 
     def _iter_characters_schedule_order(self):
         """调度顺序：优先账号内 dispatch_queue，其余按服务器名、角色名排序。"""
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
 
         chars = cfg._account_data.get("characters", {}) or {}
         seen: set[tuple[str, str]] = set()
@@ -392,7 +392,7 @@ class Scheduler:
         收集到期任务路径；若当前角色无到期，则按顺序切换到下一有到期任务的角色。
         与总览多角色统计一致，避免「全角色调度」后活动角色停在队列末尾时其他角色永不执行。
         """
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
 
         due = self._collect_due(cfg.get("tasks") or {}, "", time.time())
         if due:
@@ -427,7 +427,7 @@ class Scheduler:
         explicit_tasks=None  → 调度模式，由 _collect_due() 动态收集到期任务
         explicit_tasks=[...] → 单任务模式，执行外部传入的固定列表（不跑自动登录，假定当前角色正确）
         """
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         from AutoScriptor.utils.perf import boost, unboost
 
         if not cfg._config.get("game", {}).get("character_name", ""):
@@ -483,20 +483,7 @@ class Scheduler:
                     ac = cfg.active_character()
                     self._logged_in_character = (ac.get("server", ""), ac.get("name", ""))
                 else:
-                    try:
-                        self._ensure_character_logged_in(cfg)
-                    except Exception as e:
-                        logger.error("📅 自动登录失败，本轮跳过: %s", e)
-                        self._consecutive_errors += 1
-                        if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                            self.mark_error()
-                            break
-                        delay = min(60, 20 * self._consecutive_errors)
-                        logger.info("📅 %d 秒后重试登录 (%d/%d)",
-                                    delay, self._consecutive_errors, MAX_CONSECUTIVE_ERRORS)
-                        self._wake.clear()
-                        self._wake.wait(delay)
-                        continue
+                    self._ensure_character_logged_in(cfg)
 
                 task_key = due[0]
                 attempted.add(task_key)
@@ -559,7 +546,7 @@ class Scheduler:
 
     def task_call(self, task_path: str):
         """将指定任务设为立即执行（next_exec_time=now, on=True），下一轮自动拾取。"""
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         import dpath
         try:
             node = dpath.get(cfg._config, f"tasks/{task_path.replace('/', '/')}")
@@ -635,7 +622,7 @@ class Scheduler:
         return runtime_ctx.refresh()
 
     def _post_execution_action(self):
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         action = cfg["emulator"].get("post_execution", "none").lower()
         if action == "none" or action == "null":
             return
@@ -663,6 +650,8 @@ class Scheduler:
     # ── 角色登录检查 ──
 
     def _ensure_character_logged_in(self, cfg):
+        # 暂时不检查角色登录状态，直接执行自动登录
+        return
         """检查当前游戏中登录的角色是否与 cfg 中的一致，不一致则自动登录。"""
         ac = cfg.active_character()
         server = ac.get("server", "")

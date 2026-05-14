@@ -6,7 +6,7 @@ const SettingsPanel = {
   emits: ['save-settings'],
   data() {
     return {
-      hiddenSections: ['game', 'status', 'encryption', 'profiles', 'current_account', 'active_character', 'characters_summary', 'deploy', 'notify', 'update', 'remote_access', 'llm'],
+      hiddenSections: ['game', 'status', 'encryption', 'profiles', 'current_account', 'active_character', 'characters_summary', 'deploy', 'notify', 'update', 'remote_access', 'llm', 'accounts'],
       /** 仍保存在 config 中，但不在表单里展示（避免误改） */
       hiddenKeysBySection: { app: ['name'] },
       sectionLabels: { app: '应用设置', ocr: 'OCR 设置', emulator: '模拟器设置', llm: '智能体' },

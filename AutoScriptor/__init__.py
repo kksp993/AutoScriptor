@@ -1,7 +1,7 @@
 from AutoScriptor.utils.box import Box, box_cell_in_grid
 from AutoScriptor.core import *
 from AutoScriptor.utils.ui_map import ui
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.core.background import bg
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import RequestHumanTakeover
 from AutoScriptor.errors import *

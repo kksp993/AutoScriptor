@@ -208,27 +208,6 @@ class Updater:
         except Exception as e:
             logger.warning(f"依赖安装失败: {e}")
 
-    # ── 定时检查 ──
-
-    def start_scheduled_check(self, interval_minutes: int = 30):
-        if self._check_thread and self._check_thread.is_alive():
-            return
-
-        self._stop_event.clear()
-
-        def _loop():
-            while not self._stop_event.is_set():
-                self._stop_event.wait(interval_minutes * 60)
-                if self._stop_event.is_set():
-                    break
-                try:
-                    self.check_update()
-                except Exception as e:
-                    logger.debug(f"定时更新检查异常: {e}")
-
-        self._check_thread = threading.Thread(target=_loop, daemon=True, name="updater")
-        self._check_thread.start()
-        logger.info(f"自动更新检查已启动，间隔 {interval_minutes} 分钟")
 
     def set_restart_event(self, event):
         """设置重启事件（multiprocessing.Event），由 gui.py 子进程传入。"""

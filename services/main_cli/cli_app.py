@@ -11,7 +11,7 @@ import questionary
 from typing import Dict, Any, List
 from AutoScriptor.utils.logger import logger
 
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.logger import setup_task_aware_logging
 
 from services.core.task_tree import TaskTree

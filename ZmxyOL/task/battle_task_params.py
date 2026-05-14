@@ -1,7 +1,7 @@
-"""战斗类任务在 WebUI 中的配招参数。
+"""战斗类任务在 WebUI 中的参数。
 
 BattleFlowName 枚举成员由 Hero 子类上 @flow 注册的流程名聚合（见
-ZmxyOL.battle.character.hero.get_registered_flows），与配招 YAML 无关。
+battle_character.hero.get_registered_flows）。职业列表来自 battle_character 注册表。
 
 @flow(..., task=None) 的流程对所有任务可选；仅当某流程在所有注册中均带非空 task
 时，才按该 task 与 cfg 任务路径最后一级匹配过滤（见 battle_flow_allowed_for_task）。
@@ -12,11 +12,10 @@ from __future__ import annotations
 import enum
 import keyword
 import re
-from pathlib import Path
 from typing import Iterable
 
 from AutoScriptor.utils.logger import logger
-from AutoScriptor.utils.paths import get_profiles_dir
+from battle_character.hero import ensure_battle_heroes_loaded
 
 
 def _enum_member_key(raw: str) -> str:
@@ -33,34 +32,40 @@ def _enum_member_key(raw: str) -> str:
     return fix
 
 
-def _dedupe_keys(names: Iterable[str]) -> list[tuple[str, str]]:
-    """(member_key, value) 列表；member_key 冲突时追加后缀。"""
-    seen: set[str] = set()
+def _dedupe_keys(names: Iterable[str], *, sort_unique: bool = True) -> list[tuple[str, str]]:
+    """(member_key, value) 列表；member_key 冲突时追加后缀。
+
+    sort_unique=True：按 (长度, 字面值) 排序后去重（流程名等）。
+    sort_unique=False：按传入顺序去重（职业名：保持 default 在前等约定）。
+    """
+    if sort_unique:
+        ordered = sorted(set(names), key=lambda s: (len(s), s))
+    else:
+        seen_val: set[str] = set()
+        ordered = []
+        for v in names:
+            if v not in seen_val:
+                seen_val.add(v)
+                ordered.append(v)
+    seen_key: set[str] = set()
     out: list[tuple[str, str]] = []
-    for v in sorted(set(names), key=lambda s: (len(s), s)):
+    for v in ordered:
         k = _enum_member_key(v)
         base = k
         n = 0
-        while k in seen:
+        while k in seen_key:
             n += 1
             k = f"{base}_{n}"
-        seen.add(k)
+        seen_key.add(k)
         out.append((k, v))
     return out
 
 
-def _discover_profession_dirs(profiles_dir: Path) -> list[str]:
-    """子目录下存在「流程」或「技能」的视为职业配招目录名（与 load_profile 参数一致）。"""
-    if not profiles_dir.is_dir():
-        return ["default"]
-    names: list[str] = []
-    for p in profiles_dir.iterdir():
-        if not p.is_dir() or p.name.startswith("."):
-            continue
-        if (p / "流程").is_dir() or (p / "技能").is_dir():
-            names.append(p.name)
-    if not names:
-        return ["default"]
+def _profession_names_from_registry() -> list[str]:
+    """从 Hero 子类 profession 注册表收集名称（ensure_battle_heroes_loaded 已调用）。"""
+    from battle_character.hero import _hero_registry
+
+    names = [k for k in _hero_registry.keys() if k]
     if "default" in names:
         names.remove("default")
         return ["default"] + sorted(names)
@@ -112,9 +117,9 @@ def _make_str_enum(
     )
 
 
-_profiles_dir = get_profiles_dir()
-_profession_values = _discover_profession_dirs(_profiles_dir)
-_profession_pairs = _dedupe_keys(_profession_values)
+ensure_battle_heroes_loaded()
+_profession_values = _profession_names_from_registry()
+_profession_pairs = _dedupe_keys(_profession_values, sort_unique=False)
 
 _flow_values = _discover_registered_flow_names()
 _flow_pairs = _dedupe_keys(_flow_values)
@@ -156,7 +161,7 @@ DEFAULT_JJC_BATTLE_FLOW = BattleFlowName[_jjc_key]
 
 
 def ensure_default_battle_profile(h) -> None:
-    """仅加载 default 配招目录（兜底）。"""
+    """加载 default 职业（兜底）。"""
     h.load_profile("default")
 
 
@@ -166,7 +171,7 @@ def _resolve_profession_maybe() -> str | None:
 
 
 def get_battle_profile(h) -> None:
-    """解析并加载当前角色配招；识别失败或未实现时回退到 default。"""
+    """解析并加载当前职业；识别失败或未实现时回退到 default。"""
     try:
         prof = _resolve_profession_maybe()
         if prof:

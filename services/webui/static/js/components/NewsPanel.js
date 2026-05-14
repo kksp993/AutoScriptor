@@ -12,6 +12,11 @@ const NewsPanel = {
       iframeSrc: '',
       /** 当前弹窗对应的帖子（用于展示与列表一致的简介正文） */
       dialogPost: null,
+      giftDialogVisible: false,
+      giftLoading: false,
+      giftRows: [],
+      giftUpdatedAt: '',
+      giftFetchError: '',
     };
   },
   computed: {
@@ -72,6 +77,40 @@ const NewsPanel = {
       }
       return dateStr;
     },
+    openGiftCodes() {
+      this.giftDialogVisible = true;
+      this.fetchGiftCodes();
+    },
+    async fetchGiftCodes() {
+      this.giftLoading = true;
+      this.giftFetchError = '';
+      try {
+        const res = await fetch('/api/news/gift_codes?refresh=1', { credentials: 'same-origin' });
+        const data = await res.json();
+        this.giftUpdatedAt = data.generated_at || '';
+        this.giftRows = data.rows || [];
+      } catch (e) {
+        this.giftFetchError = '同步失败，请稍后点击重试或检查网络。' + e.message;
+        this.giftRows = [];
+        this.giftUpdatedAt = '';
+      } finally {
+        this.giftLoading = false;
+      }
+    },
+    onGiftDialogClosed() {
+      this.giftRows = [];
+      this.giftUpdatedAt = '';
+      this.giftFetchError = '';
+    },
+    async copyGiftCode(code) {
+      if (!code) return;
+      try {
+        await navigator.clipboard.writeText(code);
+        ElementPlus.ElMessage.success('已复制');
+      } catch (e) {
+        ElementPlus.ElMessage.error('复制失败');
+      }
+    },
   },
   template: `
 <div class="news-panel h-full flex flex-col overflow-hidden">
@@ -107,6 +146,9 @@ const NewsPanel = {
       </span>
     </div>
     <div class="flex items-center gap-2">
+      <el-button size="small" type="success" plain @click="openGiftCodes">
+        <i class="fa fa-gift mr-1"></i>兑换码
+      </el-button>
       <el-button size="small" :icon="''" :loading="loading" @click="fetchPosts(true)">
         <i class="fa fa-refresh" v-if="!loading"></i>
         刷新资讯
@@ -199,6 +241,65 @@ const NewsPanel = {
   </div>
 
   </div><!-- /.news-panel-body -->
+
+  <teleport to="body">
+    <el-dialog v-model="giftDialogVisible"
+               title="兑换码"
+               width="92%"
+               top="4vh"
+               destroy-on-close
+               class="news-dialog news-gift-dialog"
+               @closed="onGiftDialogClosed">
+      <div class="text-xs text-slate-500 mb-2">
+        <p>
+          更新时间：<span class="text-slate-700 font-medium">{{ giftLoading ? '同步中…' : (giftUpdatedAt || '—') }}</span>
+          <span v-if="giftLoading" class="text-slate-400 ml-2">正在从论坛拉取未过期口令，可能需要数十秒。</span>
+        </p>
+      </div>
+      <div class="rounded-lg border border-gray-200 bg-white overflow-auto" style="max-height:min(72vh,640px);min-height:200px;">
+        <table class="w-full text-sm border-collapse">
+          <thead class="sticky top-0 z-10">
+            <tr class="bg-slate-100 text-slate-600 text-left border-b border-slate-200">
+              <th class="px-3 py-2.5 font-semibold">标题</th>
+              <th class="px-3 py-2.5 font-semibold">口令</th>
+              <th class="px-3 py-2.5 font-semibold">到期时间</th>
+              <th class="px-3 py-2.5 font-semibold w-[88px]">复制</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="giftLoading">
+              <td colspan="4" class="px-3 py-12 text-center text-slate-400">
+                <i class="fa fa-spinner fa-spin text-lg mr-2"></i>正在同步兑换码数据…
+              </td>
+            </tr>
+            <tr v-else-if="giftFetchError">
+              <td colspan="4" class="px-3 py-12 text-center text-amber-800">
+                <p class="mb-2">{{ giftFetchError }}</p>
+                <el-button size="small" type="primary" @click="fetchGiftCodes">重试</el-button>
+              </td>
+            </tr>
+            <template v-else>
+              <tr v-for="(r, i) in giftRows" :key="i" class="border-b border-slate-100 align-top hover:bg-slate-50/80">
+                <td class="px-3 py-2">
+                  <a v-if="r.url" :href="r.url" target="_blank" rel="noopener noreferrer"
+                     class="text-primary hover:underline">{{ r.title }}</a>
+                  <span v-else>{{ r.title }}</span>
+                </td>
+                <td class="px-3 py-2 font-mono text-xs break-all text-slate-800">{{ r.code }}</td>
+                <td class="px-3 py-2 text-slate-600">{{ r.expires_at }}</td>
+                <td class="px-3 py-2">
+                  <el-button size="small" type="success" @click="copyGiftCode(r.code)">复制</el-button>
+                </td>
+              </tr>
+              <tr v-if="!giftRows.length">
+                <td colspan="4" class="px-3 py-12 text-center text-slate-400">暂无更多兑换码</td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </el-dialog>
+  </teleport>
 
   <!-- iframe 对话框 -->
   <teleport to="body">

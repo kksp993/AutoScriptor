@@ -2,7 +2,7 @@ import cv2
 from paddleocr import PaddleOCR
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.box import Box
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
 from fuzzywuzzy import fuzz
 import threading
 import paddle

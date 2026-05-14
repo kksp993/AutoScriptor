@@ -1,0 +1,20 @@
+---
+description: 阶段二性能优化（OCR缓存+后台监控改革）接口文档索引，指引查阅重构技术文档。
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# 阶段二 性能优化接口文档
+
+阶段二的重构改动了 OCR 识别层和后台监控层，相关接口文档位于 `docs/AutoScriptor/refactor/`：
+
+- **[OCR 识别优化](docs/AutoScriptor/refactor/ocr_optimize.md)**：`ocr()` 默认 scale 改为 1.0、scale fallback 已移除、`_raw_ocr_cached()` 帧级缓存（TTL=0.5s）
+- **[后台监控改革](docs/AutoScriptor/refactor/bg_monitor_reform.md)**：`BackgroundMonitor` 每轮共享一张截图、`ui_T`/`locate` 新增 `screenshot` 参数、`DEFAULT_INTERVAL` 从 0.2s 调至 1.0s
+
+改动涉及的关键文件：`AutoScriptor/recognition/ocr_rec.py`、`AutoScriptor/core/background.py`、`AutoScriptor/core/api.py`
+
+对应测试位于 `test/test_perf_optimize/`，运行方式：
+
+```powershell
+python -m unittest discover -s test/test_perf_optimize -v
+```

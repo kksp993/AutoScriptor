@@ -1,0 +1,10 @@
+---
+description: autoscheduler编程风格：一行一语义、kwargs传递上下文、无冗余强转/try-catch、assert替代防御编程、变量去重复用
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# AutoScheduler 编程风格
+
+一行一语义，变量去重，kwargs 透传上下文，无冗余 str()/int()/float() 强转，不写防御式 try-catch/if-else，关键处用 assert，语义相同的值只保留一个变量名，优先 `dict()` 构造和 `.get(k, default)` 取值，死代码即删。
+

@@ -56,7 +56,9 @@ def battle_task(
     self.battle_loop(flow_name=flow_name)
     # bonus=0 不执行
     if bg.signal("bonus_x", bonus_x) > 1:
-        for _ in range(bg.signal("bonus_x", bonus_x)):
+        _ = 0
+        while _ < bg.signal("bonus_x", bonus_x) or ui_T(I("极北-关卡奖励")):
+            _ += 1
             click(I("极北-关卡奖励"), delay=1)
             sleep(1)
             click(T("确定"))
@@ -69,7 +71,8 @@ def battle_task(
             logger.info("到达最右侧")
             switch_base("nemu")
             if not has_loading_after_battle:
-                self.way_to_exit(until=lambda:ui_T((T("回家", box=Box(29,613,77,88).margin()), T("还有"))), exit_loc=exit_loc)
+                _home = T("回家", box=Box(29, 613, 77, 88).margin())
+                self.way_to_exit(until=lambda: ui_T(_home), exit_loc=exit_loc)
             else:
                 self.way_to_exit(until=lambda:ui_T((I("加载中"), I("极北-加载中"), T("还有"))), exit_loc=exit_loc)
         else:

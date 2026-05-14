@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import sys
 import time
 from datetime import datetime, timedelta
+from html import escape
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -44,6 +48,42 @@ _ALLOWED_DOMAINS = {"bbs.4399.cn", "my.4399.com"}
 _ALLOWED_DOMAINS_JS = "bbs.4399.cn|my.4399.com"
 
 _cache: dict[str, Any] = {}
+
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _gift_codes_rows_path() -> Path:
+    return _project_root() / "docs" / "zmxy_gift_codes_rows.json"
+
+
+def _load_gift_codes_rows_payload() -> dict[str, Any]:
+    """由 scripts/collect_zmxy_redeem_2026.py 写入，供资讯页兑换码表格。"""
+    path = _gift_codes_rows_path()
+    if not path.is_file():
+        return {"generated_at": "", "timezone": "Asia/Shanghai", "rows": []}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"generated_at": "", "timezone": "Asia/Shanghai", "rows": [], "error": "invalid_json"}
+
+
+def _refresh_gift_codes_rows() -> None:
+    root = _project_root()
+    script = root / "scripts" / "collect_zmxy_redeem_2026.py"
+    if not script.is_file():
+        return
+    try:
+        subprocess.run(
+            [sys.executable, str(script)],
+            cwd=str(root),
+            capture_output=True,
+            timeout=240,
+        )
+    except subprocess.TimeoutExpired:
+        pass
+
 
 # 从 HTML 中移除会拉起「登录 / 通行证」弹窗的外链脚本（在服务端处理，避免脚本先执行）
 _SCRIPT_TAG_WITH_SRC = re.compile(
@@ -501,6 +541,78 @@ async def get_redeem_codes(request: Request, force: int = Query(0, description="
     if err:
         out["error"] = err
     return out
+
+
+@router.get("/gift_codes")
+def get_gift_codes(refresh: int = Query(0, description="传 1 时先执行采集脚本再返回")):
+    """未过期兑换码列表（JSON），与 `docs/zmxy_gift_codes_rows.json` 同步。"""
+    if refresh:
+        _refresh_gift_codes_rows()
+    return _load_gift_codes_rows_payload()
+
+
+@router.get("/gift_codes/page", response_class=HTMLResponse)
+def get_gift_codes_page():
+    """独立 HTML 页（仅读本地 JSON，不跑采集）；表格列 标题 | 口令 | 到期时间 | 复制。"""
+    p = _load_gift_codes_rows_payload()
+    rows = p.get("rows") or []
+    gen = escape(str(p.get("generated_at") or "-"))
+    parts: list[str] = [
+        "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"/>",
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>",
+        "<style>",
+        "body{font-family:system-ui,sans-serif;margin:0;padding:12px 14px;background:#f8fafc;color:#0f172a;font-size:14px;}",
+        "h1{font-size:15px;margin:0 0 10px;font-weight:600;}",
+        ".hint{color:#64748b;font-size:12px;margin-bottom:12px;}",
+        "table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06);}",
+        "th,td{text-align:left;padding:10px 12px;border-bottom:1px solid #e2e8f0;vertical-align:top;}",
+        "th{background:#f1f5f9;font-weight:600;font-size:12px;color:#475569;}",
+        "tbody tr:last-child td{border-bottom:none;}",
+        ".code{font-family:ui-monospace,Menlo,monospace;word-break:break-all;}",
+        "a.link{color:#2563eb;text-decoration:none;}",
+        "a.link:hover{text-decoration:underline;}",
+        ".btn-copy{cursor:pointer;border:none;background:#22c55e;color:#fff;padding:6px 12px;border-radius:6px;font-size:12px;}",
+        ".btn-copy:hover{background:#16a34a;}",
+        "td.empty{text-align:center;color:#94a3b8;padding:28px 12px;}",
+        "</style></head><body>",
+        f"<h1>兑换码</h1><p class=\"hint\">更新时间：{gen}</p>",
+        "<table><thead><tr><th>标题</th><th>口令</th><th>到期时间</th><th>复制</th></tr></thead><tbody>",
+    ]
+    if not rows:
+        parts.append('<tr><td colspan="4" class="empty">暂无更多兑换码</td></tr>')
+    else:
+        for r in rows:
+            title = escape(str(r.get("title") or ""))
+            code = escape(str(r.get("code") or ""))
+            exp = escape(str(r.get("expires_at") or ""))
+            url = str(r.get("url") or "")
+            url_esc = escape(url, quote=True)
+            title_cell = (
+                f'<a class="link" href="{url_esc}" target="_blank" rel="noopener noreferrer">{title}</a>'
+                if url
+                else title
+            )
+            code_attr = escape(str(r.get("code") or ""), quote=True)
+            parts.append(
+                f"<tr><td>{title_cell}</td><td class=\"code\">{code}</td><td>{exp}</td>"
+                f'<td><button type="button" class="btn-copy" data-code="{code_attr}" '
+                f'onclick="copyCode(this)">复制</button></td></tr>'
+            )
+    parts.append("</tbody></table>")
+    parts.append(
+        "<script>"
+        "function copyCode(btn){var t=btn.getAttribute('data-code')||'';"
+        "if(!t)return;"
+        "if(navigator.clipboard&&navigator.clipboard.writeText){"
+        "navigator.clipboard.writeText(t).then(function(){btn.textContent='已复制';"
+        "setTimeout(function(){btn.textContent='复制';},1200);});"
+        "}else{var ta=document.createElement('textarea');ta.value=t;"
+        "document.body.appendChild(ta);ta.select();try{document.execCommand('copy');}catch(e){}"
+        "document.body.removeChild(ta);btn.textContent='已复制';"
+        "setTimeout(function(){btn.textContent='复制';},1200);}}"
+        "</script></body></html>"
+    )
+    return HTMLResponse("".join(parts))
 
 
 @router.get("/proxy", response_class=HTMLResponse)

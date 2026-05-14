@@ -108,7 +108,8 @@ def way():
 def way():
     while ui_F(T("仙盟",box=Box(16,30,130,400)), 3):
         click(I("导航-按钮收缩"))
-        sleep(4)
+        if ui_T(T("精彩活动"), 2): click(B(1100, 40, 40, 40))
+        sleep(2)
     click(T("仙盟",box=Box(16,30,130,400)))
     sleep(1)
     click(I("仙盟-驻地"))

@@ -64,6 +64,7 @@ def task(
             bonus_x = extract_info(B(241, 592, 103, 53), post_process=lambda s: 1 if s.strip() == "普通" else int(s.strip()[-1]), ensure_not_empty=True)
             bonus_repeat = (remains - bonus_x) % 3
             click(B(344, 577, 73, 81), repeat=bonus_repeat)
+            sleep(1)    # 等待倍战生效
             bonus_x = extract_info(B(241, 592, 103, 53), post_process=lambda s: 1 if s.strip() == "普通" else int(s.strip()[-1]), ensure_not_empty=True)
 
             click(T("开始挑战", box=Box(928, 589, 170, 73).margin()))

@@ -1,4 +1,4 @@
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.task_registry import task_registry
 from ZmxyOL.task.pkg_utils import (
     gather_py_files, sort_py_files, import_modules,

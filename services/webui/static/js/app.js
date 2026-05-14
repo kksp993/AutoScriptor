@@ -91,6 +91,39 @@ const app = createApp({
     const characterDialogVisible = ref(false);
     const newCharacterForm = reactive({ server: '', character: '' });
 
+    /** 各角色游戏职业（悟空、唐僧…），与账号 JSON 同步 */
+    const gameProfessionsByCharacter = reactive({});
+    const gameProfessionOptions = ref([]);
+
+    function mergeGameProfessionsFromPayload(data) {
+      if (!data || typeof data !== 'object') return;
+      if (data.game_professions_by_character) {
+        Object.keys(gameProfessionsByCharacter).forEach((k) => delete gameProfessionsByCharacter[k]);
+        Object.assign(gameProfessionsByCharacter, data.game_professions_by_character);
+      }
+      if (Array.isArray(data.game_profession_options)) {
+        gameProfessionOptions.value = data.game_profession_options;
+      }
+    }
+
+    async function setGameProfession(server, character, game_profession) {
+      try {
+        const res = await API.postRaw('/characters/game_profession', { server, character, game_profession });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          ElementPlus.ElMessage.error((payload && payload.error) || '保存职业失败');
+          return;
+        }
+        mergeGameProfessionsFromPayload(payload);
+        if (payload.game && payload.game.game_profession && configData.game) {
+          configData.game.game_profession = payload.game.game_profession;
+        }
+        ElementPlus.ElMessage.success('职业已保存');
+      } catch (e) {
+        ElementPlus.ElMessage.error('保存职业失败: ' + e);
+      }
+    }
+
     // ── 调度队列 ──
     const dispatchQueue = ref([]);
     const allTasksSummary = reactive({});
@@ -162,6 +195,8 @@ const app = createApp({
       delete clone.current_account;
       delete clone.active_character;
       delete clone.characters_summary;
+      delete clone.game_professions_by_character;
+      delete clone.game_profession_options;
       return clone;
     });
 
@@ -243,6 +278,7 @@ const app = createApp({
         if (data && !data.error) {
           Object.keys(configData).forEach(k => delete configData[k]);
           Object.assign(configData, data);
+          mergeGameProfessionsFromPayload(data);
           if (data.game) characterName.value = data.game.character_name || '';
           if (data.active_character) {
             Object.assign(activeCharacter, data.active_character);
@@ -1020,6 +1056,7 @@ const app = createApp({
           characterDialogVisible.value = false;
           Object.assign(newCharacterForm, { server: '', character: '' });
           ElementPlus.ElMessage.success('角色已添加');
+          await refreshConfig(true);
           fetchAccounts();
         } else {
           ElementPlus.ElMessage.error(data.error || '添加失败');
@@ -1040,6 +1077,7 @@ const app = createApp({
             Object.assign(charactersTree, data.characters);
           }
           ElementPlus.ElMessage.success('角色已删除');
+          await refreshConfig(true);
           fetchAccounts();
         } else {
           ElementPlus.ElMessage.error(data.error || '删除失败');
@@ -1341,6 +1379,7 @@ const app = createApp({
       accounts, currentAccount, accountDialogVisible, newAccountForm,
       activeCharacter, charactersTree, characterDialogVisible, newCharacterForm,
       characterDisplayName, charactersList,
+      gameProfessionsByCharacter, gameProfessionOptions, setGameProfession,
       dispatchQueue, allTasksSummary, isDispatchRunning, dispatchProgress,
       directRunRunning, executionBusy, fetchRunStatus,
       fetchAccounts, switchAccount, addAccount, deleteAccount,
