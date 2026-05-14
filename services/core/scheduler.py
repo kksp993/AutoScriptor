@@ -373,6 +373,7 @@ class Scheduler:
                                 _dt.datetime.fromtimestamp(deferred).strftime("%Y-%m-%d %H:%M"),
                             )
                             cfg.save_config()
+                            self._tasks_updated.set()
                             continue
                     aw = parse_allowed_weekdays(val)
                     if aw is not None:
@@ -387,6 +388,7 @@ class Scheduler:
                                 _dt.datetime.fromtimestamp(deferred).strftime("%Y-%m-%d %H:%M"),
                             )
                             cfg.save_config()
+                            self._tasks_updated.set()
                             continue
                     tasks.append(path)
             else:
@@ -406,10 +408,13 @@ class Scheduler:
         """
         from AutoScriptor.utils.app_config import cfg
 
+        original = cfg.active_character()
+        original_key = (original.get("server", ""), original.get("name", ""))
         dispatch_order = list(self._iter_characters_schedule_order())
         if not dispatch_order:
             logger.info("📅 dispatch_queue is empty; scheduler has no characters to run")
             return []
+        switched = False
         for server, name in dispatch_order:
             ac = cfg.active_character()
             cur = (ac.get("server", ""), ac.get("name", ""))
@@ -426,10 +431,24 @@ class Scheduler:
                 except (KeyError, ValueError) as e:
                     logger.warning("📅 切换角色跳过 %s/%s: %s", server, name, e)
                     continue
+                switched = True
                 self.invalidate_login()
                 due = self._collect_due(cfg.get("tasks") or {}, "", time.time())
             if due:
+                if switched:
+                    self._tasks_updated.set()
                 return due
+        if switched and original_key[0] and original_key[1]:
+            try:
+                if self._task_manager:
+                    with self._task_manager._cfg_lock:
+                        cfg.switch_character(*original_key)
+                        self._task_manager.reload_tasks()
+                else:
+                    cfg.switch_character(*original_key)
+                self.invalidate_login()
+            except (KeyError, ValueError) as e:
+                logger.warning("📅 恢复原角色失败 %s/%s: %s", original_key[0], original_key[1], e)
         return []
 
     # ── 共用执行管线 ──
@@ -575,6 +594,7 @@ class Scheduler:
                 node["on"] = True
                 node["next_exec_time"] = time.time()
                 cfg.save_config()
+                self._tasks_updated.set()
                 logger.info("📅 task_call: %s 已设为立即执行", task_path)
                 self.wake()
         except Exception as e:
