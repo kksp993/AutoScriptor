@@ -33,19 +33,25 @@ bg.set_signal(BG_SIGNALS.PAUSE_BATTLE, False)
 
 ## 战斗 Flow
 
-职业战斗逻辑尽量写成 `@flow`，任务脚本只选择 `battle_flow`，不要把连招细节塞进任务脚本。flow 内优先使用这些可读性较高的时间辅助：
+职业战斗逻辑尽量声明成 `battle_plan`，任务脚本只选择 `battle_flow`，不要把连招细节塞进任务脚本。推荐把 flow 写成类属性，这样“什么时候做什么”一眼能读懂：
 
 ```python
-@flow("战斗循环146")
-def default_battle_flow(self):
-    if self.first_round():
-        self.huashen(4)
-    if self.at(50, fast=30):
-        self.zhenwu()
-    if self.every(60, fast=30):
-        self.huashen()
-    self.battle("146")
+from AutoScriptor.battle_character import Hero, battle_plan
+
+
+class LiuLi(Hero):
+    profession = "琉离"
+
+    default_battle_flow = battle_plan("战斗循环146") \
+        .first("huashen", 4) \
+        .at(50, "zhenwu", fast=30) \
+        .at(60, "huashen_long", 1, fast=35) \
+        .every(60, "huashen", fast=30) \
+        .combo("146")
 ```
 
-`battle_weight` 目前只是兼容旧任务参数，不参与战斗策略。需要调整战斗行为时，优先新增或选择 `battle_flow`。
+`profession` 必须显式写在职业子类上，且要和 WebUI 角色职业一致；未显式声明 `profession` 的辅助子类不会进入职业注册表，避免误覆盖 `default`。任务执行前会按当前账号角色的 `game.game_profession` 自动切换职业脚本，`battle_loop()` / `jjc_battle()` 在未显式传 `flow_name` 时会使用 WebUI 选择的 `battle_flow`。
 
+需要非常特殊的逻辑时，旧的 `@flow` 函数仍然可用；但普通职业循环优先用 `battle_plan`，避免手写 `first_round/once_at/every` 状态判断。
+
+`battle_weight` 目前只是兼容旧任务参数，不参与战斗策略。需要调整战斗行为时，优先新增或选择 `battle_flow`。

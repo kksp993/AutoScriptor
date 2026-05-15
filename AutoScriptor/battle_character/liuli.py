@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 
-from AutoScriptor.battle_character.hero import Hero, flow
+from AutoScriptor.battle_character.hero import Hero, battle_plan
 
 sys.modules.setdefault("battle_character.liuli", sys.modules[__name__])
 
@@ -41,23 +41,14 @@ class LiuLi(Hero):
 
     # ═══════════════ Flows ═══════════════
 
-    @flow("战斗循环146")
-    def default_battle_flow(self):
-        """琉离战斗循环: 首轮化身 → 定时真武/化身 → 每轮 battle("146")"""
-        if self.is_first_round:
-            self.huashen(4)
-        if self.once_at(50, 30):
-            self.zhenwu()
-        if self.once_at(60, 35):
-            self.huashen_long(1)
-        if self.every(60, 30):
-            self.huashen()
-        self.battle("146")
+    default_battle_flow = battle_plan("战斗循环146") \
+        .first("huashen", 4) \
+        .at(50, "zhenwu", fast=30) \
+        .at(60, "huashen_long", 1, fast=35) \
+        .every(60, "huashen", fast=30) \
+        .combo("146")
 
-    @flow("竞技场循环")
-    def jjc_flow(self):
-        """琉离竞技场: 首轮化身+真武 → 每轮 battle("146")"""
-        if self.is_first_round:
-            self.huashen(4)
-            self.zhenwu()
-        self.battle("146")
+    jjc_flow = battle_plan("竞技场循环") \
+        .first("huashen", 4) \
+        .first("zhenwu") \
+        .combo("146")

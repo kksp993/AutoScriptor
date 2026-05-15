@@ -14,6 +14,7 @@ import keyword
 import re
 from typing import Iterable
 
+from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.battle_character.hero import ensure_battle_heroes_loaded
 
@@ -127,6 +128,7 @@ _FLOW_SCOPE_FOR_KEY = _build_flow_scope_from_registration()
 # 无任何 @flow 注册时的兜底
 if not _flow_pairs:
     _flow_pairs = _dedupe_keys(["战斗循环", "竞技场循环"])
+_missing_profession_warnings: set[str] = set()
 
 
 def battle_flow_allowed_for_task(flow_value: str, task_path: str | None) -> bool:
@@ -154,7 +156,8 @@ BattleFlowName = _make_str_enum(
 
 # 任务默认参数（取扫描结果首项；竞技场任务优先「竞技场循环」若存在）
 # HeroProfession 保留供后续自动识别；配招职业与 battle_flow 在 register_task 的 task_wrapper 中于任务体执行前注入。
-DEFAULT_BATTLE_FLOW = BattleFlowName[_flow_pairs[0][0]]
+_default_key = next((k for k, v in _flow_pairs if v == "战斗循环"), _flow_pairs[0][0])
+DEFAULT_BATTLE_FLOW = BattleFlowName[_default_key]
 
 _jjc_key = next((k for k, v in _flow_pairs if v == "竞技场循环"), _flow_pairs[0][0])
 DEFAULT_JJC_BATTLE_FLOW = BattleFlowName[_jjc_key]
@@ -166,17 +169,27 @@ def ensure_default_battle_profile(h) -> None:
 
 
 def _resolve_profession_maybe() -> str | None:
-    """从游戏/存档自动识别职业名；未接入时返回 None。"""
+    """Resolve the configured game profession for the active character."""
+    prof = cfg.get("game.game_profession")
+    if isinstance(prof, str) and prof.strip():
+        return prof.strip()
     return None
 
 
 def get_battle_profile(h) -> None:
-    """解析并加载当前职业；识别失败或未实现时回退到 default。"""
+    """解析并加载当前职业；缺少对应职业脚本时回退到 default。"""
     try:
         prof = _resolve_profession_maybe()
         if prof:
-            h.load_profile(prof)
-            return
+            from AutoScriptor.battle_character.hero import _hero_registry
+
+            ensure_battle_heroes_loaded()
+            if prof in _hero_registry:
+                h.load_profile(prof)
+                return
+            if prof not in _missing_profession_warnings:
+                _missing_profession_warnings.add(prof)
+                logger.warning("未找到职业脚本 %s，回退 default 配招", prof)
     except Exception:
         logger.exception("自动识别职业失败，回退 default 配招")
     ensure_default_battle_profile(h)

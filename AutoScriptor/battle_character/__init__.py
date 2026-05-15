@@ -9,3 +9,14 @@ import sys
 # 兼容由框架加载的旧脚本里的 `from battle_character.hero import ...`。
 # 仓库根目录不再保留 battle_character/ 包。
 sys.modules.setdefault("battle_character", sys.modules[__name__])
+
+from AutoScriptor.battle_character.hero import Hero, battle_plan, flow, h
+from AutoScriptor.battle_character.plan import BattlePlan
+
+__all__ = [
+    "BattlePlan",
+    "Hero",
+    "battle_plan",
+    "flow",
+    "h",
+]
