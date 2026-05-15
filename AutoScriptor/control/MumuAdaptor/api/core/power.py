@@ -8,6 +8,7 @@
 import time
 from typing import Callable
 
+from AutoScriptor.control.MumuAdaptor.api.adb.direct import adb_device_ready
 from AutoScriptor.utils.cancel import TaskCancelled, check_cancel_raise, sleep_with_cancel
 from AutoScriptor.utils.logger import logger
 
@@ -22,9 +23,12 @@ class Power:
         try:
             self.utils.set_operate('control')
             ret_code, retval = self.utils.run_command(['info'])
-            return ret_code == 0 and 'running' in (retval or '').lower()
+            if ret_code == 0:
+                return 'running' in (retval or '').lower()
+            logger.debug("MuMuManager info 失败，回退 ADB 检测: ret=%s, out=%s", ret_code, retval)
         except Exception:
-            return False
+            logger.debug("MuMuManager info 异常，回退 ADB 检测", exc_info=True)
+        return adb_device_ready()
 
     def start(
         self,
@@ -55,6 +59,9 @@ class Power:
                 ret_code, retval = self.utils.run_command(args)
                 if ret_code == 0:
                     logger.info(f"模拟器 {self.utils.get_vm_id()} 启动成功")
+                    return True
+                if adb_device_ready():
+                    logger.warning("MuMuManager launch 失败，但 ADB 已可用，视为模拟器已启动: %s", retval)
                     return True
 
                 last_error = RuntimeError(retval)

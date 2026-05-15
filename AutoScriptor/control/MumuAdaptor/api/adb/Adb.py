@@ -5,6 +5,11 @@
 # @File : Adb.py
 # @Software: PyCharm
 from AutoScriptor.utils.app_config import cfg
+from AutoScriptor.control.MumuAdaptor.api.adb.direct import (
+    adb_device_ready,
+    configured_adb_host_port,
+    run_adb,
+)
 import json
 import os.path
 import warnings
@@ -15,6 +20,16 @@ class Adb:
 
     def __init__(self, utils):
         self.utils = utils
+
+    @staticmethod
+    def _adb_error(result) -> str:
+        return (result.stderr or result.stdout or "").strip()
+
+    def _direct_shell(self, args: list[str], timeout: int = 10) -> bool:
+        result = run_adb(["shell", *args], timeout=timeout)
+        if result.returncode == 0:
+            return True
+        raise RuntimeError(self._adb_error(result))
 
     # __connect_list = None
 
@@ -27,11 +42,15 @@ class Adb:
         ret_code, retval = self.utils.run_command([''])
 
         if ret_code != 0:
+            if adb_device_ready() and (configured := configured_adb_host_port()):
+                return configured
             return None, None
 
         try:
             data = json.loads(retval)
         except json.JSONDecodeError:
+            if adb_device_ready() and (configured := configured_adb_host_port()):
+                return configured
             return None, None
 
         adb_info = {}
@@ -56,6 +75,8 @@ class Adb:
         ret_code, retval = self.utils.run_command(['-c', 'shell', 'input', 'tap', str(x), str(y)], repeat=repeat)
         if ret_code == 0:
             return True
+        if adb_device_ready():
+            return self._direct_shell(["input", "tap", str(x), str(y)])
 
         raise RuntimeError(retval)
 
@@ -82,6 +103,10 @@ class Adb:
             ['-c', 'shell', 'input', 'swipe', str(from_x), str(from_y), str(to_x), str(to_y), str(duration)])
         if ret_code == 0:
             return True
+        if adb_device_ready():
+            return self._direct_shell([
+                "input", "swipe", str(from_x), str(from_y), str(to_x), str(to_y), str(duration)
+            ])
 
         raise RuntimeError(retval)
 
@@ -96,6 +121,8 @@ class Adb:
 
         if ret_code == 0:
             return True
+        if adb_device_ready():
+            return self._direct_shell(["input", "text", text])
 
         raise RuntimeError(retval)
 
@@ -110,6 +137,8 @@ class Adb:
 
         if ret_code == 0:
             return True
+        if adb_device_ready():
+            return self._direct_shell(["input", "keyevent", str(key)])
 
         raise RuntimeError(retval)
 
@@ -123,12 +152,16 @@ class Adb:
         ret_code, retval = self.utils.run_command([''])
 
         if ret_code != 0:
-            return self
+            if adb_device_ready() and (configured := configured_adb_host_port()):
+                yield configured
+            return
 
         try:
             data = json.loads(retval)
         except json.JSONDecodeError:
-            return None, None
+            if adb_device_ready() and (configured := configured_adb_host_port()):
+                yield configured
+            return
 
         for key, value in data.items():
             if key == "adb_host" and "adb_port" in data:
@@ -212,5 +245,7 @@ class Adb:
 
         if ret_code == 0:
             return True
+        if adb_device_ready():
+            return self._direct_shell(["pm", "clear", package])
 
         raise RuntimeError(retval)
