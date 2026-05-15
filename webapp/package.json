@@ -7,7 +7,7 @@
   "scripts": {
     "postinstall": "node ../scripts/npm-postinstall.js",
     "prebuild": "node scripts/ensure-ico.cjs",
-    "start": "electron .",
+    "start": "node scripts/start-dev.cjs",
     "prepare-release-shell": "node scripts/prepare-release-shell.cjs",
     "verify-pack": "node scripts/verify-pack.cjs",
     "build": "electron-builder build --win --config electron-builder.config.js",
