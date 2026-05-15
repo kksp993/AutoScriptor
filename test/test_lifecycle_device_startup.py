@@ -30,6 +30,12 @@ def logger_stub():
 def import_power_for_test():
     autoscriptor = types.ModuleType("AutoScriptor")
     utils_pkg = types.ModuleType("AutoScriptor.utils")
+    control_pkg = types.ModuleType("AutoScriptor.control")
+    mumu_pkg = types.ModuleType("AutoScriptor.control.MumuAdaptor")
+    api_pkg = types.ModuleType("AutoScriptor.control.MumuAdaptor.api")
+    adb_pkg = types.ModuleType("AutoScriptor.control.MumuAdaptor.api.adb")
+    direct = types.ModuleType("AutoScriptor.control.MumuAdaptor.api.adb.direct")
+    direct.adb_device_ready = lambda: False
     cancel = types.ModuleType("AutoScriptor.utils.cancel")
     cancel.TaskCancelled = Cancelled
     cancel.check_cancel_raise = lambda: None
@@ -47,8 +53,82 @@ def import_power_for_test():
     with patch.dict(sys.modules, {
         "AutoScriptor": autoscriptor,
         "AutoScriptor.utils": utils_pkg,
+        "AutoScriptor.control": control_pkg,
+        "AutoScriptor.control.MumuAdaptor": mumu_pkg,
+        "AutoScriptor.control.MumuAdaptor.api": api_pkg,
+        "AutoScriptor.control.MumuAdaptor.api.adb": adb_pkg,
+        "AutoScriptor.control.MumuAdaptor.api.adb.direct": direct,
         "AutoScriptor.utils.cancel": cancel,
         "AutoScriptor.utils.logger": logger,
+    }):
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+    return module
+
+
+def import_mumu_app_for_test():
+    autoscriptor = types.ModuleType("AutoScriptor")
+    utils_pkg = types.ModuleType("AutoScriptor.utils")
+    control_pkg = types.ModuleType("AutoScriptor.control")
+    mumu_pkg = types.ModuleType("AutoScriptor.control.MumuAdaptor")
+    api_pkg = types.ModuleType("AutoScriptor.control.MumuAdaptor.api")
+    adb_pkg = types.ModuleType("AutoScriptor.control.MumuAdaptor.api.adb")
+    direct = types.ModuleType("AutoScriptor.control.MumuAdaptor.api.adb.direct")
+    direct.run_adb = lambda args, timeout=10: SimpleNamespace(returncode=1, stdout="", stderr="")
+    app_config = types.ModuleType("AutoScriptor.utils.app_config")
+    app_config.cfg = {"emulator": {"adb_path": "adb", "adb_addr": "addr"}}
+    logger = types.ModuleType("AutoScriptor.utils.logger")
+    logger.logger = logger_stub()
+    module_name = "mumu_app_under_test"
+    spec = importlib.util.spec_from_file_location(
+        module_name,
+        ROOT / "AutoScriptor/control/MumuAdaptor/api/core/app.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    with patch.dict(sys.modules, {
+        "AutoScriptor": autoscriptor,
+        "AutoScriptor.utils": utils_pkg,
+        "AutoScriptor.control": control_pkg,
+        "AutoScriptor.control.MumuAdaptor": mumu_pkg,
+        "AutoScriptor.control.MumuAdaptor.api": api_pkg,
+        "AutoScriptor.control.MumuAdaptor.api.adb": adb_pkg,
+        "AutoScriptor.control.MumuAdaptor.api.adb.direct": direct,
+        "AutoScriptor.utils.app_config": app_config,
+        "AutoScriptor.utils.logger": logger,
+    }):
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+    return module
+
+
+def import_mumu_adb_for_test():
+    autoscriptor = types.ModuleType("AutoScriptor")
+    utils_pkg = types.ModuleType("AutoScriptor.utils")
+    control_pkg = types.ModuleType("AutoScriptor.control")
+    mumu_pkg = types.ModuleType("AutoScriptor.control.MumuAdaptor")
+    api_pkg = types.ModuleType("AutoScriptor.control.MumuAdaptor.api")
+    adb_pkg = types.ModuleType("AutoScriptor.control.MumuAdaptor.api.adb")
+    direct = types.ModuleType("AutoScriptor.control.MumuAdaptor.api.adb.direct")
+    direct.adb_device_ready = lambda: False
+    direct.configured_adb_host_port = lambda: None
+    direct.run_adb = lambda args, timeout=10: SimpleNamespace(returncode=1, stdout="", stderr="")
+    app_config = types.ModuleType("AutoScriptor.utils.app_config")
+    app_config.cfg = {"emulator": {"adb_path": "adb", "adb_addr": "127.0.0.1:16416"}}
+    module_name = "mumu_adb_under_test"
+    spec = importlib.util.spec_from_file_location(
+        module_name,
+        ROOT / "AutoScriptor/control/MumuAdaptor/api/adb/Adb.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    with patch.dict(sys.modules, {
+        "AutoScriptor": autoscriptor,
+        "AutoScriptor.utils": utils_pkg,
+        "AutoScriptor.control": control_pkg,
+        "AutoScriptor.control.MumuAdaptor": mumu_pkg,
+        "AutoScriptor.control.MumuAdaptor.api": api_pkg,
+        "AutoScriptor.control.MumuAdaptor.api.adb": adb_pkg,
+        "AutoScriptor.control.MumuAdaptor.api.adb.direct": direct,
+        "AutoScriptor.utils.app_config": app_config,
     }):
         assert spec.loader is not None
         spec.loader.exec_module(module)
@@ -222,6 +302,106 @@ class TestMuMuPowerLifecycle(unittest.TestCase):
 
         with self.assertRaises(Cancelled):
             module.Power(FakeUtils()).start(cancel_check=cancel)
+
+    def test_is_running_falls_back_to_adb_when_manager_crashes(self):
+        module = import_power_for_test()
+
+        class FakeUtils:
+            def get_vm_id(self):
+                return "1"
+
+            def set_operate(self, operate):
+                self.operate = operate
+
+            def run_command(self, args):
+                return 3221226505, ""
+
+        def fake_run_adb(args, timeout=10):
+            if args == ["get-state"]:
+                return SimpleNamespace(returncode=0, stdout="device\n", stderr="")
+            if args == ["shell", "getprop", "sys.boot_completed"]:
+                return SimpleNamespace(returncode=0, stdout="1\n", stderr="")
+            return SimpleNamespace(returncode=1, stdout="", stderr="bad")
+
+        def ready():
+            return (
+                fake_run_adb(["get-state"]).stdout.strip() == "device"
+                and fake_run_adb(["shell", "getprop", "sys.boot_completed"]).stdout.strip() == "1"
+            )
+
+        with patch.object(module, "adb_device_ready", side_effect=ready):
+            self.assertTrue(module.Power(FakeUtils()).is_running())
+
+
+class TestMuMuAppLifecycle(unittest.TestCase):
+    def test_get_installed_falls_back_to_adb_when_manager_crashes(self):
+        module = import_mumu_app_for_test()
+
+        class FakeUtils:
+            def set_operate(self, operate):
+                self.operate = operate
+
+            def run_command(self, args):
+                return 3221226505, ""
+
+        def fake_run_adb(args, timeout=10):
+            self.assertEqual(args, ["shell", "pm", "list", "packages"])
+            return SimpleNamespace(returncode=0, stdout="package:org.yjmobile.zmxy\npackage:x\n", stderr="")
+
+        with patch.object(module, "run_adb", side_effect=fake_run_adb):
+            installed = module.App(FakeUtils()).get_installed()
+
+        self.assertEqual(installed[0]["package"], "org.yjmobile.zmxy")
+
+    def test_app_state_falls_back_to_adb_when_manager_crashes(self):
+        module = import_mumu_app_for_test()
+
+        class FakeUtils:
+            def set_operate(self, operate):
+                self.operate = operate
+
+            def run_command(self, args):
+                return 3221226505, ""
+
+        with patch.object(module, "run_adb", return_value=SimpleNamespace(returncode=0, stdout="7361\n", stderr="")):
+            self.assertEqual(module.App(FakeUtils()).state("org.yjmobile.zmxy"), "running")
+
+
+class TestMuMuAdbLifecycle(unittest.TestCase):
+    def test_click_falls_back_to_direct_adb_when_manager_crashes(self):
+        module = import_mumu_adb_for_test()
+        calls = []
+
+        class FakeUtils:
+            def set_operate(self, operate):
+                self.operate = operate
+
+            def run_command(self, args, repeat=1):
+                return 3221226505, ""
+
+        def fake_run_adb(args, timeout=10):
+            calls.append(args)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch.object(module, "adb_device_ready", return_value=True), \
+                patch.object(module, "run_adb", side_effect=fake_run_adb):
+            self.assertTrue(module.Adb(FakeUtils()).click(2000, 0))
+
+        self.assertEqual(calls, [["shell", "input", "tap", "2000", "0"]])
+
+    def test_connect_info_falls_back_to_configured_adb_when_manager_crashes(self):
+        module = import_mumu_adb_for_test()
+
+        class FakeUtils:
+            def set_operate(self, operate):
+                self.operate = operate
+
+            def run_command(self, args):
+                return 3221226505, ""
+
+        with patch.object(module, "adb_device_ready", return_value=True), \
+                patch.object(module, "configured_adb_host_port", return_value=("127.0.0.1", "16416")):
+            self.assertEqual(module.Adb(FakeUtils()).get_connect_info(), ("127.0.0.1", "16416"))
 
 
 class TestEnsureAppRunningLifecycle(unittest.TestCase):
