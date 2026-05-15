@@ -304,20 +304,6 @@ const app = createApp({
       const ansi_up = new AnsiUp();
       let buffer = [];
       let scheduled = false;
-      let taskConfigRefreshTimer = null;
-      const TASK_CONFIG_REFRESH_DEBOUNCE_MS = 400;
-
-      const scheduleTaskConfigRefresh = () => {
-        if (taskConfigRefreshTimer) clearTimeout(taskConfigRefreshTimer);
-        taskConfigRefreshTimer = setTimeout(() => {
-          taskConfigRefreshTimer = null;
-          refreshConfig(true);
-        }, TASK_CONFIG_REFRESH_DEBOUNCE_MS);
-      };
-
-      const LOG_NEEDS_TASK_REFRESH =
-        /(所有任务执行完成|任务执行被中断|任务执行已被中断|Task \[END\])/;
-
       const ANSI_STRIP = /\x1b\[[0-9;]*m/g;
       const LOG_LEVEL_ORDER = { DEBUG: 10, INFO: 20, WARNING: 30, ERROR: 40, CRITICAL: 50 };
       function stripAnsi(s) {
@@ -354,15 +340,9 @@ const app = createApp({
         let data;
         try { data = JSON.parse(event.data).data || ''; } catch { data = event.data; }
         const lines = String(data).split('\n');
-        let needTaskConfigRefresh = false;
         for (const line of lines) {
           if (!shouldShowLogLine(line)) continue;
-          if (LOG_NEEDS_TASK_REFRESH.test(line)) needTaskConfigRefresh = true;
           buffer.push({ html: ansi_up.ansi_to_html(line) });
-        }
-        if (needTaskConfigRefresh) {
-          scheduleTaskConfigRefresh();
-          fetchRuntimeSnapshot({ refreshConfigIfChanged: true });
         }
         if (!scheduled) {
           scheduled = true;

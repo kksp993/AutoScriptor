@@ -31,6 +31,7 @@ from services.core.banner import _print_banner
 from services.core.scheduler import scheduler, SchedulerState
 from AutoScriptor.utils.perf import set_thread_high_priority as _set_thread_high_priority
 from services.webui.api_response import api_error, api_ok
+from services.webui.lifecycle_service import WebUILifecycleService
 from services.webui.runtime_controller import RuntimeController
 from services.webui.state_version import bump_version, current_version
 from services.webui.task_tree_service import task_tree_service
@@ -145,6 +146,7 @@ ORDER_MAP: dict[str, int] = {}
 TASK_MANAGER = TaskManager()
 scheduler.set_task_manager(TASK_MANAGER)
 runtime_controller = RuntimeController(scheduler, TASK_MANAGER)
+lifecycle_service: WebUILifecycleService | None = None
 
 
 def _guard_runtime_idle(action: str = "modify runtime config") -> JSONResponse | None:
@@ -300,6 +302,17 @@ def _consume_runtime_config_updates() -> bool:
     read_config()
     _mark_config_changed("runtime tasks updated")
     return True
+
+
+lifecycle_service = WebUILifecycleService(
+    cfg,
+    TASK_MANAGER,
+    scheduler,
+    task_tree_service,
+    read_config,
+    _mark_config_changed,
+    _apply_webui_log_level_from_config,
+)
 
 
 # ── FastAPI 应用 ──
@@ -478,8 +491,8 @@ def _do_heavy_init():
         logger.error("运行时上下文初始化失败: %s", e)
 
     try:
-        from ZmxyOL.task import load_tasks
-        load_tasks()
+        TASK_MANAGER.reload_tasks()
+        read_config()
     except Exception as e:
         logger.error("任务加载失败: %s", e)
 
@@ -529,9 +542,7 @@ async def reload_tasks_api():
     if busy is not None:
         return busy
     try:
-        TASK_MANAGER.reload_tasks()
-        read_config()
-        _mark_config_changed("reload tasks")
+        lifecycle_service.reload_tasks()
         return make_public_config()
     except Exception as e:
         logger.error("reload_tasks error: %s", e)
@@ -546,14 +557,10 @@ async def save_config_api(request: Request):
     data = await request.json()
     if not isinstance(data, dict):
         return api_error(400, "invalid config payload", code="invalid_payload")
-    cfg["app"] = data["app"]
-    if "scheduler" in data and isinstance(data["scheduler"], dict):
-        cfg["scheduler"] = data["scheduler"]
-    cfg["emulator"] = data["emulator"]
-    cfg["ocr"] = data["ocr"]
-    cfg.save_config()
-    _apply_webui_log_level_from_config()
-    return api_ok(config_version=_mark_config_changed("save config"))
+    try:
+        return api_ok(config_version=lifecycle_service.save_runtime_config(data))
+    except (KeyError, ValueError) as e:
+        return api_error(400, str(e), code="invalid_payload")
 
 
 @app.post("/api/tasks")
@@ -566,15 +573,7 @@ async def save_tasks_api(request: Request):
         tasks = payload.get('tasks', payload)
         if not isinstance(tasks, dict):
             return api_error(400, "invalid tasks payload", code="invalid_payload")
-        task_tree_service.strip_runtime_fields_inplace(tasks)
-        with TASK_MANAGER._cfg_lock:
-            cfg._config.setdefault('tasks', {})
-            cfg._config['tasks'] = tasks
-            cfg.save_config()
-            TASK_MANAGER.reload_tasks()
-        scheduler.wake()
-        read_config()
-        _mark_config_changed("save tasks")
+        lifecycle_service.save_tasks(tasks)
         return make_public_config()
     except Exception as e:
         logger.error("save_tasks error: %s", e)
@@ -592,11 +591,7 @@ def _apply_run_character_from_body(body: dict):
     if not server or not character:
         return None
     try:
-        with TASK_MANAGER._cfg_lock:
-            cfg.switch_character(server, character)
-            TASK_MANAGER.reload_tasks()
-        scheduler.invalidate_login()
-        _mark_config_changed("select run character")
+        lifecycle_service.switch_character(server, character, reason="select run character")
         logger.info("Selected role for execution: %s/%s", server, character)
     except (KeyError, ValueError) as e:
         return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
@@ -745,24 +740,10 @@ async def verify_account_api(request: Request):
         return JSONResponse(status_code=401, content={"error": "请输入安全密码"})
 
     try:
-        TASK_MANAGER.reload_tasks(security_key)
+        character_name = lifecycle_service.reload_verified_account(security_key)
     except Exception as e:
         logger.error("verify reload_tasks: %s", e)
         return JSONResponse(status_code=500, content={"error": "加载配置失败"})
-
-    cfg._config.setdefault("game", {})
-    ac = cfg.active_character()
-    character_name = cfg._config.get("game", {}).get("character_name", "")
-    if not character_name:
-        character_name = ac.get("name", "")
-        if character_name:
-            cfg._config["game"]["character_name"] = character_name
-
-    server_name = cfg._config.get("game", {}).get("server_name", "")
-    if not server_name:
-        server_name = ac.get("server", "")
-        if server_name:
-            cfg._config["game"]["server_name"] = server_name
 
     if has_enc:
         if not cfg.has_decrypted_credentials():
@@ -833,13 +814,7 @@ async def update_account_credentials_api(request: Request):
             "message": f"更新账密会覆盖当前已有的加密设置（当前角色: {existing_name}），是否继续？"
         }
     try:
-        from AutoScriptor.crypto.config_manager import ConfigManager
-        sensitive = {"account": account, "password": password}
-        cfg._account_data["encryption"] = ConfigManager.encrypt_data(sensitive, security_key)
-        cfg._save_account_file()
-        TASK_MANAGER.reload_tasks(security_key)
-        character_name = cfg._config.get("game", {}).get("character_name", "")
-        version = _mark_config_changed("update account credentials")
+        character_name, version = lifecycle_service.update_account_credentials(account, password, security_key)
     except Exception as e:
         logger.error("update_account error: %s", e)
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -1051,10 +1026,11 @@ async def notify_test_api(request: Request):
 @app.post("/api/notify/save")
 async def notify_save_api(request: Request):
     data = await request.json()
-    cfg["notify.enabled"] = data.get("enabled", False)
-    cfg["notify.config_yaml"] = data.get("config_yaml", "provider: null")
-    cfg.save_config()
-    return api_ok(status="ok", config_version=_mark_config_changed("save notify settings"))
+    version = lifecycle_service.save_notify_settings(
+        data.get("enabled", False),
+        data.get("config_yaml", "provider: null"),
+    )
+    return api_ok(status="ok", config_version=version)
 
 
 # ── 更新 API ──
@@ -1192,10 +1168,7 @@ async def accounts_switch_api(request: Request):
         _record_verify_failure(client_ip)
         return JSONResponse(status_code=401, content={"error": "安全密码错误"})
     try:
-        cfg.switch_account(name, security_key)
-        TASK_MANAGER.reload_tasks(security_key)
-        scheduler.invalidate_login()
-        version = _mark_config_changed("switch account")
+        version = lifecycle_service.switch_account(name, security_key)
         character_name = cfg._config.get("game", {}).get("character_name", "")
         ac = cfg.active_character()
         old_tok = _credential_unlock_from_request(request)
@@ -1245,8 +1218,8 @@ async def accounts_add_api(request: Request):
         return JSONResponse(status_code=400, content={"error": "安全密码不能为空"})
 
     try:
-        cfg.add_account(name, account, password, server, character_name, security_key)
-        return {"accounts": cfg.list_accounts(), "config_version": _mark_config_changed("add account")}
+        version = lifecycle_service.add_account(name, account, password, server, character_name, security_key)
+        return {"accounts": cfg.list_accounts(), "config_version": version}
     except Exception as e:
         logger.error("add account error: %s", e)
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -1260,11 +1233,11 @@ async def accounts_delete_api(request: Request):
     data = await request.json()
     name = data.get("name", "")
     try:
-        cfg.delete_account(name)
+        version = lifecycle_service.delete_account(name)
         return {
             "accounts": cfg.list_accounts(),
             "current_account": cfg.current_account(),
-            "config_version": _mark_config_changed("delete account"),
+            "config_version": version,
         }
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
@@ -1291,10 +1264,7 @@ async def characters_switch_api(request: Request):
     server = data.get("server", "")
     character = data.get("character", "")
     try:
-        cfg.switch_character(server, character)
-        TASK_MANAGER.reload_tasks()
-        scheduler.invalidate_login()
-        version = _mark_config_changed("switch character")
+        version = lifecycle_service.switch_character(server, character)
         return {
             "active_character": cfg.active_character(),
             "character_name": character,
@@ -1317,8 +1287,7 @@ async def characters_add_api(request: Request):
     server = data.get("server", "")
     character = data.get("character", "")
     try:
-        cfg.add_character(server, character)
-        version = _mark_config_changed("add character")
+        version = lifecycle_service.add_character(server, character)
         return {
             "active_character": cfg.active_character(),
             "characters": task_tree_service.characters_summary(),
@@ -1337,8 +1306,7 @@ async def characters_delete_api(request: Request):
     server = data.get("server", "")
     character = data.get("character", "")
     try:
-        cfg.delete_character(server, character)
-        version = _mark_config_changed("delete character")
+        version = lifecycle_service.delete_character(server, character)
         return {
             "active_character": cfg.active_character(),
             "characters": task_tree_service.characters_summary(),
@@ -1361,9 +1329,7 @@ async def characters_game_profession_api(request: Request):
     character = (data.get("character") or "").strip()
     profession = (data.get("game_profession") or "").strip()
     try:
-        with TASK_MANAGER._cfg_lock:
-            cfg.set_character_game_profession(server, character, profession)
-        version = _mark_config_changed("change character profession")
+        version = lifecycle_service.set_character_profession(server, character, profession)
         return {
             "game_professions_by_character": task_tree_service.game_professions_by_character(),
             "game": {"game_profession": cfg._config.get("game", {}).get("game_profession", "")},
@@ -1399,10 +1365,8 @@ async def dispatch_queue_save_api(request: Request):
     if busy is not None:
         return busy
     data = await request.json()
-    queue = task_tree_service.normalize_dispatch_queue(data.get("queue", []))
-    cfg._account_data["dispatch_queue"] = queue
-    cfg._save_account_file()
-    return {"queue": queue, "config_version": _mark_config_changed("save dispatch queue")}
+    queue, version = lifecycle_service.save_dispatch_queue(data.get("queue", []))
+    return {"queue": queue, "config_version": version}
 
 
 # ── 配置导入导出 API ──
@@ -1428,27 +1392,8 @@ async def config_import_api(request: Request):
         data = await request.json()
         if not isinstance(data, dict):
             return JSONResponse(status_code=400, content={"error": "invalid JSON"})
-        data.pop("encryption", None)
-        data.pop("current_profile", None)
-        data.pop("current_account", None)
-        data.pop("profiles", None)
-        data.pop("game", None)
-        data.pop("active_character", None)
-        data.pop("characters_summary", None)
-        if "deploy" in data and isinstance(data["deploy"], dict):
-            data["deploy"].pop("password", None)
-            data["deploy"].pop("ssl_key", None)
-            data["deploy"].pop("ssl_cert", None)
-        for key in ("app", "emulator", "ocr", "llm", "scheduler", "tasks", "deploy", "notify", "update", "remote_access"):
-            if key in data:
-                val = data[key]
-                if key == "tasks" and isinstance(val, dict):
-                    task_tree_service.strip_runtime_fields_inplace(val)
-                cfg._config[key] = val
-        cfg.save_config()
-        TASK_MANAGER.reload_tasks()
-        read_config()
-        return api_ok(status="ok", config_version=_mark_config_changed("import config"))
+        version = lifecycle_service.import_config(data)
+        return api_ok(status="ok", config_version=version)
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -1560,10 +1505,7 @@ async def deploy_save_api(request: Request):
                         if not current_pwd or not _verify_deploy_password(current_pwd, existing_pwd):
                             return JSONResponse(status_code=403, content={"error": "修改密码需要验证当前密码"})
                     incoming["password"] = _hash_deploy_password(incoming_pwd)
-            cfg._config[section] = data[section]
-    cfg.save_config()
-    _apply_webui_log_level_from_config()
-    return api_ok(status="ok", config_version=_mark_config_changed("save deploy settings"))
+    return api_ok(status="ok", config_version=lifecycle_service.save_deploy_sections(data))
 
 
 # ── 入口 ──

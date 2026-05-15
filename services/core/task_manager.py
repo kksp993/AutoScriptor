@@ -12,6 +12,7 @@ import inspect
 import os
 import sys
 import traceback
+from contextlib import contextmanager
 from typing import List, Tuple
 from threading import Event, RLock
 
@@ -127,6 +128,18 @@ class TaskManager:
     def _reset_cancel(self):
         self._cancel_event.clear()
 
+    @contextmanager
+    def config_transaction(self):
+        """Serialize config mutations that must not race with task execution."""
+        with self._cfg_lock:
+            yield
+
+    def switch_character_and_reload(self, server: str, character: str) -> None:
+        """Switch the active character and reload task registry/config atomically."""
+        with self.config_transaction():
+            cfg.switch_character(server, character)
+            self.reload_tasks()
+
     def execute_tasks(self, tasks: List[str]) -> Tuple[int, int]:
         """执行一组任务。返回 (成功数, 失败数)。"""
         if self._cancel_event.is_set():
@@ -148,8 +161,7 @@ class TaskManager:
         """重新加载任务和配置。"""
         with self._cfg_lock:
             try:
-                saved_game = cfg._config.get('game', {}).copy()
-                cfg.load_config(security_key)
+                cfg.reload_preserving_decrypted_credentials(security_key)
                 # 清除 ZmxyOL 子模块缓存，强制重新导入
                 for name in [m for m in sys.modules if m.startswith('ZmxyOL.')]:
                     sys.modules.pop(name, None)
@@ -167,8 +179,6 @@ class TaskManager:
                 # 重新发现并注册任务（不再由 import 自动触发）
                 from ZmxyOL.task import force_reload_tasks
                 force_reload_tasks()
-                if not security_key:
-                    cfg._config['game'] = saved_game
                 logger.info("✅ 任务重新加载完成")
             except Exception as e:
                 logger.error(f"❌ 任务重新加载失败: {e}")
@@ -486,5 +496,3 @@ class TaskManager:
                     os.remove(fp)
                 except Exception:
                     pass
-
-

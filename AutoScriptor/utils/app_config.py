@@ -108,6 +108,15 @@ class Account:
                 logger.error(f"解密账号 {self.account_name} 失败: {e}")
         return False
 
+    def restore_credentials(self, credentials: dict[str, Any] | None) -> None:
+        """Restore already-decrypted credentials across config-only reloads."""
+        if not credentials:
+            return
+        account = credentials.get("account", "")
+        password = credentials.get("password", "")
+        if account and password:
+            self.credentials = {"account": account, "password": password}
+
     def get_active_character(self) -> Character | None:
         ac = self.active_info
         return self.characters.get((ac.get("server", ""), ac.get("name", "")))
@@ -310,12 +319,29 @@ class AutoConfig:
         self.ACCOUNTS_DIR = str(self._mgr.resolved_accounts_dir())
         self._refresh_flat_config()
 
+    def reload_preserving_decrypted_credentials(self, pwd: str = "") -> None:
+        current_account = self.current_account()
+        saved_credentials = None
+        if not pwd and self._mgr.current_acc:
+            saved_credentials = copy.deepcopy(self._mgr.current_acc.credentials)
+        self.load_config(pwd)
+        if not pwd and saved_credentials and self.current_account() == current_account and self._mgr.current_acc:
+            self._mgr.current_acc.restore_credentials(saved_credentials)
+            self._refresh_flat_config()
+
     def save_config(self) -> None:
         os.makedirs(os.path.dirname(self.CONFIG_PATH), exist_ok=True)
         self._mgr.save_all(self._config)
 
     def _save_account_file(self) -> None:
         self._mgr.save_account_file_only()
+
+    def update_current_account_credentials(self, account: str, password: str, security_key: str) -> None:
+        self._account_data["encryption"] = CryptoConfigManager.encrypt_data(
+            {"account": account, "password": password},
+            security_key,
+        )
+        self._save_account_file()
 
     def has_encrypted_credentials(self) -> bool:
         return bool((self._account_data.get("encryption") or {}).get("encrypted_data"))
