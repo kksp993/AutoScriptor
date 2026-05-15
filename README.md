@@ -9,6 +9,7 @@ AutoScriptor 是一个基于 Python 的自动化脚本与任务编排器，专�
 
 - **双模式管理**：支持 CLI 命令行界面和 WebUI 可视化界面两种操作方式
 - **模拟器控制**：支持 MuMu 模拟器的点击、长按、滑动、输入、按键事件等操作
+- **启动诊断**：WebUI 可分层查看 MuMuManager、ADB、App、NemuIpc、OCR、UI Map 状态
 - **智能识别**：集成 PaddleOCR 文本识别和图像匹配，支持颜色采样、稳定性检测
 - **任务编排**：按「每日 / 每周 / 一般 / 活动」分类管理任务，支持参数配置、执行后冷却与状态持久化
 - **实时监控**：WebUI 通过 WebSocket 推送日志；CLI 提供交互式任务导航
@@ -38,6 +39,13 @@ AutoScriptor 是一个基于 Python 的自动化脚本与任务编排器，专�
 # 使用说明与配置指南
 
 如需完整的入门到进阶与 API 参考，请查阅: [docs/AutoScriptor/API.md](docs/AutoScriptor/API.md)
+
+当前生命周期与接口规范:
+
+- [运行生命周期](docs/AutoScriptor/runtime-lifecycle.md)
+- [WebUI API 规范](docs/AutoScriptor/webui-api-contract.md)
+- [任务脚本编写约定](docs/AutoScriptor/script-authoring.md)
+- [WebUI 用户轨迹验收](docs/AutoScriptor/webui-user-trajectories.md)
 
 **发行构建与日常运行**（`build_release.py` 参数、portable/NSIS、增量缓存、安装向导、`backend.zip` 与排错）：[docs/AutoScriptor/release-build-and-run.md](docs/AutoScriptor/release-build-and-run.md)
 
@@ -100,7 +108,13 @@ AutoScriptor 是一个基于 Python 的自动化脚本与任务编排器，专�
    npm start
    ```
 
-5. 按照安装器要求一步步安装依赖到 venv，若发生错误，请删除 .venv 重试。
+5. 安装器会自动创建 `.venv`、安装依赖、探测 MuMu/ADB 并写入配置。若只想安装依赖不启动界面，可运行：
+
+   ```powershell
+   python services/installer/installer.py install-only --no-git-update
+   ```
+
+   需要强制重装依赖时可加 `--fresh-install`。若 MuMuManager `version` 失败但 ADB 可用，安装器会给出警告但不再直接阻断。
 
 6. **从源码打发行包（维护者）**：在仓库根目录用 **`.venv-nuitka`** 执行 `python scripts/build_release.py`（可加 `-j 16` 等），默认产物为 **`dist_electron/AutoScriptor_Zao_Install.exe`**（单文件；首次运行即 HTML 安装向导，解压引擎并配置 MuMu/ADB）。完整说明见上文 **release-build-and-run** 文档。
 
@@ -157,6 +171,7 @@ AutoScriptor 是一个基于 Python 的自动化脚本与任务编排器，专�
 - 确认 MuMu 模拟器已启动
 - 检查 `config.json` 中的 `adb_addr` 是否正确
 - 确认 ADB 路径配置正确
+- 在 WebUI 打开「启动诊断」，先看 ADB/App/NemuIpc 哪一层失败；默认诊断不触发截图，点击「截图探测」才检查 NemuIpc
 - 尝试重启模拟器或重新连接 ADB
 
 ## 任务执行失败

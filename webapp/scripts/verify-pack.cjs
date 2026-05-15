@@ -8,6 +8,7 @@
 const path = require('path');
 const fs = require('fs');
 const { listPackage, extractFile } = require('@electron/asar');
+const yauzl = require('yauzl');
 
 const defaultUnpacked = path.resolve(__dirname, '..', '..', 'dist_electron', 'win-unpacked');
 const unpacked = path.resolve(process.argv[2] || defaultUnpacked);
@@ -41,5 +42,47 @@ if (!hasMain) {
   process.exit(1);
 }
 
-console.log('[verify-pack] OK', unpacked);
-console.log('[verify-pack] main=', pkgMain, 'asar files=', files.length);
+const backendZipCandidates = [
+  path.join(unpacked, 'backend.zip'),
+  path.join(unpacked, 'resources', 'backend.zip'),
+];
+const backendZip = backendZipCandidates.find((p) => fs.existsSync(p));
+
+if (!backendZip) {
+  console.error('[verify-pack] missing backend.zip. Expected one of:');
+  for (const p of backendZipCandidates) console.error('  -', p);
+  process.exit(1);
+}
+
+yauzl.open(backendZip, { lazyEntries: true }, (err, zipfile) => {
+  if (err) {
+    console.error('[verify-pack] cannot open backend.zip:', err.message);
+    process.exit(1);
+  }
+  let hasEngine = false;
+  let count = 0;
+  zipfile.readEntry();
+  zipfile.on('entry', (entry) => {
+    if (!entry.fileName.endsWith('/')) {
+      count += 1;
+      const n = entry.fileName.replace(/\\/g, '/');
+      if (n === 'autoscriptor-engine.exe' || n.endsWith('/autoscriptor-engine.exe')) {
+        hasEngine = true;
+      }
+    }
+    zipfile.readEntry();
+  });
+  zipfile.on('error', (e) => {
+    console.error('[verify-pack] failed reading backend.zip:', e.message);
+    process.exit(1);
+  });
+  zipfile.on('end', () => {
+    if (!hasEngine) {
+      console.error('[verify-pack] backend.zip is missing autoscriptor-engine.exe');
+      process.exit(1);
+    }
+    console.log('[verify-pack] OK', unpacked);
+    console.log('[verify-pack] main=', pkgMain, 'asar files=', files.length);
+    console.log('[verify-pack] backend.zip=', backendZip, 'files=', count);
+  });
+});

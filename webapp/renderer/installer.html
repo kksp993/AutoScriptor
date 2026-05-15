@@ -448,6 +448,10 @@
       border-color: rgba(239,68,68,0.35);
       background: rgba(239,68,68,0.03);
     }
+    .path-verify-item.warn {
+      border-color: rgba(245,158,11,0.38);
+      background: rgba(245,158,11,0.05);
+    }
     .pv-header {
       display: flex;
       align-items: center;
@@ -475,6 +479,11 @@
       background: #ef4444;
       color: #fff;
       border-color: #ef4444;
+    }
+    .pv-status.warn {
+      background: #f59e0b;
+      color: #fff;
+      border-color: #f59e0b;
     }
     .pv-info { flex: 1; min-width: 0; }
     .pv-label {
@@ -1627,6 +1636,10 @@
       if (ok === null) {
         if (item) item.className = 'path-verify-item';
         if (status) { status.className = 'pv-status'; status.textContent = '?'; }
+      } else if (ok === 'warn') {
+        if (item) item.className = 'path-verify-item warn';
+        if (status) { status.className = 'pv-status warn'; status.textContent = '!'; }
+        if (input) input.classList.remove('invalid-input');
       } else if (ok) {
         if (item) item.className = 'path-verify-item valid';
         if (status) { status.className = 'pv-status ok'; status.textContent = '✓'; }
@@ -1699,8 +1712,9 @@
       }
 
       setPvState('mumu_folder', report.mumu_folder?.exists, report.mumu_folder?.detail || '');
-      const emuOk = report.emu_path?.exists && report.emu_path?.runnable;
-      setPvState('emu_path', emuOk, report.emu_path?.detail || '');
+      const managerRunnable = !!report.emu_path?.runnable;
+      const emuAcceptable = !!report.emu_path?.exists && (managerRunnable || !!report.overall);
+      setPvState('emu_path', managerRunnable ? true : (emuAcceptable ? 'warn' : false), report.emu_path?.detail || '');
       const adbOk = report.adb_path?.exists && report.adb_path?.runnable;
       setPvState('adb_path', adbOk,
         (report.adb_path?.detail || '') + (report.adb_path?.version ? '' : ''));
@@ -1714,7 +1728,7 @@
       document.querySelectorAll('.pv-help.show').forEach(h => h.classList.remove('show'));
 
       if (report.overall) {
-        const parts = ['路径有效', '可执行文件正常'];
+        const parts = ['路径有效', managerRunnable ? 'MuMuManager 正常' : 'MuMuManager 警告，ADB 路径可用'];
         if (deviceOk) parts.push('设备已连接');
         showValidationBar('success', '✓ 功能检测通过：' + parts.join('，') + '。可以继续完成安装。');
       } else {
@@ -1724,7 +1738,7 @@
           const h = document.getElementById('help-mumu_folder');
           if (h) h.classList.add('show');
         }
-        if (!emuOk) {
+        if (!emuAcceptable) {
           issues.push('模拟器不可执行');
           const h = document.getElementById('help-emu_path');
           if (h) h.classList.add('show');

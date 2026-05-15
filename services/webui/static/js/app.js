@@ -4,7 +4,7 @@ const { createApp, ref, reactive, computed, nextTick, watch } = Vue;
 const FEATURE_SCRIPT_CANVAS = false;
 
 const app = createApp({
-  components: { AppSidebar, NewsPanel, OverviewPanel, SchedulerPanel, TaskPanel, SettingsPanel, EditorPanel, CanvasPanel, ErrorArchivesPanel, UpdatePanel, AboutPanel },
+  components: { AppSidebar, NewsPanel, OverviewPanel, SchedulerPanel, TaskPanel, SettingsPanel, EditorPanel, DiagnosticsPanel, CanvasPanel, ErrorArchivesPanel, UpdatePanel, AboutPanel },
   setup() {
     const configData = reactive({});
     const activeTab = ref('news');
@@ -170,7 +170,7 @@ const app = createApp({
     const pageTitle = computed(() => {
       const map = {
         news: '资讯', overview: '总览', scheduler: '调度', editor: '编辑器', canvas: '脚本画布',
-        errorArchives: '错误汇总', updater: '检查更新', settings: '设置', about: '关于',
+        diagnostics: '启动诊断', errorArchives: '错误汇总', updater: '检查更新', settings: '设置', about: '关于',
         daily: '每日任务', weekly: '每周任务', general: '一般任务', custom: '自定义任务',
       };
       return map[activeTab.value] || '';

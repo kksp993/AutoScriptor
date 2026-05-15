@@ -9,7 +9,6 @@
 - 保持核心功能不变，提高代码可读性
 """
 
-import time
 from AutoScriptor import *
 from AutoScriptor.core.api import ui_idx
 from ZmxyOL.nav.envs.decorators import LOC_ENV
@@ -58,7 +57,7 @@ def locate_region(cnt = 0, check_only = False) -> tuple[str, str]:
     if cnt == 0:
         try:
             mixctrl.app.launch(cfg["app"]["app_to_start"])
-            time.sleep(2)
+            sleep(2)
         except Exception:
             pass
     """
@@ -151,7 +150,7 @@ def try_close_via_x():
             sleep(0.5)
         for target in wait_for_disappear_targets:
             while(ui_T(target)): 
-                time.sleep(0.5) 
+                sleep(0.5)
                 found = True
     
     return True 

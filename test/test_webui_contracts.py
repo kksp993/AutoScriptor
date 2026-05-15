@@ -514,11 +514,30 @@ class TestConfigLifecycleContract(unittest.TestCase):
 
             self.assertTrue(watcher.should_reload())
 
+    def test_config_writes_json_atomically(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module = import_app_config_for_test(tmp)
+            calls = []
+            real_replace = os.replace
+
+            def tracking_replace(src, dst):
+                calls.append((Path(src).name, Path(dst).name))
+                return real_replace(src, dst)
+
+            with patch.object(module.os, "replace", side_effect=tracking_replace):
+                module.cfg._config["app"] = {"name": "ZmxyOL"}
+                module.cfg.save_config()
+
+            self.assertTrue((Path(tmp) / "config.json").exists())
+            self.assertTrue(calls)
+            self.assertEqual(calls[-1][1], "config.json")
+
 
 class TestWebUIFrontendContract(unittest.TestCase):
     JS_FILES = [
         ROOT / "services/webui/static/js/app.js",
         ROOT / "services/webui/static/js/stores/runtimeStore.js",
+        ROOT / "services/webui/static/js/components/DiagnosticsPanel.js",
         ROOT / "services/webui/static/js/components/Overview.js",
         ROOT / "services/webui/static/js/components/TaskPanel.js",
         ROOT / "services/webui/static/js/components/TaskTree.js",
@@ -568,6 +587,16 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertNotIn("remoteConfig", content)
         self.assertNotIn("passwordProtected", content)
 
+    def test_diagnostics_page_is_registered(self):
+        sidebar = (ROOT / "services/webui/static/js/components/AppSidebar.js").read_text(encoding="utf-8")
+        app = (ROOT / "services/webui/static/js/app.js").read_text(encoding="utf-8")
+        index = (ROOT / "services/webui/static/index.html").read_text(encoding="utf-8")
+
+        self.assertIn("diagnostics", sidebar)
+        self.assertIn("DiagnosticsPanel", app)
+        self.assertIn("<diagnostics-panel", index)
+        self.assertIn("DiagnosticsPanel.js", index)
+
 
 class TestWebUIServerRouteContract(unittest.TestCase):
     @classmethod
@@ -582,6 +611,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
     def test_runtime_routes_are_registered(self):
         for path in {
             "/api/runtime/snapshot",
+            "/api/device/diagnostics",
             "/api/run",
             "/api/stop",
             "/api/tasks",
@@ -628,12 +658,72 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("join_with_cancel", api)
         self.assertIn("sleep_with_cancel", api)
 
+    def test_device_facade_centralizes_manager_adb_nemu_checks(self):
+        content = (ROOT / "AutoScriptor/control/MumuAdaptor/device_facade.py").read_text(encoding="utf-8")
+        server = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+
+        self.assertIn("class DeviceFacade", content)
+        self.assertIn("diagnostics", content)
+        self.assertIn("NemuIpc", content)
+        self.assertIn("/api/device/diagnostics", server)
+
+    def test_device_diagnostics_import_does_not_initialize_heavy_runtime(self):
+        package_init = (ROOT / "AutoScriptor/__init__.py").read_text(encoding="utf-8")
+        mumu_init = (ROOT / "AutoScriptor/control/MumuAdaptor/__init__.py").read_text(encoding="utf-8")
+        server = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+
+        self.assertIn("def __getattr__", package_init)
+        self.assertIn("def __getattr__", mumu_init)
+        self.assertNotIn("from AutoScriptor.core import *", package_init)
+        self.assertNotIn("from AutoScriptor import *", server)
+        self.assertNotIn("from .mumu import Mumu", mumu_init)
+        self.assertNotIn("from .api import *", mumu_init)
+
+    def test_navigation_waits_use_cancellable_sleep(self):
+        for rel in [
+            "ZmxyOL/nav/api.py",
+            "ZmxyOL/nav/envs/login.py",
+            "ZmxyOL/nav/envs/env_trans.py",
+            "ZmxyOL/nav/envs/loc_trans.py",
+        ]:
+            content = (ROOT / rel).read_text(encoding="utf-8")
+            self.assertNotIn("time.sleep", content, rel)
+
+    def test_mumu_manager_subprocesses_are_perf_safe(self):
+        content = (ROOT / "AutoScriptor/control/MumuAdaptor/utils.py").read_text(encoding="utf-8")
+        perf = (ROOT / "AutoScriptor/utils/perf.py").read_text(encoding="utf-8")
+
+        self.assertIn("mumu_safe_subprocess", content)
+        self.assertIn("_boost_options", perf)
+
     def test_mumu_shutdown_does_not_global_taskkill(self):
         content = (ROOT / "AutoScriptor/control/MumuAdaptor/api/core/power.py").read_text(encoding="utf-8")
 
         self.assertNotIn("[\"taskkill\"", content)
         self.assertNotIn("_force_kill", content)
         self.assertIn("不执行全局", content)
+
+
+class TestInstallerContract(unittest.TestCase):
+    def test_mumu_manager_version_failure_is_warning_when_adb_is_connected(self):
+        content = (ROOT / "services/installer/installer.py").read_text(encoding="utf-8")
+
+        self.assertIn("安装器将把 MuMuManager 异常视为警告", content)
+        self.assertIn('results["emu_path"]["exists"]', content)
+        self.assertNotIn('and results["emu_path"]["exists"] and results["emu_path"]["runnable"]', content)
+
+    def test_electron_installer_matches_mumu_manager_fallback_policy(self):
+        content = (ROOT / "webapp/mumu-detect.cjs").read_text(encoding="utf-8")
+        html = (ROOT / "webapp/renderer/installer.html").read_text(encoding="utf-8")
+
+        self.assertIn('"${emuPath}" version', content)
+        self.assertIn("安装器将把 MuMuManager 异常视为警告", content)
+        self.assertIn("results.adb_path.runnable", content)
+        self.assertIn("&& results.emu_path.exists", content)
+        self.assertNotIn("&& results.emu_path.exists && results.emu_path.runnable", content)
+        self.assertIn("const managerRunnable", html)
+        self.assertIn("emuAcceptable", html)
+        self.assertIn("pv-status warn", html)
 
 
 class TestUpdaterGitCommandContract(unittest.TestCase):

@@ -288,23 +288,25 @@ function validateMumuSetup(emulator) {
       if (fs.statSync(emuPath).isFile()) {
         results.emu_path.exists = true;
         try {
-          const out = execSync(`"${emuPath}" -v 0 player -ld`, {
+          const out = execSync(`"${emuPath}" version`, {
             encoding: 'utf-8', timeout: 8000, stdio: ['pipe', 'pipe', 'pipe'],
           });
           results.emu_path.runnable = true;
-          results.emu_path.detail = '可执行，响应正常';
+          let ver = '';
+          try {
+            ver = JSON.parse(out || '{}').version || '';
+          } catch (_) {}
+          results.emu_path.version = ver;
+          results.emu_path.detail = ver ? `可执行（MuMuManager ${ver}）` : '可执行，响应正常';
         } catch (runErr) {
           const stderr = (runErr.stderr || '').trim();
           const stdout = (runErr.stdout || '').trim();
-          if (runErr.status !== undefined && runErr.status !== null) {
-            results.emu_path.runnable = true;
-            results.emu_path.detail = '可执行（返回码 ' + runErr.status + '）';
-          } else if (stderr || stdout) {
-            results.emu_path.runnable = true;
-            results.emu_path.detail = '可执行，有输出';
-          } else {
-            results.emu_path.detail = '文件存在但执行超时或无响应';
-          }
+          const code = runErr.status !== undefined && runErr.status !== null ? runErr.status : 'timeout';
+          const hint = (stderr || stdout || '').split(/\r?\n/)[0] || '';
+          results.emu_path.runnable = false;
+          results.emu_path.detail = 'MuMuManager version 失败（返回码 ' + code + '）。' +
+            '若 ADB 可用，安装器会继续；后续可在 WebUI「启动诊断」确认。' +
+            (hint ? ' ' + hint : '');
         }
       } else {
         results.emu_path.detail = '路径存在但不是文件';
@@ -360,8 +362,16 @@ function validateMumuSetup(emulator) {
     results.adb_device.detail = 'ADB 不可用，跳过设备检测';
   }
 
+  if (results.emu_path.exists && !results.emu_path.runnable) {
+    if (results.adb_device.connected) {
+      results.emu_path.detail += ' 已检测到 ADB 设备可用，安装器将把 MuMuManager 异常视为警告。';
+    } else if (results.adb_path.runnable) {
+      results.emu_path.detail += ' ADB 可执行文件可用，安装器将把 MuMuManager 异常视为警告。';
+    }
+  }
+
   results.overall = results.mumu_folder.exists
-    && results.emu_path.exists && results.emu_path.runnable
+    && results.emu_path.exists
     && results.adb_path.exists && results.adb_path.runnable;
 
   return results;

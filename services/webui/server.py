@@ -20,9 +20,9 @@ import webbrowser
 from queue import Queue, Empty
 from typing import Set
 
-from AutoScriptor import *
 from AutoScriptor.utils.logger import logger, _TaskFilter as _LogTaskFilter
 
+from AutoScriptor.control.MumuAdaptor.device_facade import get_device_facade
 from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.game_profession import GAME_PROFESSIONS
 from ZmxyOL.task.battle_task_params import battle_flow_allowed_for_task
@@ -999,6 +999,16 @@ async def runtime_snapshot_api(request: Request):
     except Exception as e:
         logger.error("runtime snapshot error: %s", e)
         return api_error(500, str(e), code="snapshot_failed")
+
+
+@app.get("/api/device/diagnostics")
+async def device_diagnostics_api(screenshot: bool = False):
+    try:
+        diagnostics = get_device_facade().diagnostics(include_screenshot=screenshot)
+        return api_ok(diagnostics=diagnostics)
+    except Exception as e:
+        logger.error("device diagnostics error: %s", e)
+        return api_error(500, str(e), code="device_diagnostics_failed")
 
 
 # ── 通知 API ──

@@ -1,7 +1,11 @@
 """Small response helpers for WebUI APIs.
 
-Keep the HTTP status code meaningful while returning one predictable error
-shape to the frontend.
+Contract:
+    success -> {"ok": true, ...payload}
+    failure -> {"ok": false, "error": str, "message": str, "code": str?}
+
+HTTP status codes remain meaningful. New/changed endpoints should use these
+helpers so frontend error handling can stay shared.
 """
 from __future__ import annotations
 

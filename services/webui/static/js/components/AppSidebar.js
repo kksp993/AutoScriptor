@@ -20,6 +20,7 @@ const APP_MENU = [
     group: 'TOOLS',
     items: [
       { id: 'editor',   label: '编辑器',   icon: 'fa-pencil-square-o' },
+      { id: 'diagnostics', label: '启动诊断', icon: 'fa-stethoscope' },
       { id: 'canvas',   label: '脚本画布', icon: 'fa-object-group' },
       { id: 'errorArchives', label: '错误汇总', icon: 'fa-exclamation-triangle' },
       { id: 'updater',  label: '检查更新', icon: 'fa-cloud-download' },
