@@ -604,6 +604,37 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertNotIn("from ZmxyOL.task import load_tasks", content)
         self.assertNotIn("with TASK_MANAGER._cfg_lock", content)
 
+    def test_webui_startup_does_not_initialize_device_controls(self):
+        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        start = content.index("def _do_heavy_init():")
+        end = content.index("@app.get(\"/api/init-status\")", start)
+        body = content[start:end]
+
+        self.assertNotIn("AutoScriptor.core.api import init", body)
+        self.assertNotIn("runtime_ctx.init(", body)
+        self.assertIn("runtime_ctx.init_bg()", body)
+        self.assertIn("TASK_MANAGER.reload_tasks()", body)
+
+    def test_runtime_startup_is_cancellable_and_execution_owned(self):
+        runtime_context = (ROOT / "services/core/runtime_context.py").read_text(encoding="utf-8")
+        scheduler = (ROOT / "services/core/scheduler.py").read_text(encoding="utf-8")
+        api = (ROOT / "AutoScriptor/core/api.py").read_text(encoding="utf-8")
+
+        self.assertIn("self._refresh_lock", runtime_context)
+        self.assertIn("start_emulator=True", runtime_context)
+        self.assertIn("launch_app=True", runtime_context)
+        self.assertIn("cancel_check=cancel_check", runtime_context)
+        self.assertIn("runtime_ctx.refresh(cancel_check=self._check_cancel_requested)", scheduler)
+        self.assertIn("join_with_cancel", api)
+        self.assertIn("sleep_with_cancel", api)
+
+    def test_mumu_shutdown_does_not_global_taskkill(self):
+        content = (ROOT / "AutoScriptor/control/MumuAdaptor/api/core/power.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("[\"taskkill\"", content)
+        self.assertNotIn("_force_kill", content)
+        self.assertIn("不执行全局", content)
+
 
 class TestUpdaterGitCommandContract(unittest.TestCase):
     def test_git_command_includes_safe_directory_for_repo_root(self):
