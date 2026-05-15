@@ -1,11 +1,59 @@
 'use strict';
 
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, dialog } = require('electron');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const treeKill = require('tree-kill');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
+
+let previousWindowsConsoleCodePage = null;
+
+function getWindowsConsoleCodePage() {
+  if (process.platform !== 'win32') return null;
+  try {
+    const output = execFileSync(
+      'cmd.exe',
+      ['/d', '/s', '/c', 'chcp'],
+      { encoding: 'utf8', windowsHide: true, timeout: 2000 },
+    );
+    const match = String(output).match(/(\d{3,5})/);
+    return match ? match[1] : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function setWindowsConsoleCodePage(codePage) {
+  execFileSync(
+    'cmd.exe',
+    ['/d', '/s', '/c', `chcp ${codePage} >nul`],
+    { windowsHide: true, timeout: 2000, stdio: 'ignore' },
+  );
+}
+
+function ensureUtf8Console() {
+  if (process.platform !== 'win32') return;
+  try { process.stdout?.setDefaultEncoding?.('utf8'); } catch (_) {}
+  try { process.stderr?.setDefaultEncoding?.('utf8'); } catch (_) {}
+
+  const current = getWindowsConsoleCodePage();
+  if (current && current !== '65001') {
+    previousWindowsConsoleCodePage = current;
+  }
+  if (current !== '65001') {
+    try { setWindowsConsoleCodePage('65001'); } catch (_) {}
+  }
+}
+
+function restoreWindowsConsoleCodePage() {
+  if (process.platform !== 'win32' || !previousWindowsConsoleCodePage) return;
+  try { setWindowsConsoleCodePage(previousWindowsConsoleCodePage); } catch (_) {}
+  previousWindowsConsoleCodePage = null;
+}
+
+ensureUtf8Console();
+process.once('exit', restoreWindowsConsoleCodePage);
 
 // ── Config ──────────────────────────────────────────────────────────────────
 /** 开发模式：仓库根目录。发行安装包：install.json 中的 installRoot，或 exe 同层（旧版整包）。 */
@@ -127,31 +175,8 @@ function findPython() {
   return 'python';
 }
 
-/**
- * 解码管道一行：优先 UTF-8；Windows 上若像「UTF-8 误读 GBK」则回退 gb18030。
- * （与 gui.py 强制 UTF-8 stdio 互补，防止仍有库绕过 TextIO 写 cp936）
- */
 function decodePipeLine(buf) {
-  const utf8 = buf.toString('utf-8');
-  if (process.platform !== 'win32' || buf.length === 0) return utf8;
-  if (utf8.includes('\uFFFD')) {
-    try {
-      const g = buf.toString('gb18030');
-      if (!g.includes('\uFFFD')) return g;
-    } catch (_) { /* ignore */ }
-  }
-  // 常见：管道实为 GBK，被当成 UTF-8 解成「璐﹀彿…」类字形
-  const mojibakeHint =
-    /[瀵嗙爜鐧诲綍鎵嬫満鍙风櫥褰璐﹀彿鍚屾剰杩涘叆娓告垯]/.test(utf8);
-  if (mojibakeHint) {
-    try {
-      const g = buf.toString('gb18030');
-      if (g.includes('\uFFFD')) return utf8;
-      const han = (s) => (s.match(/[\u4e00-\u9fff]/g) || []).length;
-      if (han(g) >= han(utf8) - 2) return g;
-    } catch (_) { /* ignore */ }
-  }
-  return utf8;
+  return buf.toString('utf8');
 }
 
 /**
@@ -315,6 +340,8 @@ function startPython() {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUTF8: '1',
         AUTOSCRIPTOR_ELECTRON_PIPE: '1',
         AUTOSCRIPTOR_ELECTRON: '1',
         UVICORN_LOG_LEVEL: 'info',
