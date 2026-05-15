@@ -36,6 +36,20 @@ WebUI 新增或重构接口应统一使用以下响应形状。
 - 独立页面可按需主动刷新，例如启动诊断页调用 `/api/device/diagnostics`。
 - 不新增散落的账号、调度器、运行状态多路轮询。
 
+## Editor 设备会话
+
+Editor 接口分为两类:
+
+- 离线图片接口只读 `_last_screenshot` 缓存，不应启动模拟器，例如 `/api/editor/ingest-image`、`/api/editor/ocr`、`/api/editor/color`、`/api/editor/save`、`/api/editor/store-template`、`/api/editor/locate-image`。
+- 实时设备接口必须按需调用 `runtime_ctx.ensure_device_session()`，包括 `/api/editor/screenshot`、无缓存图时的 `/api/editor/locate`、`/api/editor/remote/click`、`/api/editor/remote/swipe`、真实 `/api/editor/execute-code`、无缓存图时的 `/api/editor/preview-extract`。
+
+约定:
+
+- WebUI 启动、普通轮询和默认诊断页不得为了“预加载”而创建 `mixctrl/mumu`。
+- 实时设备接口第一次调用可能较慢，因为它会启动或确认 MuMu、拉起 App，并同步全局 API 引用。
+- 设备会话失败统一返回可读错误，例如 `设备会话初始化失败: ...`；前端按钮应展示该错误，而不是静默吞掉或显示“未初始化”。
+- 模拟执行且已有导入/截图缓存时使用虚拟 `mixctrl`，只在画布标注点击/滑动，不触发真实模拟器。
+
 ## 设备诊断
 
 `GET /api/device/diagnostics?screenshot=false`

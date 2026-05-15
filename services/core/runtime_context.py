@@ -43,7 +43,7 @@ class RuntimeContext:
         self.bg = None
         self.vlm_client = None
         self._initialized = False
-        self._refresh_lock = threading.Lock()
+        self._refresh_lock = threading.RLock()
 
     @classmethod
     def instance(cls) -> RuntimeContext:
@@ -89,7 +89,33 @@ class RuntimeContext:
         except Exception as e:
             logger.warning("RuntimeContext: VLM client 初始化失败: %s", e)
 
-    # ── 刷新（模拟器重启后） ──
+    # ── 设备会话 ──
+
+    def has_device_session(self) -> bool:
+        """Return True when live device controls are already available."""
+        return self.mixctrl is not None and self.mumu is not None
+
+    def ensure_device_session(
+        self,
+        *,
+        reason: str = "",
+        cancel_check: Callable[[], None] | None = None,
+    ):
+        """
+        Lazily create the live device session used by explicit device actions.
+
+        WebUI startup and passive diagnostics must not initialize mixctrl/mumu.
+        Screenshot, remote control and task execution paths call this method
+        when they really need a connected emulator session.
+        """
+        with self._refresh_lock:
+            if self.has_device_session():
+                self._sync_globals()
+                return self.mixctrl, self.mumu
+
+            if reason:
+                logger.info("RuntimeContext: acquiring device session for %s", reason)
+            return self._refresh_device_session_locked(cancel_check)
 
     def refresh(self, cancel_check: Callable[[], None] | None = None):
         """
@@ -97,27 +123,8 @@ class RuntimeContext:
         and sync back to module-level globals.
         Returns the new (mixctrl, mumu) pair.
         """
-        from AutoScriptor.utils.app_config import cfg
-        from AutoScriptor import ensure_app_running
-
-        cancel_check = cancel_check or check_cancel_raise
         with self._refresh_lock:
-            cancel_check()
-            self._release_nemu_ipc()
-            mixctrl, mumu = ensure_app_running(
-                cfg["emulator"]["index"],
-                cfg["emulator"]["adb_addr"],
-                cfg["app"]["app_to_start"],
-                start_emulator=True,
-                launch_app=True,
-                cancel_check=cancel_check,
-            )
-            self.mixctrl = mixctrl
-            self.mumu = mumu
-            self._initialized = True
-            self._sync_globals()
-            logger.info("RuntimeContext 已刷新 (mixctrl/mumu 已替换)")
-            return mixctrl, mumu
+            return self._refresh_device_session_locked(cancel_check)
 
     # ── 关闭 ──
 
@@ -148,6 +155,28 @@ class RuntimeContext:
             logger.debug("NemuIpc 连接已释放")
         except Exception as e:
             logger.debug("释放 NemuIpc 连接失败: %s", e)
+
+    def _refresh_device_session_locked(self, cancel_check: Callable[[], None] | None = None):
+        from AutoScriptor.utils.app_config import cfg
+        from AutoScriptor import ensure_app_running
+
+        cancel_check = cancel_check or check_cancel_raise
+        cancel_check()
+        self._release_nemu_ipc()
+        mixctrl, mumu = ensure_app_running(
+            cfg["emulator"]["index"],
+            cfg["emulator"]["adb_addr"],
+            cfg["app"]["app_to_start"],
+            start_emulator=True,
+            launch_app=True,
+            cancel_check=cancel_check,
+        )
+        self.mixctrl = mixctrl
+        self.mumu = mumu
+        self._initialized = True
+        self._sync_globals()
+        logger.info("RuntimeContext 已刷新 (mixctrl/mumu 已替换)")
+        return mixctrl, mumu
 
     def _sync_globals(self):
         """

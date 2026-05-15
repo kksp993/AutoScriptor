@@ -9,6 +9,13 @@
 - `runtime_ctx.refresh()` 负责释放旧 NemuIpc、启动或确认 MuMu、拉起 App，并把新的 `mixctrl/mumu` 同步到兼容的全局变量。
 - 停止按钮通过 `TaskManager` 取消事件、`Scheduler.request_stop()` 和直接执行线程中断协同完成；脚本内应使用 `AutoScriptor.sleep()`，不要直接 `time.sleep()`。
 
+## 懒加载边界
+
+- 模块级懒加载只负责避免 import 阶段副作用：导入 `AutoScriptor`、`DeviceFacade`、诊断页路由时，不应初始化 OCR、UI Map、MuMu、NemuIpc 或 `mixctrl/mumu`。
+- 请求级按需初始化由 `runtime_ctx.ensure_device_session(reason=...)` 负责。只有明确需要实时设备的操作才能调用它，例如任务执行、Editor 刷新截图、实时定位补帧、遥控点击/滑动、自定义代码真实执行、无缓存的 `extract_info` 预览。
+- Editor 的离线图片流程不应启动模拟器：`/ingest-image`、缓存图上的 OCR/颜色/保存/模板匹配，以及有缓存图的模拟执行，均只使用 `_last_screenshot`。
+- 诊断页默认只做状态探测，不拉起截图；只有用户点击“截图探测”时才检查 NemuIpc 截图层。OCR/UI Map 状态显示为 `skipped` 代表模块尚未被运行期需要，不代表功能丢失。
+
 ## 设备通道
 
 - `DeviceFacade` 是统一设备检查入口，集中处理 MuMuManager、ADB、App、NemuIpc、OCR、UI Map 状态。

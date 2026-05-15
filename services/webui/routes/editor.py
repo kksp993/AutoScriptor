@@ -8,9 +8,9 @@ Editor API routes – WebUI 版图片编辑器后端
 from __future__ import annotations
 
 import ast
+import asyncio
 import base64
 import os
-import time
 import traceback
 import types
 
@@ -64,6 +64,70 @@ def _get_runtime():
     return runtime_ctx
 
 
+def _ignore_cancel() -> None:
+    return None
+
+
+def _ensure_editor_mixctrl(reason: str):
+    """Acquire live device controls only for explicit editor device actions."""
+    return _get_runtime().ensure_device_session(
+        reason=f"editor/{reason}",
+        cancel_check=_ignore_cancel,
+    )[0]
+
+
+def _device_session_error(exc: Exception) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={"error": f"设备会话初始化失败: {exc}"},
+    )
+
+
+def _device_action_failed(exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=500, content={"error": str(exc)})
+
+
+class _EditorVirtualMixControl:
+    """Minimal mixctrl used by virtual editor snippets with an imported frame."""
+
+    mode = "editor-virtual"
+
+    def __init__(self, screenshot):
+        self._screenshot = screenshot
+        self.virtual_clicks: list[dict] = []
+        self.virtual_swipes: list[dict] = []
+
+    def screenshot(self):
+        return self._screenshot
+
+    def locate(self, tgt_triples, confidence=0.8, screenshot=None):
+        from AutoScriptor.recognition.rec import locate_on_screen
+
+        sources, boxes, colors = zip(*tgt_triples)
+        frame = self._screenshot if screenshot is None else screenshot
+        return locate_on_screen(frame, sources, confidence, boxes, colors)
+
+    def click(self, x, y):
+        self.virtual_clicks.append({"x": int(x), "y": int(y)})
+        return None
+
+    def long_click(self, x, y, duration=1.0):
+        self.virtual_clicks.append({"x": int(x), "y": int(y)})
+        return None
+
+    def swipe(self, x1, y1, x2, y2, duration_s=1):
+        self.virtual_swipes.append({
+            "x1": int(x1), "y1": int(y1), "x2": int(x2), "y2": int(y2),
+        })
+        return None
+
+    def input_text(self, text):
+        return None
+
+    def key_event(self, key_code):
+        return None
+
+
 def _screenshot_to_base64(img_bgr: np.ndarray) -> str:
     _, buf = cv2.imencode(".jpg", img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 90])
     return base64.b64encode(buf.tobytes()).decode("ascii")
@@ -75,10 +139,8 @@ def _screenshot_to_base64(img_bgr: np.ndarray) -> str:
 async def editor_screenshot():
     global _last_screenshot
     try:
-        ctx = _get_runtime()
-        if ctx.mixctrl is None:
-            return JSONResponse(status_code=503, content={"error": "mixctrl 未初始化"})
-        img = ctx.mixctrl.screenshot()
+        mixctrl = _ensure_editor_mixctrl("screenshot")
+        img = mixctrl.screenshot()
         if img is None:
             return JSONResponse(status_code=500, content={"error": "截图返回空"})
         _last_screenshot = img
@@ -86,7 +148,7 @@ async def editor_screenshot():
         return {"image": _screenshot_to_base64(img), "width": w, "height": h}
     except Exception as e:
         logger.error("editor/screenshot error: %s", e)
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return _device_session_error(e)
 
 
 def _decode_image_bytes(raw: bytes) -> np.ndarray | None:
@@ -193,10 +255,6 @@ async def editor_locate(request: Request):
         width, height = int(data["width"]), int(data["height"])
         color = data.get("color") or None
 
-        ctx = _get_runtime()
-        if ctx.mixctrl is None:
-            return JSONResponse(status_code=503, content={"error": "mixctrl 未初始化"})
-
         empty_scales = {str(s): {"found": False, "boxes": []} for s in _LOCATE_SCALES}
         if not text:
             return {"found": False, "boxes": [], "scale_results": empty_scales}
@@ -206,7 +264,12 @@ async def editor_locate(request: Request):
 
         screenshot = _last_screenshot
         if screenshot is None:
-            screenshot = ctx.mixctrl.screenshot()
+            try:
+                screenshot = _ensure_editor_mixctrl("locate").screenshot()
+            except Exception as e:
+                return _device_session_error(e)
+            if screenshot is None:
+                return JSONResponse(status_code=500, content={"error": "截图返回空"})
             _last_screenshot = screenshot
 
         scale_results = {}
@@ -425,14 +488,17 @@ async def editor_remote_click(request: Request):
     try:
         data = await request.json()
         x, y = int(data["x"]), int(data["y"])
-        ctx = _get_runtime()
-        if ctx.mixctrl is None:
-            return JSONResponse(status_code=503, content={"error": "mixctrl 未初始化"})
-        ctx.mixctrl.click(x, y)
+        try:
+            with suppress_cancel_checks():
+                mixctrl = _ensure_editor_mixctrl("remote/click")
+        except Exception as e:
+            return _device_session_error(e)
+        with suppress_cancel_checks():
+            mixctrl.click(x, y)
         return {"ok": True}
     except Exception as e:
         logger.error("editor/remote/click error: %s", e)
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return _device_action_failed(e)
 
 
 # ── POST /api/editor/remote/swipe ──
@@ -445,21 +511,24 @@ async def editor_remote_swipe(request: Request):
         x1, y1 = int(data["x1"]), int(data["y1"])
         x2, y2 = int(data["x2"]), int(data["y2"])
         duration_s = int(round(float(data.get("duration_s", 1))))
-        ctx = _get_runtime()
-        if ctx.mixctrl is None:
-            return JSONResponse(status_code=503, content={"error": "mixctrl 未初始化"})
         # 直接走 mixctrl，避免 api.swipe 开头的 check_cancel_raise 在「已停止」后仍拦截遥控
         from AutoScriptor.core import api as core_api
 
         core_api._ensure_boosted()
         start_b = B(x1, y1, 1, 1).box
         end_b = B(x2, y2, 1, 1).box
-        ctx.mixctrl.swipe(*b2p(start_b), *b2p(end_b), duration_s)
-        time.sleep(duration_s)
+        try:
+            with suppress_cancel_checks():
+                mixctrl = _ensure_editor_mixctrl("remote/swipe")
+        except Exception as e:
+            return _device_session_error(e)
+        with suppress_cancel_checks():
+            mixctrl.swipe(*b2p(start_b), *b2p(end_b), duration_s)
+        await asyncio.sleep(duration_s)
         return {"ok": True}
     except Exception as e:
         logger.error("editor/remote/swipe error: %s", e)
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return _device_action_failed(e)
 
 
 # ── POST /api/editor/execute-code ──
@@ -489,7 +558,12 @@ def _editor_snippet_lhs_name(last_stmt: ast.stmt) -> str | None:
     return None
 
 
-def _run_editor_snippet(code: str, *, virtual_only: bool = False) -> dict:
+def _run_editor_snippet(
+    code: str,
+    *,
+    virtual_only: bool = False,
+    virtual_mixctrl=None,
+) -> dict:
     """在受限命名空间中执行用户代码，捕获所有异常，不向外抛出。
 
     返回值通过 JSON 的 ``result`` 字段给出，始终为 ``repr(值)`` 的字符串（含 ``None`` → ``\"None\"``）。
@@ -505,9 +579,10 @@ def _run_editor_snippet(code: str, *, virtual_only: bool = False) -> dict:
     import time as time_mod
     import traceback as tb_mod
 
-    from AutoScriptor.core import api as api_mod
     from AutoScriptor.core.targets import B, I, T, V
     from AutoScriptor.utils.box import Box
+
+    from AutoScriptor.core import api as api_mod
 
     safe_builtins = {
         "len": len,
@@ -567,6 +642,10 @@ def _run_editor_snippet(code: str, *, virtual_only: bool = False) -> dict:
     except SyntaxError as e:
         return {"ok": False, "error": f"语法错误: {e}"}
 
+    original_mixctrl = api_mod.mixctrl
+    if virtual_mixctrl is not None:
+        api_mod.mixctrl = virtual_mixctrl
+
     stdout_buf = io.StringIO()
     _MISSING = object()
 
@@ -578,36 +657,36 @@ def _run_editor_snippet(code: str, *, virtual_only: bool = False) -> dict:
         mc = api_mod.mixctrl
         if mc is None:
             return {"ok": False, "error": "mixctrl 未初始化"}
+        if virtual_mixctrl is None:
+            def _v_click(self, x, y):
+                virtual_clicks.append({"x": int(x), "y": int(y)})
 
-        def _v_click(self, x, y):
-            virtual_clicks.append({"x": int(x), "y": int(y)})
+            def _v_long_click(self, x, y, duration=1.0):
+                virtual_clicks.append({"x": int(x), "y": int(y)})
 
-        def _v_long_click(self, x, y, duration=1.0):
-            virtual_clicks.append({"x": int(x), "y": int(y)})
+            def _v_swipe(self, x1, y1, x2, y2, duration_s=1):
+                virtual_swipes.append({
+                    "x1": int(x1), "y1": int(y1), "x2": int(x2), "y2": int(y2),
+                })
 
-        def _v_swipe(self, x1, y1, x2, y2, duration_s=1):
-            virtual_swipes.append({
-                "x1": int(x1), "y1": int(y1), "x2": int(x2), "y2": int(y2),
-            })
+            backup = {
+                "click": mc.click,
+                "long_click": mc.long_click,
+                "swipe": mc.swipe,
+                "screenshot": mc.screenshot,
+            }
+            patched_mc = mc
 
-        backup = {
-            "click": mc.click,
-            "long_click": mc.long_click,
-            "swipe": mc.swipe,
-            "screenshot": mc.screenshot,
-        }
-        patched_mc = mc
+            def _v_screenshot(self):
+                # 与编辑器画布一致：导入图片时 _last_screenshot 为当前图，避免 extract_info 等仍读实时模拟器
+                if _last_screenshot is not None:
+                    return _last_screenshot
+                return backup["screenshot"](self)
 
-        def _v_screenshot(self):
-            # 与编辑器画布一致：导入图片时 _last_screenshot 为当前图，避免 extract_info 等仍读实时模拟器
-            if _last_screenshot is not None:
-                return _last_screenshot
-            return backup["screenshot"](self)
-
-        mc.click = types.MethodType(_v_click, mc)
-        mc.long_click = types.MethodType(_v_long_click, mc)
-        mc.swipe = types.MethodType(_v_swipe, mc)
-        mc.screenshot = types.MethodType(_v_screenshot, mc)
+            mc.click = types.MethodType(_v_click, mc)
+            mc.long_click = types.MethodType(_v_long_click, mc)
+            mc.swipe = types.MethodType(_v_swipe, mc)
+            mc.screenshot = types.MethodType(_v_screenshot, mc)
 
     try:
         with suppress_cancel_checks():
@@ -636,6 +715,9 @@ def _run_editor_snippet(code: str, *, virtual_only: bool = False) -> dict:
                 if value is not _MISSING:
                     payload["result"] = repr(value)
                 if virtual_only:
+                    if virtual_mixctrl is not None:
+                        virtual_clicks.extend(virtual_mixctrl.virtual_clicks)
+                        virtual_swipes.extend(virtual_mixctrl.virtual_swipes)
                     payload["virtual_clicks"] = virtual_clicks
                     payload["virtual_swipes"] = virtual_swipes
                 return payload
@@ -652,19 +734,26 @@ def _run_editor_snippet(code: str, *, virtual_only: bool = False) -> dict:
             patched_mc.long_click = backup["long_click"]
             patched_mc.swipe = backup["swipe"]
             patched_mc.screenshot = backup["screenshot"]
+        if virtual_mixctrl is not None:
+            api_mod.mixctrl = original_mixctrl
 
 
 @router.post("/execute-code")
 async def editor_execute_code(request: Request):
     """执行自定义 Python 片段（与脚本相同的 API 命名空间），永不抛未捕获异常。"""
     try:
-        ctx = _get_runtime()
-        if ctx.mixctrl is None:
-            return {"ok": False, "error": "mixctrl 未初始化"}
         data = await request.json()
         code = data.get("code", "")
         virtual_only = bool(data.get("virtual_only", False))
-        return _run_editor_snippet(code, virtual_only=virtual_only)
+        virtual_mixctrl = None
+        if virtual_only and _last_screenshot is not None:
+            virtual_mixctrl = _EditorVirtualMixControl(_last_screenshot)
+        else:
+            try:
+                _ensure_editor_mixctrl("execute-code")
+            except Exception as e:
+                return {"ok": False, "error": f"设备会话初始化失败: {e}"}
+        return _run_editor_snippet(code, virtual_only=virtual_only, virtual_mixctrl=virtual_mixctrl)
     except Exception as e:
         logger.error("editor/execute-code error: %s\n%s", e, traceback.format_exc())
         return {"ok": False, "error": str(e)}
@@ -676,7 +765,6 @@ async def editor_execute_code(request: Request):
 async def editor_preview_extract(request: Request):
     """对当前选区执行 extract_info 预览（与录制区生成代码一致），仅用于提示，不崩溃。"""
     try:
-        ctx = _get_runtime()
         data = await request.json()
         left, top = int(data["left"]), int(data["top"])
         width, height = int(data["width"]), int(data["height"])
@@ -690,9 +778,10 @@ async def editor_preview_extract(request: Request):
 
         frame = _last_screenshot
         if frame is None:
-            if ctx.mixctrl is None:
-                return {"ok": False, "error": "请先获取截图或导入图片"}
-            frame = ctx.mixctrl.screenshot()
+            try:
+                frame = _ensure_editor_mixctrl("preview-extract").screenshot()
+            except Exception as e:
+                return {"ok": False, "error": f"设备会话初始化失败: {e}"}
         with suppress_cancel_checks():
             info = extract_info(
                 B(left, top, width, height),

@@ -651,6 +651,9 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         api = (ROOT / "AutoScriptor/core/api.py").read_text(encoding="utf-8")
 
         self.assertIn("self._refresh_lock", runtime_context)
+        self.assertIn("threading.RLock()", runtime_context)
+        self.assertIn("def ensure_device_session", runtime_context)
+        self.assertIn("def has_device_session", runtime_context)
         self.assertIn("start_emulator=True", runtime_context)
         self.assertIn("launch_app=True", runtime_context)
         self.assertIn("cancel_check=cancel_check", runtime_context)
@@ -678,6 +681,45 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertNotIn("from AutoScriptor import *", server)
         self.assertNotIn("from .mumu import Mumu", mumu_init)
         self.assertNotIn("from .api import *", mumu_init)
+
+    def test_editor_device_actions_acquire_runtime_session_on_demand(self):
+        content = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
+
+        for marker in [
+            '_ensure_editor_mixctrl("screenshot")',
+            '_ensure_editor_mixctrl("locate").screenshot()',
+            '_ensure_editor_mixctrl("remote/click")',
+            '_ensure_editor_mixctrl("remote/swipe")',
+            '_ensure_editor_mixctrl("execute-code")',
+            '_ensure_editor_mixctrl("preview-extract")',
+        ]:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, content)
+        self.assertIn("ensure_device_session", content)
+        self.assertIn("设备会话初始化失败", content)
+        self.assertIn("_EditorVirtualMixControl", content)
+        self.assertNotIn("ctx.mixctrl", content)
+
+    def test_editor_offline_image_paths_do_not_require_device_session(self):
+        content = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
+
+        locate_start = content.index('async def editor_locate(')
+        locate_end = content.index('@router.post("/store-template")', locate_start)
+        locate_body = content[locate_start:locate_end]
+        self.assertLess(
+            locate_body.index("if not text:"),
+            locate_body.index('_ensure_editor_mixctrl("locate").screenshot()'),
+        )
+        self.assertLess(
+            locate_body.index("if screenshot is None:"),
+            locate_body.index('_ensure_editor_mixctrl("locate").screenshot()'),
+        )
+
+        execute_start = content.index('async def editor_execute_code(')
+        execute_end = content.index('@router.post("/preview-extract")', execute_start)
+        execute_body = content[execute_start:execute_end]
+        self.assertIn("if virtual_only and _last_screenshot is not None:", execute_body)
+        self.assertIn("_EditorVirtualMixControl(_last_screenshot)", execute_body)
 
     def test_navigation_waits_use_cancellable_sleep(self):
         for rel in [
