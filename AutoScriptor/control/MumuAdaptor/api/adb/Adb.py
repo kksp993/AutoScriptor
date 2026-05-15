@@ -31,6 +31,36 @@ class Adb:
             return True
         raise RuntimeError(self._adb_error(result))
 
+    def _direct_shell_or_manager(
+        self,
+        direct_args: list[str],
+        manager_args: list[str],
+        *,
+        repeat: int = 1,
+        timeout: int = 10,
+    ) -> bool:
+        """
+        Prefer direct adb.exe for high-frequency input.
+
+        MuMuManager subprocesses are wrapped in mumu_safe_subprocess() and will
+        temporarily unboost/reboost the Python process. That is correct for
+        lifecycle commands, but too noisy for every tap/swipe/key event.
+        """
+        direct_error = None
+        try:
+            for _ in range(repeat):
+                self._direct_shell(direct_args, timeout=timeout)
+            return True
+        except Exception as e:
+            direct_error = e
+
+        self.utils.set_operate('adb')
+        ret_code, retval = self.utils.run_command(manager_args, repeat=repeat)
+        if ret_code == 0:
+            return True
+
+        raise RuntimeError(retval or str(direct_error))
+
     # __connect_list = None
 
     def get_connect_info(self):
@@ -71,14 +101,11 @@ class Adb:
         :param y: 纵坐标
         :return:
         """
-        self.utils.set_operate('adb')
-        ret_code, retval = self.utils.run_command(['-c', 'shell', 'input', 'tap', str(x), str(y)], repeat=repeat)
-        if ret_code == 0:
-            return True
-        if adb_device_ready():
-            return self._direct_shell(["input", "tap", str(x), str(y)])
-
-        raise RuntimeError(retval)
+        return self._direct_shell_or_manager(
+            ["input", "tap", str(x), str(y)],
+            ['-c', 'shell', 'input', 'tap', str(x), str(y)],
+            repeat=repeat,
+        )
 
     def clickCenter(self, box, repeat=1):
         """
@@ -98,17 +125,10 @@ class Adb:
         :param duration: 滑动时间
         :return:
         """
-        self.utils.set_operate('adb')
-        ret_code, retval = self.utils.run_command(
-            ['-c', 'shell', 'input', 'swipe', str(from_x), str(from_y), str(to_x), str(to_y), str(duration)])
-        if ret_code == 0:
-            return True
-        if adb_device_ready():
-            return self._direct_shell([
-                "input", "swipe", str(from_x), str(from_y), str(to_x), str(to_y), str(duration)
-            ])
-
-        raise RuntimeError(retval)
+        return self._direct_shell_or_manager(
+            ["input", "swipe", str(from_x), str(from_y), str(to_x), str(to_y), str(duration)],
+            ['-c', 'shell', 'input', 'swipe', str(from_x), str(from_y), str(to_x), str(to_y), str(duration)],
+        )
 
     def input_text(self, text: str):
         """
@@ -116,15 +136,10 @@ class Adb:
         :param text: 输入的文本
         :return:
         """
-        self.utils.set_operate('adb')
-        ret_code, retval = self.utils.run_command(['-c', 'shell', 'input', 'text', text])
-
-        if ret_code == 0:
-            return True
-        if adb_device_ready():
-            return self._direct_shell(["input", "text", text])
-
-        raise RuntimeError(retval)
+        return self._direct_shell_or_manager(
+            ["input", "text", text],
+            ['-c', 'shell', 'input', 'text', text],
+        )
 
     def key_event(self, key: Union[int, str]):
         """
@@ -132,15 +147,10 @@ class Adb:
         :param key: 键值
         :return:
         """
-        self.utils.set_operate('adb')
-        ret_code, retval = self.utils.run_command(['-c', 'shell', 'input', 'keyevent', str(key)])
-
-        if ret_code == 0:
-            return True
-        if adb_device_ready():
-            return self._direct_shell(["input", "keyevent", str(key)])
-
-        raise RuntimeError(retval)
+        return self._direct_shell_or_manager(
+            ["input", "keyevent", str(key)],
+            ['-c', 'shell', 'input', 'keyevent', str(key)],
+        )
 
     def __connect(self):
         """
@@ -240,12 +250,7 @@ class Adb:
         :param package: 应用包名
         :return:
         """
-        self.utils.set_operate('adb')
-        ret_code, retval = self.utils.run_command(['-c', 'pm', 'clear', package])
-
-        if ret_code == 0:
-            return True
-        if adb_device_ready():
-            return self._direct_shell(["pm", "clear", package])
-
-        raise RuntimeError(retval)
+        return self._direct_shell_or_manager(
+            ["pm", "clear", package],
+            ['-c', 'pm', 'clear', package],
+        )

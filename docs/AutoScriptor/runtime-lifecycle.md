@@ -20,13 +20,14 @@
 
 - `DeviceFacade` 是统一设备检查入口，集中处理 MuMuManager、ADB、App、NemuIpc、OCR、UI Map 状态。
 - MuMuManager 用于官方 lifecycle 命令；若 `version/info/launch/app` 命令失败，但 ADB 已健康，运行链路允许降级继续。
-- ADB 是点击、输入、App 启停和包状态的稳定 fallback。
+- ADB 是点击、滑动、输入、按键、App 启停和包状态的稳定路径；高频触控优先直接调用 `adb.exe`，不走 MuMuManager 子命令。
 - NemuIpc 仍是截图主路径，诊断页默认不触发截图探测，只有点击“截图探测”才检查该层。
 
 ## 性能副作用边界
 
 - 默认只温和提升 Python 进程，不提升 MuMu 进程，避免影响同一机器上的 StarRailCopilot 等其他 MuMu 用户。
-- 所有 MuMuManager subprocess 调用都会通过 `mumu_safe_subprocess()` 临时恢复普通优先级，避免子进程继承高优先级导致虚拟化/权限误判。
+- 任务执行期间保持一次温和 boost；没有 boost 时任务也应能正常运行，但更容易受 Windows 后台调度、锁屏或省电影响而变慢。
+- MuMuManager subprocess 调用会通过 `mumu_safe_subprocess()` 临时恢复普通优先级，避免子进程继承高优先级导致虚拟化/权限误判；高频 ADB 触控不应触发该上下文。
 - `boost_mumu=True` 仅作为显式选项保留，不应在默认 WebUI/调度执行中启用。
 
 ## 配置写入
