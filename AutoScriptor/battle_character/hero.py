@@ -23,6 +23,7 @@ from time import time
 from typing import Any
 
 from AutoScriptor import *
+from AutoScriptor.battle_character.plan import BattlePlan, battle_plan
 from AutoScriptor.core.background import BG_PRIORITY_BUILTIN_ADVANCE, BG_SIGNALS
 from AutoScriptor.utils.cancel import check_cancel_raise
 from AutoScriptor.utils.logger import logger
@@ -88,7 +89,8 @@ class Hero:
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         _scan_flows(cls)
-        _hero_registry[cls.profession] = cls
+        if "profession" in cls.__dict__:
+            _hero_registry[cls.profession] = cls
 
     def __init__(self):
         self.speed_x: int = 1
@@ -256,6 +258,10 @@ class Hero:
                 return m
         return None
 
+    def _effective_flow_name(self, flow_name: str | None, default: str) -> str:
+        """Resolve the flow selected by the task/WebUI, with a safe default."""
+        return flow_name or self.task_context_battle_flow or default
+
     # ═══════════════ 轮次 / 时间辅助 ═══════════════
 
     @property
@@ -268,7 +274,7 @@ class Hero:
         """当前 battle_loop 已运行时间 (秒)。"""
         return time() - self._battle_start
 
-    def once_at(self, seconds: float, fast: float = None) -> bool:
+    def once_at(self, seconds: float, fast: float = None, key: str = None) -> bool:
         """战斗经过指定时间后触发一次。
 
         fast: ≥3 倍速时使用的时间 (不传则始终用 seconds)。
@@ -276,23 +282,23 @@ class Hero:
         threshold = fast if fast is not None and self.speed_x >= 3 else seconds
         if self.battle_elapsed < threshold:
             return False
-        k = f"_once_{seconds}_{fast}"
+        k = key or f"_once_{seconds}_{fast}"
         if k in self._moments_fired:
             return False
         self._moments_fired.add(k)
         return True
 
-    def at(self, seconds: float, fast: float = None) -> bool:
+    def at(self, seconds: float, fast: float = None, key: str = None) -> bool:
         """Alias for once_at(), useful in user-written battle flows."""
-        return self.once_at(seconds, fast=fast)
+        return self.once_at(seconds, fast=fast, key=key)
 
-    def every(self, seconds: float, fast: float = None) -> bool:
+    def every(self, seconds: float, fast: float = None, key: str = None) -> bool:
         """每隔指定时间触发一次。
 
         fast: ≥3 倍速时使用的间隔。
         """
         interval = fast if fast is not None and self.speed_x >= 3 else seconds
-        k = f"_every_{seconds}_{fast}"
+        k = key or f"_every_{seconds}_{fast}"
         last = self._intervals_last.get(k, 0.0)
         if self.battle_elapsed - last >= interval:
             self._intervals_last[k] = self.battle_elapsed
@@ -303,44 +309,35 @@ class Hero:
         """Alias for is_first_round(), useful in user-written battle flows."""
         return self.is_first_round
 
+    def plan(self) -> BattlePlan:
+        """Create a readable, declarative battle flow plan."""
+        return battle_plan()
+
     # ═══════════════ 默认 Flows ═══════════════
 
-    @flow("战斗循环")
-    def default_battle_flow(self):
-        """默认战斗循环: 首轮化身 → 定时真武/化身 → 每轮连招 143（全职业默认）。"""
-        if self.is_first_round:
-            self.huashen(4)
-        if self.once_at(30):
-            self.zhenwu()
-        if self.once_at(40):
-            self.huashen_long(1)
-        if self.every(60):
-            self.huashen()
-        self.battle()  # 使用 _default_combo / _no_cd_combo
+    default_battle_flow = battle_plan("战斗循环") \
+        .first("huashen", 4) \
+        .at(30, "zhenwu") \
+        .at(40, "huashen_long", 1) \
+        .every(60, "huashen") \
+        .combo()
 
-    @flow("竞技场循环")
-    def default_jjc_flow(self):
-        """默认竞技场: 首轮化身+真武 → 每轮连招 143（全职业默认）。"""
-        if self.is_first_round:
-            self.huashen()
-            self.zhenwu()
-        self.battle()
+    default_jjc_flow = battle_plan("竞技场循环") \
+        .first("huashen") \
+        .first("zhenwu") \
+        .combo()
 
-    @flow("昆仑山循环")
-    def kunlunshan_flow(self):
-        """昆仑山战斗循环: 首轮化身+真武 → 每轮战斗"""
-        if self.is_first_round:
-            self.huashen(4)
-            self.zhenwu()
-        if self.every(60):
-            self.huashen()
-        self.battle("kunlunshan")
+    kunlunshan_flow = battle_plan("昆仑山循环") \
+        .first("huashen", 4) \
+        .first("zhenwu") \
+        .every(60, "huashen") \
+        .combo("kunlunshan")
 
     # ═══════════════ battle_loop 外壳 ═══════════════
 
     def battle_loop(
         self,
-        flow_name: str = "战斗循环",
+        flow_name: str | None = None,
         *,
         task: str = None,
         max_duration: int = 300,
@@ -353,6 +350,7 @@ class Hero:
 
         每轮调用 flow 方法, 由 flow 决定该轮做什么。
         """
+        flow_name = self._effective_flow_name(flow_name, "战斗循环")
         flow_method = self._resolve_flow(flow_name, task)
         if flow_method is None:
             fallback = self._resolve_flow("战斗循环", task)
@@ -470,9 +468,12 @@ class Hero:
 
     # ═══════════════ 竞技场 (兼容接口) ═══════════════
 
-    def jjc_battle(self, delay: float = 4.3, flow_name: str = "竞技场循环", **kwargs):
+    def jjc_battle(self, delay: float = 4.3, flow_name: str | None = None, **kwargs):
         """竞技场战斗: 优先查找专用 flow, 无则回退到默认 battle_loop。"""
+        flow_name = self._effective_flow_name(flow_name, "竞技场循环")
         if self._resolve_flow(flow_name):
+            self.battle_loop(flow_name, delay=delay, **kwargs)
+        elif flow_name != "竞技场循环":
             self.battle_loop(flow_name, delay=delay, **kwargs)
         else:
             self.sleep(delay)
