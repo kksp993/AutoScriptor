@@ -6,6 +6,7 @@ import threading
 import time
 import types
 import unittest
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -157,6 +158,38 @@ def import_cancel_for_test():
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
+    return module
+
+
+def import_device_facade_for_test():
+    autoscriptor = types.ModuleType("AutoScriptor")
+    autoscriptor.__path__ = [str(ROOT / "AutoScriptor")]
+    utils_pkg = types.ModuleType("AutoScriptor.utils")
+    utils_pkg.__path__ = [str(ROOT / "AutoScriptor" / "utils")]
+    perf = types.ModuleType("AutoScriptor.utils.perf")
+
+    class DummySafeSubprocess:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    perf.mumu_safe_subprocess = lambda: DummySafeSubprocess()
+
+    module_name = "device_facade_under_test"
+    spec = importlib.util.spec_from_file_location(
+        module_name,
+        ROOT / "AutoScriptor/control/MumuAdaptor/device_facade.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    with patch.dict(sys.modules, {
+        "AutoScriptor": autoscriptor,
+        "AutoScriptor.utils": utils_pkg,
+        "AutoScriptor.utils.perf": perf,
+    }):
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
     return module
 
 
@@ -442,6 +475,92 @@ class TestMuMuAdbLifecycle(unittest.TestCase):
         with patch.object(module, "adb_device_ready", return_value=True), \
                 patch.object(module, "configured_adb_host_port", return_value=("127.0.0.1", "16416")):
             self.assertEqual(module.Adb(FakeUtils()).get_connect_info(), ("127.0.0.1", "16416"))
+
+
+class TestDeviceFacadeDiagnostics(unittest.TestCase):
+    def _facade(self, module, adb_path: str, emu_path: str):
+        return module.DeviceFacade(
+            emulator={
+                "adb_path": adb_path,
+                "emu_path": emu_path,
+                "adb_addr": "127.0.0.1:16416",
+                "index": 1,
+                "mumu_folder": "C:/Program Files/Netease/MuMu",
+            },
+            app={"app_to_start": "org.yjmobile.zmxy"},
+        )
+
+    def test_default_diagnostics_skips_screenshot_probe(self):
+        module = import_device_facade_for_test()
+        with tempfile.TemporaryDirectory() as tmp:
+            adb_path = str(Path(tmp) / "adb.exe")
+            emu_path = str(Path(tmp) / "MuMuManager.exe")
+            Path(adb_path).write_text("", encoding="utf-8")
+            Path(emu_path).write_text("", encoding="utf-8")
+            facade = self._facade(module, adb_path, emu_path)
+
+            def fake_run(cmd, **kwargs):
+                if cmd == [adb_path, "version"]:
+                    return SimpleNamespace(returncode=0, stdout="Android Debug Bridge version 1.0.41\n", stderr="")
+                if cmd[-1:] == ["version"]:
+                    return SimpleNamespace(returncode=1, stdout="", stderr="manager failed")
+                if cmd[-1:] == ["get-state"]:
+                    return SimpleNamespace(returncode=0, stdout="device\n", stderr="")
+                if cmd[-2:] == ["getprop", "sys.boot_completed"]:
+                    return SimpleNamespace(returncode=0, stdout="1\n", stderr="")
+                if cmd[-2:] == ["pm", "path"] or "pm" in cmd:
+                    return SimpleNamespace(returncode=0, stdout="package:/data/app/pkg/base.apk\n", stderr="")
+                if cmd[-2:] == ["pidof", "org.yjmobile.zmxy"]:
+                    return SimpleNamespace(returncode=0, stdout="123\n", stderr="")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with patch.object(module.subprocess, "run", side_effect=fake_run), \
+                    patch.dict(sys.modules, {
+                        "AutoScriptor.recognition.ocr_rec": SimpleNamespace(
+                            ocr_manager=SimpleNamespace(is_ready=lambda: True),
+                            ocr_config={"use_gpu": False},
+                        ),
+                        "AutoScriptor.utils.ui_map": SimpleNamespace(
+                            ui_manager=SimpleNamespace(_ui={"x": object()}),
+                        ),
+                    }):
+                diagnostics = facade.diagnostics(include_screenshot=False)
+
+        self.assertEqual(diagnostics["checks"]["manager"]["status"], "warn")
+        self.assertEqual(diagnostics["checks"]["nemu_ipc"]["status"], "skipped")
+        self.assertEqual(diagnostics["overall"]["status"], "ok")
+
+    def test_screenshot_probe_uses_nemu_ipc_only_when_requested(self):
+        module = import_device_facade_for_test()
+        facade = module.DeviceFacade(
+            emulator={"adb_path": "adb", "emu_path": "mumu", "adb_addr": "127.0.0.1:16416", "index": 1},
+            app={"app_to_start": "org.yjmobile.zmxy"},
+        )
+        calls = []
+        nemu_module = types.ModuleType("AutoScriptor.control.NemuIpc.device.method.nemu_ipc")
+
+        class FakeNemuIpc:
+            def __init__(self, serial):
+                calls.append(("init", serial))
+
+            def screenshot_nemu_ipc(self):
+                calls.append(("screenshot",))
+                return SimpleNamespace(shape=(720, 1280, 3))
+
+            def nemu_ipc_release(self):
+                calls.append(("release",))
+
+        nemu_module.NemuIpc = FakeNemuIpc
+        with patch.dict(sys.modules, {
+            "AutoScriptor.control.NemuIpc.device.method.nemu_ipc": nemu_module,
+        }):
+            skipped = facade._nemu_ipc_check(False)
+            checked = facade._nemu_ipc_check(True)
+
+        self.assertEqual(skipped["status"], "skipped")
+        self.assertEqual(calls, [("init", "127.0.0.1:16416"), ("screenshot",), ("release",)])
+        self.assertEqual(checked["status"], "ok")
+        self.assertEqual(checked["shape"], (720, 1280))
 
 
 class TestEnsureAppRunningLifecycle(unittest.TestCase):

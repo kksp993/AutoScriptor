@@ -170,7 +170,7 @@ const app = createApp({
     const pageTitle = computed(() => {
       const map = {
         news: '资讯', overview: '总览', scheduler: '调度', editor: '编辑器', canvas: '脚本画布',
-        diagnostics: '启动诊断', errorArchives: '错误汇总', updater: '检查更新', settings: '设置', about: '关于',
+        errorArchives: '错误汇总', updater: '检查更新', settings: '设置', about: '关于',
         daily: '每日任务', weekly: '每周任务', general: '一般任务', custom: '自定义任务',
       };
       return map[activeTab.value] || '';
@@ -1141,5 +1141,6 @@ const app = createApp({
 });
 
 app.component('task-tree', TaskTree);
+app.component('diagnostics-panel', DiagnosticsPanel);
 app.use(ElementPlus);
 app.mount('#app');

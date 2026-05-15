@@ -580,22 +580,44 @@ class TestWebUIFrontendContract(unittest.TestCase):
         content = (ROOT / "services/webui/static/js/components/Settings.js").read_text(encoding="utf-8")
 
         self.assertIn("SettingsPanel", content)
+        self.assertIn("任务开始时自动启动模拟器和游戏", content)
+        self.assertIn("它不是“兼容性越高越慢”的开关", content)
+        self.assertIn("MuMu 多开编号", content)
+        self.assertIn("MuMuManager 路径", content)
+        self.assertIn("只负责启动、关闭、窗口等官方管理动作", content)
+        self.assertIn("<diagnostics-panel embedded", content)
         self.assertIn("post_execution", content)
-        self.assertIn('value="goto_main"', content)
+        self.assertIn("value: 'goto_main'", content)
+        self.assertNotIn("visibleSections", content)
+        self.assertNotIn("兼容自动启动", content)
         self.assertNotIn("notifyConfig", content)
         self.assertNotIn("updateConfig", content)
         self.assertNotIn("remoteConfig", content)
         self.assertNotIn("passwordProtected", content)
 
-    def test_diagnostics_page_is_registered(self):
+    def test_diagnostics_is_embedded_in_settings_not_sidebar_page(self):
         sidebar = (ROOT / "services/webui/static/js/components/AppSidebar.js").read_text(encoding="utf-8")
         app = (ROOT / "services/webui/static/js/app.js").read_text(encoding="utf-8")
         index = (ROOT / "services/webui/static/index.html").read_text(encoding="utf-8")
+        settings = (ROOT / "services/webui/static/js/components/Settings.js").read_text(encoding="utf-8")
 
-        self.assertIn("diagnostics", sidebar)
+        self.assertNotIn("id: 'diagnostics'", sidebar)
+        self.assertNotIn("启动诊断', icon", sidebar)
+        self.assertNotIn("diagnostics: '启动诊断'", app)
         self.assertIn("DiagnosticsPanel", app)
-        self.assertIn("<diagnostics-panel", index)
+        self.assertIn("app.component('diagnostics-panel', DiagnosticsPanel)", app)
+        self.assertNotIn("activeTab==='diagnostics'", index)
+        self.assertIn("<diagnostics-panel embedded", settings)
         self.assertIn("DiagnosticsPanel.js", index)
+
+    def test_diagnostics_screenshot_probe_is_explicit(self):
+        content = (ROOT / "services/webui/static/js/components/DiagnosticsPanel.js").read_text(encoding="utf-8")
+
+        self.assertIn("mounted()", content)
+        self.assertIn("this.refresh(false)", content)
+        self.assertIn("includeScreenshot ? '?screenshot=true' : ''", content)
+        self.assertIn("@click=\"refresh(true)\"", content)
+        self.assertIn("默认轻量检查，不会主动读取模拟器截图", content)
 
 
 class TestWebUIServerRouteContract(unittest.TestCase):
@@ -666,9 +688,26 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         server = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
 
         self.assertIn("class DeviceFacade", content)
+        self.assertIn("MuMuManager for official lifecycle commands", content)
+        self.assertIn("ADB for click/app fallbacks", content)
+        self.assertIn("NemuIpc for screenshots", content)
         self.assertIn("diagnostics", content)
         self.assertIn("NemuIpc", content)
         self.assertIn("/api/device/diagnostics", server)
+
+    def test_mumu_manager_remains_lifecycle_channel_not_high_frequency_input(self):
+        app_core = (ROOT / "AutoScriptor/control/MumuAdaptor/api/core/app.py").read_text(encoding="utf-8")
+        power_core = (ROOT / "AutoScriptor/control/MumuAdaptor/api/core/power.py").read_text(encoding="utf-8")
+        adb_core = (ROOT / "AutoScriptor/control/MumuAdaptor/api/adb/Adb.py").read_text(encoding="utf-8")
+        settings = (ROOT / "services/webui/static/js/components/Settings.js").read_text(encoding="utf-8")
+
+        self.assertIn("MuMuManager app launch 失败，回退至 ADB monkey", app_core)
+        self.assertIn("MuMuManager app close 失败，回退至 ADB force-stop", app_core)
+        self.assertIn("MuMuManager launch 失败，但 ADB 已可用", power_core)
+        self.assertIn("def click", adb_core)
+        self.assertIn("Prefer direct adb.exe for high-frequency input", adb_core)
+        self.assertIn("return self._direct_shell_or_manager", adb_core)
+        self.assertIn("日常点击输入不会依赖它", settings)
 
     def test_device_diagnostics_import_does_not_initialize_heavy_runtime(self):
         package_init = (ROOT / "AutoScriptor/__init__.py").read_text(encoding="utf-8")
