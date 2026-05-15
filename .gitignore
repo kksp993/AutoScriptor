@@ -51,3 +51,8 @@ webapp/.release-staging
 webapp/buildResources/icon.ico
 /accounts/
 /.autoscriptor/
+docs/zmxy_codes.json
+docs/zmxy_gift_codes_rows.json
+docs/zmxy_redeem_codes_only_detail.txt
+docs/zmxy_redeem_codes_only.meta.txt
+docs/zmxy_redeem_codes_only.txt
