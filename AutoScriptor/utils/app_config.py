@@ -172,8 +172,9 @@ class ConfigManager:
     def __init__(self):
         if hasattr(self, "_initialized"):
             return
-        from AutoScriptor.utils.paths import get_data_root
+        from AutoScriptor.utils.paths import get_accounts_dir, get_data_root
         self.data_root = Path(get_data_root())
+        self.default_accounts_dir = Path(get_accounts_dir())
         self._config_path: Path = self.data_root / "config.json"
         self.global_cfg: dict[str, Any] = {}
         self.current_acc: Account | None = None
@@ -191,9 +192,14 @@ class ConfigManager:
         raw = (self.global_cfg.get("accounts") or {}).get("dir") or ""
         raw = str(raw).strip()
         if not raw:
-            return self.data_root / "accounts"
+            return self.default_accounts_dir
         p = Path(raw)
-        return p if p.is_absolute() else (self.data_root / p)
+        if p.is_absolute():
+            return p
+        normalized = p.as_posix().strip("/")
+        if normalized in {"accounts", "data/accounts"}:
+            return self.default_accounts_dir
+        return self.default_accounts_dir.parent / p
 
     @staticmethod
     def _default_account_payload(name: str) -> dict[str, Any]:
@@ -307,10 +313,10 @@ class AutoConfig:
     def __init__(self):
         if hasattr(self, "_initialized"):
             return
-        from AutoScriptor.utils.paths import get_data_root
+        from AutoScriptor.utils.paths import get_accounts_dir, get_data_root
         data_root = str(get_data_root())
         self.CONFIG_PATH = os.path.join(data_root, "config.json")
-        self.ACCOUNTS_DIR = os.path.join(data_root, "accounts")
+        self.ACCOUNTS_DIR = str(get_accounts_dir())
         self._mgr = cfg_manager
         self._config: dict[str, Any] = {}
         self._initialized = True

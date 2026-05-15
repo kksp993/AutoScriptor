@@ -32,7 +32,7 @@
 
 ## 配置写入
 
-- 配置拆为全局 `config.json` 和账号文件 `accounts/*.json`。
+- 配置拆为全局 `config.json` 和账号文件 `data/accounts/*.json`。
 - `TaskManager.config_transaction()` 负责运行期配置互斥。
 - JSON 持久化使用同目录临时文件加 `os.replace()`，避免保存中断导致半截 JSON。
 - 前端读写任务时必须以 `/api/runtime/snapshot` 和 `/api/tasks` 返回值为准，不用本地旧树覆盖后端新状态。

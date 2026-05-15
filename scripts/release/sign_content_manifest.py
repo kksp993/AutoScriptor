@@ -5,7 +5,7 @@
    python -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey; from cryptography.hazmat.primitives import serialization as s; k=Ed25519PrivateKey.generate(); print(k.private_bytes(s.Encoding.PEM, s.PrivateFormat.PKCS8, s.NoEncryption()).decode()); print(k.public_key().public_bytes(s.Encoding.PEM, s.PublicFormat.SubjectPublicKeyInfo).decode())"
 
 2. 签名:
-   python scripts/sign_content_manifest.py --manifest manifest.json --private-key key.pem -o manifest-signed.json
+   python scripts/release/sign_content_manifest.py --manifest manifest.json --private-key key.pem -o manifest-signed.json
 
 客户端在 config 或环境中配置公钥后，仅信任带有效签名的 manifest。
 """
@@ -17,7 +17,7 @@ import json
 import sys
 
 REPO_ROOT = __import__("os").path.abspath(
-    __import__("os").path.join(__import__("os").path.dirname(__file__), "..")
+    __import__("os").path.join(__import__("os").path.dirname(__file__), "..", "..")
 )
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)

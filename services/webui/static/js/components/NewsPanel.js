@@ -263,17 +263,18 @@ const NewsPanel = {
               <th class="px-3 py-2.5 font-semibold">标题</th>
               <th class="px-3 py-2.5 font-semibold">口令</th>
               <th class="px-3 py-2.5 font-semibold">到期时间</th>
+              <th class="px-3 py-2.5 font-semibold">类型</th>
               <th class="px-3 py-2.5 font-semibold w-[88px]">复制</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="giftLoading">
-              <td colspan="4" class="px-3 py-12 text-center text-slate-400">
+              <td colspan="5" class="px-3 py-12 text-center text-slate-400">
                 <i class="fa fa-spinner fa-spin text-lg mr-2"></i>正在同步兑换码数据…
               </td>
             </tr>
             <tr v-else-if="giftFetchError">
-              <td colspan="4" class="px-3 py-12 text-center text-amber-800">
+              <td colspan="5" class="px-3 py-12 text-center text-amber-800">
                 <p class="mb-2">{{ giftFetchError }}</p>
                 <el-button size="small" type="primary" @click="fetchGiftCodes">重试</el-button>
               </td>
@@ -287,12 +288,16 @@ const NewsPanel = {
                 </td>
                 <td class="px-3 py-2 font-mono text-xs break-all text-slate-800">{{ r.code }}</td>
                 <td class="px-3 py-2 text-slate-600">{{ r.expires_at }}</td>
+                <td class="px-3 py-2 text-slate-600">
+                  <span>{{ r.kind === 'public_code' ? '通用口令' : (r.kind === 'conditional_code' ? '有限制' : '礼包') }}</span>
+                  <p v-if="r.note" class="text-xs text-slate-400 mt-1">{{ r.note }}</p>
+                </td>
                 <td class="px-3 py-2">
                   <el-button size="small" type="success" @click="copyGiftCode(r.code)">复制</el-button>
                 </td>
               </tr>
               <tr v-if="!giftRows.length">
-                <td colspan="4" class="px-3 py-12 text-center text-slate-400">暂无更多兑换码</td>
+                <td colspan="5" class="px-3 py-12 text-center text-slate-400">暂无当前仍有效的兑换码</td>
               </tr>
             </template>
           </tbody>

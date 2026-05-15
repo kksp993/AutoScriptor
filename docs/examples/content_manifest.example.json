@@ -1,7 +1,7 @@
 {
   "content_version": "0.1.1",
   "min_shell_version": "1.0.0",
-  "signature_ed25519": "BASE64_ED25519_SIGNATURE_FROM_sign_content_manifest.py",
+  "signature_ed25519": "BASE64_ED25519_SIGNATURE_FROM_scripts_release_sign_content_manifest.py",
   "artifacts": [
     {
       "kind": "bsdiff",

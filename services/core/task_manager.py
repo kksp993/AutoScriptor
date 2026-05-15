@@ -170,7 +170,7 @@ class TaskManager:
                 for name in [m for m in sys.modules if m.startswith('ZmxyOL.')]:
                     sys.modules.pop(name, None)
                 try:
-                    from battle_character.hero import reload_battle_character_modules
+                    from AutoScriptor.battle_character.hero import reload_battle_character_modules
 
                     reload_battle_character_modules()
                 except Exception as e:

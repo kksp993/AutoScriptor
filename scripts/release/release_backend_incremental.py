@@ -7,7 +7,7 @@
     applyBackendIncremental 应用到已有 backend/ 目录（校验旧文件 SHA-256 后覆盖）。
 
 用法:
-  python scripts/release_backend_incremental.py create \\
+  python scripts/release/release_backend_incremental.py create \\
     --old path/to/old_gui.dist 或 old_backend.zip \\
     --new dist/gui.dist \\
     --out dist/backend_incremental.zip
@@ -25,7 +25,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _sha256_file(path: Path, chunk: int = 1024 * 1024) -> str:

@@ -3,7 +3,7 @@
 /**
  * 发行版（薄包）：将 resources/backend.zip 解压到用户选择的安装目录，复制 data，写 install.json，注册卸载。
  *
- * 增量包（backend_incremental.zip）：由 scripts/release_backend_incremental.py 对比旧版 gui.dist / backend.zip
+ * 增量包（backend_incremental.zip）：由 scripts/release/release_backend_incremental.py 对比旧版 gui.dist / backend.zip
  * 与新版生成；applyBackendIncremental 在已有 backend/ 上校验 SHA-256 后覆盖，无需全量删除解压。
  */
 const fs = require('fs');

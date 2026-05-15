@@ -27,7 +27,9 @@ class TestCustomTaskPaths(unittest.TestCase):
         mod = importlib.util.module_from_spec(spec)
         assert spec.loader is not None
         spec.loader.exec_module(mod)
-        self.assertEqual(mod.get_custom_task_dir(), mod.get_data_root() / "custom_task")
+        self.assertEqual(mod.get_custom_task_dir(), mod.get_app_root() / "data" / "custom_task")
+        self.assertEqual(mod.get_accounts_dir(), mod.get_app_root() / "data" / "accounts")
+        self.assertEqual(mod.get_battle_character_dir(), mod.get_app_root() / "data" / "battle_character")
 
 
 class TestPruneStaleCustomTasks(unittest.TestCase):
