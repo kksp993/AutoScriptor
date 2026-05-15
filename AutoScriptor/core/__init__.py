@@ -1,5 +1,6 @@
 from AutoScriptor.core.targets import Target,B,I,T,V
 from AutoScriptor.core.api import *
+from AutoScriptor.core.background import BG_SIGNALS, BgSignals, bg
 
 __all__ = [
  "Target",
@@ -31,5 +32,8 @@ __all__ = [
  "dismiss_floating_window",
  "mixctrl",
  "ensure_app_running",
- "ensure_all_environment_ready"
+ "ensure_all_environment_ready",
+ "bg",
+ "BG_SIGNALS",
+ "BgSignals"
 ]

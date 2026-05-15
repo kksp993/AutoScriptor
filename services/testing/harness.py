@@ -17,6 +17,7 @@ import os
 import sys
 import time
 import tempfile
+from contextlib import contextmanager
 from typing import Dict, Any
 from unittest.mock import MagicMock
 from AutoScriptor.utils.logger import logger
@@ -204,26 +205,100 @@ class MockAppControl:
 class MockBg:
     """模拟 BackgroundMonitor (bg)。"""
 
+    def __init__(self):
+        self._callbacks = {}
+        self._signals = {}
+
     def clear(self, clear_signals=False):
-        pass
+        self._callbacks.clear()
+        if clear_signals:
+            self._signals.clear()
+
+    def clear_signals(self):
+        self._signals.clear()
 
     def stop(self):
         pass
 
-    def add(self, *a, **kw):
-        pass
+    def add(self, name=None, identifier=None, callback=None, **kw):
+        if name is None:
+            raise TypeError("MockBg.add() missing required argument: 'name'")
+        self._callbacks[name] = {
+            "idf": identifier,
+            "cb": callback,
+            **kw,
+        }
+        return name
 
-    def remove(self, name):
-        pass
+    def remove(self, name, expected_info=None):
+        if expected_info is not None and self._callbacks.get(name) is not expected_info:
+            return
+        self._callbacks.pop(name, None)
 
     def signal(self, key, default=None):
-        return default
+        return self._signals.get(key, default)
 
     def set_signal(self, key, value):
+        self._signals[key] = value
         return value
 
+    def wait_signal(self, key, expected=True, *, timeout=None, interval=0.2, default=None):
+        start = time.time()
+        while True:
+            current = self.signal(key, default)
+            matched = expected(current) if callable(expected) else current == expected
+            if matched:
+                return current
+            if timeout is not None and time.time() - start >= timeout:
+                raise TimeoutError(f"MockBg wait_signal timeout: {key} != {expected!r}")
+            time.sleep(interval)
+
+    @contextmanager
+    def scope(self, prefix=None, *, clear_signals=False):
+        items = []
+
+        class Scope:
+            def _name(scope_self, name):
+                raw = str(name)
+                if not prefix or raw.startswith(f"{prefix}:"):
+                    return raw
+                return f"{prefix}:{raw}"
+
+            def add(scope_self, name, identifier, callback, **kwargs):
+                full_name = scope_self._name(name)
+                self.add(full_name, identifier, callback, **kwargs)
+                items.append((full_name, self._callbacks.get(full_name)))
+                return full_name
+
+            def remove(scope_self, name):
+                full_name = scope_self._name(name)
+                remaining = []
+                for item_name, info in items:
+                    if item_name == full_name:
+                        self.remove(item_name, expected_info=info)
+                    else:
+                        remaining.append((item_name, info))
+                items[:] = remaining
+
+            def signal(scope_self, key, default=None):
+                return self.signal(key, default)
+
+            def set_signal(scope_self, key, value):
+                return self.set_signal(key, value)
+
+            def wait_signal(scope_self, *args, **kwargs):
+                return self.wait_signal(*args, **kwargs)
+
+        try:
+            yield Scope()
+        finally:
+            for name, info in reversed(items):
+                self.remove(name, expected_info=info)
+            if clear_signals:
+                self.clear_signals()
+
     def get_idfs(self):
-        return set()
+        return set(self._callbacks)
 
     @property
     def running(self):
