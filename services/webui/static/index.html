@@ -44,7 +44,7 @@
   </style>
   <link rel="stylesheet" href="/vendor/drawflow.min.css" />
   <script src="/vendor/drawflow.min.js"></script>
-  <link rel="stylesheet" href="/static/css/style.css?v=34" />
+  <link rel="stylesheet" href="/static/css/style.css?v=35" />
 </head>
 <body class="app-body overflow-hidden" style="height:100vh;">
   <div id="app" class="flex h-screen overflow-hidden">
@@ -187,8 +187,6 @@
         <editor-panel v-if="activeTab==='editor'"
           :pending-import-url="pendingEditorImportUrl"
           @imported="onEditorImported"></editor-panel>
-
-        <diagnostics-panel v-if="activeTab==='diagnostics'"></diagnostics-panel>
 
         <error-archives-panel v-if="activeTab==='errorArchives'"
           @go-to-editor-with-image="goToEditorWithImage"></error-archives-panel>
@@ -450,23 +448,23 @@
 
   <!-- Vue 组件 -->
   <script src="/static/js/components/NewsPanel.js?v=3"></script>
-  <script src="/static/js/components/AppSidebar.js?v=14"></script>
+  <script src="/static/js/components/AppSidebar.js?v=15"></script>
   <script src="/static/js/components/TaskTree.js?v=12"></script>
   <script src="/static/js/components/Overview.js?v=18"></script>
   <script src="/static/js/components/SchedulerPanel.js?v=14"></script>
   <script src="/static/js/components/TaskPanel.js?v=11"></script>
-  <script src="/static/js/components/Settings.js?v=9"></script>
+  <script src="/static/js/components/Settings.js?v=10"></script>
   <script src="/static/js/components/AboutPanel.js?v=1"></script>
   <script src="/static/js/components/UpdatePanel.js?v=1"></script>
   <script src="/static/js/components/editor/EditorCanvas.js?v=10"></script>
   <script src="/static/js/components/editor/EditorControls.js?v=14"></script>
   <script src="/static/js/components/editor/EditorPanel.js?v=25"></script>
-  <script src="/static/js/components/DiagnosticsPanel.js?v=1"></script>
+  <script src="/static/js/components/DiagnosticsPanel.js?v=2"></script>
   <script src="/static/js/components/canvas/CanvasPanel.js?v=4"></script>
   <script src="/static/js/components/ErrorArchivesPanel.js?v=4"></script>
   <script src="/static/js/task_help_docs.js?v=1"></script>
   <script src="/static/js/core/api.js?v=1"></script>
   <script src="/static/js/stores/runtimeStore.js?v=1"></script>
-  <script src="/static/js/app.js?v=27"></script>
+  <script src="/static/js/app.js?v=28"></script>
 </body>
 </html>

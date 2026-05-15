@@ -1881,3 +1881,308 @@ html.light .bg-white {
 /* TableParam 表格编辑器 */
 .table-param-editor .el-table__cell { padding: 4px 0; }
 .table-param-editor .cell { padding: 0 6px; }
+
+/* ── 设置页：用户视角配置 + 嵌入诊断 ── */
+.settings-page {
+  padding: 2px 2px 20px;
+}
+.settings-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px 24px;
+  margin-bottom: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(34, 197, 94, 0.16);
+  background:
+    radial-gradient(circle at 12% 0%, rgba(34, 197, 94, 0.14), transparent 32%),
+    linear-gradient(135deg, #ffffff 0%, #f8fafc 52%, #ecfdf5 100%);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+}
+.settings-kicker,
+.diagnostics-kicker {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: #16a34a;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.settings-title {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.25;
+  font-weight: 800;
+  color: #0f172a;
+}
+.settings-subtitle {
+  margin: 8px 0 0;
+  max-width: 760px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #64748b;
+}
+.settings-busy-alert {
+  margin-bottom: 16px;
+}
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.settings-grid {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+}
+.settings-grid--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.settings-grid--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.settings-card,
+.diagnostics-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+}
+.settings-card {
+  padding: 20px;
+}
+.settings-card--compact {
+  min-height: 100%;
+}
+.settings-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.settings-card h3,
+.diagnostics-panel h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.35;
+  font-weight: 800;
+  color: #1e293b;
+}
+.settings-card h3 .fa,
+.diagnostics-panel h3 .fa {
+  color: #22c55e;
+}
+.settings-card-head p,
+.settings-card > p {
+  margin: 5px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #64748b;
+}
+.settings-field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 0;
+  border-top: 1px solid #f1f5f9;
+}
+.settings-card .settings-field-row:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+.settings-field-text {
+  min-width: 0;
+}
+.settings-field-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: #334155;
+}
+.settings-field-text p,
+.settings-help,
+.settings-note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #64748b;
+}
+.settings-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 10px;
+}
+.settings-card .el-form-item {
+  margin-bottom: 14px;
+}
+.settings-card .el-form-item:last-child {
+  margin-bottom: 0;
+}
+.settings-card .el-form-item__label {
+  padding-bottom: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #334155;
+}
+.settings-note {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+.settings-footer-save {
+  display: none;
+}
+.diagnostics-panel {
+  margin-top: 18px;
+  padding: 18px;
+}
+.diagnostics-panel--standalone {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.diagnostics-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.diagnostics-head p {
+  margin: 6px 0 0;
+  max-width: 780px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #64748b;
+}
+.diagnostics-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.diagnostics-alert {
+  margin-bottom: 12px;
+}
+.diagnostics-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  margin-bottom: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+.diagnostics-summary-label {
+  font-size: 12px;
+  color: #64748b;
+}
+.diagnostics-summary-message {
+  margin-top: 2px;
+  font-size: 16px;
+  font-weight: 800;
+  color: #1e293b;
+}
+.diagnostics-summary-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 12px;
+  color: #64748b;
+}
+.diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.diagnostics-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #ffffff;
+}
+.diagnostics-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.diagnostics-card-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: #334155;
+}
+.diagnostics-card p {
+  margin: 5px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #64748b;
+}
+.diagnostics-detail-list {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #f1f5f9;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.diagnostics-detail-row {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.diagnostics-detail-key {
+  color: #94a3b8;
+}
+.diagnostics-detail-value {
+  color: #475569;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 1180px) {
+  .settings-grid--two,
+  .settings-grid--three,
+  .diagnostics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .settings-hero,
+  .diagnostics-head,
+  .diagnostics-summary {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .settings-grid--two,
+  .settings-grid--three,
+  .settings-field-grid,
+  .diagnostics-grid {
+    grid-template-columns: 1fr;
+  }
+  .settings-footer-save {
+    display: flex;
+    position: sticky;
+    bottom: 0;
+    justify-content: center;
+    padding: 12px 0 0;
+    background: linear-gradient(180deg, rgba(248,250,252,0), #f8fafc 28%);
+  }
+  .settings-hero > .el-button {
+    display: none;
+  }
+}
