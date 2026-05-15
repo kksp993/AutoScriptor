@@ -82,3 +82,9 @@ Editor 接口分为两类:
 - `warn`: 可继续观察或 fallback，但有潜在风险。
 - `error`: 当前层不可用，会阻断执行或截图。
 - `skipped`: 本次未检查，例如默认不做 NemuIpc 截图探测，或 OCR/UI Map 模块尚未被运行期加载。诊断接口不会为了查看状态而主动初始化 OCR/UI Map。
+
+## 性能与设备输入
+
+- 任务执行期间性能优化应保持任务级启用，不应因每次点击/滑动反复启停。
+- 高频输入接口必须优先直接调用配置中的 `adb.exe`，避免每次触控走 MuMuManager subprocess。
+- MuMuManager 只承担启动、关闭、官方 app/package 查询等低频生命周期能力；其 subprocess 调用会临时解除 boost，这是安全边界，不是点击路径。
