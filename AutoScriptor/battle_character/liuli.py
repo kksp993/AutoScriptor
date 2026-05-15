@@ -4,7 +4,13 @@
 连招 146: 新旧专无敌 + 落雁斩无敌 2s (刮痧神器)
 连招 143: 新旧专 + 依靠非专属仙术输出
 """
-from battle_character.hero import Hero, flow
+from __future__ import annotations
+
+import sys
+
+from AutoScriptor.battle_character.hero import Hero, flow
+
+sys.modules.setdefault("battle_character.liuli", sys.modules[__name__])
 
 
 class LiuLi(Hero):

@@ -2,8 +2,8 @@
 生成 bsdiff 增量补丁并输出可粘贴进 manifest 的 JSON 片段。
 
 用法:
-  python scripts/release_binary_delta.py create --old OLD.exe --new NEW.exe --out patch.bsdiff
-  python scripts/release_binary_delta.py create --old OLD.exe --new NEW.exe --out patch.bsdiff --relative-path backend/autoscriptor-engine.exe --url-base https://example.com/updates/
+  python scripts/release/release_binary_delta.py create --old OLD.exe --new NEW.exe --out patch.bsdiff
+  python scripts/release/release_binary_delta.py create --old OLD.exe --new NEW.exe --out patch.bsdiff --relative-path backend/autoscriptor-engine.exe --url-base https://example.com/updates/
 
 依赖: bsdiff4（与运行环境一致）
 """
@@ -14,7 +14,7 @@ import json
 import os
 import sys
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 

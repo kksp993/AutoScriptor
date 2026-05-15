@@ -88,6 +88,7 @@ def import_app_config_for_test(tmp_root: str):
     )
     paths = types.ModuleType("AutoScriptor.utils.paths")
     paths.get_data_root = lambda: tmp_root
+    paths.get_accounts_dir = lambda: Path(tmp_root) / "accounts"
 
     module_name = "app_config_under_test"
     spec = importlib.util.spec_from_file_location(
@@ -532,6 +533,17 @@ class TestConfigLifecycleContract(unittest.TestCase):
             self.assertTrue(calls)
             self.assertEqual(calls[-1][1], "config.json")
 
+    def test_relative_accounts_dir_keeps_data_accounts_compatibility(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module = import_app_config_for_test(tmp)
+            mgr = module.ConfigManager()
+            default_dir = Path(tmp) / "accounts"
+
+            for raw in ("", "accounts", "data/accounts"):
+                mgr.global_cfg = {"accounts": {"dir": raw}}
+                with self.subTest(raw=raw):
+                    self.assertEqual(mgr.resolved_accounts_dir(), default_dir)
+
 
 class TestWebUIFrontendContract(unittest.TestCase):
     JS_FILES = [
@@ -820,6 +832,70 @@ class TestUpdaterGitCommandContract(unittest.TestCase):
         self.assertEqual(cmd[1], "-c")
         self.assertEqual(cmd[2], f"safe.directory={str(ROOT).replace(chr(92), '/')}")
         self.assertEqual(cmd[-2:], ["status", "--short"])
+
+
+class TestZmxyRedeemCollectorContract(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        module_name = "collect_zmxy_redeem_2026_under_test"
+        spec = importlib.util.spec_from_file_location(
+            module_name,
+            ROOT / "scripts/collect_zmxy_redeem_2026.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        cls.collector = module
+
+    def test_parse_expiry_accepts_range_with_partial_end_date(self):
+        text = "兑换码有效时间：2026年5月10日12时----5月12日5时"
+
+        self.assertEqual(
+            self.collector.parse_expiry(text, 2026),
+            "2026-05-12T05:00:00+08:00",
+        )
+
+    def test_parse_expiry_accepts_month_day_cutoff(self):
+        text = "兑换码有效时间至9月1日05:00"
+
+        self.assertEqual(
+            self.collector.parse_expiry(text, 2026),
+            "2026-09-01T05:00:00+08:00",
+        )
+
+    def test_extract_codes_covers_official_4399_styles(self):
+        samples = "\n".join([
+            "祝福奖励：谁言寸草心：莲心*1、青莲炎*1（在“活动”中输入兑换码“谁言寸草心”即可领取福利哦！）",
+            "通用兑换码：金炉驱寒气 奖励内容：时装随机礼包",
+            "福利码：但愿长闲有诗酒，一溪风月共清明内含：祝福礼包*5",
+            "兑换码献上：小小插曲（小月卡（7日）*1）",
+        ])
+
+        self.assertEqual(
+            self.collector.extract_codes(samples),
+            ["谁言寸草心", "金炉驱寒气", "但愿长闲有诗酒，一溪风月共清明", "小小插曲"],
+        )
+
+    def test_redeem_codes_use_single_authoritative_file(self):
+        content = "\n".join(
+            path.read_text(encoding="utf-8", errors="ignore")
+            for path in [
+                ROOT / "scripts/collect_zmxy_redeem_2026.py",
+                ROOT / "services/webui/routes/news.py",
+                ROOT / "services/webui/static/js/components/NewsPanel.js",
+            ]
+        )
+
+        self.assertIn("docs/zmxy_redeem_codes.json", content)
+        for old_name in [
+            "zmxy_codes.json",
+            "zmxy_gift_codes_rows.json",
+            "zmxy_redeem_codes_only.txt",
+            "zmxy_redeem_codes_only.meta.txt",
+            "zmxy_redeem_codes_only_detail.txt",
+        ]:
+            self.assertNotIn(old_name, content)
 
 
 if __name__ == "__main__":

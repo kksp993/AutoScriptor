@@ -2,7 +2,7 @@
 
 Storage remains split as:
 - global config.json for shared app settings;
-- accounts/{account}.json for encrypted account data, dispatch queue and
+- data/accounts/{account}.json for encrypted account data, dispatch queue and
   per-character tasks/status.
 
 This service only prepares safe public copies and sanitized save payloads.

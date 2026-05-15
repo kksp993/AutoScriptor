@@ -5,7 +5,8 @@
 
 在开发模式下:
   APP_ROOT  = 项目根目录 (包含 gui.py 的目录)
-  DATA_ROOT = 项目根目录 (config.json, accounts/, ZmxyOL/assets/ 等)
+  DATA_ROOT = 项目根目录 (config.json, ZmxyOL/assets/ 等)
+  EDITABLE_DATA_ROOT = 项目根目录 / data (accounts/, custom_task/, battle_character/ 等)
 
 在 Nuitka standalone 编译后:
   APP_ROOT  = 安装目录 (造笔.exe 所在目录)
@@ -50,7 +51,7 @@ def get_app_root() -> Path:
 
 @lru_cache(maxsize=1)
 def get_data_root() -> Path:
-    """用户数据根目录 (config.json, accounts/, profiles 等)。
+    """主数据根目录 (config.json, profiles 等)。
 
     优先使用环境变量 AUTOSCRIPTOR_DATA_DIR (Electron 启动时设置)。
     """
@@ -62,13 +63,29 @@ def get_data_root() -> Path:
     return get_app_root()
 
 
+def get_editable_data_root() -> Path:
+    """运行态可编辑数据根目录。
+
+    开发模式也集中到项目根目录 data/，避免账号/自定义任务/职业覆盖脚本散落在源码根。
+    发行模式与 AUTOSCRIPTOR_DATA_DIR 仍沿用 get_data_root()。
+    """
+    if os.environ.get("AUTOSCRIPTOR_DATA_DIR") or is_compiled():
+        return get_data_root()
+    return get_app_root() / "data"
+
+
 def get_custom_task_dir() -> Path:
     """用户自定义任务脚本目录 (各 .py 内使用 @register_task)。
 
-    开发模式: 项目根目录下 custom_task/
+    开发模式: 项目根目录下 data/custom_task/
     发行模式: data/custom_task/（或 AUTOSCRIPTOR_DATA_DIR/custom_task/）
     """
-    return get_data_root() / "custom_task"
+    return get_editable_data_root() / "custom_task"
+
+
+def get_accounts_dir() -> Path:
+    """账号数据目录（真实账号 JSON 不进入 Git / Nuitka 内置包）。"""
+    return get_editable_data_root() / "accounts"
 
 
 @lru_cache(maxsize=1)
@@ -99,15 +116,15 @@ def get_error_archives_dir() -> Path:
 
 
 def get_profiles_dir() -> Path:
-    """已弃用：旧 YAML 配招目录。职业逻辑请改 battle_character / data/battle_character。"""
+    """已弃用：旧 YAML 配招目录。职业逻辑请改 data/battle_character。"""
     if is_compiled():
         return get_data_root() / "profiles"
     return get_data_root() / "ZmxyOL" / "assets" / "profiles"
 
 
 def get_battle_character_dir() -> Path:
-    """战斗职业 .py 目录（发行版为 data/battle_character，与内置 battle_character 包同名可覆盖）。"""
-    return get_data_root() / "battle_character"
+    """运行态可编辑战斗职业 .py 目录（开发与发行均为 data/battle_character）。"""
+    return get_editable_data_root() / "battle_character"
 
 
 def get_assets_dir() -> Path:

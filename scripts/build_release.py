@@ -448,11 +448,9 @@ def run_nuitka(timings: list[tuple[str, float]] | None = None, jobs: int | None 
         "--output-filename=autoscriptor-engine.exe",
         "--follow-import-to=AutoScriptor",
         "--follow-import-to=ZmxyOL",
-        "--follow-import-to=battle_character",
         "--follow-import-to=services",
         "--include-package=AutoScriptor",
         "--include-package=ZmxyOL",
-        "--include-package=battle_character",
         "--include-package=services",
         # setuptools 依赖；仅复制 setuptools 目录时，冻结环境需能解析该子模块
         "--include-package=_distutils_hack",
@@ -535,7 +533,7 @@ def collect_data():
             shutil.copy2(src_cfg, dist_cfg)
             print("[data] config.json（未找到模板，降级使用）")
 
-    # accounts/：仅保留空目录，绝不把仓库内 accounts/*.json 打入发行包（账号仅用户本机生成）
+    # accounts/：仅保留空目录，绝不把仓库内 data/accounts/*.json 打入发行包（账号仅用户本机生成）
     accounts_dst = DATA_DIR / "accounts"
     accounts_dst.mkdir(parents=True, exist_ok=True)
     for stale in accounts_dst.glob("*.json"):
@@ -545,12 +543,15 @@ def collect_data():
             pass
     print("[data] accounts/（空目录，不含 *.json）")
 
-    # battle_character：可编辑职业 .py（与仓库 battle_character/ 同源；发行版 data 下覆盖内置逻辑）
-    bc_src = PROJECT_ROOT / "battle_character"
+    # battle_character：运行态可编辑职业 .py，位于 Nuitka 外，可覆盖内置职业逻辑
+    bc_src = PROJECT_ROOT / "data" / "battle_character"
     bc_dst = DATA_DIR / "battle_character"
     if bc_src.is_dir():
         shutil.copytree(bc_src, bc_dst, dirs_exist_ok=True)
         print("[data] battle_character/")
+    else:
+        bc_dst.mkdir(parents=True, exist_ok=True)
+        print("[data] battle_character/ (空目录)")
 
     # assets/config (ui_map.csv 等)
     assets_config_src = PROJECT_ROOT / "ZmxyOL" / "assets" / "config"
@@ -573,8 +574,8 @@ def collect_data():
     # logs/ 目录 (占位)
     (DATA_DIR / "logs").mkdir(parents=True, exist_ok=True)
 
-    # custom_task/ 用户自定义 Python 任务（与开发态仓库根 custom_task 对齐）
-    custom_src = PROJECT_ROOT / "custom_task"
+    # custom_task/ 用户自定义 Python 任务（开发与发行均位于 data/custom_task）
+    custom_src = PROJECT_ROOT / "data" / "custom_task"
     custom_dst = DATA_DIR / "custom_task"
     if custom_src.is_dir():
         shutil.copytree(custom_src, custom_dst, dirs_exist_ok=True)
@@ -834,7 +835,7 @@ def main():
         inc_out = DIST_DIR / "backend_incremental.zip"
         cmd = [
             sys.executable,
-            str(PROJECT_ROOT / "scripts" / "release_backend_incremental.py"),
+            str(PROJECT_ROOT / "scripts" / "release" / "release_backend_incremental.py"),
             "create",
             "--old",
             str(inc_path),

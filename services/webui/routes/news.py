@@ -54,19 +54,23 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def _gift_codes_rows_path() -> Path:
-    return _project_root() / "docs" / "zmxy_gift_codes_rows.json"
+def _redeem_codes_path() -> Path:
+    return _project_root() / "docs" / "zmxy_redeem_codes.json"
 
 
-def _load_gift_codes_rows_payload() -> dict[str, Any]:
+def _load_redeem_codes_payload() -> dict[str, Any]:
     """由 scripts/collect_zmxy_redeem_2026.py 写入，供资讯页兑换码表格。"""
-    path = _gift_codes_rows_path()
+    path = _redeem_codes_path()
     if not path.is_file():
-        return {"generated_at": "", "timezone": "Asia/Shanghai", "rows": []}
+        return {"generated_at": "", "timezone": "Asia/Shanghai", "source": "", "rows": []}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload.setdefault("rows", [])
+        payload.setdefault("timezone", "Asia/Shanghai")
+        payload.setdefault("source", "")
+        return payload
     except Exception:
-        return {"generated_at": "", "timezone": "Asia/Shanghai", "rows": [], "error": "invalid_json"}
+        return {"generated_at": "", "timezone": "Asia/Shanghai", "source": "", "rows": [], "error": "invalid_json"}
 
 
 def _refresh_gift_codes_rows() -> None:
@@ -545,16 +549,16 @@ async def get_redeem_codes(request: Request, force: int = Query(0, description="
 
 @router.get("/gift_codes")
 def get_gift_codes(refresh: int = Query(0, description="传 1 时先执行采集脚本再返回")):
-    """未过期兑换码列表（JSON），与 `docs/zmxy_gift_codes_rows.json` 同步。"""
+    """未过期兑换码列表（JSON），与 `docs/zmxy_redeem_codes.json` 同步。"""
     if refresh:
         _refresh_gift_codes_rows()
-    return _load_gift_codes_rows_payload()
+    return _load_redeem_codes_payload()
 
 
 @router.get("/gift_codes/page", response_class=HTMLResponse)
 def get_gift_codes_page():
-    """独立 HTML 页（仅读本地 JSON，不跑采集）；表格列 标题 | 口令 | 到期时间 | 复制。"""
-    p = _load_gift_codes_rows_payload()
+    """独立 HTML 页（仅读本地 JSON，不跑采集）；表格列 标题 | 口令 | 到期时间 | 类型 | 复制。"""
+    p = _load_redeem_codes_payload()
     rows = p.get("rows") or []
     gen = escape(str(p.get("generated_at") or "-"))
     parts: list[str] = [
@@ -576,15 +580,21 @@ def get_gift_codes_page():
         "td.empty{text-align:center;color:#94a3b8;padding:28px 12px;}",
         "</style></head><body>",
         f"<h1>兑换码</h1><p class=\"hint\">更新时间：{gen}</p>",
-        "<table><thead><tr><th>标题</th><th>口令</th><th>到期时间</th><th>复制</th></tr></thead><tbody>",
+        "<table><thead><tr><th>标题</th><th>口令</th><th>到期时间</th><th>类型</th><th>复制</th></tr></thead><tbody>",
     ]
     if not rows:
-        parts.append('<tr><td colspan="4" class="empty">暂无更多兑换码</td></tr>')
+        parts.append('<tr><td colspan="5" class="empty">暂无当前仍有效的兑换码</td></tr>')
     else:
         for r in rows:
             title = escape(str(r.get("title") or ""))
             code = escape(str(r.get("code") or ""))
             exp = escape(str(r.get("expires_at") or ""))
+            kind = str(r.get("kind") or "")
+            note = escape(str(r.get("note") or ""))
+            kind_label = {"public_code": "通用口令", "conditional_code": "有限制", "box_gift": "礼包"}.get(kind, kind)
+            kind_cell = escape(kind_label)
+            if note:
+                kind_cell += f'<div class="hint">{note}</div>'
             url = str(r.get("url") or "")
             url_esc = escape(url, quote=True)
             title_cell = (
@@ -594,7 +604,7 @@ def get_gift_codes_page():
             )
             code_attr = escape(str(r.get("code") or ""), quote=True)
             parts.append(
-                f"<tr><td>{title_cell}</td><td class=\"code\">{code}</td><td>{exp}</td>"
+                f"<tr><td>{title_cell}</td><td class=\"code\">{code}</td><td>{exp}</td><td>{kind_cell}</td>"
                 f'<td><button type="button" class="btn-copy" data-code="{code_attr}" '
                 f'onclick="copyCode(this)">复制</button></td></tr>'
             )

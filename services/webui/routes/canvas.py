@@ -16,6 +16,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from AutoScriptor.utils.logger import logger
+from AutoScriptor.utils.paths import get_custom_task_dir, get_data_root
 
 router = APIRouter(prefix="/api/canvas", tags=["canvas"])
 
@@ -25,7 +26,7 @@ _CANVAS_DIR: Path | None = None
 def _get_canvas_dir() -> Path:
     global _CANVAS_DIR
     if _CANVAS_DIR is None:
-        _CANVAS_DIR = Path(os.getcwd()) / "canvas_data"
+        _CANVAS_DIR = get_data_root() / "canvas_data"
         _CANVAS_DIR.mkdir(parents=True, exist_ok=True)
     return _CANVAS_DIR
 
@@ -57,7 +58,7 @@ async def save_canvas(request: Request):
 
         # Save generated code to custom_task directory
         if code:
-            custom_dir = Path(os.getcwd()) / "custom_task"
+            custom_dir = get_custom_task_dir()
             custom_dir.mkdir(parents=True, exist_ok=True)
             code_path = custom_dir / f"canvas_{name}.py"
             with open(code_path, "w", encoding="utf-8") as f:
@@ -127,7 +128,7 @@ async def delete_canvas(request: Request):
             graph_path.unlink()
 
         # Also remove generated code
-        code_path = Path(os.getcwd()) / "custom_task" / f"canvas_{name}.py"
+        code_path = get_custom_task_dir() / f"canvas_{name}.py"
         if code_path.exists():
             code_path.unlink()
 

@@ -9,7 +9,9 @@
 Flow 查找链 (沿 MRO):
   SubClass/(flow, task) → SubClass/(flow, None) → Hero/(flow, task) → Hero/(flow, None)
 
-职业脚本: 仓库根目录 battle_character/（开发）或安装目录 data/battle_character/（发行，可编辑 .py 覆盖内置）。
+职业脚本:
+  - 内置基线: AutoScriptor/battle_character/
+  - 可编辑覆盖: data/battle_character/（开发与发行一致，位于 Nuitka 外）
 """
 import hashlib
 import importlib
@@ -24,7 +26,9 @@ from AutoScriptor import *
 from AutoScriptor.core.background import BG_PRIORITY_BUILTIN_ADVANCE
 from AutoScriptor.utils.cancel import check_cancel_raise
 from AutoScriptor.utils.logger import logger
-from AutoScriptor.utils.paths import get_battle_character_dir, is_compiled
+from AutoScriptor.utils.paths import get_battle_character_dir
+
+sys.modules.setdefault("battle_character.hero", sys.modules[__name__])
 
 WUSHUANG_SPEED_1X = 0.0175
 WUSHUANG_SPEED_3X = 0.00815
@@ -516,7 +520,7 @@ def _get_hero_class(profession: str) -> type:
 
 def _discover_hero_classes():
     try:
-        import battle_character.liuli  # noqa: F401
+        import AutoScriptor.battle_character.liuli  # noqa: F401
     except ImportError:
         pass
 
@@ -525,9 +529,7 @@ _heroes_loaded = False
 
 
 def _load_user_character_modules() -> None:
-    """Nuitka standalone：执行 data/battle_character 下除 hero.py 外的 .py，覆盖同 profession 注册。"""
-    if not is_compiled():
-        return
+    """执行 data/battle_character 下除 hero.py 外的 .py，覆盖同 profession 注册。"""
     root = get_battle_character_dir()
     if not root.is_dir():
         return
@@ -536,7 +538,7 @@ def _load_user_character_modules() -> None:
         if py_file.name in skip:
             continue
         digest = hashlib.sha256(str(py_file.resolve()).encode("utf-8")).hexdigest()[:16]
-        mod_name = f"battle_character._user_{digest}"
+        mod_name = f"AutoScriptor.battle_character._user_{digest}"
         if mod_name in sys.modules:
             continue
         try:
@@ -595,16 +597,16 @@ def reset_hero_registry_for_reload() -> None:
 
 
 def reload_battle_character_modules() -> None:
-    """热重载：重新 import 内置 liuli +（发行）data/battle_character 覆盖。
+    """热重载：重新 import 内置 liuli + data/battle_character 覆盖。
 
     须在重新 import ZmxyOL（从而重建 battle_task_params 枚举）之前调用。
     """
     global _heroes_loaded
     reset_hero_registry_for_reload()
     for name in list(sys.modules.keys()):
-        if name.startswith("battle_character._user_"):
+        if name.startswith("AutoScriptor.battle_character._user_") or name.startswith("battle_character._user_"):
             del sys.modules[name]
-    import battle_character.liuli as liuli_mod
+    import AutoScriptor.battle_character.liuli as liuli_mod
 
     importlib.reload(liuli_mod)
     _load_user_character_modules()

@@ -1,7 +1,7 @@
 """战斗类任务在 WebUI 中的参数。
 
 BattleFlowName 枚举成员由 Hero 子类上 @flow 注册的流程名聚合（见
-battle_character.hero.get_registered_flows）。职业列表来自 battle_character 注册表。
+AutoScriptor.battle_character.hero.get_registered_flows）。职业列表来自职业注册表。
 
 @flow(..., task=None) 的流程对所有任务可选；仅当某流程在所有注册中均带非空 task
 时，才按该 task 与 cfg 任务路径最后一级匹配过滤（见 battle_flow_allowed_for_task）。
@@ -15,7 +15,7 @@ import re
 from typing import Iterable
 
 from AutoScriptor.utils.logger import logger
-from battle_character.hero import ensure_battle_heroes_loaded
+from AutoScriptor.battle_character.hero import ensure_battle_heroes_loaded
 
 
 def _enum_member_key(raw: str) -> str:
@@ -63,7 +63,7 @@ def _dedupe_keys(names: Iterable[str], *, sort_unique: bool = True) -> list[tupl
 
 def _profession_names_from_registry() -> list[str]:
     """从 Hero 子类 profession 注册表收集名称（ensure_battle_heroes_loaded 已调用）。"""
-    from battle_character.hero import _hero_registry
+    from AutoScriptor.battle_character.hero import _hero_registry
 
     names = [k for k in _hero_registry.keys() if k]
     if "default" in names:

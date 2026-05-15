@@ -5,10 +5,10 @@ title AutoScriptor
 set "ROOT=%~dp0"
 cd /d "%ROOT%"
 
-REM 将便携版/运行态下的 accounts\*.json 覆盖回仓库 accounts\
+REM 将便携版/运行态下的 accounts\*.json 覆盖回仓库 data\accounts\
 if not exist "dist_electron\zaobi\data\accounts\" goto :skip_acc_sync
-if not exist "accounts\" mkdir "accounts"
-copy /y "dist_electron\zaobi\data\accounts\*.json" "accounts\" >nul 2>&1
+if not exist "data\accounts\" mkdir "data\accounts"
+copy /y "dist_electron\zaobi\data\accounts\*.json" "data\accounts\" >nul 2>&1
 if errorlevel 1 echo [WARN] 未找到 dist_electron\zaobi\data\accounts\*.json，跳过同步。
 :skip_acc_sync
 

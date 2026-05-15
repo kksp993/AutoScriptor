@@ -41,6 +41,9 @@ nuitka-crash-report.xml
 /errors/
 /examples/
 /logs/
+/data/accounts/*.json
+/data/canvas_data/
+/data/logs/
 /config.json
 /config_*.json
 /.python*
@@ -50,6 +53,8 @@ nuitka-crash-report.xml
 webapp/.release-staging
 webapp/buildResources/icon.ico
 /accounts/
+/custom_task/
+/battle_character/
 /.autoscriptor/
 docs/zmxy_codes.json
 docs/zmxy_gift_codes_rows.json
