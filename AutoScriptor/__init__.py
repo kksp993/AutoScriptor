@@ -41,6 +41,8 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "perf_boost": ("AutoScriptor.utils.perf", "boost"),
     # runtime helpers
     "bg": ("AutoScriptor.core.background", "bg"),
+    "BG_SIGNALS": ("AutoScriptor.core.background", "BG_SIGNALS"),
+    "BgSignals": ("AutoScriptor.core.background", "BgSignals"),
     "set_config": ("AutoScriptor.crypto.update_config", "set_config"),
     "verify_config": ("AutoScriptor.crypto.update_config", "verify_config"),
 }
@@ -120,6 +122,8 @@ __all__ = [
     "ensure_app_running",
     "ensure_all_environment_ready",
     "bg",
+    "BG_SIGNALS",
+    "BgSignals",
     "mixctrl",
     "mumu",
     "set_config",
@@ -143,4 +147,3 @@ def __getattr__(name: str) -> Any:
 
 def __dir__() -> list[str]:
     return sorted(set(globals()) | set(__all__))
-

@@ -23,7 +23,7 @@ from time import time
 from typing import Any
 
 from AutoScriptor import *
-from AutoScriptor.core.background import BG_PRIORITY_BUILTIN_ADVANCE
+from AutoScriptor.core.background import BG_PRIORITY_BUILTIN_ADVANCE, BG_SIGNALS
 from AutoScriptor.utils.cancel import check_cancel_raise
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.paths import get_battle_character_dir
@@ -35,6 +35,7 @@ WUSHUANG_SPEED_3X = 0.00815
 
 _way_to_exit_lock = RLock()
 _hero_registry: dict[str, type] = {}
+_compat_param_warnings: set[str] = set()
 
 
 # ── @flow 装饰器 ─────────────────────────────────────
@@ -281,6 +282,10 @@ class Hero:
         self._moments_fired.add(k)
         return True
 
+    def at(self, seconds: float, fast: float = None) -> bool:
+        """Alias for once_at(), useful in user-written battle flows."""
+        return self.once_at(seconds, fast=fast)
+
     def every(self, seconds: float, fast: float = None) -> bool:
         """每隔指定时间触发一次。
 
@@ -293,6 +298,10 @@ class Hero:
             self._intervals_last[k] = self.battle_elapsed
             return True
         return False
+
+    def first_round(self) -> bool:
+        """Alias for is_first_round(), useful in user-written battle flows."""
+        return self.is_first_round
 
     # ═══════════════ 默认 Flows ═══════════════
 
@@ -356,6 +365,14 @@ class Hero:
                     f"(task={task or self.task}, class={type(self).__name__})"
                 )
 
+        if battle_weight is not None and "battle_weight" not in _compat_param_warnings:
+            _compat_param_warnings.add("battle_weight")
+            logger.warning(
+                "battle_loop 参数 battle_weight=%s 当前仅保留兼容，尚未参与战斗策略；"
+                "如需定制战斗，请优先选择/编写 battle_flow。",
+                battle_weight,
+            )
+
         self.sleep(delay)
         switch_base("nemu")
 
@@ -363,11 +380,9 @@ class Hero:
         self._flow_round = 0
         self._moments_fired.clear()
         self._intervals_last.clear()
-        bg.set_signal("try_exit", False)
-        bg.set_signal("Pause_battle", False)
-        bg.set_signal("_builtin_advance", False)
-
-        self._setup_builtin_triggers()
+        bg.set_signal(BG_SIGNALS.TRY_EXIT, False)
+        bg.set_signal(BG_SIGNALS.PAUSE_BATTLE, False)
+        bg.set_signal(BG_SIGNALS.BUILTIN_ADVANCE, False)
 
         logger.info(
             "battle_loop 开始 (flow=%s, task=%s, class=%s, max=%ds)",
@@ -375,23 +390,25 @@ class Hero:
         )
 
         try:
-            while not bg.signal("try_exit", False):
-                check_cancel_raise()
-                if bg.signal("Pause_battle", False):
-                    self.sleep(1)
-                    continue
-                if self._check_advance(advance_grace_sec):
-                    self.travel()
-                    continue
+            with bg.scope() as builtin_scope:
+                self._setup_builtin_triggers(builtin_scope)
 
-                flow_method(self)
-                self._flow_round += 1
+                while not bg.signal(BG_SIGNALS.TRY_EXIT, False):
+                    check_cancel_raise()
+                    if bg.signal(BG_SIGNALS.PAUSE_BATTLE, False):
+                        self.sleep(1)
+                        continue
+                    if self._check_advance(advance_grace_sec):
+                        self.travel()
+                        continue
 
-                if self.battle_elapsed > max_duration:
-                    logger.error("battle_loop 超时 (%ds)", max_duration)
-                    raise RuntimeError(f"battle_loop 超时: {max_duration}秒")
+                    flow_method(self)
+                    self._flow_round += 1
+
+                    if self.battle_elapsed > max_duration:
+                        logger.error("battle_loop 超时 (%ds)", max_duration)
+                        raise RuntimeError(f"battle_loop 超时: {max_duration}秒")
         finally:
-            self._cleanup_builtin_triggers()
             self._flow_round = 0
             self._moments_fired.clear()
             self._intervals_last.clear()
@@ -401,18 +418,18 @@ class Hero:
 
     # ── 内置触发器 ──
 
-    def _setup_builtin_triggers(self):
+    def _setup_builtin_triggers(self, registry=bg):
         from AutoScriptor.core.targets import T as _T, I as _I
 
-        bg.add(
+        registry.add(
             name="_builtin_advance",
             identifier=_T("前进", box=Box(513, 253, 260, 86).margin()),
-            callback=lambda: bg.set_signal("_builtin_advance", True),
+            callback=lambda: bg.set_signal(BG_SIGNALS.BUILTIN_ADVANCE, True),
             once=False, allow_concurrent=False, throttle=5,
             priority=BG_PRIORITY_BUILTIN_ADVANCE,
         )
         _bao = Box(28, 296, 447, 403)
-        bg.add(
+        registry.add(
             name="_builtin_bao",
             identifier=_I("爆", box=_bao),
             callback=lambda: click(
@@ -421,15 +438,10 @@ class Hero:
             once=False, allow_concurrent=True, throttle=2.5,
         )
 
-    @staticmethod
-    def _cleanup_builtin_triggers():
-        bg.remove("_builtin_advance")
-        bg.remove("_builtin_bao")
-
     def _check_advance(self, grace_sec: float) -> bool:
-        if not bg.signal("_builtin_advance", False):
+        if not bg.signal(BG_SIGNALS.BUILTIN_ADVANCE, False):
             return False
-        bg.set_signal("_builtin_advance", False)
+        bg.set_signal(BG_SIGNALS.BUILTIN_ADVANCE, False)
         if grace_sec > 0 and self.battle_elapsed < grace_sec:
             logger.debug("忽略「前进」(grace)")
             return False

@@ -1,6 +1,7 @@
 from collections import deque
 from datetime import datetime
-from threading import Thread, RLock, Event
+from functools import wraps
+from threading import Thread, RLock, Event, current_thread
 import time
 from typing import Any, Callable, List
 from AutoScriptor.utils.logger import logger
@@ -14,6 +15,84 @@ BG_PRIORITY_DEFAULT = 0
 BG_PRIORITY_BUILTIN_ADVANCE = -1_000_000
 
 
+class BgSignals:
+    """Well-known signal names used by battle/task code.
+
+    The values intentionally keep the legacy strings so existing scripts that
+    call bg.signal("try_exit") continue to work.
+    """
+
+    TRY_EXIT = "try_exit"
+    PAUSE_BATTLE = "Pause_battle"
+    BUILTIN_ADVANCE = "_builtin_advance"
+    FAILED = "failed"
+    FAILED_LEGACY = "Failed"
+    EXIT = "Exit"
+
+
+BG_SIGNALS = BgSignals
+
+
+class BackgroundScope:
+    """Context manager for task-local background callbacks.
+
+    New code can use:
+        with bg.scope("team") as scope:
+            scope.add("entered", I("加载中"), lambda: ...)
+
+    All callbacks registered through the scope are removed on exit, even when
+    the task raises. Existing bg.add/bg.remove callers remain supported.
+    """
+
+    def __init__(self, monitor: "BackgroundMonitor", prefix: str | None = None, clear_signals: bool = False):
+        self._monitor = monitor
+        self._prefix = str(prefix).strip() if prefix else ""
+        self._clear_signals = clear_signals
+        self._items: list[tuple[str, dict | None]] = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        for name, info in reversed(self._items):
+            self._monitor.remove(name, expected_info=info)
+        self._items.clear()
+        if self._clear_signals:
+            self._monitor.clear_signals()
+        return False
+
+    def _name(self, name: str) -> str:
+        raw = str(name)
+        if not self._prefix or raw.startswith(f"{self._prefix}:"):
+            return raw
+        return f"{self._prefix}:{raw}"
+
+    def add(self, name: str, identifier, callback: Callable[[], None], **kwargs) -> str:
+        full_name = self._name(name)
+        full_name, info = self._monitor._register_callback(full_name, identifier, callback, **kwargs)
+        self._items.append((full_name, info))
+        return full_name
+
+    def remove(self, name: str):
+        full_name = self._name(name)
+        remaining = []
+        for item_name, info in self._items:
+            if item_name == full_name:
+                self._monitor.remove(item_name, expected_info=info)
+            else:
+                remaining.append((item_name, info))
+        self._items = remaining
+
+    def signal(self, key: str, default: Any = None):
+        return self._monitor.signal(key, default)
+
+    def set_signal(self, key: str, value: Any):
+        return self._monitor.set_signal(key, value)
+
+    def wait_signal(self, *args, **kwargs):
+        return self._monitor.wait_signal(*args, **kwargs)
+
+
 class BackgroundMonitor(Thread):
     def __init__(self):
         super().__init__(daemon=True)
@@ -24,6 +103,7 @@ class BackgroundMonitor(Thread):
         self._stop_event = Event()
         self._in_callback = False  # 标记：是否正在执行某个常规 callback
         self._event_history: deque = deque(maxlen=50)  # 最近 50 条事件记录
+        self._mutation_version = 0
         self.start()
 
     def _record_event(self, event: str):
@@ -43,6 +123,11 @@ class BackgroundMonitor(Thread):
                 continue
             return True
         return False
+
+    def _callback_is_current(self, name: str, info: dict) -> bool:
+        """Return False when a stale snapshot entry was removed/replaced."""
+        with self._lock:
+            return self._callbacks.get(name) is info
 
     def run(self):
         from AutoScriptor.core.api import _locate_all, first as _first
@@ -100,8 +185,12 @@ class BackgroundMonitor(Thread):
                     boxes = [None] * len(all_targets)
 
                 for (name, info, _targets), (start, end) in zip(pending, offsets):
+                    if not self._callback_is_current(name, info):
+                        continue
                     segment = boxes[start:end]
                     if not _first(segment):
+                        continue
+                    if not self._callback_is_current(name, info):
                         continue
                     info['last'] = time.time()
                     checker = None
@@ -122,7 +211,7 @@ class BackgroundMonitor(Thread):
                         if checker is not None and checker.is_alive():
                             checker.join(timeout=2)
                     if info.get('once', True):
-                        self.remove(name)
+                        self.remove(name, expected_info=info)
 
             time.sleep(self._interval)
 
@@ -175,8 +264,12 @@ class BackgroundMonitor(Thread):
             return
 
         for (name, info, _), (start, end) in zip(pending, offsets):
+            if not self._callback_is_current(name, info):
+                continue
             segment = boxes[start:end]
             if not _first(segment):
+                continue
+            if not self._callback_is_current(name, info):
                 continue
             info['last'] = time.time()
             logger.info('🔔 bg并发回调触发: %s', name)
@@ -189,7 +282,34 @@ class BackgroundMonitor(Thread):
                 logger.exception('bg concurrent cb error %s', name)
                 self._record_event(f"并发回调异常: {name}")
             if info.get('once', True):
-                self.remove(name)
+                self.remove(name, expected_info=info)
+
+    def _register_callback(
+        self,
+        name: str,
+        identifier,
+        callback: Callable[[], None],
+        once: bool = True,
+        throttle: float = 0,
+        allow_concurrent: bool = False,
+        priority: int = BG_PRIORITY_DEFAULT,
+    ) -> tuple[str, dict]:
+        if isinstance(identifier, Target):
+            identifier = (identifier,)
+        info = {
+            'idf': identifier,
+            'cb': callback,
+            'once': once,
+            'throttle': throttle,
+            'last': 0,
+            'allow_concurrent': allow_concurrent,
+            'priority': priority,
+        }
+        with self._lock:
+            self._callbacks[name] = info
+            self._mutation_version += 1
+        logger.info('✅ 添加监控事件: %s', name)
+        return name, info
 
     def add(
         self,
@@ -208,27 +328,30 @@ class BackgroundMonitor(Thread):
         priority: 仅对常规回调 (allow_concurrent=False) 生效；数值越大越先匹配。
                   内置「前进」使用 BG_PRIORITY_BUILTIN_ADVANCE（最低）。
         """
-        if isinstance(identifier, Target):
-            identifier = (identifier,)
-        with self._lock:
-            self._callbacks[name] = {
-                'idf': identifier,
-                'cb': callback,
-                'once': once,
-                'throttle': throttle,
-                'last': 0,
-                'allow_concurrent': allow_concurrent,
-                'priority': priority,
-            }
-        logger.info('✅ 添加监控事件: %s', name)
+        self._register_callback(
+            name=name,
+            identifier=identifier,
+            callback=callback,
+            once=once,
+            throttle=throttle,
+            allow_concurrent=allow_concurrent,
+            priority=priority,
+        )
+        return name
 
-    def remove(self, name: str):
+    def remove(self, name: str, expected_info: dict | None = None):
         with self._lock:
-            self._callbacks.pop(name, None)
+            if expected_info is not None and self._callbacks.get(name) is not expected_info:
+                return
+            if name in self._callbacks:
+                self._callbacks.pop(name, None)
+                self._mutation_version += 1
 
     def clear(self, clear_signals: bool = False):
         with self._lock:
-            self._callbacks.clear()
+            if self._callbacks:
+                self._callbacks.clear()
+                self._mutation_version += 1
             if clear_signals:
                 self._signals.clear()
         self._record_event(f"clear() 被调用 (clear_signals={clear_signals})")
@@ -247,18 +370,48 @@ class BackgroundMonitor(Thread):
 
     def stop(self):
         self._stop_event.set()
-        self.join()
+        if current_thread() is not self and self.is_alive():
+            self.join()
 
     def signal(self, key: str, default: Any = None):
-        return self._signals.get(key, default)
+        with self._lock:
+            return self._signals.get(key, default)
 
     def set_signal(self, key: str, value: Any):
-        old_value = self._signals.get(key, '<unset>')
-        self._signals[key] = value
+        with self._lock:
+            old_value = self._signals.get(key, '<unset>')
+            self._signals[key] = value
         if old_value != value:
             logger.info('📡 signal %s: %s → %s', key, old_value, value)
             self._record_event(f"signal {key}: {old_value} → {value}")
         return value
+
+    def wait_signal(
+        self,
+        key: str,
+        expected: Any = True,
+        *,
+        timeout: float | None = None,
+        interval: float = 0.2,
+        default: Any = None,
+    ):
+        """Wait until a signal reaches expected.
+
+        expected may be a literal value or a predicate callable. A TimeoutError
+        is raised when timeout is provided and the condition is not met.
+        """
+        start = time.time()
+        while True:
+            current = self.signal(key, default)
+            matched = expected(current) if callable(expected) else current == expected
+            if matched:
+                return current
+            if timeout is not None and time.time() - start >= timeout:
+                raise TimeoutError(f"等待 signal 超时: {key} != {expected!r}")
+            time.sleep(interval)
+
+    def scope(self, prefix: str | None = None, *, clear_signals: bool = False) -> BackgroundScope:
+        return BackgroundScope(self, prefix=prefix, clear_signals=clear_signals)
 
 
 # lazy proxy
@@ -283,13 +436,25 @@ bg = BackgroundProxy()
 
 def monitor(pairs):
     def deco(fn):
+        @wraps(fn)
         def wrapper(*a, **k):
-            for idf, cb in pairs:
-                bg.add(idf, cb)
-            r = fn(*a, **k)
-            for idf, _ in pairs:
-                bg.remove(idf)
-            return r
+            with bg.scope() as scope:
+                for idx, item in enumerate(pairs):
+                    if isinstance(item, dict):
+                        kwargs = dict(item)
+                        name = kwargs.pop("name", f"{fn.__name__}:{idx}")
+                        identifier = kwargs.pop("identifier")
+                        callback = kwargs.pop("callback")
+                        scope.add(name=name, identifier=identifier, callback=callback, **kwargs)
+                    else:
+                        if len(item) == 3:
+                            name, identifier, callback = item
+                        elif len(item) == 2:
+                            identifier, callback = item
+                            name = f"{fn.__name__}:{idx}"
+                        else:
+                            raise ValueError("monitor pair must be (identifier, callback) or (name, identifier, callback)")
+                        scope.add(name=name, identifier=identifier, callback=callback)
+                return fn(*a, **k)
         return wrapper
     return deco
- 
