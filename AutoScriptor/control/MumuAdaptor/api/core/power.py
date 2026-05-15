@@ -8,7 +8,7 @@
 import time
 from typing import Callable
 
-from AutoScriptor.control.MumuAdaptor.api.adb.direct import adb_device_ready
+from AutoScriptor.control.MumuAdaptor.device_facade import get_device_facade
 from AutoScriptor.utils.cancel import TaskCancelled, check_cancel_raise, sleep_with_cancel
 from AutoScriptor.utils.logger import logger
 
@@ -28,7 +28,7 @@ class Power:
             logger.debug("MuMuManager info 失败，回退 ADB 检测: ret=%s, out=%s", ret_code, retval)
         except Exception:
             logger.debug("MuMuManager info 异常，回退 ADB 检测", exc_info=True)
-        return adb_device_ready()
+        return get_device_facade(vm_index=self.utils.get_vm_id()).adb_device_ready()
 
     def start(
         self,
@@ -60,7 +60,7 @@ class Power:
                 if ret_code == 0:
                     logger.info(f"模拟器 {self.utils.get_vm_id()} 启动成功")
                     return True
-                if adb_device_ready():
+                if get_device_facade(vm_index=self.utils.get_vm_id()).adb_device_ready():
                     logger.warning("MuMuManager launch 失败，但 ADB 已可用，视为模拟器已启动: %s", retval)
                     return True
 
@@ -100,7 +100,7 @@ class Power:
             if not self.is_running():
                 logger.info(f"模拟器 {self.utils.get_vm_id()} 已完全关闭")
                 return True
-            time.sleep(2)
+            sleep_with_cancel(2)
 
         logger.warning(f"等待模拟器 {self.utils.get_vm_id()} 关闭超时 ({timeout}s)，不执行全局 taskkill 以免影响其他 MuMu 实例")
         return False
@@ -111,7 +111,7 @@ class Power:
         :return:
         """
         self.shutdown(wait=True, timeout=30)
-        time.sleep(3)
+        sleep_with_cancel(3)
         return self.start()
 
     def stop(self):

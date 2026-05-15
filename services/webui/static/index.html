@@ -188,6 +188,8 @@
           :pending-import-url="pendingEditorImportUrl"
           @imported="onEditorImported"></editor-panel>
 
+        <diagnostics-panel v-if="activeTab==='diagnostics'"></diagnostics-panel>
+
         <error-archives-panel v-if="activeTab==='errorArchives'"
           @go-to-editor-with-image="goToEditorWithImage"></error-archives-panel>
 
@@ -448,7 +450,7 @@
 
   <!-- Vue 组件 -->
   <script src="/static/js/components/NewsPanel.js?v=3"></script>
-  <script src="/static/js/components/AppSidebar.js?v=13"></script>
+  <script src="/static/js/components/AppSidebar.js?v=14"></script>
   <script src="/static/js/components/TaskTree.js?v=12"></script>
   <script src="/static/js/components/Overview.js?v=18"></script>
   <script src="/static/js/components/SchedulerPanel.js?v=14"></script>
@@ -459,11 +461,12 @@
   <script src="/static/js/components/editor/EditorCanvas.js?v=10"></script>
   <script src="/static/js/components/editor/EditorControls.js?v=14"></script>
   <script src="/static/js/components/editor/EditorPanel.js?v=25"></script>
+  <script src="/static/js/components/DiagnosticsPanel.js?v=1"></script>
   <script src="/static/js/components/canvas/CanvasPanel.js?v=4"></script>
   <script src="/static/js/components/ErrorArchivesPanel.js?v=4"></script>
   <script src="/static/js/task_help_docs.js?v=1"></script>
   <script src="/static/js/core/api.js?v=1"></script>
   <script src="/static/js/stores/runtimeStore.js?v=1"></script>
-  <script src="/static/js/app.js?v=26"></script>
+  <script src="/static/js/app.js?v=27"></script>
 </body>
 </html>

@@ -6,6 +6,7 @@ import copy
 import datetime
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,26 @@ _GLOBAL_KEYS = (
     "app", "ocr", "emulator", "llm", "scheduler", "deploy", "notify",
     "update", "remote_access", "accounts",
 )
+
+
+def _atomic_write_json(path: Path, data: Any) -> None:
+    """Write JSON via same-directory temp file then atomic replace."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
 
 
 class Character:
@@ -197,8 +218,7 @@ class ConfigManager:
         if not path.exists():
             try:
                 acc_dir.mkdir(parents=True, exist_ok=True)
-                with open(path, "w", encoding="utf-8") as f:
-                    json.dump(self._default_account_payload(name), f, ensure_ascii=False, indent=4)
+                _atomic_write_json(path, self._default_account_payload(name))
                 logger.info(f"已创建默认账号文件: {path}")
             except OSError as e:
                 logger.warning(f"账号文件不存在且创建失败: {path} ({e})")
@@ -260,26 +280,20 @@ class ConfigManager:
                 self.global_cfg[k] = copy.deepcopy(flat[k])
         self.global_cfg["current_account"] = flat.get("current_account", self.global_cfg.get("current_account", ""))
         self._update_runtime_dates()
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
         safe_cfg = {k: self.global_cfg.get(k, {}) for k in _GLOBAL_KEYS}
         safe_cfg["current_account"] = self.global_cfg.get("current_account", "")
-        with open(self.config_path, "w", encoding="utf-8") as f:
-            json.dump(safe_cfg, f, ensure_ascii=False, indent=4)
+        _atomic_write_json(self.config_path, safe_cfg)
         if self.current_acc:
             self.current_acc.prepare_for_save(flat)
             acc_dir = self.resolved_accounts_dir()
-            acc_dir.mkdir(parents=True, exist_ok=True)
-            with open(acc_dir / f"{self.current_acc.account_name}.json", "w", encoding="utf-8") as f:
-                json.dump(self.current_acc.to_persist_dict(), f, ensure_ascii=False, indent=4)
+            _atomic_write_json(acc_dir / f"{self.current_acc.account_name}.json", self.current_acc.to_persist_dict())
 
     def save_account_file_only(self) -> None:
         if not self.current_acc:
             return
         self.current_acc.prepare_for_save(None)
         acc_dir = self.resolved_accounts_dir()
-        acc_dir.mkdir(parents=True, exist_ok=True)
-        with open(acc_dir / f"{self.current_acc.account_name}.json", "w", encoding="utf-8") as f:
-            json.dump(self.current_acc.to_persist_dict(), f, ensure_ascii=False, indent=4)
+        _atomic_write_json(acc_dir / f"{self.current_acc.account_name}.json", self.current_acc.to_persist_dict())
 
 
 class AutoConfig:
@@ -465,9 +479,7 @@ class AutoConfig:
             "active_character": {"server": server, "name": character_name},
             "characters": {server: {character_name: {"tasks": {}, "status": {}, "game_profession": DEFAULT_GAME_PROFESSION}}},
         }
-        os.makedirs(self.ACCOUNTS_DIR, exist_ok=True)
-        with open(self._account_path(name), "w", encoding="utf-8") as f:
-            json.dump(account_data, f, ensure_ascii=False, indent=4)
+        _atomic_write_json(Path(self._account_path(name)), account_data)
         logger.info("已创建账号: %s", name)
 
     def delete_account(self, name: str) -> None:

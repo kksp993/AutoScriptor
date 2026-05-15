@@ -6,7 +6,7 @@
 # @Software: PyCharm
 import json
 import os.path
-from AutoScriptor.control.MumuAdaptor.api.adb.direct import run_adb
+from AutoScriptor.control.MumuAdaptor.device_facade import get_device_facade
 from AutoScriptor.utils.logger import logger
 
 
@@ -24,41 +24,26 @@ def _is_not_handle_cmd(retval) -> bool:
 
 def _adb_app_close(package: str) -> bool:
     """ADB 回退：强制关闭应用（MuMu 6 等不支持 MuMuManager app close 时使用）"""
-    r = run_adb(["shell", "am", "force-stop", package], timeout=10)
-    return r.returncode == 0
+    return get_device_facade().adb_force_stop_app(package)
 
 
 def _adb_app_launch(package: str) -> bool:
     """ADB 回退：通过 monkey 启动应用（MuMu 6 等不支持 MuMuManager app launch 时使用）"""
-    r = run_adb(["shell", "monkey", "-p", package, "-c", "android.intent.category.LAUNCHER", "1"], timeout=15)
-    return r.returncode == 0
+    return get_device_facade().adb_launch_app(package)
 
 
 def _adb_app_state(package: str) -> str:
     """ADB 回退：通过 pidof 判断应用是否在运行"""
-    r = run_adb(["shell", "pidof", package], timeout=5)
-    return "running" if (r.returncode == 0 and r.stdout.strip()) else "stopped"
+    return get_device_facade().adb_app_state(package)
 
 
 def _adb_list_packages() -> list[dict[str, str]]:
     """ADB 回退：列出已安装包。app_name/version 留空，调用方只依赖 package。"""
-    r = run_adb(["shell", "pm", "list", "packages"], timeout=15)
-    if r.returncode != 0:
-        raise RuntimeError((r.stderr or r.stdout).strip())
-    installed = []
-    for line in r.stdout.splitlines():
-        line = line.strip()
-        if not line.startswith("package:"):
-            continue
-        package = line.split("package:", 1)[1].strip()
-        if package:
-            installed.append({"package": package, "app_name": "", "version": ""})
-    return installed
+    return get_device_facade().adb_list_packages()
 
 
 def _adb_app_exists(package: str) -> bool:
-    r = run_adb(["shell", "pm", "path", package], timeout=5)
-    return r.returncode == 0 and bool(r.stdout.strip())
+    return get_device_facade().adb_app_exists(package)
 
 
 class App:

@@ -1,5 +1,4 @@
 from re import U
-import time
 from AutoScriptor import *
 from ZmxyOL.nav import mm
 from ZmxyOL.nav import path
@@ -85,7 +84,7 @@ def way():
     click(T("古万界"),offset=(180,0))
     wait_for_appear(T("万界穿梭"))
     mm.set_loc("荒古万界")
-    time.sleep(1)
+    sleep(1)
 
 @path("荒古万界", LOC_ENV)
 def way():

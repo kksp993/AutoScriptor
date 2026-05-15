@@ -489,9 +489,18 @@ def validate_mumu_setup(emulator: dict) -> dict:
     else:
         results["adb_device"]["detail"] = "ADB 不可用，跳过设备检测"
 
+    if (
+        results["emu_path"]["exists"]
+        and not results["emu_path"]["runnable"]
+    ):
+        if results["adb_device"]["connected"]:
+            results["emu_path"]["detail"] += " 已检测到 ADB 设备可用，安装器将把 MuMuManager 异常视为警告。"
+        elif results["adb_path"]["runnable"]:
+            results["emu_path"]["detail"] += " ADB 可执行文件可用，安装器将把 MuMuManager 异常视为警告。"
+
     results["overall"] = (
         results["mumu_folder"]["exists"]
-        and results["emu_path"]["exists"] and results["emu_path"]["runnable"]
+        and results["emu_path"]["exists"]
         and results["adb_path"]["exists"] and results["adb_path"]["runnable"]
     )
     return results

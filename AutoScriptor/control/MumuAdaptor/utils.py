@@ -6,6 +6,7 @@
 # @Software: PyCharm
 
 import subprocess
+from contextlib import nullcontext
 from typing import Union, List
 
 
@@ -72,16 +73,21 @@ class utils:
             else:
                 command_extend = command
             result = None
-            for _ in range(repeat):
-                result = subprocess.run(
-                    command_extend,
-                    shell=False,
-                    check=False,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    encoding='utf-8',
-                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0,
-                )
+            ctx = nullcontext()
+            if mumu:
+                from AutoScriptor.utils.perf import mumu_safe_subprocess
+                ctx = mumu_safe_subprocess()
+            with ctx:
+                for _ in range(repeat):
+                    result = subprocess.run(
+                        command_extend,
+                        shell=False,
+                        check=False,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        encoding='utf-8',
+                        creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0,
+                    )
             ret_code = result.returncode
             retval = result.stdout
             if ret_code != 0 and result.stderr:

@@ -193,3 +193,11 @@ electron-builder **不会清空你的 `dist/`**；每次打桌面包会刷新 **
 |------|------|
 | **本文** | 构建参数、缓存、产物形态、NSIS/HTML 区别、安装流程与排错 |
 | [nuitka-reference.md](./nuitka-reference.md) | Nuitka 选项、post 拷贝、嵌入式 Python、验收清单等 |
+
+---
+
+## 15. Current Packaging Checks
+
+- `npm run verify-pack` validates both the Electron `app.asar` entry and the backend payload. It fails if `backend.zip` is missing from the unpacked app root/resources, or if that zip does not contain `autoscriptor-engine.exe`.
+- The installer treats a failing `MuMuManager version` command as a warning when ADB is usable. This matches runtime behavior: MuMuManager is useful for official lifecycle commands, while ADB is the stable fallback for app/package/input checks.
+- In the installer UI, this case is displayed as a yellow warning instead of a red blocking error. Users can finish installation, then use WebUI `启动诊断` to inspect MuMuManager, ADB, App, NemuIpc, OCR and UI Map layers separately.

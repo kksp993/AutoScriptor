@@ -1,5 +1,4 @@
 from AutoScriptor import *
-import time
 import getpass
 from dataclasses import dataclass
 from AutoScriptor.utils.logger import logger
@@ -141,7 +140,7 @@ def _fill_account_password(ctx_or_account, password = None):
     # Agree to terms checkbox (may already be checked)
     click(T("我已同意"), if_exist=True, timeout=2)
     click(T("登录", box=Box(23,487,674,62).margin()), timeout=5)
-    time.sleep(1)
+    sleep(1)
 
 
 def _handle_post_login_popups():
@@ -171,7 +170,7 @@ def _select_character():
     wait_for_appear(I("加载中"), timeout=10)
     locate(I("活动公告页面"), 30)
     click(B(1240, 5, 40, 60))
-    time.sleep(0.5)
+    sleep(0.5)
     dismiss_floating_window(max_retries=1, debug=False)
     if ui_T(T("精彩活动"), 3):
         click(B(1100, 40, 40, 40))
@@ -197,7 +196,7 @@ def _on_authorization(ctx):
     click(B(719, 536, 144, 26), if_exist=True)
     click(T("授权并登录"), if_exist=True, timeout=3)
     click(T("添加账号"), if_exist=True, timeout=3)
-    time.sleep(1)
+    sleep(1)
     if ui_T(T("请输入手机号或用户名"), 3) or ui_T(T("账号密码登录"), 3):
         click(T("账号登录"), if_exist=True, delay=1)
         _fill_account_password(ctx)
@@ -213,7 +212,7 @@ def _on_password_login(ctx):
 @_login.page("快速登录", T("手机号登录"), T("账号登录"))
 def _on_quick_login(ctx):
     click(T("账号登录"))
-    time.sleep(1)
+    sleep(1)
     if ui_T(T("账号密码登录"), 5) or ui_T(T("请输入手机号或用户名"), 5):
         _fill_account_password(ctx)
     else:
@@ -235,7 +234,7 @@ def ensure_server(server_name:str):
             if server_name == extract_info(B(1007,49,232,30), post_process=lambda s: s.strip().replace("（","(").split("(")[0], ensure_not_empty=True):
                 return
             cnt += 1
-            time.sleep(1)
+            sleep(1)
         raise Exception(f"当前服务器不是{server_name},当前服务器是{cur_server},请检查服务器是否正确")
 
 def ensure_character(character_name:str):
