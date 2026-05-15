@@ -313,7 +313,10 @@ class Scheduler:
     def _loop(self):
         from services.core.watcher import ConfigWatcher
         from AutoScriptor.utils.app_config import cfg
-        watcher = ConfigWatcher(cfg.CONFIG_PATH)
+        watcher = ConfigWatcher(
+            cfg.CONFIG_PATH,
+            extra_paths=lambda: [cfg._account_path(cfg.current_account())] if cfg.current_account() else [],
+        )
         watcher.start_watching()
         while True:
             self._wake.clear()
@@ -423,9 +426,7 @@ class Scheduler:
             else:
                 try:
                     if self._task_manager:
-                        with self._task_manager._cfg_lock:
-                            cfg.switch_character(server, name)
-                            self._task_manager.reload_tasks()
+                        self._task_manager.switch_character_and_reload(server, name)
                     else:
                         cfg.switch_character(server, name)
                 except (KeyError, ValueError) as e:
@@ -441,9 +442,7 @@ class Scheduler:
         if switched and original_key[0] and original_key[1]:
             try:
                 if self._task_manager:
-                    with self._task_manager._cfg_lock:
-                        cfg.switch_character(*original_key)
-                        self._task_manager.reload_tasks()
+                    self._task_manager.switch_character_and_reload(*original_key)
                 else:
                     cfg.switch_character(*original_key)
                 self.invalidate_login()

@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import subprocess
 import sys
+import tempfile
 import types
 import unittest
+from contextlib import contextmanager
+from copy import deepcopy
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+import os
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -59,6 +65,61 @@ def autoscriptor_logger_stubs() -> dict[str, types.ModuleType]:
         "AutoScriptor.utils": utils,
         "AutoScriptor.utils.logger": logger_module,
     }
+
+
+def import_app_config_for_test(tmp_root: str):
+    autoscriptor = types.ModuleType("AutoScriptor")
+    crypto = types.ModuleType("AutoScriptor.crypto")
+    crypto_config = types.ModuleType("AutoScriptor.crypto.config_manager")
+    crypto_config.ConfigManager = SimpleNamespace(
+        encrypt_data=lambda data, key: {"encrypted_data": json.dumps(data), "key": key},
+        decrypt_data=lambda enc, key: json.loads(enc.get("encrypted_data", "{}")),
+    )
+    utils = types.ModuleType("AutoScriptor.utils")
+    game_profession = types.ModuleType("AutoScriptor.utils.game_profession")
+    game_profession.DEFAULT_GAME_PROFESSION = "default_profession"
+    game_profession.normalize_game_profession = lambda raw: raw or "default_profession"
+    logger_module = types.ModuleType("AutoScriptor.utils.logger")
+    logger_module.logger = SimpleNamespace(
+        debug=lambda *args, **kwargs: None,
+        info=lambda *args, **kwargs: None,
+        warning=lambda *args, **kwargs: None,
+        error=lambda *args, **kwargs: None,
+    )
+    paths = types.ModuleType("AutoScriptor.utils.paths")
+    paths.get_data_root = lambda: tmp_root
+
+    module_name = "app_config_under_test"
+    spec = importlib.util.spec_from_file_location(
+        module_name,
+        ROOT / "AutoScriptor/utils/app_config.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    with patch.dict(sys.modules, {
+        "AutoScriptor": autoscriptor,
+        "AutoScriptor.crypto": crypto,
+        "AutoScriptor.crypto.config_manager": crypto_config,
+        "AutoScriptor.utils": utils,
+        "AutoScriptor.utils.game_profession": game_profession,
+        "AutoScriptor.utils.logger": logger_module,
+        "AutoScriptor.utils.paths": paths,
+    }):
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+    return module
+
+
+def import_watcher_for_test():
+    module_name = "config_watcher_under_test"
+    spec = importlib.util.spec_from_file_location(
+        module_name,
+        ROOT / "services/core/watcher.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    with patch.dict(sys.modules, autoscriptor_logger_stubs()):
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+    return module
 
 
 class TestConfigTemplateContract(unittest.TestCase):
@@ -264,6 +325,196 @@ class TestRuntimeControllerContract(unittest.TestCase):
         self.assertEqual(calls, ["cancel", "scheduler_stop", "invalidate_login"])
 
 
+class TestWebUILifecycleServiceContract(unittest.TestCase):
+    def setUp(self):
+        sys.modules.pop("services.webui.lifecycle_service", None)
+        from services.webui.lifecycle_service import WebUILifecycleService
+
+        self.WebUILifecycleService = WebUILifecycleService
+
+    def _service(self, cfg=None, task_tree_service=None, task_manager=None, scheduler=None):
+        self.calls = []
+        cfg = cfg or SimpleNamespace(
+            _config={},
+            _account_data={},
+            save_config=lambda: self.calls.append("save_config"),
+            _save_account_file=lambda: self.calls.append("save_account_file"),
+            switch_character=lambda server, character: self.calls.append(("switch_character", server, character)),
+            switch_account=lambda name, key: self.calls.append(("switch_account", name, key)),
+            set_character_game_profession=lambda server, character, profession: self.calls.append(
+                ("set_profession", server, character, profession)
+            ),
+        )
+        task_tree_service = task_tree_service or SimpleNamespace(
+            strip_runtime_fields=lambda tasks: deepcopy(tasks),
+            normalize_dispatch_queue=lambda queue: queue,
+        )
+
+        if task_manager is None:
+            class FakeTaskManager:
+                @contextmanager
+                def config_transaction(inner_self):
+                    self.calls.append("lock")
+                    yield
+
+                def reload_tasks(inner_self, security_key=None):
+                    self.calls.append(("reload_tasks", security_key))
+
+                def switch_character_and_reload(inner_self, server, character):
+                    self.calls.append(("switch_character_and_reload", server, character))
+
+            task_manager = FakeTaskManager()
+
+        scheduler = scheduler or SimpleNamespace(
+            wake=lambda: self.calls.append("wake"),
+            invalidate_login=lambda: self.calls.append("invalidate_login"),
+        )
+
+        return self.WebUILifecycleService(
+            cfg,
+            task_manager,
+            scheduler,
+            task_tree_service,
+            refresh_order_map=lambda: self.calls.append("read_config"),
+            mark_config_changed=lambda reason: self.calls.append(("bump", reason)) or 42,
+            apply_log_level=lambda: self.calls.append("apply_log_level"),
+        ), cfg
+
+    def test_save_tasks_sanitizes_persists_reloads_and_wakes(self):
+        def strip_runtime_fields(tasks):
+            cleaned = deepcopy(tasks)
+            cleaned["group"]["task"].pop("param_meta", None)
+            return cleaned
+
+        service, cfg = self._service(
+            task_tree_service=SimpleNamespace(strip_runtime_fields=strip_runtime_fields)
+        )
+        tasks = {"group": {"task": {"on": True, "next_exec_time": 0, "param_meta": {"x": "secret"}}}}
+
+        version = service.save_tasks(tasks)
+
+        self.assertEqual(version, 42)
+        self.assertEqual(cfg._config["tasks"], {"group": {"task": {"on": True, "next_exec_time": 0}}})
+        self.assertIn("param_meta", tasks["group"]["task"])
+        self.assertEqual(
+            self.calls,
+            ["lock", "save_config", ("reload_tasks", None), "wake", "read_config", ("bump", "save tasks")],
+        )
+
+    def test_switch_character_uses_task_manager_boundary_and_invalidates_login(self):
+        service, _cfg = self._service()
+
+        version = service.switch_character("s1", "hero", reason="select run character")
+
+        self.assertEqual(version, 42)
+        self.assertEqual(
+            self.calls,
+            [("switch_character_and_reload", "s1", "hero"), "invalidate_login", "read_config", ("bump", "select run character")],
+        )
+
+    def test_save_dispatch_queue_normalizes_and_writes_account_file_only(self):
+        def normalize(queue):
+            return [item for item in queue if item.get("server") == "s1"]
+
+        service, cfg = self._service(
+            cfg=SimpleNamespace(
+                _config={},
+                _account_data={},
+                _save_account_file=lambda: self.calls.append("save_account_file"),
+            ),
+            task_tree_service=SimpleNamespace(normalize_dispatch_queue=normalize),
+        )
+
+        queue, version = service.save_dispatch_queue([
+            {"server": "s1", "name": "a"},
+            {"server": "missing", "name": "x"},
+        ])
+
+        self.assertEqual(version, 42)
+        self.assertEqual(queue, [{"server": "s1", "name": "a"}])
+        self.assertEqual(cfg._account_data["dispatch_queue"], queue)
+        self.assertEqual(self.calls, ["lock", "save_account_file", ("bump", "save dispatch queue")])
+
+    def test_delete_character_prunes_dispatch_queue(self):
+        def normalize(queue):
+            return [item for item in queue if item["name"] != "deleted"]
+
+        def delete_character(server, character):
+            self.calls.append(("delete_character", server, character))
+
+        service, cfg = self._service(
+            cfg=SimpleNamespace(
+                _config={},
+                _account_data={
+                    "dispatch_queue": [
+                        {"server": "s1", "name": "keep"},
+                        {"server": "s1", "name": "deleted"},
+                    ]
+                },
+                delete_character=delete_character,
+                _save_account_file=lambda: self.calls.append("save_account_file"),
+            ),
+            task_tree_service=SimpleNamespace(normalize_dispatch_queue=normalize),
+        )
+
+        version = service.delete_character("s1", "deleted")
+
+        self.assertEqual(version, 42)
+        self.assertEqual(cfg._account_data["dispatch_queue"], [{"server": "s1", "name": "keep"}])
+        self.assertEqual(
+            self.calls,
+            ["lock", ("delete_character", "s1", "deleted"), "save_account_file", ("bump", "delete character")],
+        )
+
+
+class TestConfigLifecycleContract(unittest.TestCase):
+    def test_account_can_restore_decrypted_credentials_after_config_only_reload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module = import_app_config_for_test(tmp)
+            account = module.Account("main", {"characters": {}, "active_character": {}, "encryption": {}})
+            account.restore_credentials({"account": "user", "password": "pwd"})
+
+            self.assertEqual(account.credentials, {"account": "user", "password": "pwd"})
+
+    def test_reload_preserving_decrypted_credentials_keeps_verified_account_unlocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module = import_app_config_for_test(tmp)
+            cfg = module.cfg
+            cfg.add_account("main", "user", "pwd", "s1", "hero", "key")
+            cfg._config["current_account"] = "main"
+            cfg.save_config()
+            cfg.load_config("key")
+            self.assertTrue(cfg.has_decrypted_credentials())
+
+            cfg.reload_preserving_decrypted_credentials()
+
+            self.assertTrue(cfg.has_decrypted_credentials())
+            self.assertEqual(cfg._config["game"]["account"], "user")
+            self.assertEqual(cfg._config["game"]["password"], "pwd")
+
+    def test_task_manager_reload_uses_config_reload_preserving_credentials(self):
+        content = (ROOT / "services/core/task_manager.py").read_text(encoding="utf-8")
+
+        self.assertIn("reload_preserving_decrypted_credentials", content)
+        self.assertNotIn("saved_game = cfg._config.get('game'", content)
+
+    def test_config_watcher_tracks_extra_account_file(self):
+        watcher_module = import_watcher_for_test()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = os.path.join(tmp, "config.json")
+            account_path = os.path.join(tmp, "account.json")
+            Path(config_path).write_text("{}", encoding="utf-8")
+            Path(account_path).write_text("{}", encoding="utf-8")
+
+            watcher = watcher_module.ConfigWatcher(config_path, extra_paths=lambda: [account_path])
+            watcher.start_watching()
+            time.sleep(1.1)
+            Path(account_path).write_text('{"changed": true}', encoding="utf-8")
+
+            self.assertTrue(watcher.should_reload())
+
+
 class TestWebUIFrontendContract(unittest.TestCase):
     JS_FILES = [
         ROOT / "services/webui/static/js/app.js",
@@ -284,6 +535,7 @@ class TestWebUIFrontendContract(unittest.TestCase):
 
         self.assertIn("fetchRuntimeSnapshot", content)
         self.assertIn("'/runtime/snapshot'", content)
+        self.assertNotIn("LOG_NEEDS_TASK_REFRESH", content)
         self.assertNotIn("fetchOverview", content)
         self.assertNotIn("fetchSchedulerStatus", content)
         self.assertNotIn("fetchRunStatus", content)
@@ -345,6 +597,12 @@ class TestWebUIServerRouteContract(unittest.TestCase):
     def test_removed_profile_routes_do_not_return(self):
         self.assertNotIn("/api/profiles", self.routes)
         self.assertNotIn("/api/profiles/switch", self.routes)
+
+    def test_webui_routes_do_not_bypass_task_lifecycle(self):
+        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("from ZmxyOL.task import load_tasks", content)
+        self.assertNotIn("with TASK_MANAGER._cfg_lock", content)
 
 
 class TestUpdaterGitCommandContract(unittest.TestCase):
