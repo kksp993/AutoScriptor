@@ -5,6 +5,7 @@ import time
 import traceback
 import getpass
 import cv2
+from typing import Callable
 from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
 from AutoScriptor.core.control import MixControl
 from AutoScriptor.core.targets import Target, B
@@ -20,7 +21,7 @@ from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.app_package_resolve import resolve_app_to_start
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
 from AutoScriptor.utils.edit_img import launch_editor
-from AutoScriptor.utils.cancel import check_cancel_raise, cancellable_sleep
+from AutoScriptor.utils.cancel import check_cancel_raise, cancellable_sleep, join_with_cancel, sleep_with_cancel
 
 def ensure_all_environment_ready():
     # 初始化编排器
@@ -37,37 +38,63 @@ def ensure_all_environment_ready():
     app_to_start = cfg["app"]["app_to_start"]
     return selected_emulator_index, adb_addr, app_to_start
 
-def ensure_app_running(selected_emulator_index, adb_addr, app_to_start):
+def ensure_app_running(
+    selected_emulator_index,
+    adb_addr,
+    app_to_start,
+    *,
+    start_emulator: bool | None = None,
+    launch_app: bool | None = None,
+    cancel_check: Callable[[], None] | None = None,
+):
     """
-    确保模拟器和应用都在运行。若模拟器未启动则先启动模拟器，再启动应用。
-    
-    Args:
-        package: 应用包名，默认使用 cfg 中配置的 app_to_start
-        wait: 启动模拟器后等待就绪的秒数，默认 15s
-    
-    Returns:
-        bool: True 表示应用已在运行或已成功启动
+    确保当前配置的 MuMu 实例可控制，并按需启动游戏。
+
+    start_emulator:
+        True 表示执行链需要 MuMu，未运行时必须启动。None 兼容旧语义，
+        使用 cfg["app"]["auto_start"]。
+    launch_app:
+        True 表示启动/拉起 app_to_start。None 兼容旧语义，使用
+        cfg["app"]["auto_start"]。
+    cancel_check:
+        协作式取消检查；WebUI 停止按钮会通过它快速打断启动、解析和探测等待。
     """
+    cancel_check = cancel_check or check_cancel_raise
+    if start_emulator is None:
+        start_emulator = bool(cfg["app"].get("auto_start", True))
+    if launch_app is None:
+        launch_app = bool(cfg["app"].get("auto_start", True))
+
     mumu_manager_path = cfg["emulator"]["emu_path"]
-    logger.debug("ensure_app_running: index=%s, adb=%s, app=%s, emu=%s",
-                 selected_emulator_index, adb_addr, app_to_start, mumu_manager_path)
+    logger.debug(
+        "ensure_app_running: index=%s, adb=%s, app=%s, emu=%s, start_emulator=%s, launch_app=%s",
+        selected_emulator_index, adb_addr, app_to_start, mumu_manager_path, start_emulator, launch_app,
+    )
     # 启动模拟器前必须恢复正常进程优先级。
     # boost() 会将 Python 设为 HIGH_PRIORITY_CLASS，subprocess 子进程默认继承，
     # MuMu Hypervisor 在高优先级下启动会误判权限 → "安卓设备无法启动"。
     from AutoScriptor.utils.perf import unboost as _unboost
     _unboost()
     mumu = Mumu().select(selected_emulator_index)
-    # app_to_start 为空或未安装时由 resolve_app_to_start 枚举候选包并写回 config.json
-    if cfg["app"]["auto_start"]:
-        if not mumu.power.is_running():
-            mumu.power.start(None)
-        resolved = resolve_app_to_start(mumu)
+    cancel_check()
+
+    is_running = mumu.power.is_running()
+    if not is_running:
+        if not start_emulator:
+            raise RuntimeError("ensure_app_running: 模拟器未运行，且当前调用不允许自动启动")
+        mumu.power.start(None, cancel_check=cancel_check)
+        is_running = True
+    if not is_running:
+        raise RuntimeError("ensure_app_running: 模拟器启动失败")
+
+    # app_to_start 为空或未安装时由 resolve_app_to_start 枚举候选包并写回 config.json。
+    # 解析只在需要拉起应用时进行，避免 WebUI 初始化或纯设备探测误触 MuMuManager。
+    if launch_app:
+        cancel_check()
+        resolved = resolve_app_to_start(mumu, cancel_check=cancel_check)
         mumu.app.launch(resolved)
-    else:
-        if mumu.power.is_running():
-            resolve_app_to_start(mumu)
-        else:
-            logger.debug("auto_start 为 false 且模拟器未运行，跳过 app_to_start 解析")
+        cancel_check()
+
     logger.info("模拟器启动完成")
     mixctrl = MixControl(mumu, serial=adb_addr)
     logger.info("编排器初始化完成.")
@@ -85,14 +112,14 @@ def ensure_app_running(selected_emulator_index, adb_addr, app_to_start):
         t = threading.Thread(target=_click_test)
         t.daemon = True
         t.start()
-        t.join(5)
+        join_with_cancel(t, 5, cancel_check)
         if not t.is_alive() and 'error' not in click_result:
             success = True
         if success:
             logger.info("测试点击(0,0)成功，模拟器响应正常。")
             break
         logger.error(f"测试点击(0,0)，第{i}次尝试，第{interval}秒后重试")
-        time.sleep(interval)
+        sleep_with_cancel(interval, cancel_check)
     if not success:
         logger.error("多次点击测试失败，模拟器无响应")
         raise RuntimeError("ensure_app_running: 多次点击测试失败，模拟器无响应，请检查模拟器状态")
@@ -123,7 +150,7 @@ def init():
     """
     global mixctrl, mumu
     idx, addr, app = ensure_all_environment_ready()
-    mixctrl, mumu = ensure_app_running(idx, addr, app)
+    mixctrl, mumu = ensure_app_running(idx, addr, app, start_emulator=True, launch_app=True)
     # Propagate live references to package-level namespaces so that
     # ``from AutoScriptor import mixctrl`` picks up the real object
     # when the import happens *after* init().
@@ -702,5 +729,5 @@ def _ensure_boosted():
     if _boosted:
         return
     _boosted = True
-    from AutoScriptor.utils.perf import boost
-    boost()                          # 提升 Python 进程自身（不提升 MuMu，避免干扰其他程序）
+    from AutoScriptor.utils.perf import ABOVE_NORMAL_PRIORITY_CLASS, boost
+    boost(process_priority=ABOVE_NORMAL_PRIORITY_CLASS)  # 温和提升 Python 自身；不提升 MuMu，避免干扰其他程序

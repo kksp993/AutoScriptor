@@ -453,11 +453,11 @@ async def _on_startup():
 
 
 async def _deferred_heavy_init():
-    """在 uvicorn 已开始监听后，后台执行重量级初始化。"""
+    """在 uvicorn 已开始监听后，后台执行任务注册等轻量初始化。"""
     global _init_done
     loop = asyncio.get_event_loop()
     try:
-        logger.info("后台初始化：设备/运行时/任务加载...")
+        logger.info("后台初始化：运行时/任务加载（不启动设备）...")
         await loop.run_in_executor(None, _do_heavy_init)
         _init_done = True
         if cfg.get("scheduler.auto_start", False):
@@ -474,17 +474,9 @@ async def _deferred_heavy_init():
 
 
 def _do_heavy_init():
-    """同步版的重量级初始化，在线程池中执行。"""
-    try:
-        from AutoScriptor.core.api import init as _init_env
-        _init_env()
-    except Exception as e:
-        logger.error("设备初始化失败: %s", e)
-
+    """同步版初始化：只做不触碰模拟器的准备工作。"""
     try:
         from services.core.runtime_context import runtime_ctx
-        from AutoScriptor.core.api import mixctrl, mumu
-        runtime_ctx.init(mixctrl, mumu)
         runtime_ctx.init_bg()
         runtime_ctx.init_vlm()
     except Exception as e:

@@ -13,7 +13,7 @@ const SettingsPanel = {
       sectionLabels: { app: '应用设置', ocr: 'OCR 设置', emulator: '模拟器设置', llm: '智能体' },
       keyLabels: {
         name: '应用名称', app_to_start: '服务器选择', restart_on_error: '出错重启',
-        run_in_background: '后台运行', auto_start: '自动启动', max_retry: '最大重试',
+        run_in_background: '后台运行', auto_start: '兼容自动启动', max_retry: '最大重试',
         debug_mode: '调试模式', cpu_cores: 'CPU 核心数',
         use_gpu: '使用 GPU', index: '模拟器索引',
         adb_addr: 'ADB 地址', mumu_folder: 'MuMu 安装目录', post_execution: '执行后动作',

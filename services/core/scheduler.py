@@ -18,6 +18,7 @@ import os
 import time
 import threading
 from enum import Enum
+from AutoScriptor.utils.cancel import TaskCancelled
 from AutoScriptor.utils.logger import logger
 
 from services.core.runtime_context import runtime_ctx
@@ -255,6 +256,10 @@ class Scheduler:
     def wake(self):
         self._wake.set()
 
+    def _check_cancel_requested(self) -> None:
+        if self._task_manager and self._task_manager._cancel_event.is_set():
+            raise TaskCancelled("scheduler stop requested")
+
     def stop(self, timeout: float | None = None):
         self._stop.set()
         self._wake.set()
@@ -460,7 +465,7 @@ class Scheduler:
         explicit_tasks=[...] → 单任务模式，执行外部传入的固定列表（仍复用登录确认与中断控制）
         """
         from AutoScriptor.utils.app_config import cfg
-        from AutoScriptor.utils.perf import boost, unboost
+        from AutoScriptor.utils.perf import ABOVE_NORMAL_PRIORITY_CLASS, boost, unboost
 
         if not cfg._config.get("game", {}).get("character_name", ""):
             logger.warning("⚠️ 账号未验证，跳过执行")
@@ -498,14 +503,17 @@ class Scheduler:
                 logger.info("📅 发现 %d 个待执行任务: %s", len(due), due)
                 self._maybe_daily_restart(cfg)
 
-                # 必须先让模拟器在正常优先级下启动，启动完成后再 boost。
-                # 如果先 boost 再启动，MuMu 子进程会继承 HIGH_PRIORITY_CLASS，
-                # 导致虚拟化引擎误判权限状态 → "安卓设备无法启动"。
+                # 必须先让模拟器在正常优先级下启动，启动完成后再温和 boost。
+                # 如果先 boost 再启动，MuMu 子进程会继承提升后的优先级，
+                # 可能导致虚拟化引擎误判权限状态 → "安卓设备无法启动"。
                 unboost()
                 try:
                     # 与 api.init() 不同：ensure_app_running 的返回值必须写入 runtime_ctx，
                     # 否则 mixctrl 仅存在于栈上，runtime_ctx.mixctrl 仍为 None（例如关机清理后）。
-                    runtime_ctx.refresh()
+                    runtime_ctx.refresh(cancel_check=self._check_cancel_requested)
+                except TaskCancelled:
+                    logger.info("⏹ 检测到取消请求，停止执行")
+                    break
                 except Exception as e:
                     logger.error("📅 模拟器启动失败: %s", e, exc_info=True)
                     self._consecutive_errors += 1
@@ -517,8 +525,11 @@ class Scheduler:
                                 delay, self._consecutive_errors, MAX_CONSECUTIVE_ERRORS)
                     self._wake.clear()
                     self._wake.wait(delay)
+                    if self._task_manager._cancel_event.is_set() or self.state != SchedulerState.RUNNING:
+                        logger.info("⏹ 检测到取消请求，停止执行")
+                        break
                     continue
-                boost()
+                boost(process_priority=ABOVE_NORMAL_PRIORITY_CLASS)
 
                 self._ensure_character_logged_in(cfg)
 

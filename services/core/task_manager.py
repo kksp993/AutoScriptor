@@ -128,6 +128,10 @@ class TaskManager:
     def _reset_cancel(self):
         self._cancel_event.clear()
 
+    def _check_cancel_requested(self):
+        if self._cancel_event.is_set():
+            raise TaskCancelled("任务已终止")
+
     @contextmanager
     def config_transaction(self):
         """Serialize config mutations that must not race with task execution."""
@@ -438,7 +442,7 @@ class TaskManager:
             runtime_ctx.mumu = None
 
             sleep(3)
-            runtime_ctx.refresh()
+            runtime_ctx.refresh(cancel_check=self._check_cancel_requested)
             sleep(5)
             mm.set_region("登录")
             return True
@@ -450,7 +454,7 @@ class TaskManager:
         """重启 ADB 并验证连接。"""
         import subprocess
         import threading
-        import time as _time
+        from AutoScriptor.utils.cancel import join_with_cancel, sleep_with_cancel
         adb = cfg["emulator"]["adb_path"]
         addr = str(cfg["emulator"].get("adb_addr", ""))
         subprocess.run([adb, "kill-server"], capture_output=True, text=True)
@@ -468,11 +472,11 @@ class TaskManager:
                     result["error"] = e
             t = threading.Thread(target=_test, daemon=True)
             t.start()
-            t.join(5)
+            join_with_cancel(t, 5, self._check_cancel_requested)
             if not t.is_alive() and result.get("ok"):
                 logger.info("✅ ADB重启完成，点击测试成功")
                 return
-            _time.sleep(interval)
+            sleep_with_cancel(interval, self._check_cancel_requested)
         raise RuntimeError("ADB重启后仍无法控制(点击测试失败)")
 
     # ── 工具 ──

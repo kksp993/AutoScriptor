@@ -6,6 +6,9 @@
 # @Software: PyCharm
 
 import time
+from typing import Callable
+
+from AutoScriptor.utils.cancel import TaskCancelled, check_cancel_raise, sleep_with_cancel
 from AutoScriptor.utils.logger import logger
 
 
@@ -23,7 +26,12 @@ class Power:
         except Exception:
             return False
 
-    def start(self, package: str = None, max_retries: int = 2) -> bool:
+    def start(
+        self,
+        package: str = None,
+        max_retries: int = 2,
+        cancel_check: Callable[[], None] | None = None,
+    ) -> bool:
         """
             启动模拟器(start)
         :param package: 启动时自动启动应用的应用包名
@@ -34,8 +42,10 @@ class Power:
         if package:
             logger.info(f"将自动启动应用: {package}")
 
+        cancel_check = cancel_check or check_cancel_raise
         last_error = None
         for attempt in range(max_retries + 1):
+            cancel_check()
             try:
                 self.utils.set_operate('control')
                 args = ['launch']
@@ -50,12 +60,14 @@ class Power:
                 last_error = RuntimeError(retval)
                 if attempt < max_retries:
                     logger.warning(f"模拟器启动失败 (尝试 {attempt+1}/{max_retries+1}): {retval}")
-                    time.sleep(5)
+                    sleep_with_cancel(5, cancel_check)
+            except TaskCancelled:
+                raise
             except Exception as e:
                 last_error = e
                 if attempt < max_retries:
                     logger.warning(f"模拟器启动异常 (尝试 {attempt+1}/{max_retries+1}): {e}")
-                    time.sleep(5)
+                    sleep_with_cancel(5, cancel_check)
 
         logger.error(f"模拟器启动失败 (已重试 {max_retries} 次): {last_error}")
         raise last_error
@@ -83,29 +95,8 @@ class Power:
                 return True
             time.sleep(2)
 
-        logger.warning(f"等待模拟器关闭超时 ({timeout}s)，尝试强制关闭")
-        self._force_kill()
-        time.sleep(3)
-        return not self.is_running()
-
-    def _force_kill(self):
-        """强制终止 MuMu 模拟器进程（最后手段）。"""
-        import subprocess
-        mumu_processes = [
-            "MuMuVMMHeadless.exe", "MuMuVMMSVC.exe", "MuMuPlayer.exe",
-        ]
-        for proc in mumu_processes:
-            try:
-                subprocess.run(
-                    ["taskkill", "/F", "/IM", proc],
-                    shell=False,
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0,
-                )
-            except Exception:
-                pass
+        logger.warning(f"等待模拟器 {self.utils.get_vm_id()} 关闭超时 ({timeout}s)，不执行全局 taskkill 以免影响其他 MuMu 实例")
+        return False
 
     def restart(self):
         """

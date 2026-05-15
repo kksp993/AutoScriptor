@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import os
-import time
-from typing import Any
+from typing import Any, Callable
 
+from AutoScriptor.utils.cancel import check_cancel_raise, sleep_with_cancel
 from AutoScriptor.utils.logger import logger
 
 # 与常见渠道一致；新渠道可追加到此列表（优先靠前的先匹配）
@@ -17,16 +17,25 @@ ZMXY_PACKAGE_FALLBACK_ORDER: tuple[str, ...] = (
 )
 
 
-def _fetch_installed_with_retry(mumu, max_wait: float = 90.0, interval: float = 2.0) -> list[dict[str, Any]] | None:
+def _fetch_installed_with_retry(
+    mumu,
+    max_wait: float = 90.0,
+    interval: float = 2.0,
+    cancel_check: Callable[[], None] | None = None,
+) -> list[dict[str, Any]] | None:
+    cancel_check = cancel_check or check_cancel_raise
+    import time
+
     deadline = time.monotonic() + max_wait
     last_err: Exception | None = None
     while time.monotonic() < deadline:
+        cancel_check()
         try:
             return mumu.app.get_installed()
         except Exception as e:
             last_err = e
             logger.debug("get_installed 暂不可用，%.1fs 后重试: %s", interval, e)
-            time.sleep(interval)
+            sleep_with_cancel(interval, cancel_check)
     logger.error("多次重试后仍无法获取已安装应用列表: %s", last_err)
     return None
 
@@ -67,7 +76,7 @@ def _choose_package(
     return None
 
 
-def resolve_app_to_start(mumu) -> str:
+def resolve_app_to_start(mumu, cancel_check: Callable[[], None] | None = None) -> str:
     """
     根据 cfg['app']['app_to_start'] 与已安装应用解析最终包名。
     - 未填写或仅空白：按 ZMXY_PACKAGE_FALLBACK_ORDER 依次匹配。
@@ -77,7 +86,7 @@ def resolve_app_to_start(mumu) -> str:
     from AutoScriptor.utils.app_config import cfg
 
     raw = _normalize_raw(cfg["app"].get("app_to_start"))
-    installed = _fetch_installed_with_retry(mumu)
+    installed = _fetch_installed_with_retry(mumu, cancel_check=cancel_check or check_cancel_raise)
     if not installed:
         raise RuntimeError(
             "无法读取模拟器已安装应用列表（请确认 MuMu 已启动且 MuMuManager 可用）。"

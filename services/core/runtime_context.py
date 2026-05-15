@@ -21,8 +21,10 @@ RuntimeContext: 运行时对象的集中生命周期管理
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING
+import sys
+from typing import Callable, TYPE_CHECKING
 
+from AutoScriptor.utils.cancel import check_cancel_raise
 from AutoScriptor.utils.logger import logger
 
 if TYPE_CHECKING:
@@ -41,6 +43,7 @@ class RuntimeContext:
         self.bg = None
         self.vlm_client = None
         self._initialized = False
+        self._refresh_lock = threading.Lock()
 
     @classmethod
     def instance(cls) -> RuntimeContext:
@@ -61,7 +64,7 @@ class RuntimeContext:
         self.mixctrl = mixctrl
         self.mumu = mumu
         self._sync_globals()
-        self._initialized = True
+        self._initialized = mixctrl is not None and mumu is not None
         logger.info("RuntimeContext 初始化完成")
 
     def init_bg(self):
@@ -80,7 +83,7 @@ class RuntimeContext:
         if not cfg.get("llm.use_agent", False):
             return
         try:
-            from AutoScriptor.vlm.vlm import VLMCliient
+            from AutoScriptor.vlm.vlm import VLMClient
             self.vlm_client = VLMClient()
             logger.info("RuntimeContext: VLM client 初始化完成")
         except Exception as e:
@@ -88,7 +91,7 @@ class RuntimeContext:
 
     # ── 刷新（模拟器重启后） ──
 
-    def refresh(self):
+    def refresh(self, cancel_check: Callable[[], None] | None = None):
         """
         Release old NemuIpc connections, re-create mixctrl/mumu,
         and sync back to module-level globals.
@@ -97,17 +100,24 @@ class RuntimeContext:
         from AutoScriptor.utils.app_config import cfg
         from AutoScriptor import ensure_app_running
 
-        self._release_nemu_ipc()
-        mixctrl, mumu = ensure_app_running(
-            cfg["emulator"]["index"],
-            cfg["emulator"]["adb_addr"],
-            cfg["app"]["app_to_start"],
-        )
-        self.mixctrl = mixctrl
-        self.mumu = mumu
-        self._sync_globals()
-        logger.info("RuntimeContext 已刷新 (mixctrl/mumu 已替换)")
-        return mixctrl, mumu
+        cancel_check = cancel_check or check_cancel_raise
+        with self._refresh_lock:
+            cancel_check()
+            self._release_nemu_ipc()
+            mixctrl, mumu = ensure_app_running(
+                cfg["emulator"]["index"],
+                cfg["emulator"]["adb_addr"],
+                cfg["app"]["app_to_start"],
+                start_emulator=True,
+                launch_app=True,
+                cancel_check=cancel_check,
+            )
+            self.mixctrl = mixctrl
+            self.mumu = mumu
+            self._initialized = True
+            self._sync_globals()
+            logger.info("RuntimeContext 已刷新 (mixctrl/mumu 已替换)")
+            return mixctrl, mumu
 
     # ── 关闭 ──
 
@@ -118,6 +128,7 @@ class RuntimeContext:
         self.mumu = None
         self.vlm_client = None
         self._initialized = False
+        self._sync_globals()
         logger.info("RuntimeContext 已关闭")
 
     # ── 内部工具 ──
@@ -136,7 +147,7 @@ class RuntimeContext:
             nemu.nemu_ipc_release()
             logger.debug("NemuIpc 连接已释放")
         except Exception as e:
-            logger.debug("释放 NemuIpc 连接: %s", e)
+            logger.debug("释放 NemuIpc 连接失败: %s", e)
 
     def _sync_globals(self):
         """
@@ -145,15 +156,15 @@ class RuntimeContext:
         to the module attribute, so we patch both ``AutoScriptor`` and
         ``AutoScriptor.core.api``.
         """
-        import AutoScriptor
-        import AutoScriptor.core.api as core_api
+        pkg = sys.modules.get("AutoScriptor")
+        core_api = sys.modules.get("AutoScriptor.core.api")
 
-        if self.mixctrl is not None:
+        if core_api is not None:
             core_api.mixctrl = self.mixctrl
-            AutoScriptor.mixctrl = self.mixctrl
-        if self.mumu is not None:
             core_api.mumu = self.mumu
-            AutoScriptor.mumu = self.mumu
+        if pkg is not None:
+            pkg.mixctrl = self.mixctrl
+            pkg.mumu = self.mumu
 
     # ── 状态查询 ──
 
