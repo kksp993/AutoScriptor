@@ -299,6 +299,9 @@ def _mark_config_changed(reason: str) -> int:
 def _consume_runtime_config_updates() -> bool:
     if not scheduler.consume_tasks_updated():
         return False
+    if getattr(scheduler, "is_executing", False):
+        _mark_config_changed("runtime tasks updated")
+        return True
     read_config()
     _mark_config_changed("runtime tasks updated")
     return True
@@ -1127,6 +1130,12 @@ async def remote_access_toggle_api(request: Request):
     data = await request.json()
     from services.core.remote_access import RemoteAccess
     if data.get("enabled"):
+        if not cfg._config.get("deploy", {}).get("password"):
+            return api_error(
+                403,
+                "开启远程访问前请先设置 WebUI 访问密码",
+                code="deploy_password_required",
+            )
         RemoteAccess.start(
             local_port=5000,
             ssh_server=cfg.get("remote_access.ssh_server", ""),

@@ -29,18 +29,18 @@ def task(
         click(T("进入",color="绿色"))
         sleep(1)
         wait_for_disappear(ui["加载中"].i)
-        bg.add(
-            name="妖兽-战斗",
-            identifier=(T("退出副本"),T("确定")),
-            callback=lambda: [
-                logger.info("妖兽突发事件"),
-                sleep(0.03),
-                bg.set_signal("failed", True),
-                bg.set_signal("try_exit", True),
-                bg.clear()
-            ],
-        )
-        h.set(has_cd=False,speed_x=1).battle_loop(battle_weight=100000),
+        with bg.scope("妖兽") as scope:
+            scope.add(
+                name="战斗结束",
+                identifier=(T("退出副本"),T("确定")),
+                callback=lambda: [
+                    logger.info("妖兽突发事件"),
+                    sleep(0.03),
+                    bg.set_signal("failed", True),
+                    bg.set_signal("try_exit", True),
+                ],
+            )
+            h.set(has_cd=False,speed_x=1).battle_loop(battle_weight=100000)
         click((T("退出副本"),T("确定")), delay=2)
         wait_for_appear(ui["导航-奇闻录"].i)
 

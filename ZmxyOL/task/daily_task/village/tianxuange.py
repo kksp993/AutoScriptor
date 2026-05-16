@@ -76,20 +76,20 @@ def task(
             not_finish = False
             continue
         wait_for_appear(I("加载中"))
-        bg.add(
-            name="天选战斗结束",
-            identifier=(T("胜利", box=Box(568,30,161,85).margin()),T("确定"),T("联赛排行"),T("回家")),
-            callback=lambda : [
-                logger.info("战斗结束"),
-                bg.set_signal("try_exit", True),
-                bg.set_signal("failed", True),
-                click(T("确定"),until=lambda:ui_F(T("确定"))),
-                h.heaven_draw_card_exit(),
-                bg.clear(),
-            ],
-            once=True
-        )
-        h.set(True,3).battle_task(crash_suddenly=True)
+        with bg.scope("天选阁") as scope:
+            scope.add(
+                name="战斗结束",
+                identifier=(T("胜利", box=Box(568,30,161,85).margin()),T("确定"),T("联赛排行"),T("回家")),
+                callback=lambda : [
+                    logger.info("战斗结束"),
+                    bg.set_signal("try_exit", True),
+                    bg.set_signal("failed", True),
+                    click(T("确定"),until=lambda:ui_F(T("确定"))),
+                    h.heaven_draw_card_exit(),
+                ],
+                once=True
+            )
+            h.set(True,3).battle_task(crash_suddenly=True)
         if ui_T(T("恭喜本次通关，请重置或等待"),timeout=3):
             click(T("确定"))
             sleep(1)

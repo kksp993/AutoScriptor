@@ -201,6 +201,7 @@ class Scheduler:
         self._wake = threading.Event()
         self._tasks_updated = threading.Event()
         self._pipeline_active = threading.Event()
+        self._reload_deferred = threading.Event()
         self._consecutive_errors = 0
         self._logged_in_character: tuple[str, str] | None = None  # (server, name)
 
@@ -276,6 +277,49 @@ class Scheduler:
     def is_executing(self) -> bool:
         return self._pipeline_active.is_set()
 
+    def _reload_tasks_from_disk(self, *, reason: str) -> bool:
+        """Reload config/tasks at a safe boundary."""
+        from AutoScriptor.utils.app_config import cfg
+
+        try:
+            # 必须通过 TaskManager.reload_tasks() 重载：内部会在 load_config 前保存 game，
+            # 无安全密码时写回，避免先 cfg.load_config() 清空 game 导致 character_name 丢失。
+            if self._task_manager:
+                self._task_manager.reload_tasks()
+            else:
+                cfg.load_config()
+            self._tasks_updated.set()
+            self._reload_deferred.clear()
+            if reason:
+                logger.info("📅 已应用延迟重载: %s", reason)
+            return True
+        except Exception as e:
+            logger.warning("配置热重载失败: %s", e)
+            return False
+
+    def _handle_watched_config_change(self) -> None:
+        if self.is_executing:
+            from AutoScriptor.utils.app_config import cfg
+
+            if not self._reload_deferred.is_set():
+                logger.info("📅 检测到运行期配置变更，延迟到当前任务结束后重载")
+            try:
+                # 运行中只同步 cfg，避免后续 cfg.save_config() 用旧内存覆盖磁盘变更。
+                # 任务注册表热重载会清 bg，必须等当前任务退出后再做。
+                cfg.reload_preserving_decrypted_credentials()
+            except Exception as e:
+                logger.warning("运行期配置同步失败，将在任务结束后重试: %s", e)
+            self._reload_deferred.set()
+            self._tasks_updated.set()
+            return
+        self._reload_tasks_from_disk(reason="配置文件变更")
+
+    def _apply_deferred_reload_if_needed(self) -> bool:
+        if not self._reload_deferred.is_set():
+            return False
+        logger.info("📅 正在应用运行期延迟重载")
+        return self._reload_tasks_from_disk(reason="运行期配置变更")
+
     # ── 结果反馈 ──
 
     def record_result(self, success: int, failed: int):
@@ -329,16 +373,7 @@ class Scheduler:
             if self._stop.is_set():
                 break
             if watcher.should_reload():
-                try:
-                    # 必须通过 TaskManager.reload_tasks() 重载：内部会在 load_config 前保存 game，
-                    # 无安全密码时写回，避免先 cfg.load_config() 清空 game 导致 character_name 丢失。
-                    if self._task_manager:
-                        self._task_manager.reload_tasks()
-                    else:
-                        cfg.load_config()
-                    self._tasks_updated.set()
-                except Exception as e:
-                    logger.warning("配置热重载失败: %s", e)
+                self._handle_watched_config_change()
             if self.state == SchedulerState.RUNNING and self._task_manager:
                 try:
                     self._check_and_run()
@@ -554,8 +589,11 @@ class Scheduler:
                         break
 
                 try:
-                    cfg.save_config()
-                    self._task_manager.reload_tasks()
+                    if self._reload_deferred.is_set():
+                        self._apply_deferred_reload_if_needed()
+                    else:
+                        cfg.save_config()
+                        self._task_manager.reload_tasks()
                 except Exception as e:
                     logger.error("📅 配置保存/重载失败（将在下一轮重新收集任务）: %s", e)
 
@@ -571,6 +609,8 @@ class Scheduler:
                     content=f"执行完成: 成功 {total_success}, 失败 {total_failed}"
                 )
             self._post_execution_action()
+            self._tasks_updated.set()
+        elif self._reload_deferred.is_set():
             self._tasks_updated.set()
 
     # ── 调度模式入口 ──
@@ -741,6 +781,7 @@ class Scheduler:
             "consecutive_errors": self._consecutive_errors,
             "executing": self.is_executing,
             "busy": self.state == SchedulerState.RUNNING or self.is_executing,
+            "reload_deferred": self._reload_deferred.is_set(),
         }
 
 

@@ -325,6 +325,12 @@ class TestRuntimeControllerContract(unittest.TestCase):
         self.assertEqual(controller.request_stop(), "idle")
         self.assertEqual(calls, ["cancel", "scheduler_stop", "invalidate_login"])
 
+    def test_request_stop_does_not_async_raise_into_worker_thread(self):
+        content = (ROOT / "services/webui/runtime_controller.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("PyThreadState_SetAsyncExc", content)
+        self.assertNotIn("_raise_in_thread", content)
+
 
 class TestWebUILifecycleServiceContract(unittest.TestCase):
     def setUp(self):
@@ -692,6 +698,8 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("launch_app=True", runtime_context)
         self.assertIn("cancel_check=cancel_check", runtime_context)
         self.assertIn("runtime_ctx.refresh(cancel_check=self._check_cancel_requested)", scheduler)
+        self.assertIn("_reload_deferred", scheduler)
+        self.assertIn("_handle_watched_config_change", scheduler)
         self.assertIn("join_with_cancel", api)
         self.assertIn("sleep_with_cancel", api)
 
@@ -747,9 +755,28 @@ class TestWebUIServerRouteContract(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertIn(marker, content)
         self.assertIn("ensure_device_session", content)
+        self.assertIn("_require_editor_device_unlock(request)", content)
         self.assertIn("设备会话初始化失败", content)
         self.assertIn("_EditorVirtualMixControl", content)
         self.assertNotIn("ctx.mixctrl", content)
+
+    def test_remote_access_requires_deploy_password(self):
+        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        start = content.index('async def remote_access_toggle_api')
+        end = content.index('# ── 多账号 API ──', start)
+        body = content[start:end]
+
+        self.assertIn('cfg._config.get("deploy", {}).get("password")', body)
+        self.assertIn("deploy_password_required", body)
+
+    def test_editor_save_updates_existing_ui_map_rows(self):
+        content = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
+
+        self.assertIn("_read_ui_map_rows", content)
+        self.assertIn("_write_ui_map_rows", content)
+        self.assertIn("_unique_filename", content)
+        self.assertIn("_clamp_crop_rect", content)
+        self.assertIn('existing = next((row for row in rows if row.get("key") == name), None)', content)
 
     def test_editor_offline_image_paths_do_not_require_device_session(self):
         content = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")

@@ -1,5 +1,6 @@
 from enum import Enum
 import traceback
+from time import time
 
 from numpy import arange
 from AutoScriptor.utils import box
@@ -30,26 +31,31 @@ def battle():
     h.zhenling()
     h.sleep(1.5)
     h.skill(6)
-    bg.add(
-        name="FTT_battle",
-        identifier=(T("确认"),T("前往新一层")),
-        callback=lambda: [bg.set_signal("try_exit", True),bg.clear()]
-    )
-    bg.add(
-        name="FFT_short_cut",
-        identifier=T("入劫"),
-        callback=lambda: [
-            bg.set_signal("try_exit", True),bg.clear(),bg.set_signal("short_cut", True)
-        ]
-    )
     bg.set_signal("try_exit", False)
-    while not bg.signal("try_exit"):
-        for cnt in range(5):
-            h.prop()
-            if cnt % 2 == 0: h.skill(6)
-            else: h.skill(5,4)
-        h.zhenling()
-        h.battle_loop(battle_weight=99)
+    deadline = time() + 180
+    with bg.scope("梵天塔") as scope:
+        scope.add(
+            name="战斗结束",
+            identifier=(T("确认"),T("前往新一层")),
+            callback=lambda: bg.set_signal("try_exit", True)
+        )
+        scope.add(
+            name="捷径",
+            identifier=T("入劫"),
+            callback=lambda: [
+                bg.set_signal("try_exit", True),
+                bg.set_signal("short_cut", True),
+            ]
+        )
+        while not bg.signal("try_exit"):
+            if time() >= deadline:
+                raise TimeoutError("梵天塔战斗等待结束超时")
+            for cnt in range(5):
+                h.prop()
+                if cnt % 2 == 0: h.skill(6)
+                else: h.skill(5,4)
+            h.zhenling()
+            h.battle_loop(battle_weight=99)
     if not bg.signal("short_cut"):
         click((T("确认"),T("前往新一层")))
         wait_for_disappear(I("加载中"))

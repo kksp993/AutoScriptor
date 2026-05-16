@@ -117,23 +117,20 @@ def task(
         logger.info("当前免费任务已经完成，荒古挑战结束")
         return
 
+    bg.set_signal("all_task_done", False)
     while not bg.signal("all_task_done", False):
         if ui_T(I("加载中"), timeout=3):
             wait_for_disappear(I("加载中"))
 
         bg.set_signal("try_exit", False)
         bg.set_signal("Pause_battle", False)
-        bg.add(name="hgwj_settle", identifier=_SETTLE_IDF, callback=_stop_battle)
-        bg.add(name="hgwj_fail", identifier=_FAIL_IDF, callback=_stop_battle)
-
-        try:
+        with bg.scope("荒古万界") as scope:
+            scope.add(name="settle", identifier=_SETTLE_IDF, callback=_stop_battle)
+            scope.add(name="fail", identifier=_FAIL_IDF, callback=_stop_battle)
             if ui_T(T("规则", box=Box(551, 43, 144, 56).margin()), 2):
                 bonus_callback()
                 continue
             h.set(True, 3).battle_loop()
-        finally:
-            bg.remove("hgwj_settle")
-            bg.remove("hgwj_fail")
 
         if _handle_settlement() == "done":
             bg.set_signal("all_task_done", True)

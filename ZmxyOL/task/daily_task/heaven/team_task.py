@@ -3,6 +3,8 @@ import traceback
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.errors import TaskRequireReTry
+from ZmxyOL.battle.tasks import get_task_table
+from time import time
 
 
 
@@ -19,18 +21,18 @@ def zudui_task(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
         click(T("快速加入"), until=lambda: ui_T(T("我的队伍")))
     except Exception:
         raise TaskRequireReTry("快速加入失败，重试")
-    bg.add(
-        name="组队进图",
-        identifier=I("加载中"),
-        callback=lambda:[
-            bg.set_signal("组队进图", True),
-            bg.clear(),
-        ]
-    )
     bg.set_signal("组队进图", False)
-    while not bg.signal("组队进图"):
-        cnt = 0
+    deadline = time() + 180
+    cnt = 0
+    with bg.scope("组队任务") as scope:
+        scope.add(
+            name="进图",
+            identifier=I("加载中"),
+            callback=lambda: bg.set_signal("组队进图", True),
+        )
         while not bg.signal("组队进图"):
+            if time() >= deadline:
+                raise TaskRequireReTry("等待组队进图超时，重试")
             cnt += 1
             if cnt % 5 == 0 :
                 click(B(1050,50,30,30),delay=1.5)
