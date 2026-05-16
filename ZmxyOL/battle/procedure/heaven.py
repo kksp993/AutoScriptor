@@ -16,44 +16,41 @@ def battle_task(
     bg.clear_signals()
     wait_for_disappear((I("加载中"), I("极北-加载中")))
     switch_base("nemu")
-    bg.add(
-        name="战斗结束",
-        identifier=(T(key="战斗-离开关卡"), T("倍战"), I(key="返回地图")),
-        callback=lambda: [
-            logger.info("战斗结束"),
-            bg.set_signal("try_exit", True),
-            bg.clear()
-        ]
-    )
+    with bg.scope("天庭通用战斗") as scope:
+        scope.add(
+            name="战斗结束",
+            identifier=(T(key="战斗-离开关卡"), T("倍战"), I(key="返回地图")),
+            callback=lambda: [
+                logger.info("战斗结束"),
+                bg.set_signal("try_exit", True),
+            ]
+        )
 
-
-
-    def battle_fail_callback():
-        # 必须先 set try_exit，再执行耗时 click；否则 battle_loop 在点「取消」整段期间仍在战斗
-        switch_base("mumu")
-        logger.info("战斗失败")
-        bg.set_signal("Failed", True)
-        if cancel_on_failed:
-            bg.clear()
-            bg.set_signal("try_exit", True)
-            bg.set_signal("bonus_x", 0)
-            bg.set_signal("failed", True)
+        def battle_fail_callback():
+            # 必须先 set try_exit，再执行耗时 click；否则 battle_loop 在点「取消」整段期间仍在战斗
             switch_base("mumu")
-            click(T("取消"), delay=4, repeat=3)
-        else:
-            switch_base("mumu")
-            click(T("确定"), delay=4, repeat=3)
+            logger.info("战斗失败")
+            bg.set_signal("Failed", True)
+            if cancel_on_failed:
+                bg.set_signal("try_exit", True)
+                bg.set_signal("bonus_x", 0)
+                bg.set_signal("failed", True)
+                switch_base("mumu")
+                click(T("取消"), delay=4, repeat=3)
+            else:
+                switch_base("mumu")
+                click(T("确定"), delay=4, repeat=3)
 
-    bg.add(
-        name="战斗失败",
-        identifier=((T("198点券"), T("159点券"), T("复活"), T("取消"))),
-        callback=battle_fail_callback,
-    )
-    sleep(0.5)
-    # 战斗结束不执行
-    if flow_name is None:
-        flow_name = getattr(self, "task_context_battle_flow", None) or "战斗循环"
-    self.battle_loop(flow_name=flow_name)
+        scope.add(
+            name="战斗失败",
+            identifier=((T("198点券"), T("159点券"), T("复活"), T("取消"))),
+            callback=battle_fail_callback,
+        )
+        sleep(0.5)
+        # 战斗结束不执行
+        if flow_name is None:
+            flow_name = getattr(self, "task_context_battle_flow", None) or "战斗循环"
+        self.battle_loop(flow_name=flow_name)
     # bonus=0 不执行
     if bg.signal("bonus_x", bonus_x) > 1:
         _ = 0
@@ -101,33 +98,35 @@ def heaven_battle(
     flow_name: str | None = None,
 ):
     """天庭战斗"""
-    bg.add(
-        name="战斗结束",
-        identifier=I("战斗结束"),
-        callback=lambda: [
-            bg.set_signal("Pause_battle", True),
-            logger.info("检测到战斗结束"),
-            self.way_to_exit(until=(T("抽牌", box=Box(514,513,253,97)), T("还有")), exit_loc=exit_loc),
-            self.heaven_draw_card_exit(),
-            switch_base("mumu"),
-            bg.set_signal("try_exit", True),
-            sleep(4),
-            bg.clear()
-        ]
-    )
-    bg.add(
-        name="稍后",
-        identifier=(I("稍后"),T("稍后")),
-        callback=lambda: [
-            click((I("稍后"),T("稍后")), delay=0, repeat=3, timeout=5, if_exist=True)
-        ],
-        once=False
-    )
-    if flow_name is None:
-        flow_name = getattr(self, "task_context_battle_flow", None) or "战斗循环"
-    self.battle_loop(flow_name=flow_name, battle_weight=2, delay=2)
-    bg.set_signal("try_exit", False)
-    bg.set_signal("Pause_battle", False)
+    try:
+        with bg.scope("天庭战斗") as scope:
+            scope.add(
+                name="战斗结束",
+                identifier=I("战斗结束"),
+                callback=lambda: [
+                    bg.set_signal("Pause_battle", True),
+                    logger.info("检测到战斗结束"),
+                    self.way_to_exit(until=(T("抽牌", box=Box(514,513,253,97)), T("还有")), exit_loc=exit_loc),
+                    self.heaven_draw_card_exit(),
+                    switch_base("mumu"),
+                    bg.set_signal("try_exit", True),
+                    sleep(4),
+                ]
+            )
+            scope.add(
+                name="稍后",
+                identifier=(I("稍后"),T("稍后")),
+                callback=lambda: [
+                    click((I("稍后"),T("稍后")), delay=0, repeat=3, timeout=5, if_exist=True)
+                ],
+                once=False
+            )
+            if flow_name is None:
+                flow_name = getattr(self, "task_context_battle_flow", None) or "战斗循环"
+            self.battle_loop(flow_name=flow_name, battle_weight=2, delay=2)
+    finally:
+        bg.set_signal("try_exit", False)
+        bg.set_signal("Pause_battle", False)
 
 @combo
 def task(self, task_name:str):

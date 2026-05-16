@@ -113,6 +113,27 @@ class BackgroundClearProtection:
         return False
 
 
+class BackgroundIntervalOverride:
+    """Temporarily override the monitor interval and always restore it."""
+
+    def __init__(self, monitor: "BackgroundMonitor", interval: float):
+        self._monitor = monitor
+        self._interval = float(interval)
+        self._previous: float | None = None
+
+    def __enter__(self):
+        with self._monitor._lock:
+            self._previous = self._monitor._interval
+            self._monitor._interval = self._interval
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        with self._monitor._lock:
+            if self._previous is not None:
+                self._monitor._interval = self._previous
+        return False
+
+
 class BackgroundMonitor(Thread):
     def __init__(self):
         super().__init__(daemon=True)
@@ -417,6 +438,9 @@ class BackgroundMonitor(Thread):
     def set_interval(self, interval: float):
         with self._lock:
             self._interval = interval
+
+    def interval(self, interval: float) -> BackgroundIntervalOverride:
+        return BackgroundIntervalOverride(self, interval)
 
     def stop(self):
         self._stop_event.set()

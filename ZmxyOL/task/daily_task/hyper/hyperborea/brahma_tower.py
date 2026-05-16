@@ -1,4 +1,5 @@
 import traceback
+from time import time
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
@@ -13,22 +14,23 @@ def battle():
     h.prop()
     h.sleep(0.5)
     h.skill(6)
-    bg.add(
-        name="FTT_battle",
-        identifier=(T("确认"),T("入劫")),
-        callback=lambda: [
-            bg.set_signal("try_exit", True),
-            bg.clear(),
-        ]
-    )
     cnt = 1
     bg.set_signal("try_exit", False)
-    while not bg.signal("try_exit"):
-        if cnt % 2 == 0:
-            h.skill(6)
-        else:
-            h.skill(5,5)
-        cnt += 1
+    deadline = time() + 120
+    with bg.scope("每日梵天塔") as scope:
+        scope.add(
+            name="战斗结束",
+            identifier=(T("确认"),T("入劫")),
+            callback=lambda: bg.set_signal("try_exit", True)
+        )
+        while not bg.signal("try_exit"):
+            if time() >= deadline:
+                raise TimeoutError("每日梵天塔战斗等待结束超时")
+            if cnt % 2 == 0:
+                h.skill(6)
+            else:
+                h.skill(5,5)
+            cnt += 1
     click(T("确认"))
     wait_for_disappear(I("加载中"))
 

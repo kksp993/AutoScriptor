@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import base64
+import csv
 import os
 import traceback
 import types
@@ -18,6 +19,7 @@ import cv2
 import numpy as np
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.box import b2p
 from AutoScriptor.utils.cancel import suppress_cancel_checks
@@ -31,6 +33,7 @@ _last_screenshot: np.ndarray | None = None
 _last_template: np.ndarray | None = None
 
 _LOCATE_SCALES = [0.5, 0.75, 1.0]
+_UI_MAP_COLUMNS = ["key", "text", "left", "top", "width", "height", "img"]
 
 
 def _locate_text_at_scale(screenshot, text, margin_box, color, scale):
@@ -74,6 +77,20 @@ def _ensure_editor_mixctrl(reason: str):
         reason=f"editor/{reason}",
         cancel_check=_ignore_cancel,
     )[0]
+
+
+def _require_editor_device_unlock(request: Request) -> JSONResponse | None:
+    """Require account unlock for editor actions that can operate the device."""
+    if not cfg.has_decrypted_credentials():
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": "请先验证账号安全密码后再使用编辑器设备控制",
+                "code": "credential_locked",
+                "need_credential_unlock": True,
+            },
+        )
+    return None
 
 
 def _device_session_error(exc: Exception) -> JSONResponse:
@@ -131,6 +148,72 @@ class _EditorVirtualMixControl:
 def _screenshot_to_base64(img_bgr: np.ndarray) -> str:
     _, buf = cv2.imencode(".jpg", img_bgr, [cv2.IMWRITE_JPEG_QUALITY, 90])
     return base64.b64encode(buf.tobytes()).decode("ascii")
+
+
+def _clamp_crop_rect(left: int, top: int, width: int, height: int, frame: np.ndarray) -> tuple[int, int, int, int]:
+    frame_h, frame_w = frame.shape[:2]
+    if width <= 0 or height <= 0:
+        raise ValueError("选区宽高必须大于 0")
+    right = left + width
+    bottom = top + height
+    if left < 0 or top < 0 or right > frame_w or bottom > frame_h:
+        raise ValueError(f"选区超出截图范围: ({left}, {top}, {width}, {height}) / {frame_w}x{frame_h}")
+    return left, top, right, bottom
+
+
+def _unique_filename(directory: str, filename: str) -> str:
+    stem, ext = os.path.splitext(filename)
+    candidate = filename
+    idx = 2
+    while os.path.exists(os.path.join(directory, candidate)):
+        candidate = f"{stem}__{idx}{ext}"
+        idx += 1
+    return candidate
+
+
+def _safe_asset_stem(raw: str) -> str:
+    stem = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in raw).strip("_")
+    return stem or "template"
+
+
+def _read_ui_map_rows(csv_path: str) -> list[dict]:
+    if not os.path.exists(csv_path):
+        return []
+    rows: list[dict] = []
+    with open(csv_path, "r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames and "key" in reader.fieldnames:
+            for row in reader:
+                rows.append({col: row.get(col, "") for col in _UI_MAP_COLUMNS})
+            return rows
+        f.seek(0)
+        for raw in csv.reader(f):
+            if not raw:
+                continue
+            if raw[0] == "key":
+                continue
+            padded = (raw + [""] * len(_UI_MAP_COLUMNS))[: len(_UI_MAP_COLUMNS)]
+            rows.append(dict(zip(_UI_MAP_COLUMNS, padded)))
+    return rows
+
+
+def _write_ui_map_rows(csv_path: str, rows: list[dict]) -> None:
+    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+    deduped: dict[str, dict] = {}
+    order: list[str] = []
+    for row in rows:
+        key = str(row.get("key", "")).strip()
+        if not key:
+            continue
+        if key not in deduped:
+            order.append(key)
+        deduped[key] = {col: row.get(col, "") for col in _UI_MAP_COLUMNS}
+        deduped[key]["key"] = key
+    with open(csv_path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=_UI_MAP_COLUMNS)
+        writer.writeheader()
+        for key in order:
+            writer.writerow(deduped[key])
 
 
 # ── GET /api/editor/screenshot ──
@@ -435,26 +518,33 @@ async def editor_save(request: Request):
 
         from AutoScriptor.utils.app_config import cfg
         from pypinyin import lazy_pinyin
-        import pandas as pd
 
-        right, bottom = left + width, top + height
+        left, top, right, bottom = _clamp_crop_rect(left, top, width, height, _last_screenshot)
         cropped = _last_screenshot[top:bottom, left:right]
 
         save_left, save_top, save_w, save_h = left, top, width, height
+        frame_h, frame_w = _last_screenshot.shape[:2]
         if free_x:
-            save_left, save_w = 0, 1280
+            save_left, save_w = 0, frame_w
         if free_y:
-            save_top, save_h = 0, 720
+            save_top, save_h = 0, frame_h
 
         pic_dir = os.path.join(os.getcwd(), cfg["app"]["name"], "assets", "pic")
         os.makedirs(pic_dir, exist_ok=True)
+        csv_path = os.path.join(os.getcwd(), cfg["app"]["name"], "assets", "config", "ui_map.csv")
+        rows = _read_ui_map_rows(csv_path)
+        existing = next((row for row in rows if row.get("key") == name), None)
 
         fn = ""
         if not only_ocr:
-            pinyin_name = "".join(lazy_pinyin(name))
-            fn = f"{pinyin_name}@{save_left}#{save_top}#{save_w}#{save_h}.png"
+            pinyin_name = _safe_asset_stem("".join(lazy_pinyin(name)))
+            raw_fn = f"{pinyin_name}@{save_left}#{save_top}#{save_w}#{save_h}.png"
+            fn = _unique_filename(pic_dir, raw_fn)
             sp = os.path.join(pic_dir, fn)
-            cv2.imwrite(sp, cropped)
+            if not cv2.imwrite(sp, cropped):
+                raise RuntimeError(f"保存模板图片失败: {sp}")
+        elif existing is not None:
+            fn = ""
 
         text = name
         if "-" in name:
@@ -462,19 +552,24 @@ async def editor_save(request: Request):
 
         l2 = max(0, save_left - 10)
         t2 = max(0, save_top - 10)
-        w2 = save_w + 20 if l2 + save_w + 20 <= 1280 else 1280 - l2
-        h2 = save_h + 20 if t2 + save_h + 20 <= 720 else 720 - t2
+        w2 = save_w + 20 if l2 + save_w + 20 <= frame_w else frame_w - l2
+        h2 = save_h + 20 if t2 + save_h + 20 <= frame_h else frame_h - t2
 
-        csv_path = os.path.join(os.getcwd(), cfg["app"]["name"], "assets", "config", "ui_map.csv")
-        try:
-            df = pd.read_csv(csv_path, header=None, encoding="utf-8")
-        except FileNotFoundError:
-            df = pd.DataFrame(columns=range(7))
+        new_row = {
+            "key": name,
+            "text": text,
+            "left": int(l2),
+            "top": int(t2),
+            "width": int(w2),
+            "height": int(h2),
+            "img": fn,
+        }
+        action = "更新" if existing is not None else "新增"
+        rows = [row for row in rows if row.get("key") != name]
+        rows.append(new_row)
+        _write_ui_map_rows(csv_path, rows)
 
-        df.loc[len(df)] = [name, text, l2, t2, w2, h2, fn]
-        df.to_csv(csv_path, index=False, header=False, encoding="utf-8")
-
-        return {"ok": True, "message": f"已保存: {fn if fn else '仅保存配置'}"}
+        return {"ok": True, "message": f"已{action}: {fn if fn else '仅保存配置'}", "filename": fn, "action": action}
     except Exception as e:
         logger.error("editor/save error: %s\n%s", e, traceback.format_exc())
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -485,6 +580,9 @@ async def editor_save(request: Request):
 @router.post("/remote/click")
 async def editor_remote_click(request: Request):
     """在模拟器中点击指定坐标。"""
+    locked = _require_editor_device_unlock(request)
+    if locked is not None:
+        return locked
     try:
         data = await request.json()
         x, y = int(data["x"]), int(data["y"])
@@ -506,6 +604,9 @@ async def editor_remote_click(request: Request):
 @router.post("/remote/swipe")
 async def editor_remote_swipe(request: Request):
     """在模拟器中执行滑动，与 AutoScriptor.core.api.swipe 一致（b2p、boost、滑动后稳定等）。"""
+    locked = _require_editor_device_unlock(request)
+    if locked is not None:
+        return locked
     try:
         data = await request.json()
         x1, y1 = int(data["x1"]), int(data["y1"])
@@ -749,6 +850,9 @@ async def editor_execute_code(request: Request):
         if virtual_only and _last_screenshot is not None:
             virtual_mixctrl = _EditorVirtualMixControl(_last_screenshot)
         else:
+            locked = _require_editor_device_unlock(request)
+            if locked is not None:
+                return locked
             try:
                 _ensure_editor_mixctrl("execute-code")
             except Exception as e:

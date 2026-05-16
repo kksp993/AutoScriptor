@@ -305,6 +305,27 @@ class TestBackgroundMonitorInterval(unittest.TestCase):
         mon.set_interval(0.5)
         self.assertEqual(mon._interval, 0.5)
 
+    @patch.object(BackgroundMonitor, "start")
+    def test_interval_context_restores_on_exit(self, _):
+        mon = BackgroundMonitor()
+        mon.set_interval(1.5)
+
+        with mon.interval(0.4):
+            self.assertEqual(mon._interval, 0.4)
+
+        self.assertEqual(mon._interval, 1.5)
+
+    @patch.object(BackgroundMonitor, "start")
+    def test_interval_context_restores_on_exception(self, _):
+        mon = BackgroundMonitor()
+        mon.set_interval(1.5)
+
+        with self.assertRaises(RuntimeError):
+            with mon.interval(0.4):
+                raise RuntimeError("boom")
+
+        self.assertEqual(mon._interval, 1.5)
+
 
 class TestMonitorDecorator(unittest.TestCase):
 

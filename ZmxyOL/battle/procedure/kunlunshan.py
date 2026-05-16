@@ -46,48 +46,48 @@ def kunlunshan_battle(num: int = 5, flow_name: str | None = None, equipment: str
     for _ in range(num):
         h.set(has_cd=False, speed_x=3)   
         bg.set_signal("try_exit", False)
-        bg.set_interval(0.4)
-        with bg.scope("昆仑山") as scope:
-            # 「知道了」弹窗：once=False → 同一局 battle_loop 内每次识别到都会触发（可多次）。
-            scope.add(
-                name="突发事件",
-                identifier=(T("知道了"), T("取消")),
-                callback=lambda: [
-                    logger.info("昆仑山突发事件"),
-                    sleep(0.03),
-                    click((T("知道了"), T("取消")), if_exist=True),
-                ],
-                once=False,
-                allow_concurrent=True,
-            )
-            # 每次迭代开始时重新读取门票状态，只有在config中has_YuxuDian_ticket为True时才添加玉虚殿监控
-            has_ticket = cfg.get("status.kunlunshan.has_YuxuDian_ticket", False)
-            if has_ticket:
+        with bg.interval(0.4):
+            with bg.scope("昆仑山") as scope:
+                # 「知道了」弹窗：once=False → 同一局 battle_loop 内每次识别到都会触发（可多次）。
                 scope.add(
-                    name="玉虚殿",
-                    identifier=I("昆仑山-玉虚殿"),
-                    callback=lambda: kls_yxd_callback(scope),
-                    once=False
+                    name="突发事件",
+                    identifier=(T("知道了"), T("取消")),
+                    callback=lambda: [
+                        logger.info("昆仑山突发事件"),
+                        sleep(0.03),
+                        click((T("知道了"), T("取消")), if_exist=True),
+                    ],
+                    once=False,
+                    allow_concurrent=True,
                 )
-            # 与「知道了」不同：once=True → 本局内首次识别到「站在这里」后回调一次即移除，避免重复 try_exit。
-            scope.add(
-                name="战斗结束",
-                identifier=(T("站在这里"),
-                    # 会误判，但是目前这样可能玉虚殿会出问题
-                    # B(803,546,46,19, color="白色"),
-                    # B(1022,535,7,27, color="白色")
-                ),
-                callback=lambda: [
-                    h.set(has_cd=False, speed_x=1 if ui_T((B(803,546,46,19, color="白色"),B(1022,535,7,27, color="白色")),2) else 3),
-                    bg.set_signal("try_exit", True)
-                ],
-                once=True,
-            )
-            h.set(has_cd=False, speed_x=3).battle_loop(flow_name=flow_name, max_duration=1000)
-            sleep(1)
-            xumiding(equipment=equipment)
-            h.way_to_exit(until=(I("加载中"), T("还有")), exit_loc=0)
-            wait_for_disappear(I("加载中"))
+                # 每次迭代开始时重新读取门票状态，只有在config中has_YuxuDian_ticket为True时才添加玉虚殿监控
+                has_ticket = cfg.get("status.kunlunshan.has_YuxuDian_ticket", False)
+                if has_ticket:
+                    scope.add(
+                        name="玉虚殿",
+                        identifier=I("昆仑山-玉虚殿"),
+                        callback=lambda: kls_yxd_callback(scope),
+                        once=False
+                    )
+                # 与「知道了」不同：once=True → 本局内首次识别到「站在这里」后回调一次即移除，避免重复 try_exit。
+                scope.add(
+                    name="战斗结束",
+                    identifier=(T("站在这里"),
+                        # 会误判，但是目前这样可能玉虚殿会出问题
+                        # B(803,546,46,19, color="白色"),
+                        # B(1022,535,7,27, color="白色")
+                    ),
+                    callback=lambda: [
+                        h.set(has_cd=False, speed_x=1 if ui_T((B(803,546,46,19, color="白色"),B(1022,535,7,27, color="白色")),2) else 3),
+                        bg.set_signal("try_exit", True)
+                    ],
+                    once=True,
+                )
+                h.set(has_cd=False, speed_x=3).battle_loop(flow_name=flow_name, max_duration=1000)
+                sleep(1)
+                xumiding(equipment=equipment)
+                h.way_to_exit(until=(I("加载中"), T("还有")), exit_loc=0)
+                wait_for_disappear(I("加载中"))
     back_to_map()
 
 def xumiding(equipment:str="诛仙剑阵"):

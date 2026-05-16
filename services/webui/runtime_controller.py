@@ -6,7 +6,6 @@ execution; this controller only composes its state with direct execution.
 """
 from __future__ import annotations
 
-import ctypes
 from threading import Lock, Thread, current_thread
 from typing import Callable, Literal
 
@@ -123,23 +122,5 @@ class RuntimeController:
         self.scheduler.request_stop()
         self.scheduler.invalidate_login()
 
-        if direct_alive and self._direct_thread and self._direct_thread.ident:
-            self._raise_in_thread(self._direct_thread.ident, KeyboardInterrupt)
-
-        logger.info("⏹ 已发送终止信号")
+        logger.info("⏹ 已发送终止信号，等待任务协作退出")
         return "stopping" if (direct_alive or scheduler_alive) else "idle"
-
-    @staticmethod
-    def _raise_in_thread(tid: int, exctype: type[BaseException]) -> bool:
-        if not isinstance(exctype, type):
-            raise TypeError("Only exception types can be raised")
-        res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
-            ctypes.c_long(tid),
-            ctypes.py_object(exctype),
-        )
-        if res == 0:
-            return False
-        if res != 1:
-            ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(tid), None)
-            return False
-        return True

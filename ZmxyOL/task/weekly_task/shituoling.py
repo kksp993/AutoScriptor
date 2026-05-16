@@ -42,16 +42,14 @@ def task(
     click(T("难度" + str(d), box=Box(982,463,105,55).margin()))
     click(T("挑战", box=Box(909,561,180,77).margin()))
     wait_for_disappear(I("加载中"))
-    bg.add(
-        name="try_exit",
-        identifier=T("确认", box=Box(572,474,135,78).margin()),
-        callback=lambda: [
-            bg.set_signal("try_exit", True),
-            bg.clear(),
-        ],
-        once=True
-    )
-    h.set(True,3).battle_loop(battle_weight=0)
+    with bg.scope("狮驼岭") as scope:
+        scope.add(
+            name="try_exit",
+            identifier=T("确认", box=Box(572,474,135,78).margin()),
+            callback=lambda: bg.set_signal("try_exit", True),
+            once=True
+        )
+        h.set(True,3).battle_loop(battle_weight=0)
     click(T("确认", box=Box(572,474,135,78).margin()))
     wait_for_appear(T("恐怖加工厂", box=Box(520,16,239,58).margin()))
     click(B(274,671,105,39))

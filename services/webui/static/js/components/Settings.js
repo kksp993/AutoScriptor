@@ -98,6 +98,7 @@ const SettingsPanel = {
         <div class="settings-field-row">
           <div class="settings-field-text">
             <div class="settings-field-title">模拟器后台运行</div>
+            <div class="settings-help">任务开始时自动启动模拟器和游戏；它不是“兼容性越高越慢”的开关。</div>
           </div>
           <el-switch v-model="appConfig.run_in_background" />
         </div>
