@@ -18,13 +18,14 @@ import importlib
 import importlib.util
 import sys
 from functools import partial
-from threading import RLock
+from threading import Event, RLock, Thread
 from time import time
 from typing import Any
 
 from AutoScriptor import *
 from AutoScriptor.battle_character.plan import BattlePlan, battle_plan
 from AutoScriptor.core.background import BG_PRIORITY_BUILTIN_ADVANCE, BG_SIGNALS
+from AutoScriptor.core.targets import Target
 from AutoScriptor.utils.cancel import check_cancel_raise
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.paths import get_battle_character_dir
@@ -235,10 +236,10 @@ class Hero:
 
     def combo_kunlunshan(self):
         """连招 kunlunshan: 1 → 4 → 3 + 赶路"""
+        self.travel().move_right()
         self.skill(1).sleep(0.02)
         self.skill(4).sleep(0.02)
         self.skill(3).move_right()
-        # self.travel().move_right()
         click(B(985,263,155,50))    # 昆仑山知道了
         return self
 
@@ -388,11 +389,14 @@ class Hero:
         )
 
         try:
-            with bg.scope() as builtin_scope:
+            with bg.protect_clear(), bg.scope() as builtin_scope:
                 self._setup_builtin_triggers(builtin_scope)
 
                 while not bg.signal(BG_SIGNALS.TRY_EXIT, False):
                     check_cancel_raise()
+                    if self.battle_elapsed > max_duration:
+                        logger.error("battle_loop 超时 (%ds)", max_duration)
+                        raise RuntimeError(f"battle_loop 超时: {max_duration}秒")
                     if bg.signal(BG_SIGNALS.PAUSE_BATTLE, False):
                         self.sleep(1)
                         continue
@@ -402,10 +406,6 @@ class Hero:
 
                     flow_method(self)
                     self._flow_round += 1
-
-                    if self.battle_elapsed > max_duration:
-                        logger.error("battle_loop 超时 (%ds)", max_duration)
-                        raise RuntimeError(f"battle_loop 超时: {max_duration}秒")
         finally:
             self._flow_round = 0
             self._moments_fired.clear()
@@ -447,23 +447,102 @@ class Hero:
 
     # ═══════════════ 离开关卡 ═══════════════
 
-    def way_to_exit(self, until=None, exit_loc: float = 0, timeout: float = 180):
-        """走向出口并离开关卡; until 为返回 bool 的回调。"""
+    def way_to_exit(
+        self,
+        until=None,
+        exit_loc: float = 0,
+        timeout: float = 180,
+        *,
+        initial_wait: float = 3,
+        step_delay: float = 1,
+        monitor_interval: float = 0.25,
+    ):
+        """走向出口并离开关卡。
+
+        `until` 可以是 Target、Target 容器，或返回 bool 的 callable。检测在
+        私有线程中执行，不挂到 bg 全局监控表，避免被热重载、bg.clear() 或
+        scope 清理误删；移动循环只轮询 Event，不再被 OCR 间隔放慢。
+        """
+        if until is None:
+            raise ValueError("way_to_exit 需要 until 条件或目标")
+
+        def _is_target_condition(value) -> bool:
+            return isinstance(value, Target) or (
+                isinstance(value, (tuple, list))
+                and bool(value)
+                and all(_is_target_condition(v) for v in value)
+            )
+
+        def _label() -> str:
+            return getattr(until, "__name__", repr(until))
+
+        if _is_target_condition(until):
+            def _until_matched() -> bool:
+                return ui_T(until)
+        elif callable(until):
+            _until_matched = until
+        else:
+            raise TypeError(f"way_to_exit until 需要 Target/tuple/list/callable，收到 {type(until).__name__}")
+
         with _way_to_exit_lock:
             start = time()
-            self.move_right(400).move_left(exit_loc)
-            sleep(3)
-            has_moved = False
-            while not until():
-                if not has_moved and time() - start > 30:
-                    self.move_right(2000, directly=True)
-                    has_moved = True
-                if time() - start > timeout:
-                    raise RuntimeError(
-                        f"离开关卡 超时: {timeout}秒, 条件 {until.__name__} 未满足"
-                    )
-                self.sleep(0.5)
-                self.move_left(25, directly=True)
+            done = Event()
+            stop = Event()
+            errors: list[BaseException] = []
+
+            def _done() -> bool:
+                if errors:
+                    raise errors[0]
+                return done.is_set()
+
+            def _sleep_until_done(seconds: float) -> bool:
+                end = time() + max(seconds, 0)
+                while time() < end:
+                    check_cancel_raise()
+                    if _done():
+                        return True
+                    self.sleep(min(0.05, end - time()))
+                return _done()
+
+            def _move_loop():
+                self.move_right(400).move_left(exit_loc)
+                if _sleep_until_done(initial_wait):
+                    return
+
+                has_moved = False
+                while not _done():
+                    check_cancel_raise()
+                    elapsed = time() - start
+                    if not has_moved and elapsed > 30:
+                        self.move_right(2000, directly=True)
+                        has_moved = True
+                    if elapsed > timeout:
+                        raise RuntimeError(
+                            f"离开关卡 超时: {timeout}秒, 条件 {_label()} 未满足"
+                        )
+                    if _sleep_until_done(step_delay):
+                        break
+                    self.move_left(25, directly=True)
+
+            def _watch_until():
+                while not stop.is_set() and not done.is_set():
+                    try:
+                        if _until_matched():
+                            done.set()
+                            return
+                    except BaseException as e:
+                        errors.append(e)
+                        done.set()
+                        return
+                    stop.wait(monitor_interval)
+
+            watcher = Thread(target=_watch_until, daemon=True, name="WayToExitDetector")
+            watcher.start()
+            try:
+                _move_loop()
+            finally:
+                stop.set()
+                watcher.join(timeout=1)
         return self
 
     # ═══════════════ 竞技场 (兼容接口) ═══════════════

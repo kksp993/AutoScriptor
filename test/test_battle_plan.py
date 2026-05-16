@@ -1,4 +1,5 @@
 import unittest
+from time import sleep
 from unittest.mock import patch
 
 from AutoScriptor.battle_character.hero import Hero, battle_plan
@@ -28,6 +29,18 @@ class FakeHero(Hero):
 
     def battle(self, combo: str = None, no_cd: str = None):
         self.actions.append(("battle", combo, no_cd))
+        return self
+
+    def move_left(self, distance: int = 0, directly: bool = False):
+        self.actions.append(("move_left", distance, directly))
+        return self
+
+    def move_right(self, distance: int = 0, directly: bool = False):
+        self.actions.append(("move_right", distance, directly))
+        return self
+
+    def sleep(self, seconds: float):
+        sleep(seconds)
         return self
 
 
@@ -179,6 +192,111 @@ class TestBattlePlan(unittest.TestCase):
             helper_flow = battle_plan("仅测试").combo("146")
 
         self.assertIs(_hero_registry["default"], before)
+
+    def test_way_to_exit_callable_detector_does_not_block_move_loop(self):
+        hero = FakeHero()
+        calls = {"n": 0}
+
+        def slow_until():
+            calls["n"] += 1
+            sleep(0.12)
+            return calls["n"] >= 2
+
+        hero.way_to_exit(
+            until=slow_until,
+            exit_loc=25,
+            initial_wait=0,
+            step_delay=0.02,
+            monitor_interval=0.01,
+            timeout=2,
+        )
+
+        move_left_count = sum(1 for action in hero.actions if action[0] == "move_left")
+        self.assertGreater(move_left_count, 2)
+
+    def test_way_to_exit_target_detector_survives_bg_clear(self):
+        from AutoScriptor.battle_character import hero as hero_mod
+        from AutoScriptor.core.targets import T
+
+        class FakeBg:
+            def __init__(self):
+                self.cleared = False
+
+            def clear(self, clear_signals=False):
+                self.cleared = True
+
+        calls = {"n": 0}
+
+        def fake_ui_t(target):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                fake_bg.clear()
+            return calls["n"] >= 3
+
+        fake_bg = FakeBg()
+        hero = FakeHero()
+        target = T("还有")
+
+        with patch.object(hero_mod, "bg", fake_bg), patch.object(hero_mod, "ui_T", side_effect=fake_ui_t):
+            hero.way_to_exit(
+                until=target,
+                initial_wait=0,
+                step_delay=0.02,
+                monitor_interval=0.01,
+                timeout=2,
+            )
+
+        self.assertTrue(fake_bg.cleared)
+        self.assertGreaterEqual(calls["n"], 3)
+
+    def test_battle_loop_timeout_is_checked_while_paused(self):
+        from AutoScriptor.battle_character import hero as hero_mod
+
+        class FakeBg:
+            def __init__(self):
+                self._signals = {}
+
+            def scope(self, prefix=None, *, clear_signals=False):
+                class Scope:
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, exc_type, exc, tb):
+                        return False
+
+                    def add(self, *args, **kwargs):
+                        return args[0] if args else None
+                return Scope()
+
+            def signal(self, key, default=None):
+                return self._signals.get(key, default)
+
+            def set_signal(self, key, value):
+                self._signals[key] = value
+                return value
+
+            def protect_clear(self):
+                class Guard:
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, exc_type, exc, tb):
+                        return False
+                return Guard()
+
+        class PausedHero(FakeHero):
+            @property
+            def battle_elapsed(self):
+                self._fake_elapsed += 0.2
+                return self._fake_elapsed
+
+        fake_bg = FakeBg()
+        hero = PausedHero()
+        fake_bg.set_signal(hero_mod.BG_SIGNALS.PAUSE_BATTLE, True)
+
+        with patch.object(hero_mod, "bg", fake_bg), patch.object(hero_mod, "switch_base"):
+            with self.assertRaisesRegex(RuntimeError, "battle_loop 超时"):
+                hero.battle_loop(max_duration=0.5)
 
 
 if __name__ == "__main__":

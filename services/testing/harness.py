@@ -297,6 +297,10 @@ class MockBg:
             if clear_signals:
                 self.clear_signals()
 
+    @contextmanager
+    def protect_clear(self):
+        yield self
+
     def get_idfs(self):
         return set(self._callbacks)
 

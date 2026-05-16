@@ -1,7 +1,7 @@
 from collections import deque
 from datetime import datetime
 from functools import wraps
-from threading import Thread, RLock, Event, current_thread
+from threading import Thread, RLock, Event, current_thread, get_ident
 import time
 from typing import Any, Callable, List
 from AutoScriptor.utils.logger import logger
@@ -93,6 +93,26 @@ class BackgroundScope:
         return self._monitor.wait_signal(*args, **kwargs)
 
 
+class BackgroundClearProtection:
+    """Temporarily ignore external bg.clear() calls for critical sections."""
+
+    def __init__(self, monitor: "BackgroundMonitor"):
+        self._monitor = monitor
+
+    def __enter__(self):
+        with self._monitor._lock:
+            self._monitor._external_clear_protect_count += 1
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        with self._monitor._lock:
+            self._monitor._external_clear_protect_count = max(
+                0,
+                self._monitor._external_clear_protect_count - 1,
+            )
+        return False
+
+
 class BackgroundMonitor(Thread):
     def __init__(self):
         super().__init__(daemon=True)
@@ -104,6 +124,8 @@ class BackgroundMonitor(Thread):
         self._in_callback = False  # 标记：是否正在执行某个常规 callback
         self._event_history: deque = deque(maxlen=50)  # 最近 50 条事件记录
         self._mutation_version = 0
+        self._external_clear_protect_count = 0
+        self._callback_thread_ids: set[int] = set()
         self.start()
 
     def _record_event(self, event: str):
@@ -128,6 +150,18 @@ class BackgroundMonitor(Thread):
         """Return False when a stale snapshot entry was removed/replaced."""
         with self._lock:
             return self._callbacks.get(name) is info
+
+    def _enter_callback_thread(self):
+        with self._lock:
+            self._callback_thread_ids.add(get_ident())
+
+    def _exit_callback_thread(self):
+        with self._lock:
+            self._callback_thread_ids.discard(get_ident())
+
+    def _current_thread_can_clear(self) -> bool:
+        with self._lock:
+            return current_thread() is self or get_ident() in self._callback_thread_ids
 
     def run(self):
         from AutoScriptor.core.api import _locate_all, first as _first
@@ -200,7 +234,11 @@ class BackgroundMonitor(Thread):
                         self._in_callback = True
                         checker = Thread(target=self._concurrent_loop, daemon=True, name="BG-Concurrent")
                         checker.start()
-                        info['cb']()
+                        self._enter_callback_thread()
+                        try:
+                            info['cb']()
+                        finally:
+                            self._exit_callback_thread()
                         logger.info('✅ bg回调完成: %s', name)
                         self._record_event(f"回调完成: {name}")
                     except Exception:
@@ -275,7 +313,11 @@ class BackgroundMonitor(Thread):
             logger.info('🔔 bg并发回调触发: %s', name)
             self._record_event(f"并发回调触发: {name} (identifier: {info['idf']})")
             try:
-                info['cb']()
+                self._enter_callback_thread()
+                try:
+                    info['cb']()
+                finally:
+                    self._exit_callback_thread()
                 logger.info('✅ bg并发回调完成: %s', name)
                 self._record_event(f"并发回调完成: {name}")
             except Exception:
@@ -347,8 +389,16 @@ class BackgroundMonitor(Thread):
                 self._callbacks.pop(name, None)
                 self._mutation_version += 1
 
-    def clear(self, clear_signals: bool = False):
+    def clear(self, clear_signals: bool = False, *, force: bool = False):
         with self._lock:
+            if (
+                self._external_clear_protect_count > 0
+                and not force
+                and not self._current_thread_can_clear()
+            ):
+                self._record_event(f"external clear() ignored during protected section (clear_signals={clear_signals})")
+                logger.warning("bg.clear() ignored during protected battle section")
+                return
             if self._callbacks:
                 self._callbacks.clear()
                 self._mutation_version += 1
@@ -412,6 +462,9 @@ class BackgroundMonitor(Thread):
 
     def scope(self, prefix: str | None = None, *, clear_signals: bool = False) -> BackgroundScope:
         return BackgroundScope(self, prefix=prefix, clear_signals=clear_signals)
+
+    def protect_clear(self) -> BackgroundClearProtection:
+        return BackgroundClearProtection(self)
 
 
 # lazy proxy

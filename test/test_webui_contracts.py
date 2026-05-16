@@ -772,6 +772,14 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("if virtual_only and _last_screenshot is not None:", execute_body)
         self.assertIn("_EditorVirtualMixControl(_last_screenshot)", execute_body)
 
+    def test_editor_click_recording_keeps_offset_out_of_target_box(self):
+        content = (ROOT / "services/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
+
+        self.assertIn("function buildClickCodeAt(x, y)", content)
+        self.assertIn("offsetPart = (dx || dy) ? `, offset=(${dx},${dy})` : ''", content)
+        self.assertIn("return `click(${tgt}${offsetPart})`", content)
+        self.assertNotIn(".margin()+(", content)
+
     def test_navigation_waits_use_cancellable_sleep(self):
         for rel in [
             "ZmxyOL/nav/api.py",

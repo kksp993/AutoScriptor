@@ -404,6 +404,19 @@ const EditorPanel = {
       return null;
     }
 
+    function buildClickCodeAt(x, y) {
+      const tgt = buildTarget();
+      if (!tgt) return null;
+      const b = optimizedSel.value;
+      if (!b || tgt.startsWith('B(')) return `click(B(${x},${y},1,1))`;
+      const cx = Math.floor((b.left + b.right) / 2);
+      const cy = Math.floor((b.top + b.bottom) / 2);
+      const dx = x - cx;
+      const dy = y - cy;
+      const offsetPart = (dx || dy) ? `, offset=(${dx},${dy})` : '';
+      return `click(${tgt}${offsetPart})`;
+    }
+
     function appendCode(line) {
       if (!line) return;
       const cur = recordedCode.value;
@@ -747,9 +760,7 @@ const EditorPanel = {
       const cx = Math.floor((s.left + s.right) / 2);
       const cy = Math.floor((s.top + s.bottom) / 2);
 
-      // generate code in parallel
-      const tgt = buildTarget();
-      if (tgt) appendCode(`click(${tgt})`);
+      appendCode(buildClickCodeAt(cx, cy));
 
       if (virtualRemoteOnly.value) {
         virtualClickMarkers.value = [...virtualClickMarkers.value, { x: cx, y: cy }];
@@ -774,7 +785,7 @@ const EditorPanel = {
 
     /** 画布右键单击：同遥控器点击，坐标为像素点 */
     async function onCanvasRemoteClick({ x, y }) {
-      appendCode(`click(B(${x},${y},1,1))`);
+      appendCode(buildClickCodeAt(x, y) || `click(B(${x},${y},1,1))`);
       if (virtualRemoteOnly.value) {
         virtualClickMarkers.value = [...virtualClickMarkers.value, { x, y }];
         ElementPlus.ElMessage.success(`虚拟点击 (${x}, ${y})（未下发模拟器）`);

@@ -131,7 +131,7 @@ class Box(collections.namedtuple('Box', 'left top width height')):
         
         return merged_boxes
     
-    def __add__(self, other: dict) -> 'Box':
+    def __add__(self, other) -> 'Box':
         """
         平移/缩放 Box，语义与 ``click(..., offset=..., resize=...)``、``b2p`` 一致。
 
@@ -139,10 +139,14 @@ class Box(collections.namedtuple('Box', 'left top width height')):
         ``(0, 0)`` / ``(-1, -1)``）。未出现的键按 ``offset=(0,0)``、``resize=(-1,-1)``（保持宽高）。
         可与 ``click`` 共用同一 dict：``T(..., box=base + delta)``、``click(..., **delta)``。
         """
-        if not isinstance(other, dict):
-            raise TypeError('Box + 仅支持 dict，键为 "offset"、"resize"，与 click/b2p 对齐')
-        o = other.get("offset", (0, 0))
-        rz = other.get("resize", (-1, -1))
+        if isinstance(other, (tuple, list)) and len(other) == 2:
+            o = other
+            rz = (-1, -1)
+        elif isinstance(other, dict):
+            o = other.get("offset", (0, 0))
+            rz = other.get("resize", (-1, -1))
+        else:
+            raise TypeError('Box + supports (dx, dy) or {"offset": ..., "resize": ...}')
         if len(o) != 2 or len(rz) != 2:
             raise ValueError("dict 中 offset、resize 须为二元组（若缺省键则使用默认）")
         return box_with_offset_resize(self, (int(o[0]), int(o[1])), (int(rz[0]), int(rz[1])))
