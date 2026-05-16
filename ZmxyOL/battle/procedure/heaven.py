@@ -72,9 +72,9 @@ def battle_task(
             switch_base("nemu")
             if not has_loading_after_battle:
                 _home = T("回家", box=Box(29, 613, 77, 88).margin())
-                self.way_to_exit(until=lambda: ui_T(_home), exit_loc=exit_loc)
+                self.way_to_exit(until=_home, exit_loc=exit_loc)
             else:
-                self.way_to_exit(until=lambda:ui_T((I("加载中"), I("极北-加载中"), T("还有"))), exit_loc=exit_loc)
+                self.way_to_exit(until=(I("加载中"), I("极北-加载中"), T("还有")), exit_loc=exit_loc)
         else:
             wait_for_appear((I("返回地图"), T("回家", box=Box(29,613,77,88).margin())))
             if ui_T((I("返回地图"),T("返回地图"))): click((I("返回地图"),T("返回地图")), until=lambda:ui_F((I("返回地图"),T("返回地图"))))
@@ -107,7 +107,7 @@ def heaven_battle(
         callback=lambda: [
             bg.set_signal("Pause_battle", True),
             logger.info("检测到战斗结束"),
-            self.way_to_exit(until=lambda:ui_T((T("抽牌", box=Box(514,513,253,97)), T("还有"))), exit_loc=exit_loc),
+            self.way_to_exit(until=(T("抽牌", box=Box(514,513,253,97)), T("还有")), exit_loc=exit_loc),
             self.heaven_draw_card_exit(),
             switch_base("mumu"),
             bg.set_signal("try_exit", True),

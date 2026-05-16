@@ -8,6 +8,7 @@
 import sys
 import os
 import inspect
+import threading
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -213,6 +214,34 @@ class TestBackgroundMonitorCallbacks(unittest.TestCase):
 
         self.assertIn("battle:end", mon._callbacks)
         self.assertIs(mon._callbacks["battle:end"]["cb"], replacement)
+
+    @patch.object(BackgroundMonitor, "start")
+    def test_protect_clear_ignores_external_clear(self, _):
+        mon = BackgroundMonitor()
+        mon.add("evt", (MagicMock(),), MagicMock())
+
+        with mon.protect_clear():
+            done = threading.Event()
+            t = threading.Thread(target=lambda: (mon.clear(clear_signals=True), done.set()))
+            t.start()
+            done.wait(1)
+            t.join(1)
+
+        self.assertIn("evt", mon._callbacks)
+
+    @patch.object(BackgroundMonitor, "start")
+    def test_protect_clear_allows_monitor_thread_clear(self, _):
+        mon = BackgroundMonitor()
+        mon.add("evt", (MagicMock(),), MagicMock())
+
+        with mon.protect_clear():
+            mon._enter_callback_thread()
+            try:
+                mon.clear()
+            finally:
+                mon._exit_callback_thread()
+
+        self.assertEqual(mon.get_idfs(), set())
 
 
 # ---------------------------------------------------------------------------

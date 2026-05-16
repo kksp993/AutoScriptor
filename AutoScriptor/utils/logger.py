@@ -20,6 +20,58 @@ import sys
 import threading
 import inspect
 
+logging.raiseExceptions = False
+
+_devnull_stream = None
+_console_lock = threading.RLock()
+
+
+def _is_closed_stream_error(exc: BaseException | None) -> bool:
+    if isinstance(exc, ValueError) and "closed file" in str(exc).lower():
+        return True
+    if isinstance(exc, OSError) and getattr(exc, "errno", None) in {9, 22}:
+        return True
+    return False
+
+
+def _stream_is_closed(stream) -> bool:
+    if stream is None:
+        return True
+    try:
+        return bool(getattr(stream, "closed", False))
+    except Exception:
+        return True
+
+
+def _safe_stderr():
+    global _devnull_stream
+    for stream in (getattr(sys, "stderr", None), getattr(sys, "__stderr__", None)):
+        if not _stream_is_closed(stream):
+            return stream
+    if _devnull_stream is None or _stream_is_closed(_devnull_stream):
+        _devnull_stream = open(os.devnull, "w", encoding="utf-8", errors="replace")
+    return _devnull_stream
+
+
+class _SafeStreamHandler(logging.StreamHandler):
+    def _refresh_stream(self) -> None:
+        self.acquire()
+        try:
+            self.stream = _safe_stderr()
+        finally:
+            self.release()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if _stream_is_closed(getattr(self, "stream", None)):
+            self._refresh_stream()
+        super().emit(record)
+
+    def handleError(self, record: logging.LogRecord) -> None:
+        if _is_closed_stream_error(sys.exc_info()[1]):
+            self._refresh_stream()
+            return
+        super().handleError(record)
+
 # Nuitka standalone 下 Rich 测量单元格宽度会动态 import「unicode17-0-0」等子模块，
 # 与冻结导入不兼容；编译产物改用标准 StreamHandler。
 _COMPILED = "__compiled__" in dir()
@@ -33,7 +85,6 @@ if not _COMPILED:
     _force_terminal = not os.environ.get("NO_COLOR")
     _electron_pipe = os.environ.get("AUTOSCRIPTOR_ELECTRON_PIPE") == "1"
     _kw = dict(
-        file=sys.stderr,
         stderr=False,
         force_terminal=_force_terminal,
         force_jupyter=False,
@@ -42,7 +93,11 @@ if not _COMPILED:
     )
     if _electron_pipe:
         _kw["width"] = 120
-    _console = Console(**_kw)
+
+    def _make_console() -> Console:
+        return Console(file=_safe_stderr(), **_kw)
+
+    _console = _make_console()
 else:
     Text = None  # type: ignore[misc, assignment]
     _electron_pipe = os.environ.get("AUTOSCRIPTOR_ELECTRON_PIPE") == "1"
@@ -80,7 +135,25 @@ logger.propagate = False
 
 if not _COMPILED:
 
-    class _ElectronRichHandler(RichHandler):
+    class _SafeRichHandler(RichHandler):
+        def _refresh_console(self) -> None:
+            global _console
+            with _console_lock:
+                _console = _make_console()
+                self.console = _console
+
+        def emit(self, record: logging.LogRecord) -> None:
+            if _stream_is_closed(getattr(self.console, "file", None)):
+                self._refresh_console()
+            super().emit(record)
+
+        def handleError(self, record: logging.LogRecord) -> None:
+            if _is_closed_stream_error(sys.exc_info()[1]):
+                self._refresh_console()
+                return
+            super().handleError(record)
+
+    class _ElectronRichHandler(_SafeRichHandler):
         """Electron 管道下：不显示源码路径，级别列不 ljust(8) 以免与竖线之间空一大截。"""
 
         def get_level_text(self, record: logging.LogRecord) -> Text:
@@ -91,7 +164,7 @@ if not _COMPILED:
 # 防止重复添加 handler（热重载场景）
 if not logger.handlers:
     if _COMPILED:
-        _plain = logging.StreamHandler(stream=sys.stderr)
+        _plain = _SafeStreamHandler(stream=_safe_stderr())
         _plain.setLevel(logging.DEBUG)
         _plain.setFormatter(
             logging.Formatter(_CONSOLE_PLAIN_FMT, datefmt=_CONSOLE_DATEFMT)
@@ -108,7 +181,7 @@ if not logger.handlers:
             markup=False,
             log_time_format="%H:%M:%S",
         )
-        _rich_handler = (_ElectronRichHandler if _electron_pipe else RichHandler)(
+        _rich_handler = (_ElectronRichHandler if _electron_pipe else _SafeRichHandler)(
             **_rh_kw
         )
         _rich_handler.setLevel(logging.DEBUG)
@@ -152,9 +225,15 @@ def log_flush(msg: str):
         return
     _last_flush_msg = msg
     if _COMPILED:
-        print(msg, end="\r", flush=True)
+        try:
+            print(msg, end="\r", flush=True, file=_safe_stderr())
+        except Exception:
+            pass
         return
     try:
         _console.print(msg, end="\r", highlight=False)
     except Exception:
-        print(msg, end="\r", flush=True)
+        try:
+            print(msg, end="\r", flush=True, file=_safe_stderr())
+        except Exception:
+            pass

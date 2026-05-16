@@ -1541,8 +1541,13 @@ def run_webui(restart_event=None):
     log_level = os.environ.get('UVICORN_LOG_LEVEL', 'warning')
     ssl_key = cfg.get("deploy.ssl_key")
     ssl_cert = cfg.get("deploy.ssl_cert")
+    electron_mode = bool(
+        os.environ.get("AUTOSCRIPTOR_ELECTRON")
+        or os.environ.get("AUTOSCRIPTOR_ELECTRON_PIPE")
+    )
     config = uvicorn.Config(
         app, host="127.0.0.1", port=5000, log_level=log_level,
+        access_log=not electron_mode,
         ssl_keyfile=ssl_key if ssl_key else None,
         ssl_certfile=ssl_cert if ssl_cert else None,
     )

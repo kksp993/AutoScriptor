@@ -120,15 +120,20 @@ class CaptureStd:
         self.stdout = b''
         self.stderr = b''
 
+    @staticmethod
+    def _flush_stream(stream):
+        try:
+            stream.flush()
+        except Exception:
+            pass
+
     def _redirect_stdout(self, to):
-        sys.stdout.close()
+        self._flush_stream(sys.stdout)
         os.dup2(to, self.fdout)
-        sys.stdout = os.fdopen(self.fdout, 'w')
 
     def _redirect_stderr(self, to):
-        sys.stderr.close()
+        self._flush_stream(sys.stderr)
         os.dup2(to, self.fderr)
-        sys.stderr = os.fdopen(self.fderr, 'w')
 
     def __enter__(self):
         self.fdout = sys.stdout.fileno()
@@ -138,17 +143,21 @@ class CaptureStd:
         self.old_stdout = os.dup(self.fdout)
         self.old_stderr = os.dup(self.fderr)
 
-        file_out = os.fdopen(self.writer_out, 'w')
-        file_err = os.fdopen(self.writer_err, 'w')
-        self._redirect_stdout(to=file_out.fileno())
-        self._redirect_stderr(to=file_err.fileno())
+        # Redirect the underlying file descriptors without closing/replacing
+        # sys.stdout/sys.stderr. Logger handlers may hold those wrappers.
+        self._redirect_stdout(to=self.writer_out)
+        self._redirect_stderr(to=self.writer_err)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        self._flush_stream(sys.stdout)
+        self._flush_stream(sys.stderr)
         self._redirect_stdout(to=self.old_stdout)
         self._redirect_stderr(to=self.old_stderr)
         os.close(self.old_stdout)
         os.close(self.old_stderr)
+        os.close(self.writer_out)
+        os.close(self.writer_err)
 
         self.stdout = self.recvall(self.reader_out)
         self.stderr = self.recvall(self.reader_err)
