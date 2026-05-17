@@ -230,7 +230,8 @@ class Hero:
         self.prop()
         self.sleep(w1)
         self.jump(2).move_right(125, directly=True)
-        self.move_right(600, directly=True)
+        self.move_right(800, directly=True)
+        self.move_right(400, directly=True)
         return self
 
     def init(self):
@@ -246,9 +247,9 @@ class Hero:
 
     def combo_143(self):
         """连招 143: 1 → 左 → 4 → 3"""
-        self.skill(1).sleep(self.wait)
-        self.skill(4).sleep(self.wait)
-        self.skill(3)
+        self.skill(1).move_right(100,directly=True)
+        self.skill(4).move_right(100,directly=True)
+        self.skill(3).move_right(25,directly=True)
         return self
 
     def combo_kunlunshan(self):

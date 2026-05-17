@@ -12,7 +12,7 @@ def task():
     click(B(10,10,10,10))
     click(B(149,594,98,89))
     click(I("诏令任务-每日任务"))
-    click(B(835,185,90,45),repeat=20)
+    click(B(835,185,90,45),repeat=20,interval=0.25)
     click(B(970,70,30,30))
     wait_for_appear(I("青莲炎"))
     click(B(60,605,30,30))
