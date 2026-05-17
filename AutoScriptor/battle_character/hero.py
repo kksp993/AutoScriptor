@@ -343,7 +343,7 @@ class Hero:
         task: str = None,
         max_duration: int = 300,
         delay: float = 0,
-        advance_grace_sec: float = 25.0,
+        advance_grace_sec: float = 0.0,
         battle_weight: int = None,
         **_kwargs,
     ):

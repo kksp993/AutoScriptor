@@ -1,7 +1,1048 @@
 {
-  "generated_at": "2026-05-15 19:31:50",
+  "generated_at": "2026-05-16 16:44:22",
   "timezone": "Asia/Shanghai",
   "source": "https://bbs.4399.cn/forums-kind-id-1493",
   "rows": [],
-  "inspected_posts": []
+  "inspected_posts": [
+    {
+      "title": "[赛季集结]\"须弥幻界\"S0先锋赛季开启公告",
+      "url": "https://bbs.4399.cn/thread-tid-52918229",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "热力值特权显示异常问题公告",
+      "url": "https://bbs.4399.cn/thread-tid-52883599",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[福利码]慈恩如海，岁月长温，母亲节快乐~",
+      "url": "https://bbs.4399.cn/thread-tid-52882347",
+      "opened_thread": false,
+      "codes": [
+        "谁言寸草心"
+      ],
+      "expires_at": "2026-05-12T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[活动]开礼包送欧皇特典，五行四季赢灵物~",
+      "url": "https://bbs.4399.cn/thread-tid-48941008",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[已处理]活跃商店及礼包、邪灵灵根元石异常处理公告",
+      "url": "https://bbs.4399.cn/thread-tid-52850171",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[公告]五一乐欢聚，混沌军团来袭",
+      "url": "https://bbs.4399.cn/thread-tid-52797433",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2026-05-12T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "《造梦西游OL》专属五一累充礼包来袭~",
+      "url": "https://bbs.4399.cn/thread-tid-52808188",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2026-05-30T23:59:00+08:00",
+      "active": false
+    },
+    {
+      "title": "【限时活动】假期结束？造梦来激励！",
+      "url": "https://bbs.4399.cn/thread-tid-44769182",
+      "opened_thread": true,
+      "codes": [
+        "造梦肾宝"
+      ],
+      "expires_at": "2024-05-11T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "【爆料】关于下周活动和后续版本的爆料",
+      "url": "https://bbs.4399.cn/thread-tid-41067058",
+      "opened_thread": true,
+      "codes": [
+        "我不听我不听"
+      ],
+      "expires_at": "2023-09-01T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[福利码]快乐五一，假期好礼速抵达~ Day2",
+      "url": "https://bbs.4399.cn/thread-tid-52805008",
+      "opened_thread": false,
+      "codes": [
+        "开心每一天"
+      ],
+      "expires_at": "2026-05-11T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[新服活动] 5月1日10时 新服“天工圣”开启",
+      "url": "https://bbs.4399.cn/thread-tid-52797392",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[合集]五一假期福利合集",
+      "url": "https://bbs.4399.cn/thread-tid-52794761",
+      "opened_thread": true,
+      "codes": [
+        "五一到来",
+        "开心每一天",
+        "快快乐乐"
+      ],
+      "expires_at": "2026-05-11T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[福利码]欢度五一，Day3福利码~",
+      "url": "https://bbs.4399.cn/thread-tid-48821498",
+      "opened_thread": false,
+      "codes": [
+        "欢乐五一"
+      ],
+      "expires_at": "2026-05-11T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[福利码]快乐五一，假期好礼速抵达~ Day3",
+      "url": "https://bbs.4399.cn/thread-tid-52797968",
+      "opened_thread": false,
+      "codes": [
+        "快快乐乐"
+      ],
+      "expires_at": "2026-05-11T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[福利码]快乐五一，假期好礼速抵达~ Day1",
+      "url": "https://bbs.4399.cn/thread-tid-52805007",
+      "opened_thread": false,
+      "codes": [
+        "五一到来"
+      ],
+      "expires_at": "2026-05-11T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[福利码]欢度五一，Day1福利码~",
+      "url": "https://bbs.4399.cn/thread-tid-44627152",
+      "opened_thread": false,
+      "codes": [
+        "欢度五一假期"
+      ],
+      "expires_at": "2026-05-11T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[福利码]欢度五一，Day1福利码~",
+      "url": "https://bbs.4399.cn/thread-tid-48821488",
+      "opened_thread": false,
+      "codes": [
+        "五一假期快乐"
+      ],
+      "expires_at": "2026-05-11T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "【预告】五一十天乐，福利享不停！",
+      "url": "https://bbs.4399.cn/thread-tid-44617433",
+      "opened_thread": false,
+      "codes": [],
+      "expires_at": "2024-04-30T16:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[福利码]除夕福利码来啦~",
+      "url": "https://bbs.4399.cn/thread-tid-52096249",
+      "opened_thread": false,
+      "codes": [
+        "除夕福利"
+      ],
+      "expires_at": "2026-02-25T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[礼包]节气好礼来袭，回帖领大寒礼包",
+      "url": "https://bbs.4399.cn/thread-tid-51818803",
+      "opened_thread": false,
+      "codes": [
+        "金炉驱寒气"
+      ],
+      "expires_at": "2026-02-04T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[福利码]马年快乐，新春福利码来啦~",
+      "url": "https://bbs.4399.cn/thread-tid-52096254",
+      "opened_thread": false,
+      "codes": [
+        "开心过大年"
+      ],
+      "expires_at": "2026-02-25T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[礼包]元宵佳节献礼，回帖领元宵礼包",
+      "url": "https://bbs.4399.cn/thread-tid-52335037",
+      "opened_thread": true,
+      "codes": [
+        "灯火良宵"
+      ],
+      "expires_at": "2026-03-20T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[礼包]节气好礼来袭，春分踏青好礼相送!",
+      "url": "https://bbs.4399.cn/thread-tid-52468105",
+      "opened_thread": false,
+      "codes": [
+        "春分踏青"
+      ],
+      "expires_at": "2026-04-05T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[公告]净化混沌赢好礼，时光兑换活动开启",
+      "url": "https://bbs.4399.cn/thread-tid-52687807",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[活动]520情缘兑好礼，残念碎片限时兑换~",
+      "url": "https://bbs.4399.cn/thread-tid-49015617",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2025-05-26T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[公告]时来运转好运来，造梦华贵商店开启",
+      "url": "https://bbs.4399.cn/thread-tid-52636861",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[福利码]风清景明，赠福于君 Day2",
+      "url": "https://bbs.4399.cn/thread-tid-52589591",
+      "opened_thread": false,
+      "codes": [
+        "寒食清明"
+      ],
+      "expires_at": "2026-04-10T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[福利码]风清景明，赠福于君 Day3",
+      "url": "https://bbs.4399.cn/thread-tid-52589690",
+      "opened_thread": false,
+      "codes": [
+        "但愿长闲有诗酒，一溪风月共清明"
+      ],
+      "expires_at": "2026-04-10T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[福利码]风清景明，赠福于君 Day1",
+      "url": "https://bbs.4399.cn/thread-tid-52589380",
+      "opened_thread": false,
+      "codes": [
+        "时节正是清明，雨初晴"
+      ],
+      "expires_at": "2026-04-10T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[公告]踏青山登高望，招财进宝开启",
+      "url": "https://bbs.4399.cn/thread-tid-52525493",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[已处理]招财进宝活动异常说明",
+      "url": "https://bbs.4399.cn/thread-tid-52552862",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[礼包]元启新程，旦愿美好，参与领跨年好礼",
+      "url": "https://bbs.4399.cn/thread-tid-47514391",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2024-03-31T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[公告]集结号冲刺，权能返利大派送",
+      "url": "https://bbs.4399.cn/thread-tid-52468001",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[活动]桂香来，清秋色，回帖领节气好礼",
+      "url": "https://bbs.4399.cn/thread-tid-50643529",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2025-12-30T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[礼包]冬至大如年，人间小团圆，回帖领暖冬好礼",
+      "url": "https://bbs.4399.cn/thread-tid-47409715",
+      "opened_thread": false,
+      "codes": [],
+      "expires_at": "2026-03-31T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[公告]春分庆典享好礼，移形换影活动开启",
+      "url": "https://bbs.4399.cn/thread-tid-52410552",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[回帖有礼]感谢有你，参与互动领实物周边及祝福礼包",
+      "url": "https://bbs.4399.cn/thread-tid-51325533",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[活动]露气偏寒气渐生，回帖领节气好礼",
+      "url": "https://bbs.4399.cn/thread-tid-50729146",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2025-12-30T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[回帖有礼]双节欢庆，参与互动领实物周边及祝福礼包",
+      "url": "https://bbs.4399.cn/thread-tid-50712223",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[活动]节气好礼来袭，回帖领小雪礼包",
+      "url": "https://bbs.4399.cn/thread-tid-51262554",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2025-02-27T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[16.2.0版本]强更延期公告说明",
+      "url": "https://bbs.4399.cn/thread-tid-52030457",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[公告]元宵欢聚，集市开启好礼不停",
+      "url": "https://bbs.4399.cn/thread-tid-52250889",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[福利码]元宵节福利礼包来啦！",
+      "url": "https://bbs.4399.cn/thread-tid-47997815",
+      "opened_thread": false,
+      "codes": [],
+      "expires_at": "2026-02-17T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[礼包]节气好礼来袭，回帖领立春礼包",
+      "url": "https://bbs.4399.cn/thread-tid-51942931",
+      "opened_thread": true,
+      "codes": [
+        "春风送暖"
+      ],
+      "expires_at": "2026-02-10T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[礼包]节气好礼来袭，回帖领冬至礼包",
+      "url": "https://bbs.4399.cn/thread-tid-51537494",
+      "opened_thread": false,
+      "codes": [
+        "岁末冬至喜乐长安"
+      ],
+      "expires_at": "2025-01-31T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[礼包]圣雪漫仙途，圣诞领好礼！",
+      "url": "https://bbs.4399.cn/thread-tid-51574273",
+      "opened_thread": false,
+      "codes": [
+        "齐天飞雪圣诞邀约"
+      ],
+      "expires_at": "2025-01-31T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "版本前瞻笔记丨这是一期FAQ！",
+      "url": "https://bbs.4399.cn/thread-tid-51336715",
+      "opened_thread": true,
+      "codes": [
+        "周末愉快"
+      ],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[新服活动] 2月14日10时 新服“梦长安”开启",
+      "url": "https://bbs.4399.cn/thread-tid-52076677",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[活动]登陆送舞狮时装，蛇年典藏纹章开售",
+      "url": "https://bbs.4399.cn/thread-tid-47996003",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[公告]欢度春节，龙马呈祥，十一乐欢聚",
+      "url": "https://bbs.4399.cn/thread-tid-52079282",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2026-02-25T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[H5活动]游戏盒新春集卡送豪礼",
+      "url": "https://bbs.4399.cn/thread-tid-52072140",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[福利码]团圆除夕夜，欢乐不停歇",
+      "url": "https://bbs.4399.cn/thread-tid-47839342",
+      "opened_thread": false,
+      "codes": [],
+      "expires_at": "2026-02-07T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[福利码]初一到，福气到~",
+      "url": "https://bbs.4399.cn/thread-tid-47839412",
+      "opened_thread": false,
+      "codes": [],
+      "expires_at": "2026-03-03T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "《造梦西游OL》专属春节累充礼包来袭~",
+      "url": "https://bbs.4399.cn/thread-tid-52060499",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2026-03-30T23:59:00+08:00",
+      "active": false
+    },
+    {
+      "title": "年味渐浓，敖烈携礼迎福到！",
+      "url": "https://bbs.4399.cn/thread-tid-51969933",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[公告]新服备战，权能返利大派送",
+      "url": "https://bbs.4399.cn/thread-tid-51975453",
+      "opened_thread": true,
+      "codes": [
+        "春节备战好礼",
+        "春节造梦相聚"
+      ],
+      "expires_at": "2026-02-14T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[活动]节气好礼来袭，回帖领霜降礼包",
+      "url": "https://bbs.4399.cn/thread-tid-50969750",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2025-01-30T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[公告]许愿新年赢好礼，白龙显现福源来",
+      "url": "https://bbs.4399.cn/thread-tid-51905945",
+      "opened_thread": false,
+      "codes": [],
+      "expires_at": "2026-02-07T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[礼包]新年新展望，参与互动领好礼",
+      "url": "https://bbs.4399.cn/thread-tid-47826819",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2025-05-31T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[活动]蛇年典藏纹章活动详情",
+      "url": "https://bbs.4399.cn/thread-tid-47995982",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[礼包]腊八过，大寒至，回帖领游戏礼包",
+      "url": "https://bbs.4399.cn/thread-tid-42938533",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2024-03-31T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[活动]冬风渐起万物藏，回帖领立冬好礼",
+      "url": "https://bbs.4399.cn/thread-tid-51129991",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "2026HIGH起来！！！",
+      "url": "https://bbs.4399.cn/thread-tid-51633138",
+      "opened_thread": false,
+      "codes": [
+        "OL陪你跨年"
+      ],
+      "expires_at": "2025-01-02T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "【爆料】金蛇送财福气到，新春福利来报道！（内含福利码）",
+      "url": "https://bbs.4399.cn/thread-tid-47784185",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2025-01-30T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[公告]囤年货待新年，腊八暖心奖励不停",
+      "url": "https://bbs.4399.cn/thread-tid-51841050",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[活动]节气好礼来袭，讨论领大雪礼包",
+      "url": "https://bbs.4399.cn/thread-tid-51417473",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2025-01-30T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[回帖有礼]万圣Biu大胆，参与互动领实物周边及祝福礼包",
+      "url": "https://bbs.4399.cn/thread-tid-51047956",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[礼包]冬日渐渐，小年暖暖，参与互动领好礼",
+      "url": "https://bbs.4399.cn/thread-tid-47672497",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2025-04-30T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[福利码]元旦快乐！你好2026！",
+      "url": "https://bbs.4399.cn/thread-tid-51584313",
+      "opened_thread": false,
+      "codes": [
+        "元旦到来"
+      ],
+      "expires_at": "2026-01-10T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[公告]四九天赢小苇灵物，五行四季兑好礼",
+      "url": "https://bbs.4399.cn/thread-tid-51717026",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[公告]四九天活动神兵领取与点灵异常说明（已修复）",
+      "url": "https://bbs.4399.cn/thread-tid-51725935",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[新服活动] 12月29日10时 新服“三世书”开启",
+      "url": "https://bbs.4399.cn/thread-tid-51581477",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[已修复]本命空间特权未生效异常说明",
+      "url": "https://bbs.4399.cn/thread-tid-51590197",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "【小苇特供】新角色爆料第一弹视频来袭！！",
+      "url": "https://bbs.4399.cn/thread-tid-51594299",
+      "opened_thread": false,
+      "codes": [
+        "见诗文"
+      ],
+      "expires_at": "2025-01-03T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "《造梦西游OL》专属累充礼包来袭~",
+      "url": "https://bbs.4399.cn/thread-tid-51611679",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2025-01-10T23:59:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[礼包]元旦跨年来造梦，回帖祝福领礼包",
+      "url": "https://bbs.4399.cn/thread-tid-42711695",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2023-03-31T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[礼包]春节新仙术抢先看，回帖命名领好礼",
+      "url": "https://bbs.4399.cn/thread-tid-42839599",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2024-03-31T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[活动]《造梦OL》初版最让你印象深刻的玩法是什么？",
+      "url": "https://bbs.4399.cn/thread-tid-45557333",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[活动]周年庆典，参与互动领实物周边及祝福礼包",
+      "url": "https://bbs.4399.cn/thread-tid-49614833",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[活动]双十二来袭，造化烘炉兑好礼",
+      "url": "https://bbs.4399.cn/thread-tid-51397533",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[活动]冬至围炉食冬饺，战令新赛季开启！",
+      "url": "https://bbs.4399.cn/thread-tid-51456209",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[活动]新春福利合集！",
+      "url": "https://bbs.4399.cn/thread-tid-47827123",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[活动]《造梦西游OL》专属累充礼包来袭~",
+      "url": "https://bbs.4399.cn/thread-tid-51168129",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2025-12-30T23:59:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[公告]16.0.0版本异常说明",
+      "url": "https://bbs.4399.cn/thread-tid-51465973",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[合集]金秋新服版本福利合集~",
+      "url": "https://bbs.4399.cn/thread-tid-50714881",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2025-10-01T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "版本前瞻笔记丨双十一活动！",
+      "url": "https://bbs.4399.cn/thread-tid-51132486",
+      "opened_thread": true,
+      "codes": [
+        "造梦活跃能量"
+      ],
+      "expires_at": "2025-11-16T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[礼包]春节壁纸来袭，回帖互动领礼包",
+      "url": "https://bbs.4399.cn/thread-tid-43286424",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2024-05-01T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[礼包]数声惊雷唤新生，回帖领节气礼包",
+      "url": "https://bbs.4399.cn/thread-tid-44060683",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2024-05-31T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[合集]双十一版本福利合集，多样好礼等你来~",
+      "url": "https://bbs.4399.cn/thread-tid-51169320",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2025-11-16T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[礼包]落雪成诗，回帖得小雪礼包",
+      "url": "https://bbs.4399.cn/thread-tid-42280994",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2023-12-31T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[礼包]迎冬至盼圣诞，回帖领暖冬好礼",
+      "url": "https://bbs.4399.cn/thread-tid-42635107",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2023-03-31T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[公告]好运自选礼包III开启异常说明",
+      "url": "https://bbs.4399.cn/thread-tid-51363823",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[福利码]双节欢庆，Day4福利码~",
+      "url": "https://bbs.4399.cn/thread-tid-50699383",
+      "opened_thread": true,
+      "codes": [
+        "享受假期"
+      ],
+      "expires_at": "2025-10-11T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "【福利码】520！请收下PD的告白！",
+      "url": "https://bbs.4399.cn/thread-tid-39512649",
+      "opened_thread": true,
+      "codes": [
+        "520快乐",
+        "PD的告白"
+      ],
+      "expires_at": "2023-05-31T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[福利码]双节欢庆，Day7福利码~",
+      "url": "https://bbs.4399.cn/thread-tid-50700867",
+      "opened_thread": true,
+      "codes": [
+        "假期不足"
+      ],
+      "expires_at": "2025-10-11T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[已修复]异常情况说明",
+      "url": "https://bbs.4399.cn/thread-tid-51098582",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[活动]时来运转好运来，打卡西游路时光兑好礼",
+      "url": "https://bbs.4399.cn/thread-tid-50872080",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[已修复]双十一活动异常情况说明",
+      "url": "https://bbs.4399.cn/thread-tid-51167309",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "集结号活动异常情况说明",
+      "url": "https://bbs.4399.cn/thread-tid-51092928",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "荒古万界调整与补偿公告",
+      "url": "https://bbs.4399.cn/thread-tid-48660436",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[福利码]双节欢庆，Day5福利码~",
+      "url": "https://bbs.4399.cn/thread-tid-50699552",
+      "opened_thread": true,
+      "codes": [
+        "好运快来"
+      ],
+      "expires_at": "2025-10-11T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[新服活动]云漫千山海纳百川 9月29日10时 新服“云海谣”开启",
+      "url": "https://bbs.4399.cn/thread-tid-50663757",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[福利码]双节欢庆，Day3福利码~",
+      "url": "https://bbs.4399.cn/thread-tid-50699185",
+      "opened_thread": true,
+      "codes": [
+        "欢乐假期"
+      ],
+      "expires_at": "2025-10-11T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[公告]15.8.0版本异常情况说明",
+      "url": "https://bbs.4399.cn/thread-tid-50698965",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[福利码]双节欢庆，Day6福利码~",
+      "url": "https://bbs.4399.cn/thread-tid-50699696",
+      "opened_thread": true,
+      "codes": [
+        "月满中秋"
+      ],
+      "expires_at": "2025-10-11T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[福利码]双节欢庆，Day2福利码~",
+      "url": "https://bbs.4399.cn/thread-tid-50698936",
+      "opened_thread": true,
+      "codes": [
+        "十二成双"
+      ],
+      "expires_at": "2025-10-11T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[福利码]双节欢庆，Day1福利码~",
+      "url": "https://bbs.4399.cn/thread-tid-50698822",
+      "opened_thread": true,
+      "codes": [
+        "金秋快乐"
+      ],
+      "expires_at": "2025-10-11T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[福利码]老师您辛苦了~",
+      "url": "https://bbs.4399.cn/thread-tid-50485136",
+      "opened_thread": true,
+      "codes": [
+        "谆谆教诲永不忘"
+      ],
+      "expires_at": "2025-09-15T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[福利码]欢度国庆，Day5福利码~",
+      "url": "https://bbs.4399.cn/thread-tid-46617530",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2024-10-11T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[福利码]欢度国庆，Day4福利码~",
+      "url": "https://bbs.4399.cn/thread-tid-46617499",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2024-10-11T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[公告]「专属唤灵」活动异常说明（已修复）",
+      "url": "https://bbs.4399.cn/thread-tid-50575612",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[公告]元灵蛋好运礼包开启异常说明（已修复）",
+      "url": "https://bbs.4399.cn/thread-tid-50503434",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[公告]【龙年主动仙术自选礼包·绝】自选兑换活动与延迟开启情况说明",
+      "url": "https://bbs.4399.cn/thread-tid-50523882",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[公告]欧皇特典活动发放异常说明",
+      "url": "https://bbs.4399.cn/thread-tid-50458877",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "7月8日异常问题说明及补偿",
+      "url": "https://bbs.4399.cn/thread-tid-49602328",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[福利码]七夕来临，咱们鹊桥见~",
+      "url": "https://bbs.4399.cn/thread-tid-50306971",
+      "opened_thread": true,
+      "codes": [
+        "天上鹊桥见"
+      ],
+      "expires_at": "2025-09-01T05:00:00+08:00",
+      "active": false
+    },
+    {
+      "title": "[公告]荒古巨兽活动与极北关卡闪退异常说明与补偿",
+      "url": "https://bbs.4399.cn/thread-tid-50413298",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[合集]十二周年福利合集",
+      "url": "https://bbs.4399.cn/thread-tid-49614719",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[公告]部分活动异常与道具“心愿结”过期时间说明",
+      "url": "https://bbs.4399.cn/thread-tid-50331863",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false
+    },
+    {
+      "title": "[福利码]周年庆典第一弹！",
+      "url": "https://bbs.4399.cn/thread-tid-50230275",
+      "opened_thread": true,
+      "codes": [
+        "暑期已过半"
+      ],
+      "expires_at": "2025-08-23T05:00:00+08:00",
+      "active": false
+    }
+  ]
 }

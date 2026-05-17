@@ -349,9 +349,15 @@ class AutoConfig:
             self._mgr.current_acc.restore_credentials(saved_credentials)
             self._refresh_flat_config()
 
-    def save_config(self) -> None:
+    def save_config(self, *, quiet: bool = False) -> None:
         os.makedirs(os.path.dirname(self.CONFIG_PATH), exist_ok=True)
-        self._mgr.save_all(self._config)
+        try:
+            self._mgr.save_all(self._config)
+        except OSError as e:
+            if quiet:
+                logger.debug("退出时保存配置失败，已忽略: %s", e)
+                return
+            raise
 
     def _save_account_file(self) -> None:
         self._mgr.save_account_file_only()
@@ -536,4 +542,4 @@ class AutoConfig:
 cfg_manager = ConfigManager()
 cfg = AutoConfig()
 cfg.load_config()
-atexit.register(lambda: cfg.save_config())
+atexit.register(lambda: cfg.save_config(quiet=True))
