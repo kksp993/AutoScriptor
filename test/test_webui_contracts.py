@@ -629,6 +629,7 @@ class TestWebUIFrontendContract(unittest.TestCase):
         ROOT / "services/webui/static/js/components/TaskPanel.js",
         ROOT / "services/webui/static/js/components/TaskTree.js",
         ROOT / "services/webui/static/js/components/Settings.js",
+        ROOT / "services/webui/static/js/components/ErrorArchivesPanel.js",
     ]
 
     def test_changed_frontend_files_parse_as_javascript(self):
@@ -662,6 +663,14 @@ class TestWebUIFrontendContract(unittest.TestCase):
         content = (ROOT / "services/webui/static/js/components/Overview.js").read_text(encoding="utf-8")
         self.assertIn("scheduled: '已完成'", content)
         self.assertNotIn("scheduled: '已计划'", content)
+
+    def test_error_archives_support_shift_range_selection(self):
+        content = (ROOT / "services/webui/static/js/components/ErrorArchivesPanel.js").read_text(encoding="utf-8")
+
+        self.assertIn("lastCheckedFolder", content)
+        self.assertIn("flatArchiveFolders", content)
+        self.assertIn("ev.shiftKey", content)
+        self.assertIn("@click.stop=\"setChecked(it.folder, $event)\"", content)
 
     def test_settings_contains_only_active_settings_ui(self):
         content = (ROOT / "services/webui/static/js/components/Settings.js").read_text(encoding="utf-8")

@@ -13,6 +13,7 @@ const ErrorArchivesPanel = {
       detail: null,
       detailLoading: false,
       checked: {},
+      lastCheckedFolder: '',
       previewVisible: false,
       previewPath: '',
       previewTitle: '',
@@ -40,6 +41,15 @@ const ErrorArchivesPanel = {
     hasSelection() {
       return Object.keys(this.checked).some((k) => this.checked[k]);
     },
+    flatArchiveFolders() {
+      const folders = [];
+      for (const dk of this.dateKeys) {
+        for (const it of this.groups[dk] || []) {
+          folders.push(it.folder);
+        }
+      }
+      return folders;
+    },
   },
   mounted() {
     this.refreshList();
@@ -53,6 +63,13 @@ const ErrorArchivesPanel = {
         if (!r.ok) throw new Error(d.error || '加载失败');
         this.items = d.items || [];
         this.groups = d.groups || {};
+        const validFolders = new Set(this.items.map((x) => x.folder));
+        this.checked = Object.fromEntries(
+          Object.entries(this.checked).filter(([folder, on]) => on && validFolders.has(folder)),
+        );
+        if (this.lastCheckedFolder && !validFolders.has(this.lastCheckedFolder)) {
+          this.lastCheckedFolder = '';
+        }
         if (this.activeFolder && !this.items.some((x) => x.folder === this.activeFolder)) {
           this.activeFolder = '';
           this.detail = null;
@@ -84,8 +101,21 @@ const ErrorArchivesPanel = {
       }
     },
     setChecked(folder, ev) {
-      const on = ev.target.checked;
-      this.checked = { ...this.checked, [folder]: on };
+      const on = !!ev.target.checked;
+      const next = { ...this.checked, [folder]: on };
+      if (ev.shiftKey && this.lastCheckedFolder && this.lastCheckedFolder !== folder) {
+        const folders = this.flatArchiveFolders;
+        const start = folders.indexOf(this.lastCheckedFolder);
+        const end = folders.indexOf(folder);
+        if (start >= 0 && end >= 0) {
+          const [lo, hi] = start < end ? [start, end] : [end, start];
+          for (const f of folders.slice(lo, hi + 1)) {
+            next[f] = on;
+          }
+        }
+      }
+      this.checked = next;
+      this.lastCheckedFolder = folder;
     },
     async deleteSelected() {
       const folders = Object.keys(this.checked).filter((k) => this.checked[k]);
@@ -236,8 +266,7 @@ const ErrorArchivesPanel = {
               <input type="checkbox"
                 class="mt-1.5 h-4 w-4 shrink-0 rounded border-slate-300 text-primary focus:ring-primary"
                 :checked="!!checked[it.folder]"
-                @click.stop
-                @change="setChecked(it.folder, $event)" />
+                @click.stop="setChecked(it.folder, $event)" />
               <div class="min-w-0 flex-1">
                 <div class="flex items-baseline justify-between gap-2">
                   <span class="text-sm font-medium text-slate-800 truncate" :title="it.taskName">{{ it.taskName }}</span>
