@@ -178,6 +178,33 @@ class TestBattlePlan(unittest.TestCase):
 
         self.assertEqual(hero.profession, "琉离")
 
+    def test_missing_profession_does_not_borrow_other_profession_flow(self):
+        from ZmxyOL.task import battle_task_params
+
+        hero = Hero()
+
+        with patch.object(battle_task_params.cfg, "get", return_value="嫦娥"):
+            battle_task_params.get_battle_profile(hero)
+
+        self.assertEqual(hero.profession, "default")
+        self.assertIsNone(
+            battle_task_params.resolve_battle_flow_for_profile(hero, "战斗循环146")
+        )
+
+    def test_profession_flow_is_kept_for_matching_profile(self):
+        from ZmxyOL.task import battle_task_params
+
+        hero = Hero()
+
+        with patch.object(battle_task_params.cfg, "get", return_value="琉离"):
+            battle_task_params.get_battle_profile(hero)
+
+        self.assertEqual(hero.profession, "琉离")
+        self.assertEqual(
+            battle_task_params.resolve_battle_flow_for_profile(hero, "战斗循环146"),
+            "战斗循环146",
+        )
+
     def test_default_battle_flow_prefers_named_default(self):
         from ZmxyOL.task.battle_task_params import DEFAULT_BATTLE_FLOW
 
