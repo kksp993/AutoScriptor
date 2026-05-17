@@ -143,6 +143,43 @@ class TestTaskTreeServiceContract(unittest.TestCase):
         self.module = import_task_tree_service_for_test()
         self.service = self.module.TaskTreeService()
 
+    def _task_registry_stubs(self, registered_paths: set[str]):
+        class FakeTaskRegistry:
+            def has_task(self, path):
+                return path in registered_paths
+
+            def get_param_meta(self, path):
+                return {}
+
+            def get_param_keys(self, path):
+                return []
+
+            def get_beta(self, path):
+                return False
+
+            def get_custom(self, path):
+                return False
+
+            def get_debug_mode(self, path):
+                return False
+
+            def get_description(self, path):
+                return ""
+
+            def get_doc_flow(self, path):
+                return []
+
+        task_registry = types.ModuleType("AutoScriptor.utils.task_registry")
+        task_registry.task_registry = FakeTaskRegistry()
+        scheduler = types.ModuleType("services.core.scheduler")
+        scheduler.is_task_due = lambda node, path, now_ts: bool(node.get("on"))
+        return {
+            "AutoScriptor": types.ModuleType("AutoScriptor"),
+            "AutoScriptor.utils": types.ModuleType("AutoScriptor.utils"),
+            "AutoScriptor.utils.task_registry": task_registry,
+            "services.core.scheduler": scheduler,
+        }
+
     def test_ordered_paths_preserves_nested_leaf_order(self):
         tree = {
             "每日任务": {
@@ -189,6 +226,37 @@ class TestTaskTreeServiceContract(unittest.TestCase):
         for key in self.service.RUNTIME_TASK_FIELDS:
             self.assertNotIn(key, leaf)
         self.assertIn("param_meta", tasks["每日任务"]["任务A"], "strip_runtime_fields must not mutate input")
+
+    def test_public_task_projection_hides_unregistered_leaf_tasks(self):
+        tasks = {
+            "registered": {
+                "task": {"on": True, "next_exec_time": 0, "params": {}},
+            },
+            "stale": {
+                "ghost": {"on": True, "next_exec_time": 0, "params": {}},
+            },
+        }
+
+        with patch.dict(sys.modules, self._task_registry_stubs({"registered/task"})):
+            self.service.inject_public_task_fields(tasks)
+
+        self.assertEqual(list(tasks.keys()), ["registered"])
+        self.assertIn("_due", tasks["registered"]["task"])
+
+    def test_flatten_tasks_skips_unregistered_leaf_tasks(self):
+        tasks = {
+            "registered": {
+                "task": {"on": True, "next_exec_time": 0, "params": {}},
+            },
+            "stale": {
+                "ghost": {"on": True, "next_exec_time": 0, "params": {}},
+            },
+        }
+
+        with patch.dict(sys.modules, self._task_registry_stubs({"registered/task"})):
+            flat = self.service.flatten_tasks(tasks, now_ts=100)
+
+        self.assertEqual([row["path"] for row in flat], ["registered/task"])
 
     def test_normalize_dispatch_queue_keeps_existing_unique_characters(self):
         account_data = {
