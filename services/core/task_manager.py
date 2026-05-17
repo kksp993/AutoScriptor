@@ -67,6 +67,19 @@ _CATEGORY_NEXT_DATE = {
 }
 
 
+def is_task_debug_mode(task_path: str, task_data: dict | None = None) -> bool:
+    """Task-level debug run policy from registry first, config fallback second."""
+    if task_registry.get_debug_mode(task_path):
+        return True
+    if isinstance(task_data, dict):
+        return bool(task_data.get("debug_mode") or task_data.get("debug"))
+    try:
+        data = dpath.get(cfg["tasks"], task_path)
+    except Exception:
+        return False
+    return isinstance(data, dict) and bool(data.get("debug_mode") or data.get("debug"))
+
+
 def parse_sched_window_hours(task_data: dict) -> tuple[int, int] | None:
     """解析 sched_window_hours: [start_h, end_h)，本地时间，左闭右开。"""
     sw = task_data.get("sched_window_hours")
@@ -144,7 +157,13 @@ class TaskManager:
             cfg.switch_character(server, character)
             self.reload_tasks()
 
-    def execute_tasks(self, tasks: List[str]) -> Tuple[int, int]:
+    def execute_tasks(
+        self,
+        tasks: List[str],
+        *,
+        max_attempts: int | None = None,
+        attempt_offset: int = 0,
+    ) -> Tuple[int, int]:
         """执行一组任务。返回 (成功数, 失败数)。"""
         if self._cancel_event.is_set():
             logger.info("⏹ 检测到终止请求，跳过本批任务")
@@ -155,7 +174,11 @@ class TaskManager:
             if self._cancel_event.is_set():
                 logger.info("⏹ 检测到终止请求，停止后续任务")
                 break
-            if self._execute_single_task(task):
+            if self._execute_single_task(
+                task,
+                max_attempts=max_attempts,
+                attempt_offset=attempt_offset,
+            ):
                 success += 1
             else:
                 failed += 1
@@ -192,13 +215,27 @@ class TaskManager:
 
     # ── 核心执行 ──
 
-    def _execute_single_task(self, task: str) -> bool:
+    def _execute_single_task(
+        self,
+        task: str,
+        *,
+        max_attempts: int | None = None,
+        attempt_offset: int = 0,
+    ) -> bool:
         """执行单个任务（含重试）。返回是否成功。"""
         max_retry = cfg["app"].get("max_retry", 0)
 
-        for attempt in range(max_retry + 1):
+        if max_attempts is None:
+            attempt_numbers = range(0, max_retry + 1)
+        else:
+            start = max(0, attempt_offset)
+            stop = min(max_retry + 1, start + max(1, max_attempts))
+            attempt_numbers = range(start, stop)
+
+        for attempt in attempt_numbers:
             if self._cancel_event.is_set():
                 return False
+            has_local_retry = attempt + 1 in attempt_numbers
 
             set_current_task(task.rsplit("/", 1)[-1])
             try:
@@ -219,7 +256,9 @@ class TaskManager:
             except TaskRequireReTry as e:
                 if attempt < max_retry:
                     logger.info(f"🔄 任务请求重试: {task} ({attempt + 1}/{max_retry})，原因: {e}")
-                    continue
+                    if has_local_retry:
+                        continue
+                    return False
                 logger.warning(f"⚠️ 重试次数已满: {task}，原因: {e}")
                 return False
 
@@ -241,11 +280,16 @@ class TaskManager:
                 logger.error("❌ 执行失败: %s，错误: %r", task, e)
                 self._archive_error(task, e)
                 traceback.print_exc()
-                if not self._try_recover_app(attempt):
+                if is_task_debug_mode(task):
+                    logger.info("🔄 debug_mode: 跳过失败恢复，不关闭/重启游戏: %s", task)
+                    return False
+                if not self._try_recover_app(attempt, task=task):
                     return False
                 if attempt < max_retry:
                     logger.info(f"🔄 重试 ({attempt + 1}/{max_retry})")
-                    continue
+                    if has_local_retry:
+                        continue
+                    return False
                 return False
 
             finally:
@@ -363,8 +407,11 @@ class TaskManager:
 
     # ── 错误恢复 ──
 
-    def _try_recover_app(self, retry_count: int) -> bool:
+    def _try_recover_app(self, retry_count: int, task: str | None = None) -> bool:
         """尝试恢复应用到可执行状态。"""
+        if task and is_task_debug_mode(task):
+            logger.info("🔄 debug_mode: 跳过失败恢复，不关闭/重启游戏: %s", task)
+            return False
         if not cfg["app"].get("restart_on_error"):
             return False
         app_name = cfg["app"]["app_to_start"]

@@ -25,6 +25,7 @@ class TaskTreeService:
         "param_keys",
         "beta",
         "custom",
+        "debug_mode",
         "task_description",
         "task_doc_flow",
         "fn",
@@ -100,6 +101,10 @@ class TaskTreeService:
                     val["custom"] = True
                 else:
                     val.pop("custom", None)
+                if task_registry.get_debug_mode(path):
+                    val["debug_mode"] = True
+                else:
+                    val.pop("debug_mode", None)
                 val["task_description"] = task_registry.get_description(path)
                 val["task_doc_flow"] = task_registry.get_doc_flow(path)
                 val["_due"] = is_task_due(val, path, now_ts)
@@ -182,6 +187,7 @@ class TaskTreeService:
                     "name": key,
                     "status": self.task_leaf_status(val, path, now_ts),
                     "beta": task_registry.get_beta(path),
+                    "debug_mode": task_registry.get_debug_mode(path),
                     "task_description": task_registry.get_description(path),
                     "task_doc_flow": task_registry.get_doc_flow(path),
                 }

@@ -1,13 +1,12 @@
-"""战斗职业脚本源码包。
+"""战斗职业脚本兼容包。
 
-运行态可编辑覆盖脚本放在 data/battle_character/；本包只作为内置基线。
+运行态实现放在 data/battle_character/；本包只保留历史导入路径。
 """
 from __future__ import annotations
 
 import sys
 
 # 兼容由框架加载的旧脚本里的 `from battle_character.hero import ...`。
-# 仓库根目录不再保留 battle_character/ 包。
 sys.modules.setdefault("battle_character", sys.modules[__name__])
 
 from AutoScriptor.battle_character.hero import Hero, battle_plan, flow, h

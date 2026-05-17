@@ -754,10 +754,8 @@ async def verify_account_api(request: Request):
     old_tok = _credential_unlock_from_request(request)
     _revoke_credential_unlock(old_tok)
     tok = _grant_credential_unlock()
-    if cfg.get("scheduler.auto_start", False) and scheduler.state == SchedulerState.PENDING:
-        scheduler.activate()
-        scheduler.wake()
-        logger.info("Scheduler auto-started after account verification")
+    if cfg.get("scheduler.auto_start", False):
+        logger.info("Scheduler auto-start is armed; waiting for explicit run after account verification")
     version = _mark_config_changed("verify account")
     resp = JSONResponse(
         content={

@@ -175,6 +175,7 @@ class TestTaskTreeServiceContract(unittest.TestCase):
                     "_due": True,
                     "beta": True,
                     "custom": True,
+                    "debug_mode": True,
                 },
             },
         }
@@ -769,6 +770,17 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn('cfg._config.get("deploy", {}).get("password")', body)
         self.assertIn("deploy_password_required", body)
 
+    def test_account_verify_does_not_start_scheduler(self):
+        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        start = content.index('async def verify_account_api')
+        end = content.index('@app.post("/api/account")', start)
+        body = content[start:end]
+
+        self.assertIn("_grant_credential_unlock()", body)
+        self.assertNotIn("scheduler.activate()", body)
+        self.assertNotIn("scheduler.wake()", body)
+        self.assertIn("waiting for explicit run", body)
+
     def test_editor_save_updates_existing_ui_map_rows(self):
         content = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
 
@@ -806,6 +818,22 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("offsetPart = (dx || dy) ? `, offset=(${dx},${dy})` : ''", content)
         self.assertIn("return `click(${tgt}${offsetPart})`", content)
         self.assertNotIn(".margin()+(", content)
+
+    def test_editor_save_keeps_template_crop_separate_from_search_box(self):
+        backend = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
+        frontend = (ROOT / "services/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
+
+        self.assertIn("template_left = int(data.get(\"template_left\", left))", backend)
+        self.assertIn("cropped = _last_screenshot[template_top:template_bottom, template_left:template_right]", backend)
+        self.assertIn("raw_fn = f\"{pinyin_name}@{save_left}#{save_top}#{save_w}#{save_h}.png\"", backend)
+        self.assertIn("_is_fullscreen_like_rect", backend)
+
+        self.assertIn("function templateBox()", frontend)
+        self.assertIn("const tb = templateBox();", frontend)
+        self.assertIn(
+            "template_left: tb.left, template_top: tb.top, template_width: tb.width, template_height: tb.height",
+            frontend,
+        )
 
     def test_navigation_waits_use_cancellable_sleep(self):
         for rel in [

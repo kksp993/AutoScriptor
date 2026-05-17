@@ -1,7 +1,6 @@
-"""琉离 — 运行态可编辑职业覆盖脚本。
+"""琉离 — 运行态可编辑职业脚本。
 
-这个文件位于 data/battle_character/，开发环境和发行环境都会被动态加载。
-内置基线在 AutoScriptor/battle_character/；此处定义相同 profession 时会覆盖内置注册。
+这个文件位于 data/battle_character/，开发环境和发行环境都会动态加载这一份。
 """
 from __future__ import annotations
 

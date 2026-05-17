@@ -32,6 +32,7 @@ class TaskRegistry:
         custom: bool = False,
         doc_flow: str = "",
         description: str = "",
+        debug_mode: bool = False,
     ):
         self._tasks[path] = {
             "fn": fn,
@@ -42,6 +43,7 @@ class TaskRegistry:
             "custom": bool(custom),
             "doc_flow": (doc_flow or "").strip(),
             "description": (description or "").strip(),
+            "debug_mode": bool(debug_mode),
         }
 
     def get_fn(self, path: str):
@@ -76,6 +78,10 @@ class TaskRegistry:
     def get_description(self, path: str) -> str:
         entry = self._tasks.get(path)
         return (entry.get("description") or "").strip() if entry else ""
+
+    def get_debug_mode(self, path: str) -> bool:
+        entry = self._tasks.get(path)
+        return bool(entry.get("debug_mode")) if entry else False
 
     def set_fn(self, path: str, fn):
         if path in self._tasks:

@@ -160,6 +160,23 @@ def is_task_due(val: dict, path: str, now_ts: float) -> bool:
     return True
 
 
+def is_task_debug_mode(task_path: str, task_data: dict | None = None) -> bool:
+    """Lightweight debug-mode lookup that does not import task runtime modules."""
+    from AutoScriptor.utils.app_config import cfg
+    from AutoScriptor.utils.task_registry import task_registry
+    import dpath
+
+    if task_registry.get_debug_mode(task_path):
+        return True
+    if isinstance(task_data, dict):
+        return bool(task_data.get("debug_mode") or task_data.get("debug"))
+    try:
+        data = dpath.get(cfg["tasks"], task_path)
+    except Exception:
+        return False
+    return isinstance(data, dict) and bool(data.get("debug_mode") or data.get("debug"))
+
+
 def calc_effective_next_time(val: dict, now_ts: float) -> float:
     """计算任务的有效下次执行时间（用于展示），与 collect_active_times_from_tasks_tree 一致。"""
     from services.core.task_manager import (
@@ -362,9 +379,20 @@ class Scheduler:
     def _loop(self):
         from services.core.watcher import ConfigWatcher
         from AutoScriptor.utils.app_config import cfg
+        from AutoScriptor.utils.paths import get_battle_character_dir, get_custom_task_dir
+
+        def _extra_reload_paths() -> list[str]:
+            paths = [
+                str(get_battle_character_dir()),
+                str(get_custom_task_dir()),
+            ]
+            if cfg.current_account():
+                paths.append(cfg._account_path(cfg.current_account()))
+            return paths
+
         watcher = ConfigWatcher(
             cfg.CONFIG_PATH,
-            extra_paths=lambda: [cfg._account_path(cfg.current_account())] if cfg.current_account() else [],
+            extra_paths=_extra_reload_paths,
         )
         watcher.start_watching()
         while True:
@@ -499,6 +527,7 @@ class Scheduler:
         explicit_tasks=None  → 调度模式，由 _collect_due() 动态收集到期任务
         explicit_tasks=[...] → 单任务模式，执行外部传入的固定列表（仍复用登录确认与中断控制）
         """
+        import inspect
         from AutoScriptor.utils.app_config import cfg
         from AutoScriptor.utils.perf import ABOVE_NORMAL_PRIORITY_CLASS, boost, unboost
 
@@ -507,8 +536,42 @@ class Scheduler:
             return
 
         total_success = total_failed = 0
-        attempted: set[tuple[str, str, str]] = set()
+        max_retry = int(cfg["app"].get("max_retry", 0) or 0)
+        retry_round = 0
+        attempted_this_round: set[tuple[str, str, str]] = set()
+        retry_queue: list[tuple[tuple[str, str], str]] = []
+        failed_next_round: list[tuple[tuple[str, str], str]] = []
+        only_debug_tasks_executed = True
         self._pipeline_active.set()
+
+        def _active_char_key() -> tuple[str, str]:
+            ac = cfg.active_character()
+            return ac.get("server", ""), ac.get("name", "")
+
+        def _switch_to_char_if_needed(char_key: tuple[str, str]) -> bool:
+            if explicit_tasks is not None:
+                return True
+            cur = _active_char_key()
+            if cur == char_key:
+                return True
+            server, name = char_key
+            if not server or not name:
+                return False
+            try:
+                self._task_manager.switch_character_and_reload(server, name)
+                self.invalidate_login()
+                self._tasks_updated.set()
+                return True
+            except (KeyError, ValueError) as e:
+                logger.warning("📅 重试轮切换角色失败，跳过 %s/%s: %s", server, name, e)
+                return False
+
+        def _execute_task_attempt(task_key: str, attempt_index: int) -> tuple[int, int]:
+            execute = self._task_manager.execute_tasks
+            params = inspect.signature(execute).parameters
+            if "max_attempts" in params:
+                return execute([task_key], max_attempts=1, attempt_offset=attempt_index)
+            return execute([task_key])
 
         try:
             while True:
@@ -519,24 +582,53 @@ class Scheduler:
                 if explicit_tasks is None and self.state != SchedulerState.RUNNING:
                     break
 
-                if explicit_tasks is not None:
-                    ac = cfg.active_character()
-                    char_key = (ac.get("server", ""), ac.get("name", ""))
-                    due = [t for t in explicit_tasks if (*char_key, t) not in attempted]
-                else:
-                    collected_due = self._collect_due_cross_character()
-                    ac = cfg.active_character()
-                    char_key = (ac.get("server", ""), ac.get("name", ""))
-                    due = [
-                        t
-                        for t in collected_due
-                        if (*char_key, t) not in attempted
+                if retry_queue:
+                    char_key, task_key = retry_queue.pop(0)
+                    if not _switch_to_char_if_needed(char_key):
+                        continue
+                    due = [task_key]
+                elif explicit_tasks is not None:
+                    char_key = _active_char_key()
+                    due = [] if retry_round > 0 else [
+                        t for t in explicit_tasks if (*char_key, t) not in attempted_this_round
                     ]
+                else:
+                    char_key = _active_char_key()
+                    if retry_round > 0:
+                        due = []
+                    else:
+                        collected_due = self._collect_due_cross_character()
+                        char_key = _active_char_key()
+                        due = [
+                            t
+                            for t in collected_due
+                            if (*char_key, t) not in attempted_this_round
+                        ]
                 if not due:
+                    if failed_next_round and retry_round < max_retry:
+                        retry_round += 1
+                        retry_queue = failed_next_round
+                        failed_next_round = []
+                        attempted_this_round = set()
+                        logger.info(
+                            "📅 开始第 %d/%d 轮失败任务重试，共 %d 个任务",
+                            retry_round,
+                            max_retry,
+                            len(retry_queue),
+                        )
+                        continue
                     break
 
+                task_key = due[0]
+                task_debug_mode = is_task_debug_mode(task_key)
+                if not task_debug_mode:
+                    only_debug_tasks_executed = False
+
                 logger.info("📅 发现 %d 个待执行任务: %s", len(due), due)
-                self._maybe_daily_restart(cfg)
+                if task_debug_mode:
+                    logger.info("📅 debug_mode: 跳过自动登录与任务前重启: %s", task_key)
+                else:
+                    self._maybe_daily_restart(cfg)
 
                 # 必须先让模拟器在正常优先级下启动，启动完成后再温和 boost。
                 # 如果先 boost 再启动，MuMu 子进程会继承提升后的优先级，
@@ -566,15 +658,27 @@ class Scheduler:
                     continue
                 boost(process_priority=ABOVE_NORMAL_PRIORITY_CLASS)
 
-                self._ensure_character_logged_in(cfg)
+                if not task_debug_mode:
+                    self._ensure_character_logged_in(cfg)
 
-                task_key = due[0]
-                attempted.add((*char_key, task_key))
+                attempted_this_round.add((*char_key, task_key))
                 try:
-                    success, failed = self._task_manager.execute_tasks([task_key])
-                    total_success += success
-                    total_failed += failed
-                    self.record_result(success, failed)
+                    success, failed = _execute_task_attempt(task_key, retry_round)
+                    if success:
+                        total_success += success
+                        self.record_result(success, 0)
+                    elif failed:
+                        if retry_round < max_retry and not task_debug_mode:
+                            failed_next_round.append((char_key, task_key))
+                            logger.info(
+                                "📅 任务失败，跳过当前任务，等待本轮其他任务完成后重试: %s (%d/%d)",
+                                task_key,
+                                retry_round + 1,
+                                max_retry,
+                            )
+                        else:
+                            total_failed += failed
+                            self.record_result(0, failed)
                 except KeyboardInterrupt:
                     logger.info("⏹ 任务执行被中断")
                     if self._task_manager:
@@ -583,10 +687,14 @@ class Scheduler:
                     break
                 except Exception as e:
                     logger.error("📅 执行异常: %s - %s", task_key, e)
-                    self._consecutive_errors += 1
-                    if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                        self.mark_error()
-                        break
+                    if retry_round < max_retry and not task_debug_mode:
+                        failed_next_round.append((char_key, task_key))
+                    else:
+                        total_failed += 1
+                        self._consecutive_errors += 1
+                        if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                            self.mark_error()
+                            break
 
                 try:
                     if self._reload_deferred.is_set():
@@ -608,7 +716,10 @@ class Scheduler:
                     title="AutoScriptor 任务失败",
                     content=f"执行完成: 成功 {total_success}, 失败 {total_failed}"
                 )
-            self._post_execution_action()
+            if only_debug_tasks_executed:
+                logger.info("📅 debug_mode: 跳过 post_execution 收尾动作")
+            else:
+                self._post_execution_action()
             self._tasks_updated.set()
         elif self._reload_deferred.is_set():
             self._tasks_updated.set()
