@@ -193,3 +193,26 @@ def get_battle_profile(h) -> None:
     except Exception:
         logger.exception("自动识别职业失败，回退 default 配招")
     ensure_default_battle_profile(h)
+
+
+def resolve_battle_flow_for_profile(h, requested: str | None) -> str | None:
+    """Return a flow only if it is valid for the currently loaded profile.
+
+    BattleFlowName is intentionally global so old task configs can keep their
+    values, but execution must remain polymorphic: a missing/other profession
+    must not borrow a sibling profession's plan. Returning None lets the task's
+    own default (for example 战斗循环 or 昆仑山循环) take over.
+    """
+    flow_name = (requested or "").strip()
+    if not flow_name:
+        return None
+    resolver = getattr(h, "_resolve_flow", None)
+    if callable(resolver) and resolver(flow_name) is not None:
+        return flow_name
+    current_profession = getattr(type(h), "profession", getattr(h, "profession", "default"))
+    logger.warning(
+        "battle_flow '%s' 不属于当前职业 %s，忽略并使用任务默认流程",
+        flow_name,
+        current_profession,
+    )
+    return None

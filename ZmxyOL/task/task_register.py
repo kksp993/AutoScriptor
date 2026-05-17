@@ -222,9 +222,12 @@ def _apply_task_battle_startup(kwargs: dict) -> None:
     """任务函数执行前：加载配招职业，并把 WebUI 中的 battle_flow 挂到 h 上供 battle_loop 等使用。"""
     try:
         from ZmxyOL.battle.character.hero import h
-        from ZmxyOL.task.battle_task_params import get_battle_profile
+        from ZmxyOL.task.battle_task_params import get_battle_profile, resolve_battle_flow_for_profile
         get_battle_profile(h)
-        h.task_context_battle_flow = getattr(kwargs.get("battle_flow"), "value", None)
+        h.task_context_battle_flow = resolve_battle_flow_for_profile(
+            h,
+            getattr(kwargs.get("battle_flow"), "value", None),
+        )
     except Exception:
         pass
 
