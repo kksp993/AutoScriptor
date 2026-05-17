@@ -197,6 +197,12 @@ def register_task(
         task_path = "/".join(keys)
         desc = (description or "").strip() if description is not None else ""
         if not desc:
+            try:
+                from ZmxyOL.task.default_descriptions import get_default_task_description
+                desc = get_default_task_description(task_path)
+            except Exception:
+                desc = ""
+        if not desc:
             desc = f"自动执行「{last_key}」相关流程。"
         task_registry.register(
             task_path,
