@@ -1,4 +1,5 @@
 import traceback
+from time import time
 from AutoScriptor import *
 from ZmxyOL import *
 from ZmxyOL.battle.character.hero import h, combo
@@ -40,12 +41,42 @@ def kls_yxd_callback(registry=bg):
     finally:
         bg.set_signal("Pause_battle", False)
 
+def _request_try_exit_with_confirm_guard(max_wait: float = 180, interval: float = 1.0):
+    """请求 battle_loop 退出，并在退出信号复位前顺手处理可能出现的「确定」弹窗。"""
+    bg.set_signal("try_exit", True)
+    start = time()
+    confirm_target = (T("确定", color="绿色"), T("确定"))
+
+    while bg.signal("try_exit", False):
+        if time() - start > max_wait:
+            logger.warning("昆仑山退出确认守护等待 try_exit 复位超时，结束本次回调")
+            return
+        try:
+            confirm_box = first(locate(confirm_target, timeout=0, assure_stable=False))
+            if confirm_box is not None:
+                click(B(confirm_box), until=lambda: ui_F(confirm_target), interval=0.5)
+                return
+        except Exception as e:
+            logger.debug("昆仑山退出确认守护本轮检测失败: %s", e)
+        sleep(interval)
+
+def _kunlunshan_hidden_callback():
+    logger.info("进入昆仑山隐藏关卡，结束当前循环")
+    sleep(10)
+    h.move_left(1280)
+    bg.set_signal("hidden", True)
+    bg.set_signal("kunlunshan_hidden_seen", True)
+    _request_try_exit_with_confirm_guard()
+    bg.set_signal("hidden", False)
+
 def kunlunshan_battle(num: int = 5, flow_name: str | None = None, equipment: str = "诛仙剑阵"):
     if flow_name is None:
         flow_name = getattr(h, "task_context_battle_flow", None) or "昆仑山循环"
-    for _ in range(num):
+    for round_idx in range(1, num + 1):
+        logger.info("昆仑山轮次 %d/%d 开始", round_idx, num)
         h.set(has_cd=False, speed_x=3)   
         bg.set_signal("try_exit", False)
+        bg.set_signal("kunlunshan_hidden_seen", False)
         with bg.interval(0.4):
             with bg.scope("昆仑山") as scope:
                 # 「知道了」弹窗：once=False → 同一局 battle_loop 内每次识别到都会触发（可多次）。
@@ -69,6 +100,12 @@ def kunlunshan_battle(num: int = 5, flow_name: str | None = None, equipment: str
                         callback=lambda: kls_yxd_callback(scope),
                         once=False
                     )
+
+                scope.add(
+                    name="昆仑山隐藏",
+                    identifier=(I("昆仑山隐藏")),
+                    callback=_kunlunshan_hidden_callback,
+                )
                 # 与「知道了」不同：once=True → 本局内首次识别到「站在这里」后回调一次即移除，避免重复 try_exit。
                 scope.add(
                     name="战斗结束",
@@ -83,16 +120,27 @@ def kunlunshan_battle(num: int = 5, flow_name: str | None = None, equipment: str
                     ],
                     once=True,
                 )
-                h.set(has_cd=False, speed_x=3).battle_loop(flow_name=flow_name, max_duration=1000)
-                sleep(1)
-                xumiding(equipment=equipment)
-                h.way_to_exit(until=(I("加载中"), T("还有")), exit_loc=0)
-                wait_for_disappear(I("加载中"))
+                try:
+                    h.set(has_cd=False, speed_x=3).battle_loop(flow_name=flow_name, max_duration=1000)
+                    sleep(1)
+                    if bg.signal("kunlunshan_hidden_seen", False):
+                        xumiding(equipment=equipment)
+                    h.way_to_exit(until=(I("加载中"), T("还有")), exit_loc=0)
+                    wait_for_disappear(I("加载中"))
+                    logger.info("昆仑山轮次 %d/%d 结束", round_idx, num)
+                finally:
+                    bg.set_signal("try_exit", False)
+                    bg.set_signal("hidden", False)
+                    bg.set_signal("kunlunshan_hidden_seen", False)
     back_to_map()
 
 def xumiding(equipment:str="诛仙剑阵"):
-    click(T("菜单", box=Box(1151,24,98,77).margin()))
-    click(T("须弥鼎", box=Box(1153,184,126,50).margin()), offset=(0,-20))
+    if ui_F(I("菜单-设置"), timeout=1):
+        click(I("导航-菜单"), if_exist=True)
+        sleep(0.5)
+    # 「须弥鼎」是右侧竖排美术字，OCR 很容易漏识别；菜单展开后直接点固定入口更稳。
+    click(B(1206,189,1,1))
+    locate(I(equipment), timeout=3)
     while ui_F(I(equipment)):
         click(I("炼丹炉-进阶-右"),if_exist=True)
         sleep(1)
@@ -104,9 +152,8 @@ def xumiding(equipment:str="诛仙剑阵"):
     sleep(0.5)
     click(T("确定进阶"))
     sleep(1)
-    click(T("确定",color="绿色"))
-    wait_for_appear(T("进阶成功"))
-    click(B(1204,21,47,42))
+    click(T("确定",color="绿色"), if_exist=True)
+    click(B(1204,21,47,42),until=lambda:ui_T(T("菜单", box=Box(1151,24,98,77).margin())),interval=1)
     sleep(1)
     click(T("菜单", box=Box(1151,24,98,77).margin()))
 

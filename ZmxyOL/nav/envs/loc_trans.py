@@ -67,7 +67,7 @@ def way():
 def way():
     click(B(1200,30,30,30))
     sleep(1)
-    click(B(1200,30,30,30))
+    click(B(1200,30,30,30), until=lambda:ui_F(T("背包")), interval=1)
     mm.set_loc(mm.get_region()[0])
 
 @path(LOC_ENV, "背包")

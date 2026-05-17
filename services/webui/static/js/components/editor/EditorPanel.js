@@ -345,6 +345,17 @@ const EditorPanel = {
       return { left, top, width: w, height: h };
     }
 
+    function templateBox() {
+      const s = optimizedSel.value;
+      if (!s) return null;
+      return {
+        left: s.left,
+        top: s.top,
+        width: s.right - s.left,
+        height: s.bottom - s.top,
+      };
+    }
+
     const centerText = computed(() => {
       const s = optimizedSel.value;
       if (!s) return '';
@@ -738,12 +749,14 @@ const EditorPanel = {
 
     async function saveSelection() {
       const b = effectiveBox();
+      const tb = templateBox();
       if (!b) { ElementPlus.ElMessage.warning('请先框选区域'); return; }
       if (!name.value.trim()) { ElementPlus.ElMessage.warning('名称不能为空'); return; }
       try {
         const data = await apiPost('/save', {
           name: name.value.trim(),
           left: b.left, top: b.top, width: b.width, height: b.height,
+          template_left: tb.left, template_top: tb.top, template_width: tb.width, template_height: tb.height,
           free_x: freeX.value, free_y: freeY.value, only_ocr: onlyOcr.value,
         });
         if (data.error) { ElementPlus.ElMessage.error(data.error); return; }

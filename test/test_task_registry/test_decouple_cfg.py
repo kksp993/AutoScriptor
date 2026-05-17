@@ -300,6 +300,18 @@ class TestTaskManagerPrepare(unittest.TestCase):
         with self.assertRaises(KeyError):
             tm._prepare_task("测试/幽灵")
 
+    def test_debug_task_skips_failure_recovery(self):
+        from services.core.task_manager import TaskManager
+
+        cfg._config.setdefault("app", {})["restart_on_error"] = True
+        cfg._config["tasks"] = {
+            "测试": {"调试任务": {"on": True, "next_exec_time": 0, "params": {}}}
+        }
+        task_registry.register("测试/调试任务", lambda: None, order=1, debug_mode=True)
+
+        tm = TaskManager()
+        self.assertFalse(tm._try_recover_app(0, task="测试/调试任务"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -25,6 +25,7 @@ def register_task(
     path_cn=None,
     task_doc=None,
     description=None,
+    debug_mode=False,
     **task_kwargs,
 ):
     """
@@ -39,6 +40,8 @@ def register_task(
       - beta (bool): 为 True 时 WebUI 任务名旁显示 Beta 标记，说明区首行提示实验性任务
       - task_doc (str): 可选。WebUI 中「补充说明」正文；不传则从任务函数 docstring 首段提取
       - description (str): 可选。WebUI 任务简介（一句话）；不传则按任务名自动生成占位简介
+      - debug_mode (bool): 调试直跑模式；执行时不强制回登录页重登，失败时不关闭/重启游戏，
+        若本轮只执行 debug 任务，也跳过 post_execution 收尾动作。也兼容 debug=True 短写。
       - path_cn (str): **仅 custom_task 目录下脚本必填**。斜杠分隔的 cfg 任务路径（中文键），
         首段一般为「自定义任务」或与目录对应的英文名（如 custom_task 会规范为「自定义任务」）。
         示例：path_cn="自定义任务/示例/hello_custom"
@@ -66,12 +69,14 @@ def register_task(
                 path_cn=path_cn,
                 task_doc=task_doc,
                 description=description,
+                debug_mode=debug_mode,
                 **task_kwargs,
             )
         return wrapper
     global registration_counter  # 引入全局计数器
     registration_counter += 1
     reg_order = registration_counter  # 当前注册顺序
+    debug_mode = bool(debug_mode or task_kwargs.pop("debug", False))
     try:
         module = inspect.getmodule(func)
         if module is not None:
@@ -203,6 +208,7 @@ def register_task(
             custom=is_custom,
             doc_flow=doc_flow,
             description=desc,
+            debug_mode=debug_mode,
         )
         # print(f"✅ 【{'/'.join(keys)}】 => {a}")
     except Exception as e:

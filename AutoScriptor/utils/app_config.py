@@ -67,7 +67,7 @@ class Character:
     def clean_tasks_inplace(data: Any) -> None:
         if isinstance(data, dict):
             for key in (
-                "fn", "order", "param_meta", "param_keys", "beta", "custom",
+                "fn", "order", "param_meta", "param_keys", "beta", "custom", "debug_mode",
                 "task_description", "task_doc_flow", "_due",
             ):
                 data.pop(key, None)

@@ -161,6 +161,17 @@ def _clamp_crop_rect(left: int, top: int, width: int, height: int, frame: np.nda
     return left, top, right, bottom
 
 
+def _is_fullscreen_like_rect(left: int, top: int, right: int, bottom: int, frame: np.ndarray) -> bool:
+    """Protect image matching from accidental full-frame templates."""
+    frame_h, frame_w = frame.shape[:2]
+    rect_w = right - left
+    rect_h = bottom - top
+    if left == 0 and top == 0 and rect_w == frame_w and rect_h == frame_h:
+        return True
+    frame_area = frame_w * frame_h
+    return frame_area > 0 and (rect_w * rect_h / frame_area) >= 0.85
+
+
 def _unique_filename(directory: str, filename: str) -> str:
     stem, ext = os.path.splitext(filename)
     candidate = filename
@@ -509,9 +520,14 @@ async def editor_save(request: Request):
 
         left, top = int(data["left"]), int(data["top"])
         width, height = int(data["width"]), int(data["height"])
+        template_left = int(data.get("template_left", left))
+        template_top = int(data.get("template_top", top))
+        template_width = int(data.get("template_width", width))
+        template_height = int(data.get("template_height", height))
         free_x = bool(data.get("free_x", False))
         free_y = bool(data.get("free_y", False))
         only_ocr = bool(data.get("only_ocr", False))
+        allow_fullscreen_template = bool(data.get("allow_fullscreen_template", False))
 
         if _last_screenshot is None:
             return JSONResponse(status_code=400, content={"error": "请先获取截图"})
@@ -520,9 +536,27 @@ async def editor_save(request: Request):
         from pypinyin import lazy_pinyin
 
         left, top, right, bottom = _clamp_crop_rect(left, top, width, height, _last_screenshot)
-        cropped = _last_screenshot[top:bottom, left:right]
+        template_left, template_top, template_right, template_bottom = _clamp_crop_rect(
+            template_left,
+            template_top,
+            template_width,
+            template_height,
+            _last_screenshot,
+        )
+        if (
+            not only_ocr
+            and not allow_fullscreen_template
+            and _is_fullscreen_like_rect(template_left, template_top, template_right, template_bottom, _last_screenshot)
+        ):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "模板裁剪框接近整张截图。若想全屏检索，请只打开自由 X/Y；模板本身应框住目标小图。"
+                },
+            )
+        cropped = _last_screenshot[template_top:template_bottom, template_left:template_right]
 
-        save_left, save_top, save_w, save_h = left, top, width, height
+        save_left, save_top, save_w, save_h = left, top, right - left, bottom - top
         frame_h, frame_w = _last_screenshot.shape[:2]
         if free_x:
             save_left, save_w = 0, frame_w

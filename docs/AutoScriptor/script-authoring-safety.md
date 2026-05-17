@@ -55,3 +55,15 @@ class LiuLi(Hero):
 需要非常特殊的逻辑时，旧的 `@flow` 函数仍然可用；但普通职业循环优先用 `battle_plan`，避免手写 `first_round/once_at/every` 状态判断。
 
 `battle_weight` 目前只是兼容旧任务参数，不参与战斗策略。需要调整战斗行为时，优先新增或选择 `battle_flow`。
+
+## 任务调试直跑
+
+需要从当前游戏画面直接验证某个任务时，可以在任务装饰器上加 `debug_mode=True`：
+
+```python
+@register_task(debug_mode=True)
+def task():
+    ...
+```
+
+debug 任务执行时不会强制回到登录页重新登录角色；任务失败后也不会关闭/重启游戏。本轮如果只执行 debug 任务，还会跳过 `post_execution` 收尾动作，方便保留现场继续调试。短写 `@register_task(debug=True)` 等价。

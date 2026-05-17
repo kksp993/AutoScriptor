@@ -366,7 +366,13 @@ class TestHarness:
         self._original_registry = dict(task_registry._tasks)
         task_registry.clear()
         for path, entry in MOCK_REGISTRY_ENTRIES.items():
-            task_registry.register(path, entry["fn"], entry["order"], entry.get("param_meta", {}))
+            task_registry.register(
+                path,
+                entry["fn"],
+                entry["order"],
+                entry.get("param_meta", {}),
+                debug_mode=entry.get("debug_mode", False),
+            )
 
         # 4. 注入 mock 对象到 task_manager 模块的全局命名空间
         import services.core.task_manager as tm_mod

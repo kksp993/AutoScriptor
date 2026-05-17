@@ -74,7 +74,7 @@ def get_pos_tgt(i,j):
 def find_in_bag(bag_class: BAG, item: str):
     click(bag_class)
     click(T("全部"))
-    click(B(891,68,216,39),until=lambda:ui_F(T("全部")))
+    click(B(891,68,216,39),until=lambda:ui_F(T("全部")), interval=1)
     extract_info(B(891,68,216,39),lambda x: len(x) if x else 0)
 
     for i in range(len(item)):
