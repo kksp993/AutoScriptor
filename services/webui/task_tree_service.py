@@ -78,11 +78,14 @@ class TaskTreeService:
         from services.core.task_tree import TaskTree
 
         now_ts = time.time()
-        for key, val in node.items():
+        for key, val in list(node.items()):
             if not isinstance(val, dict):
                 continue
             path = f"{prefix}/{key}" if prefix else key
             if TaskTree.is_leaf(val):
+                if not task_registry.has_task(path):
+                    del node[key]
+                    continue
                 meta = task_registry.get_param_meta(path)
                 if meta:
                     val["param_meta"] = meta
@@ -110,6 +113,8 @@ class TaskTreeService:
                 val["_due"] = is_task_due(val, path, now_ts)
             else:
                 self.inject_public_task_fields(val, path)
+                if not val:
+                    del node[key]
 
     def strip_runtime_fields(self, node: dict) -> dict:
         cleaned = deepcopy(node)
@@ -182,6 +187,8 @@ class TaskTreeService:
                 continue
             path = f"{prefix}/{key}" if prefix else key
             if "on" in val and "next_exec_time" in val:
+                if not task_registry.has_task(path):
+                    continue
                 row = {
                     "path": path,
                     "name": key,
