@@ -133,6 +133,8 @@ def _fill_account_password(ctx_or_account, password = None):
         account, password = ctx.account, ctx.password
     else:
         account = ctx_or_account
+    click(B(611,220,26,26))
+    click(B(612,304,25,26))
     click(T("请输入手机号或用户名"), if_exist=True, timeout=5)
     input(account)
     click(T("请输入密码"), if_exist=True)

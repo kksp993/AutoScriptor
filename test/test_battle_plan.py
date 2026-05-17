@@ -298,6 +298,86 @@ class TestBattlePlan(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "battle_loop 超时"):
                 hero.battle_loop(max_duration=0.5)
 
+    def test_builtin_advance_is_not_ignored_by_default(self):
+        from AutoScriptor.battle_character import hero as hero_mod
+
+        class FakeBg:
+            def __init__(self):
+                self._signals = {}
+
+            def scope(self, prefix=None, *, clear_signals=False):
+                class Scope:
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, exc_type, exc, tb):
+                        return False
+
+                    def add(self, *args, **kwargs):
+                        if kwargs.get("name") == "_builtin_advance":
+                            kwargs["callback"]()
+                        return kwargs.get("name") or (args[0] if args else None)
+                return Scope()
+
+            def signal(self, key, default=None):
+                return self._signals.get(key, default)
+
+            def set_signal(self, key, value):
+                self._signals[key] = value
+                return value
+
+            def protect_clear(self):
+                class Guard:
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, exc_type, exc, tb):
+                        return False
+                return Guard()
+
+        class AdvanceHero(FakeHero):
+            def __init__(self):
+                super().__init__()
+                self.travel_count = 0
+
+            def travel(self):
+                self.travel_count += 1
+                fake_bg.set_signal(hero_mod.BG_SIGNALS.TRY_EXIT, True)
+                return self
+
+        fake_bg = FakeBg()
+        hero = AdvanceHero()
+        hero.battle_elapsed = 1
+
+        with patch.object(hero_mod, "bg", fake_bg), patch.object(hero_mod, "switch_base"):
+            hero.battle_loop(max_duration=2)
+
+        self.assertEqual(hero.travel_count, 1)
+
+    def test_builtin_advance_grace_can_still_be_opted_in(self):
+        from AutoScriptor.battle_character import hero as hero_mod
+
+        class FakeBg:
+            def __init__(self):
+                self._signals = {}
+
+            def signal(self, key, default=None):
+                return self._signals.get(key, default)
+
+            def set_signal(self, key, value):
+                self._signals[key] = value
+                return value
+
+        fake_bg = FakeBg()
+        hero = FakeHero()
+        hero.battle_elapsed = 1
+        fake_bg.set_signal(hero_mod.BG_SIGNALS.BUILTIN_ADVANCE, True)
+
+        with patch.object(hero_mod, "bg", fake_bg):
+            self.assertFalse(hero._check_advance(25))
+
+        self.assertFalse(fake_bg.signal(hero_mod.BG_SIGNALS.BUILTIN_ADVANCE, False))
+
 
 if __name__ == "__main__":
     unittest.main()

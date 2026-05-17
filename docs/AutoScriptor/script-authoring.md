@@ -34,3 +34,20 @@ time.sleep(1)
 - 普通脚本只使用 `click/locate/swipe/input/key_event/extract_info`。
 - 不直接调用 MuMuManager subprocess。
 - 需要诊断设备时使用 WebUI“启动诊断”，不要在任务脚本里自行探测多个底层通道。
+
+## 颜色判断
+
+- 旧写法 `color="绿色"` 仍然保留，适合历史脚本。
+- 新写法可直接传 RGB，例如 `B(100, 200, 30, 30, color=(80, 210, 90))`。
+- 如果你想更宽松一点，可以传字典：
+
+```python
+B(100, 200, 30, 30, color={"rgb": (80, 210, 90), "tolerance": 28, "min_ratio": 0.45})
+```
+
+- 纯色块、按钮高亮、状态灯这类判断优先用 RGB 快路径，速度通常比 OCR/模板识别快很多。
+- 想调阈值时可以先看统计：
+
+```python
+get_rgb_stats(B(100, 200, 30, 30), (80, 210, 90))
+```
