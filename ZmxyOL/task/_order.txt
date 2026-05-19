@@ -5,3 +5,4 @@ normal_task
 battle_task_params
 custom_task_loader
 time
+default_descriptions
