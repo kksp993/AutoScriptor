@@ -953,9 +953,9 @@
               未检测到历史安装记录，将按您选择的目录进行<strong>首次安装</strong>。
             </div>
             <ul class="preflight-list">
-              <li>将尝试<strong>结束占用旧版引擎的进程</strong>（可执行文件位于安装目录下 <code>backend</code> 内），并清理本机 <strong>5000</strong> 端口上的残留监听，以降低「无法删除/覆盖」类错误。</li>
-              <li>本次安装将<strong>覆盖</strong>目标目录中的 <code>backend</code> 引擎文件夹（相当于替换旧版程序文件）。</li>
-              <li><code>data</code> 目录若已存在，将按<strong>随包数据</strong>同步；若有重要账号，请先自行备份 <code>data/accounts</code> 等文件。</li>
+              <li>将尝试<strong>结束占用旧版引擎的进程</strong>（可执行文件位于安装目录下 <code>backend</code> 内），并只清理属于造笔安装目录的 <strong>5000</strong> 端口残留监听，以降低「无法切换/覆盖」类错误。</li>
+              <li>本次安装会先解压到临时目录，校验通过后再<strong>事务切换</strong>目标目录中的 <code>backend</code> 引擎文件夹；切换失败会回滚旧引擎。</li>
+              <li><code>data</code> 目录若已存在，将保留 <code>config.json</code>、<code>accounts</code>、<code>custom_task</code>、<code>battle_character</code> 等用户数据，仅合并随包基础数据。</li>
               <li>杀毒软件仍可能短暂锁定文件；若失败请稍后重试或暂时排除安装目录。</li>
             </ul>
             <p class="preflight-note">说明：无法保证解除<strong>所有</strong>第三方程序的占用；若仍报错，请关闭相关程序后重试。</p>
@@ -1463,7 +1463,7 @@
         const r = await window.electron.installer.validateInstallDir(dirPath);
         if (r.ok) {
           bar.className = 'pv-validation-bar show success';
-          bar.textContent = '✓ 目录可用';
+          bar.textContent = r.existingInstall ? '✓ 已识别为现有造笔目录，将保留用户数据并修复/更新' : '✓ 目录可用';
           return true;
         }
         bar.className = 'pv-validation-bar show error';

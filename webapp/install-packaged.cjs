@@ -81,65 +81,85 @@ function writeUninstallPs1(installRoot, userDataInstallJson) {
   const rootJson = JSON.stringify(rootResolved);
   const markerJson = JSON.stringify(userDataInstallJson);
 
-  // 不能在安装目录内直接 Remove-Item $root（脚本/主程序占用句柄）。
-  // 独立进程 + 首段等待 + 多轮结束进程 + Remove-Item 与 cmd rd /s /q 双保险 + 日志。
-  const innerPs = [
+  const buildInner = (removeUserData) => [
     '$ErrorActionPreference = "Continue"',
     `$log = Join-Path $env:TEMP "ZaoBiUninstall-error.log"`,
     `$root = ${rootJson}`,
+    `$removeUserData = ${removeUserData ? '$true' : '$false'}`,
     'function Stop-UnderRoot {',
     '  try {',
-    '    Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ($_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }',
+    '    Get-CimInstance Win32_Process | Where-Object {',
+    '      ($_.ExecutablePath -and ($_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase))) -or',
+    '      ($_.CommandLine -and ($_.CommandLine.IndexOf($root, [System.StringComparison]::OrdinalIgnoreCase) -ge 0))',
+    '    } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }',
     '  } catch { }',
     '}',
-    '$exeNames = @("造笔.exe","autoscriptor-engine.exe","AutoScriptor-Portable.exe")',
-    'function Stop-ByName {',
-    '  foreach ($n in $exeNames) { & taskkill /F /IM $n /T 2>$null 1>$null }',
+    'function Remove-AppFiles {',
+    '  $items = @("backend","license","造笔.exe","AutoScriptor-Portable.exe","backend.zip","backend_incremental.zip","Uninstall.ps1","卸载造笔.bat","彻底卸载造笔.bat")',
+    '  foreach ($item in $items) {',
+    '    $p = Join-Path $root $item',
+    '    if (Test-Path -LiteralPath $p) {',
+    '      try { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop } catch { $_ | Out-File -FilePath $log -Append -Encoding utf8 }',
+    '    }',
+    '  }',
+    '  try {',
+    '    if (Test-Path -LiteralPath $root) {',
+    '      $left = @(Get-ChildItem -LiteralPath $root -Force -ErrorAction SilentlyContinue)',
+    '      if ($left.Count -eq 0) { Remove-Item -LiteralPath $root -Force -ErrorAction SilentlyContinue }',
+    '    }',
+    '  } catch { }',
     '}',
     'Start-Sleep -Seconds 5',
     'foreach ($round in 1..12) {',
     '  if (-not (Test-Path -LiteralPath $root)) { exit 0 }',
     '  Stop-UnderRoot',
-    '  Stop-ByName',
     '  Start-Sleep -Milliseconds (400 + $round * 150)',
-    '  try {',
-    '    Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction Stop',
-    '  } catch {',
-    '    $_ | Out-File -FilePath $log -Append -Encoding utf8',
+    '  if ($removeUserData) {',
+    '    try { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction Stop } catch { $_ | Out-File -FilePath $log -Append -Encoding utf8 }',
+    '    if (-not (Test-Path -LiteralPath $root)) { exit 0 }',
+    '    try {',
+    '      $q = [char]34',
+    '      $a = "/c rd /s /q " + $q + $root + $q',
+    '      Start-Process -FilePath $env:ComSpec -ArgumentList $a -Wait -NoNewWindow',
+    '    } catch { $_ | Out-File -FilePath $log -Append -Encoding utf8 }',
+    '    if (-not (Test-Path -LiteralPath $root)) { exit 0 }',
+    '  } else {',
+    '    Remove-AppFiles',
+    '    exit 0',
     '  }',
-    '  if (-not (Test-Path -LiteralPath $root)) { exit 0 }',
-    '  try {',
-    '    $q = [char]34',
-    '    $a = "/c rd /s /q " + $q + $root + $q',
-    '    Start-Process -FilePath $env:ComSpec -ArgumentList $a -Wait -NoNewWindow',
-    '  } catch {',
-    '    $_ | Out-File -FilePath $log -Append -Encoding utf8',
-    '  }',
-    '  if (-not (Test-Path -LiteralPath $root)) { exit 0 }',
     '  Start-Sleep -Seconds 2',
     '}',
     '("卸载后仍存在目录: " + $root) | Out-File -FilePath $log -Append -Encoding utf8',
     'exit 1',
   ].join('\r\n');
-  const encoded = Buffer.from(innerPs, 'utf16le').toString('base64');
+  const encodedKeepData = Buffer.from(buildInner(false), 'utf16le').toString('base64');
+  const encodedRemoveAll = Buffer.from(buildInner(true), 'utf16le').toString('base64');
 
   const outer = [
     '# 造笔卸载：注册表/标记 → 结束占用进程 → 子进程延迟多轮删除安装目录',
+    'param([switch]$RemoveUserData)',
     '$ErrorActionPreference = "Continue"',
     `$root = ${rootJson}`,
     `$marker = ${markerJson}`,
     '& reg.exe delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\AutoScriptorZao" /f 2>$null',
     'if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue }',
     'try {',
-    '  Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ($_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }',
+    '  Get-CimInstance Win32_Process | Where-Object {',
+    '    ($_.ExecutablePath -and ($_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase))) -or',
+    '    ($_.CommandLine -and ($_.CommandLine.IndexOf($root, [System.StringComparison]::OrdinalIgnoreCase) -ge 0))',
+    '  } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }',
     '} catch { }',
-    '$names = @("造笔.exe","autoscriptor-engine.exe","AutoScriptor-Portable.exe")',
-    'foreach ($n in $names) { & taskkill /F /IM $n /T 2>$null 1>$null }',
     'Start-Sleep -Seconds 2',
-    `$enc = ${JSON.stringify(encoded)}`,
+    `$encKeepData = ${JSON.stringify(encodedKeepData)}`,
+    `$encRemoveAll = ${JSON.stringify(encodedRemoveAll)}`,
+    '$enc = if ($RemoveUserData) { $encRemoveAll } else { $encKeepData }',
     '$psExe = Join-Path $env:SystemRoot "System32\\WindowsPowerShell\\v1.0\\powershell.exe"',
     'Start-Process -FilePath $psExe -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-EncodedCommand",$enc -WindowStyle Hidden',
-    'Write-Host "已移除注册信息；安装目录正在后台删除（多轮重试）。若仍有残留请查看 %TEMP%\\ZaoBiUninstall-error.log"',
+    'if ($RemoveUserData) {',
+    '  Write-Host "已移除注册信息；安装目录正在后台彻底删除（多轮重试）。若仍有残留请查看 %TEMP%\\ZaoBiUninstall-error.log"',
+    '} else {',
+    '  Write-Host "已移除注册信息；程序文件正在后台删除，data 用户数据会保留。若仍有残留请查看 %TEMP%\\ZaoBiUninstall-error.log"',
+    '}',
     'Start-Sleep -Seconds 2',
   ].join('\r\n');
 
@@ -152,6 +172,13 @@ chcp 65001 >nul
 powershell -NoProfile -ExecutionPolicy Bypass -File "${ps1.replace(/"/g, '\\"')}"
 `;
   fs.writeFileSync(bat, batBody, 'utf8');
+
+  const batAll = path.join(installRoot, '彻底卸载造笔.bat');
+  const batAllBody = `@echo off
+chcp 65001 >nul
+powershell -NoProfile -ExecutionPolicy Bypass -File "${ps1.replace(/"/g, '\\"')}" -RemoveUserData
+`;
+  fs.writeFileSync(batAll, batAllBody, 'utf8');
 }
 
 function sleepMs(ms) {
@@ -171,6 +198,99 @@ function sha256FileSync(filePath) {
     fs.closeSync(fd);
   }
   return h.digest('hex');
+}
+
+function safeSend(send, data) {
+  if (typeof send === 'function') send(data);
+}
+
+function stamp() {
+  return new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+}
+
+function formatBytes(n) {
+  if (!Number.isFinite(n)) return 'unknown';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = n;
+  let idx = 0;
+  while (value >= 1024 && idx < units.length - 1) {
+    value /= 1024;
+    idx += 1;
+  }
+  return `${value.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+function dirSizeSync(root) {
+  if (!fs.existsSync(root)) return 0;
+  const st = fs.statSync(root);
+  if (!st.isDirectory()) return st.size;
+  let total = 0;
+  for (const name of fs.readdirSync(root)) {
+    total += dirSizeSync(path.join(root, name));
+  }
+  return total;
+}
+
+function getFreeBytes(targetDir) {
+  if (typeof fs.statfsSync === 'function') {
+    try {
+      const root = path.parse(path.resolve(targetDir)).root || targetDir;
+      const st = fs.statfsSync(root);
+      return Number(st.bavail || st.bfree) * Number(st.bsize);
+    } catch (_) {}
+  }
+  if (process.platform === 'win32') {
+    try {
+      const { execFileSync } = require('child_process');
+      const drive = path.parse(path.resolve(targetDir)).root.replace(/\\$/, '');
+      const ps = `(Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='${drive.replace(/'/g, "''")}'").FreeSpace`;
+      const out = execFileSync(
+        'powershell.exe',
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps],
+        { encoding: 'utf8', windowsHide: true, timeout: 10000 },
+      ).trim();
+      const n = Number(out);
+      if (Number.isFinite(n) && n >= 0) return n;
+    } catch (_) {}
+  }
+  return null;
+}
+
+function assertDiskSpace(targetDir, requiredBytes, send) {
+  const free = getFreeBytes(targetDir);
+  if (free == null) {
+    safeSend(send, { type: 'log', message: '[预检] 无法读取磁盘剩余空间，继续安装。' });
+    return;
+  }
+  if (free < requiredBytes) {
+    throw new Error(
+      `磁盘空间不足：至少需要 ${formatBytes(requiredBytes)}，当前剩余 ${formatBytes(free)}。请清理空间或更换安装目录。`
+    );
+  }
+  safeSend(send, {
+    type: 'log',
+    message: `[预检] 磁盘空间充足：剩余 ${formatBytes(free)}，预计需要 ${formatBytes(requiredBytes)}。`,
+  });
+}
+
+function inspectZip(zipPath) {
+  return new Promise((resolve, reject) => {
+    yauzl.open(zipPath, { lazyEntries: false }, (err, zipfile) => {
+      if (err) return reject(err);
+      const info = { files: 0, uncompressedBytes: 0, hasEngine: false };
+      zipfile.on('entry', (entry) => {
+        if (entry.fileName.endsWith('/')) return;
+        const n = entry.fileName.replace(/\\/g, '/');
+        info.files += 1;
+        info.uncompressedBytes += Number(entry.uncompressedSize || 0);
+        if (n === 'autoscriptor-engine.exe' || n.endsWith('/autoscriptor-engine.exe')) {
+          info.hasEngine = true;
+        }
+      });
+      zipfile.on('end', () => resolve(info));
+      zipfile.on('error', reject);
+    });
+  });
 }
 
 /**
@@ -227,6 +347,115 @@ function extractZipEntryToPath(zipfile, entry, destPath) {
   });
 }
 
+function verifyBackendDir(backendDir) {
+  const engine = path.join(backendDir, process.platform === 'win32' ? 'autoscriptor-engine.exe' : 'autoscriptor-engine');
+  if (!fs.existsSync(engine) || !fs.statSync(engine).isFile()) {
+    throw new Error('backend 校验失败：缺少 autoscriptor-engine.exe');
+  }
+}
+
+async function removeDirWithRetry(targetDir, send, label = '目录') {
+  const max = 5;
+  let lastErr = null;
+  for (let i = 0; i < max; i++) {
+    try {
+      fs.rmSync(targetDir, { recursive: true, force: true });
+      return null;
+    } catch (e) {
+      lastErr = e;
+      const msg = String(e && e.message ? e.message : e);
+      safeSend(send, { type: 'log', message: `[重试 ${i + 1}/${max}] 删除${label}: ${msg}` });
+      if (i < max - 1) await sleepMs(600 * (i + 1));
+    }
+  }
+  return lastErr || new Error(`无法删除${label}: ${targetDir}`);
+}
+
+async function swapBackendDirectory(stagingDir, backendDest, send) {
+  const backupDir = `${backendDest}.bak.${stamp()}.${process.pid}`;
+  let oldMoved = false;
+  let newMoved = false;
+  try {
+    if (fs.existsSync(backendDest)) {
+      fs.renameSync(backendDest, backupDir);
+      oldMoved = true;
+      safeSend(send, { type: 'log', message: `[事务] 已备份旧 backend: ${backupDir}` });
+    }
+    fs.renameSync(stagingDir, backendDest);
+    newMoved = true;
+    safeSend(send, { type: 'log', message: '[事务] 已切换到新 backend。' });
+  } catch (e) {
+    try {
+      if (newMoved && fs.existsSync(backendDest)) {
+        fs.rmSync(backendDest, { recursive: true, force: true });
+      }
+      if (oldMoved && fs.existsSync(backupDir) && !fs.existsSync(backendDest)) {
+        fs.renameSync(backupDir, backendDest);
+      }
+    } catch (rollbackErr) {
+      throw new Error(
+        `backend 切换失败，且回滚也失败。切换错误: ${e.message}; 回滚错误: ${rollbackErr.message}`
+      );
+    }
+    throw new Error('backend 切换失败，已回滚旧版本。原始错误: ' + (e && e.message ? e.message : String(e)));
+  }
+
+  if (oldMoved && fs.existsSync(backupDir)) {
+    const rmErr = await removeDirWithRetry(backupDir, send, '旧 backend 备份');
+    if (rmErr) {
+      safeSend(send, {
+        type: 'warning',
+        message: '旧 backend 备份删除失败',
+        detail: `${backupDir}\n${rmErr.message || rmErr}`,
+      });
+    }
+  }
+}
+
+function shouldOverwritePackagedData(rel) {
+  const n = rel.replace(/\\/g, '/').toLowerCase();
+  if (n === 'config.json') return false;
+  if (n.startsWith('accounts/') && n.endsWith('.json')) return false;
+  if (n.startsWith('custom_task/')) return false;
+  if (n.startsWith('battle_character/')) return false;
+  return true;
+}
+
+function copyPackagedDataPreservingUserFiles(dataSrc, dataDest, send) {
+  if (!fs.existsSync(dataSrc)) {
+    safeSend(send, { type: 'log', message: '[数据] 未找到随包 data 目录（可忽略）' });
+    return;
+  }
+  fs.mkdirSync(dataDest, { recursive: true });
+  let copied = 0;
+  let kept = 0;
+  const walk = (srcDir) => {
+    for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+      const src = path.join(srcDir, entry.name);
+      const rel = path.relative(dataSrc, src);
+      const dest = path.join(dataDest, rel);
+      if (entry.isDirectory()) {
+        fs.mkdirSync(dest, { recursive: true });
+        walk(src);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      if (fs.existsSync(dest) && !shouldOverwritePackagedData(rel)) {
+        kept += 1;
+        continue;
+      }
+      fs.copyFileSync(src, dest);
+      copied += 1;
+    }
+  };
+  walk(dataSrc);
+  safeSend(send, {
+    type: 'log',
+    message: `[数据] 已合并到 ${dataDest}（复制/更新 ${copied} 个，保留用户文件 ${kept} 个）`,
+  });
+}
+
 /**
  * 将增量包应用到 installRoot/backend/：先删 manifest.remove，再按条目校验并解压覆盖。
  * @param {{ installRoot: string, zipPath: string, send: (data: object) => void }} opts
@@ -242,8 +471,15 @@ async function applyBackendIncremental(opts) {
     throw new Error('backend 目录不存在，请先完成完整安装（解压 backend.zip）');
   }
 
-  const { zipfile, map } = await openZipWithEntryMap(zipPath);
+  assertDiskSpace(rootResolved, dirSizeSync(backendDest) + fs.statSync(zipPath).size + 512 * 1024 * 1024, send);
+  const stagingDir = path.join(rootResolved, `.backend.incremental.${stamp()}.${process.pid}`);
+  let zipfile = null;
+  let map = null;
   try {
+    safeSend(send, { type: 'progress', percent: 2, message: '准备事务更新…' });
+    safeSend(send, { type: 'log', message: `[事务] 复制当前 backend 到临时目录: ${stagingDir}` });
+    fs.cpSync(backendDest, stagingDir, { recursive: true });
+    ({ zipfile, map } = await openZipWithEntryMap(zipPath));
     const mEntry = map.get('incremental_manifest.json');
     if (!mEntry) {
       throw new Error('ZIP 中未找到 incremental_manifest.json');
@@ -275,9 +511,9 @@ async function applyBackendIncremental(opts) {
     for (const rel of removes) {
       const n = String(rel).replace(/\\/g, '/');
       if (n.includes('..')) throw new Error('非法删除路径: ' + rel);
-      const p = safeJoin(backendDest, n);
+      const p = safeJoin(stagingDir, n);
       if (fs.existsSync(p)) {
-        fs.unlinkSync(p);
+        fs.rmSync(p, { force: true, recursive: true });
         send({ type: 'log', message: `[增量] 已删除 ${n}` });
       }
       bump(`已处理删除 ${step}/${totalSteps}`);
@@ -290,7 +526,7 @@ async function applyBackendIncremental(opts) {
       if (rel.includes('..') || rel === 'incremental_manifest.json') {
         throw new Error('非法路径: ' + e.path);
       }
-      const target = safeJoin(backendDest, rel);
+      const target = safeJoin(stagingDir, rel);
       const zipEnt = map.get(rel);
       if (!zipEnt) {
         throw new Error(`ZIP 内缺少文件: ${rel}`);
@@ -336,45 +572,19 @@ async function applyBackendIncremental(opts) {
       bump(`写入 ${ei}/${entries.length}`);
     }
 
+    verifyBackendDir(stagingDir);
+    await swapBackendDirectory(stagingDir, backendDest, send);
     send({ type: 'progress', percent: 100, message: '增量更新完成' });
     send({ type: 'log', message: '[增量] 引擎增量已应用，可重启造笔。' });
     send({ type: 'complete' });
   } finally {
     try {
-      zipfile.close();
+      if (zipfile) zipfile.close();
     } catch (_) {}
-  }
-}
-
-/**
- * Windows 上旧 backend 可能被 python/gui 或杀软占用，单次 rm 易 EPERM；短暂重试并给出可操作提示。
- */
-async function removeBackendDirWithRetry(backendDest, send) {
-  const max = 5;
-  let lastErr = null;
-  for (let i = 0; i < max; i++) {
-    try {
-      fs.rmSync(backendDest, { recursive: true, force: true });
-      return null;
-    } catch (e) {
-      lastErr = e;
-      const code = e && (e.code || e.errno);
-      const msg = String(e && e.message ? e.message : e);
-      if (send && i === 0) {
-        send({
-          type: 'log',
-          message:
-            '[提示] 正在删除旧 backend 目录，若被占用将重试几次。请关闭占用该目录的程序（如造笔/引擎、python.exe）后重试。',
-        });
-      } else if (send) {
-        send({ type: 'log', message: `[重试 ${i + 1}/${max}] 删除 backend: ${msg}` });
-      }
-      if (i < max - 1) await sleepMs(600 * (i + 1));
+    if (fs.existsSync(stagingDir)) {
+      await removeDirWithRetry(stagingDir, send, '增量临时目录');
     }
   }
-  const hint =
-    '无法删除旧目录「backend」（权限被拒绝）。请：1）在任务管理器中结束「造笔」、python、相关进程；2）暂时关闭杀毒软件或把该目录加入排除；3）换一个安装目录（建议选「文档」下的 AutoScriptor 文件夹，勿选 dist_electron 等开发输出目录）。原始错误: ';
-  return new Error(hint + (lastErr && lastErr.message ? lastErr.message : String(lastErr)));
 }
 
 /**
@@ -463,40 +673,55 @@ async function runPackagedInstall(opts) {
   const rootResolved = path.resolve(installRoot);
   fs.mkdirSync(rootResolved, { recursive: true });
 
+  const zipInfo = await inspectZip(zipPath);
+  if (!zipInfo.hasEngine) {
+    throw new Error('backend.zip 校验失败：压缩包内缺少 autoscriptor-engine.exe');
+  }
+  assertDiskSpace(
+    rootResolved,
+    zipInfo.uncompressedBytes + fs.statSync(zipPath).size + 512 * 1024 * 1024,
+    send,
+  );
+
   const backendDest = path.join(rootResolved, 'backend');
-  if (fs.existsSync(backendDest)) {
-    const errRm = await removeBackendDirWithRetry(backendDest, send);
+  const stagingDir = path.join(rootResolved, `.backend.new.${stamp()}.${process.pid}`);
+  if (fs.existsSync(stagingDir)) {
+    const errRm = await removeDirWithRetry(stagingDir, send, '历史解压临时目录');
     if (errRm) throw errRm;
   }
-  fs.mkdirSync(backendDest, { recursive: true });
+  fs.mkdirSync(stagingDir, { recursive: true });
 
   send({ type: 'log', message: `[解压] 压缩包: ${zipPath}` });
-  send({ type: 'log', message: `[解压] 目标目录: ${backendDest}` });
+  send({ type: 'log', message: `[解压] 临时目录: ${stagingDir}` });
 
-  const total = await countZipFiles(zipPath);
+  const total = zipInfo.files;
   send({ type: 'log', message: `[解压] 共 ${total} 个文件，开始解压（请稍候，杀软可能拖慢速度）…` });
   send({ type: 'progress', percent: 3, message: `准备解压（${total} 个文件）…` });
 
-  await extractZip(zipPath, backendDest, {
-    onFile: (done, name) => {
-      send({ type: 'log', message: `[解压] ${done}/${total} ${name}` });
-      const pct = 5 + Math.floor((88 * done) / Math.max(total, 1));
-      send({ type: 'progress', percent: Math.min(pct, 93), message: `解压 ${done}/${total}` });
-    },
-  });
+  try {
+    await extractZip(zipPath, stagingDir, {
+      onFile: (done, name) => {
+        send({ type: 'log', message: `[解压] ${done}/${total} ${name}` });
+        const pct = 5 + Math.floor((84 * done) / Math.max(total, 1));
+        send({ type: 'progress', percent: Math.min(pct, 89), message: `解压 ${done}/${total}` });
+      },
+    });
+    verifyBackendDir(stagingDir);
+    send({ type: 'progress', percent: 90, message: '切换引擎文件…' });
+    await swapBackendDirectory(stagingDir, backendDest, send);
+  } catch (e) {
+    if (fs.existsSync(stagingDir)) {
+      await removeDirWithRetry(stagingDir, send, '解压临时目录');
+    }
+    throw e;
+  }
 
   send({ type: 'log', message: '[解压] 引擎文件已完成' });
-  send({ type: 'progress', percent: 94, message: '复制用户数据…' });
+  send({ type: 'progress', percent: 94, message: '合并数据文件…' });
 
   const dataSrc = path.join(exeDir, 'data');
   const dataDest = path.join(rootResolved, 'data');
-  if (fs.existsSync(dataSrc)) {
-    if (fs.existsSync(dataDest)) fs.rmSync(dataDest, { recursive: true, force: true });
-    fs.cpSync(dataSrc, dataDest, { recursive: true });
-    send({ type: 'log', message: `[数据] 已复制到 ${dataDest}` });
-  } else {
-    send({ type: 'log', message: '[数据] 未找到随包 data 目录（可忽略）' });
-  }
+  copyPackagedDataPreservingUserFiles(dataSrc, dataDest, send);
 
   const tpl = path.join(rootResolved, 'config template.json');
   const cfg = path.join(rootResolved, 'config.json');
@@ -511,6 +736,7 @@ async function runPackagedInstall(opts) {
   fs.mkdirSync(userDataPath, { recursive: true });
   const manifest = {
     installRoot: rootResolved,
+    dataRoot: dataDest,
     version: String(appVersion || '1.0.0'),
   };
   fs.writeFileSync(markerPath, JSON.stringify(manifest, null, 2), 'utf-8');
@@ -522,7 +748,10 @@ async function runPackagedInstall(opts) {
   send({ type: 'progress', percent: 97, message: '写入卸载程序…' });
   writeUninstallPs1(rootResolved, markerPath);
   registerUninstall(rootResolved, manifest.version);
-  send({ type: 'log', message: `[卸载] 已写入 ${path.join(rootResolved, '卸载造笔.bat')}，并已注册「应用和功能」` });
+  send({
+    type: 'log',
+    message: `[卸载] 已写入 ${path.join(rootResolved, '卸载造笔.bat')}（保留 data）与 ${path.join(rootResolved, '彻底卸载造笔.bat')}，并已注册「应用和功能」`,
+  });
 
   send({ type: 'progress', percent: 100, message: '安装完成' });
   send({ type: 'complete' });

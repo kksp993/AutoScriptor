@@ -13,6 +13,7 @@ const nsisCompression =
 
 const useNsis = process.env.AUTOSCRIPTOR_ELECTRON_NSIS === '1';
 const useZip = process.env.AUTOSCRIPTOR_ELECTRON_ZIP === '1';
+const codeSigningEnabled = process.env.AUTOSCRIPTOR_CODE_SIGN === '1';
 
 let winTarget;
 if (useNsis) {
@@ -68,7 +69,8 @@ const config = {
   win: {
     target: winTarget,
     icon: 'buildResources/icon.ico',
-    signAndEditExecutable: false,
+    // 默认不签名，避免无证书机器下载/执行签名工具失败；正式发布机显式设 AUTOSCRIPTOR_CODE_SIGN=1。
+    signAndEditExecutable: codeSigningEnabled,
     ...(useZip && !useNsis
       ? {
           artifactName: 'AutoScriptor_Zao_${version}.${ext}',

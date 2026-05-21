@@ -30,6 +30,13 @@ try {
 
 const files = listPackage(asarPath);
 const norm = (f) => f.replace(/^\//, '').replace(/\\/g, '/');
+const leakedMaps = files.map(norm).filter((f) => f.toLowerCase().endsWith('.map'));
+if (leakedMaps.length) {
+  console.error('[verify-pack] app.asar contains source maps:');
+  for (const f of leakedMaps.slice(0, 20)) console.error('  -', f);
+  if (leakedMaps.length > 20) console.error(`  ... ${leakedMaps.length - 20} more`);
+  process.exit(1);
+}
 const base = path.basename(pkgMain.replace(/\\/g, '/'));
 const hasMain = files.some((f) => {
   const n = norm(f);
