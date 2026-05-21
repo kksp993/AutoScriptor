@@ -825,10 +825,15 @@ function validateInstallDir(dirPath, opts = {}) {
       return { ok: false, reason: '父目录不存在：' + parent };
     }
     try {
-      fs.mkdirSync(resolved, { recursive: true });
-      const testFile = path.join(resolved, '.install_test_' + Date.now());
-      fs.writeFileSync(testFile, 'test', 'utf-8');
-      fs.unlinkSync(testFile);
+      if (opts && opts.readOnly) {
+        const probeDir = fs.existsSync(resolved) ? resolved : parent;
+        fs.accessSync(probeDir, fs.constants.W_OK | fs.constants.X_OK);
+      } else {
+        fs.mkdirSync(resolved, { recursive: true });
+        const testFile = path.join(resolved, '.install_test_' + Date.now());
+        fs.writeFileSync(testFile, 'test', 'utf-8');
+        fs.unlinkSync(testFile);
+      }
     } catch (e) {
       return { ok: false, reason: '无法写入该目录（权限不足或磁盘已满）：' + e.message };
     }
@@ -840,6 +845,30 @@ function validateInstallDir(dirPath, opts = {}) {
 
 ipcMain.handle('installer:validate-install-dir', (_event, dirPath, opts) => {
   return validateInstallDir(String(dirPath || '').trim(), opts || {});
+});
+
+ipcMain.handle('installer:dry-run-packaged', async (_event, opts) => {
+  const { dryRunPackagedInstall } = require('./install-packaged.cjs');
+  const pkg = require('./package.json');
+  return dryRunPackagedInstall({
+    installRoot: String(opts && opts.installRoot ? opts.installRoot : '').trim(),
+    resourcesPath: process.resourcesPath,
+    zipPath: getBackendZipPath(),
+    exeDir: path.dirname(process.execPath),
+    portableExePath: process.env.PORTABLE_EXECUTABLE_FILE || process.execPath,
+    appVersion: pkg.version,
+    userDataPath: app.getPath('userData'),
+  });
+});
+
+ipcMain.handle('installer:dry-run-backend-incremental', async (_event, opts) => {
+  const installRoot = String(opts && opts.installRoot ? opts.installRoot : '').trim();
+  let zipPath = String((opts && opts.zipPath) || '').trim();
+  if (!zipPath || !fs.existsSync(zipPath)) {
+    zipPath = getBackendIncrementalZipPath();
+  }
+  const { dryRunApplyBackendIncremental } = require('./install-packaged.cjs');
+  return dryRunApplyBackendIncremental({ installRoot, zipPath });
 });
 
 ipcMain.handle('installer:run-packaged', async (_event, opts) => {
