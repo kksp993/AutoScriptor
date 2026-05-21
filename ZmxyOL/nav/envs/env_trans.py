@@ -111,11 +111,8 @@ def way():
         sleep(2)
     click(T("仙盟",box=Box(16,30,130,400)))
     sleep(1)
-    click(I("仙盟-驻地"))
-    sleep(1)
-    # 等待加载中消失
-    while ui_T(I("加载中"), 1):
-        sleep(0.5)
+    click(I("仙盟-驻地"), until=lambda: ui_T(I("加载中")), interval=1)
+    wait_for_disappear(I("加载中"))
     mm.set_region("仙盟")
     sleep(1)
 

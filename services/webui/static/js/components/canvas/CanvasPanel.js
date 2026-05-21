@@ -213,7 +213,7 @@ const CanvasPanel = {
       end:               { label: '结束',       icon: 'fa-stop-circle',    color: '#ef4444', category: 'flow',   inputs: 1, outputs: 0, params: [] },
       click:             { label: '点击',       icon: 'fa-mouse-pointer',  color: '#3b82f6', category: 'action', inputs: 1, outputs: 1, params: [
         { key: 'target',   label: '目标',    type: 'string', default: 'T("确定")' },
-        { key: 'timeout',  label: '超时(秒)', type: 'number', default: 30, min: 0 },
+        { key: 'timeout',  label: '超时(秒)', type: 'number', default: 3, min: 0 },
         { key: 'if_exist', label: '仅存在时', type: 'boolean', default: false },
         { key: 'repeat',   label: '重复次数', type: 'number', default: 1, min: 1 },
       ]},
@@ -248,6 +248,7 @@ const CanvasPanel = {
         { key: 'target',  label: '区域', type: 'string', default: 'B(0,0,1280,720)' },
         { key: 'post_process', label: '后处理', type: 'string', default: 'lambda s: s.strip()' },
         { key: 'ensure_not_empty', label: '确保非空', type: 'boolean', default: true },
+        { key: 'digit_only', label: '数字角标', type: 'boolean', default: false },
       ]},
       ensure_in:         { label: '确保场景',   icon: 'fa-map-marker',     color: '#14b8a6', category: 'nav',    inputs: 1, outputs: 1, params: [
         { key: 'scene', label: '场景名', type: 'string', default: '主界面' },
@@ -605,13 +606,13 @@ const CanvasPanel = {
           return '';
         case 'click': {
           const parts = [d.target || 'T("确定")'];
-          if (d.timeout !== undefined && d.timeout !== 30) parts.push(`timeout=${d.timeout}`);
+          parts.push(`timeout=${d.timeout ?? 3}`);
           if (d.if_exist) parts.push('if_exist=True');
           if (d.repeat !== undefined && d.repeat > 1) parts.push(`repeat=${d.repeat}`);
           return `${indent}click(${parts.join(', ')})`;
         }
         case 'swipe':
-          return `${indent}swipe(${d.start_target || 'B(640,500,1,1)'}, ${d.end_target || 'B(640,200,1,1)'}${d.duration_s !== 1 ? ', duration_s=' + d.duration_s : ''})`;
+          return `${indent}swipe(${d.start_target || 'B(640,500,1,1)'}, ${d.end_target || 'B(640,200,1,1)'}, duration_s=${d.duration_s ?? 1})`;
         case 'sleep':
           return `${indent}sleep(${d.seconds ?? 1})`;
         case 'input_text': {
@@ -627,7 +628,7 @@ const CanvasPanel = {
         case 'wait_for_disappear':
           return `${indent}wait_for_disappear(${d.target || 'T("确定")'}${d.timeout !== 30 ? ', timeout=' + d.timeout : ''})`;
         case 'extract_info':
-          return `${indent}info = extract_info(${d.target || 'B(0,0,1280,720)'}, post_process=${d.post_process || 'lambda s: s.strip()'}, ensure_not_empty=${d.ensure_not_empty ? 'True' : 'False'})`;
+          return `${indent}info = extract_info(${d.target || 'B(0,0,1280,720)'}, post_process=${d.post_process || 'lambda s: s.strip()'}, ensure_not_empty=${d.ensure_not_empty ? 'True' : 'False'}, digit_only=${d.digit_only ? 'True' : 'False'})`;
         case 'ensure_in':
           return `${indent}ensure_in("${(d.scene || '主界面').replace(/"/g, '\\"')}")`;
         case 'switch_base':

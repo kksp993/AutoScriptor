@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, dialog, globalShortcut } = require('electron');
 const { spawn, execFileSync } = require('child_process');
 const treeKill = require('tree-kill');
 const path = require('path');
@@ -58,6 +58,7 @@ process.once('exit', restoreWindowsConsoleCodePage);
 // ── Config ──────────────────────────────────────────────────────────────────
 /** 开发模式：仓库根目录。发行安装包：install.json 中的 installRoot，或 exe 同层（旧版整包）。 */
 const SERVER_URL = 'http://127.0.0.1:5000';
+const BOSS_KEY = 'Alt+W';
 
 let _rootCache = null;
 function invalidateRootCache() {
@@ -254,11 +255,7 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      if (!mainWindow.isVisible()) mainWindow.show();
-      mainWindow.focus();
-    }
+    showMainWindow();
   });
 }
 
@@ -403,6 +400,27 @@ function pollServer(retries = 0) {
 }
 
 // ── Window ───────────────────────────────────────────────────────────────────
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.focus();
+}
+
+function hideMainWindowToTray() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.hide();
+}
+
+function toggleMainWindowToTray() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isVisible() && !mainWindow.isMinimized()) {
+    hideMainWindowToTray();
+    return;
+  }
+  showMainWindow();
+}
+
 function createMainWindow() {
   const icon = loadAppIcon();
 
@@ -458,8 +476,8 @@ function createTray() {
   tray = new Tray(icon);
 
   const menu = Menu.buildFromTemplate([
-    { label: '显示窗口',    click: () => { mainWindow?.show(); mainWindow?.focus(); } },
-    { label: '隐藏窗口',    click: () => mainWindow?.hide() },
+    { label: `显示窗口 (${BOSS_KEY})`, click: () => showMainWindow() },
+    { label: `隐藏窗口 (${BOSS_KEY})`, click: () => hideMainWindowToTray() },
     { type: 'separator' },
     { label: '在浏览器中打开', click: () => shell.openExternal(SERVER_URL) },
     { type: 'separator' },
@@ -468,14 +486,18 @@ function createTray() {
 
   tray.setToolTip('造笔 - AutoScriptor');
   tray.setContextMenu(menu);
-  tray.on('click', () => {
-    if (mainWindow?.isVisible()) {
-      mainWindow.isMinimized() ? mainWindow.show() : mainWindow.hide();
-    } else {
-      mainWindow?.show();
-    }
-  });
+  tray.on('click', () => toggleMainWindowToTray());
   tray.on('right-click', () => tray.popUpContextMenu(menu));
+}
+
+function registerBossKey() {
+  globalShortcut.unregister(BOSS_KEY);
+  const ok = globalShortcut.register(BOSS_KEY, () => {
+    toggleMainWindowToTray();
+  });
+  if (!ok) {
+    console.warn(`[main] Failed to register boss key: ${BOSS_KEY}`);
+  }
 }
 
 // ── Installer Window ──────────────────────────────────────────────────────────
@@ -527,6 +549,7 @@ function transitionToApp() {
   killStalePort5000();
   createMainWindow();
   createTray();
+  registerBossKey();
   startPython();
 }
 
@@ -1055,6 +1078,7 @@ app.whenReady().then(() => {
     killStalePort5000();
     createMainWindow();
     createTray();
+    registerBossKey();
     startPython();
   } else {
     createInstallerWindow();
@@ -1070,4 +1094,5 @@ app.on('window-all-closed', (e) => {
 
 app.on('before-quit', () => {
   app.isQuitting = true;
+  globalShortcut.unregister(BOSS_KEY);
 });

@@ -567,7 +567,7 @@ def click(
 def swipe(
         start_target: Target, 
         end_target: Target, 
-        *,
+        *, 
         duration_s: int=1, 
         delay: float = 0,
         ensure_stable_after_swipe: bool = True,
@@ -596,17 +596,29 @@ def key_event(key_code: int):
     mixctrl.key_event(key_code)
 
 def extract_info(
-    target: BoxTarget,
+    target,
     post_process: callable = None,
     ensure_not_empty: bool = True,
     save_screenshot: bool = True,
     *,
+    digit_only: bool = False,
+    digital: bool | None = None,
     ocr_ttl: float = 0.5,
     max_retries: int = 10,
     screenshot_frame=None,
 )->str|None:
     """若传入 *screenshot_frame*（BGR ndarray），则在该帧上 OCR，且重试时不再刷新画面；
     用于 Web 编辑器导入图片与模拟执行时与画布一致。未传入时仍每次重试从 mixctrl 截屏。"""
+    if digital is not None:
+        digit_only = bool(digital)
+    if digit_only:
+        from AutoScriptor.recognition.digit_rec import extract_digits
+        screenshot = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
+        res = extract_digits(screenshot, target)
+        if post_process:
+            res = post_process(res)
+        return res
+
     res = None
     last_ocr_at: float | None = None
     for _ in range(max_retries):

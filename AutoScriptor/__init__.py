@@ -39,6 +39,8 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "cfg": ("AutoScriptor.utils.app_config", "cfg"),
     "log_flush": ("AutoScriptor.utils.logger", "log_flush"),
     "perf_boost": ("AutoScriptor.utils.perf", "boost"),
+    "make_box_grid": ("AutoScriptor.utils.box_grid", "make_box_grid"),
+    "indexof": ("AutoScriptor.utils.box_grid", "indexof"),
     # runtime helpers
     "bg": ("AutoScriptor.core.background", "bg"),
     "BG_SIGNALS": ("AutoScriptor.core.background", "BG_SIGNALS"),
@@ -96,6 +98,8 @@ __all__ = [
     # utils
     "cfg",
     "log_flush",
+    "make_box_grid",
+    "indexof",
     # api
     "init",
     "click",
