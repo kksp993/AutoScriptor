@@ -17,6 +17,7 @@ const path = require('path');
 const projectRoot = path.join(__dirname, '..');
 const useNsis = process.env.AUTOSCRIPTOR_ELECTRON_NSIS === '1';
 const useZip = process.env.AUTOSCRIPTOR_ELECTRON_ZIP === '1';
+const codeSigningEnabled = process.env.AUTOSCRIPTOR_CODE_SIGN === '1';
 /** store：安装时几乎不再解压算法开销，大体积包时进度条更顺滑；安装包比 normal 更大 */
 const nsisCompression =
   process.env.AUTOSCRIPTOR_NSIS_FAST_INSTALL === '1' ? 'store' : 'normal';
@@ -82,7 +83,8 @@ const cfg = {
   win: {
     target: winTarget,
     icon: winIcon,
-    signAndEditExecutable: false,
+    // 默认不签名，避免无证书机器下载/执行签名工具失败；正式发布机显式设 AUTOSCRIPTOR_CODE_SIGN=1。
+    signAndEditExecutable: codeSigningEnabled,
     ...(useZip && !useNsis
       ? {
           artifactName: 'AutoScriptor_Zao_${version}.${ext}',

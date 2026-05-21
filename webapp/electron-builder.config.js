@@ -3,6 +3,8 @@
  * Output: dist/AutoScriptor-Setup.exe (NSIS installer) + dist/AutoScriptor-Portable.exe
  */
 
+const codeSigningEnabled = process.env.AUTOSCRIPTOR_CODE_SIGN === '1';
+
 const config = {
   appId: 'com.autoscriptor.app',
   productName: '造笔',
@@ -57,8 +59,8 @@ const config = {
       { target: 'portable', arch: ['x64'] },
     ],
     icon: 'buildResources/icon.ico',
-    // 避免拉取 winCodeSign 并在解压时创建符号链接（无开发者模式/非管理员会失败）
-    signAndEditExecutable: false,
+    // 默认不签名，避免无证书机器下载/执行签名工具失败；正式发布机显式设 AUTOSCRIPTOR_CODE_SIGN=1。
+    signAndEditExecutable: codeSigningEnabled,
   },
 
   nsis: {

@@ -59,6 +59,7 @@ cd D:\Projects\AutoScriptor
 | `AUTOSCRIPTOR_ELECTRON_NSIS=1` | 等价于 `--electron-nsis`（打 NSIS 时由 electron-builder 配置读取）。 |
 | `AUTOSCRIPTOR_ELECTRON_ZIP=1` | 等价于 `--electron-zip`。 |
 | `AUTOSCRIPTOR_NSIS_FAST_INSTALL=1` | NSIS 使用 store 压缩（安装更快）。 |
+| `AUTOSCRIPTOR_CODE_SIGN=1` | 启用 Windows 代码签名。正式发布机需同时配置 electron-builder 支持的 `CSC_*` 证书环境变量或本机证书存储；无证书机器默认关闭签名，避免打包失败。 |
 | `NUITKA_CACHE_DIR` | 脚本默认设为项目下 **`.nuitka-cache/`**（dll 等缓存）。 |
 
 ---
@@ -144,8 +145,16 @@ cd D:\Projects\AutoScriptor
 ## 9. 发行版安装流程（最终用户）
 
 1. 运行 **`AutoScriptor_Zao_Install.exe`**（portable 会自解压到临时目录再启动，**用户数据**仍通过 `install.json` 指向正式安装根目录）。
-2. **HTML 向导**：选择安装根目录 → 解压 `backend.zip` → 复制 `data` → 自动写入/探测 **MuMu**（`applyMumuConfig`）→ **环境验证页**确认 **MuMu 目录 / 模拟器 exe / adb** 路径。
+2. **HTML 向导**：选择安装根目录 → 预检磁盘空间与 `backend.zip` 完整性 → 解压到 `.backend.new.*` 临时目录 → 校验 `autoscriptor-engine.exe` → 事务切换 `backend` → 合并 `data`（保留用户账号/脚本/角色数据）→ 自动写入/探测 **MuMu**（`applyMumuConfig`）→ **环境验证页**确认 **MuMu 目录 / 模拟器 exe / adb** 路径。
 3. 完成后启动主程序（`installer:launch` → 正常窗口 + 托盘）。
+
+### 9.1 修复安装 / 更新 / 卸载策略
+
+- **修复安装**：允许选择已有造笔安装目录，不要求空目录；旧 `backend` 会先备份为 `.bak.*`，新引擎校验成功后再切换，失败时回滚旧引擎。
+- **增量更新**：`backend_incremental.zip` 会先复制当前 `backend` 到 `.backend.incremental.*`，按清单校验旧文件 SHA-256，再替换并校验新文件 SHA-256；基线不匹配时会中止，不破坏旧引擎。
+- **用户数据**：默认保留 `data/config.json`、`data/accounts/*.json`、`data/custom_task/`、`data/battle_character/`，随包基础数据只做合并更新。
+- **进程占用**：安装前只结束安装目录内的后端进程，并且只清理属于造笔安装目录的 5000 端口监听，避免误杀其他本地服务。
+- **卸载**：安装目录写入 `卸载造笔.bat` 与 `彻底卸载造笔.bat`。控制面板/默认卸载保留 `data`；彻底卸载才移除整个安装目录。
 
 ---
 
@@ -171,8 +180,9 @@ electron-builder **不会清空你的 `dist/`**；每次打桌面包会刷新 **
 
 ## 12. 安全与发布物
 
-- 对外分发前确认**不包含**可还原业务逻辑的 **source map**（`*.map`）等。
+- 对外分发前确认**不包含**可还原业务逻辑的 **source map**（`*.map`）等；`npm run verify-pack` 会检查 `app.asar` 入口、`backend.zip` 内 `autoscriptor-engine.exe` 以及 source map 泄漏。
 - 发行流水线对 **`webapp`** 壳层会做**混淆/压缩 HTML**（见 `prepare-release-shell`），并排除 `*.map`；敏感逻辑仍勿放客户端明文。
+- 正式对外版本建议启用代码签名：发布机配置证书后设置 `AUTOSCRIPTOR_CODE_SIGN=1`。没有证书时安装包仍可生成，但 Windows SmartScreen/杀软信任度会低于签名版本。
 
 ---
 
@@ -183,6 +193,9 @@ electron-builder **不会清空你的 `dist/`**；每次打桌面包会刷新 **
 | 端口已被占用 | 结束上次 Python/Electron 进程；释放 WebUI 默认端口等见项目内 Cursor 规则 `webui.mdc`（若已配置）。 |
 | 构建失败 | 查看完整终端输出；Nuitka 见 [nuitka-reference.md](./nuitka-reference.md)。 |
 | 安装向导报找不到 `backend.zip` | 确认完整构建过 `dist/backend.zip` 并重新打 Electron；见本文第 7 节。 |
+| 修复安装失败或提示基线不匹配 | 优先重试完整安装包；若是增量包，确认它与当前已安装版本匹配。失败前旧 `backend` 会保留或回滚。 |
+| 卸载后仍看到 `data` | 默认卸载会保留用户数据。需要清空账号、脚本和角色数据时运行安装目录下的 `彻底卸载造笔.bat`。 |
+| Windows 提示未知发布者 | 未启用代码签名或证书信任尚未建立。正式分发请在发布机配置证书并设置 `AUTOSCRIPTOR_CODE_SIGN=1` 重新构建。 |
 | 想要「和开发时一样的窗口应用」 | 使用含 Electron 的构建（不要 `--skip-electron`）；portable 首次运行即向导。 |
 
 ---
@@ -198,6 +211,6 @@ electron-builder **不会清空你的 `dist/`**；每次打桌面包会刷新 **
 
 ## 15. Current Packaging Checks
 
-- `npm run verify-pack` validates both the Electron `app.asar` entry and the backend payload. It fails if `backend.zip` is missing from the unpacked app root/resources, or if that zip does not contain `autoscriptor-engine.exe`.
+- `build_release.py` 会在 electron-builder 后自动运行 `npm run verify-pack`，校验 Electron `app.asar` 入口、source map 泄漏和 backend payload。它会在 `backend.zip` 缺失或 zip 内不含 `autoscriptor-engine.exe` 时失败。
 - The installer treats a failing `MuMuManager version` command as a warning when ADB is usable. This matches runtime behavior: MuMuManager is useful for official lifecycle commands, while ADB is the stable fallback for app/package/input checks.
 - In the installer UI, this case is displayed as a yellow warning instead of a red blocking error. Users can finish installation, then use WebUI `启动诊断` to inspect MuMuManager, ADB, App, NemuIpc, OCR and UI Map layers separately.

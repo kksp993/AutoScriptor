@@ -648,7 +648,10 @@ def build_electron(
         mode = "portable 单文件（AutoScriptor_Zao_Install_<version>.exe）"
     print(f"[electron] 开始打包 ({mode})...")
     env = os.environ.copy()
-    env.setdefault("CSC_IDENTITY_AUTO_DISCOVERY", "false")
+    if env.get("AUTOSCRIPTOR_CODE_SIGN") == "1":
+        print("[electron] 已启用代码签名：将使用 electron-builder/CSC_* 环境变量或证书存储配置。")
+    else:
+        env.setdefault("CSC_IDENTITY_AUTO_DISCOVERY", "false")
     if use_nsis:
         env["AUTOSCRIPTOR_ELECTRON_NSIS"] = "1"
         if nsis_fast_install:
@@ -680,6 +683,18 @@ def build_electron(
         timings.append(("Electron 打包 (electron-builder)", time.perf_counter() - t_eb))
     if result.returncode != 0:
         print("[electron] 打包失败!")
+        sys.exit(1)
+    t_verify = time.perf_counter()
+    verify = subprocess.run(
+        ["npm", "run", "verify-pack"],
+        cwd=str(webapp_dir),
+        shell=True,
+        env=env,
+    )
+    if timings is not None:
+        timings.append(("Electron 打包自检 (verify-pack)", time.perf_counter() - t_verify))
+    if verify.returncode != 0:
+        print("[electron] 打包自检失败!")
         sys.exit(1)
     print("[electron] 打包完成!")
     if use_nsis:

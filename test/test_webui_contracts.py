@@ -892,10 +892,45 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         content = (ROOT / "services/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
 
         self.assertIn("function buildClickCodeAt(x, y)", content)
+        self.assertIn("if (t) {", content)
+        self.assertIn("if (useImage.value) return iCode.value;", content)
+        self.assertIn("return tCode.value;", content)
+        self.assertIn("if (b) return `B(${b.left},${b.top},${b.width},${b.height})`", content)
         self.assertIn("offsetPart = (dx || dy) ? `, offset=(${dx},${dy})` : ''", content)
         self.assertIn("if (tgt.startsWith('B(')) return `click(${tgt})`", content)
         self.assertIn("return `click(${tgt}${offsetPart}, timeout=3)`", content)
         self.assertNotIn(".margin()+(", content)
+
+    def test_editor_custom_executor_supports_grid_templates_validation_and_indent(self):
+        frontend = (ROOT / "services/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
+        backend = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
+        api = (ROOT / "AutoScriptor/core/api.py").read_text(encoding="utf-8")
+
+        self.assertIn("counts = extract_info(make_box_grid", frontend)
+        self.assertIn("digital=True", frontend)
+        self.assertIn("@click=\"validateCustomCode\"", frontend)
+        self.assertIn("function onCustomExecKeydown(e)", frontend)
+        self.assertIn("if (e.shiftKey)", frontend)
+        self.assertIn("line.startsWith('    ')", frontend)
+
+        self.assertIn("from AutoScriptor.utils.box_grid import indexof, make_box_grid", backend)
+        self.assertIn('"make_box_grid": make_box_grid', backend)
+        self.assertIn('"indexof": indexof', backend)
+        self.assertIn('"__import__": _editor_safe_import', backend)
+        self.assertIn('return _validate_editor_snippet(data.get("code", ""))', backend)
+
+        self.assertIn("digital: bool | None = None", api)
+        self.assertIn("if digital is not None:", api)
+
+    def test_canvas_generated_clicks_are_short_and_swipes_keep_duration(self):
+        frontend = (ROOT / "services/webui/static/js/components/canvas/CanvasPanel.js").read_text(encoding="utf-8")
+        backend = (ROOT / "services/webui/routes/canvas.py").read_text(encoding="utf-8")
+
+        self.assertIn("{ key: 'timeout',  label: '超时(秒)', type: 'number', default: 3", frontend)
+        self.assertIn("parts.push(`timeout=${d.timeout ?? 3}`)", frontend)
+        self.assertIn("duration_s=${d.duration_s ?? 1}", frontend)
+        self.assertIn("parts.append(f\"timeout={d.get('timeout', 3)}\")", backend)
+        self.assertIn("duration_s={dur}", backend)
 
     def test_editor_save_keeps_template_crop_separate_from_search_box(self):
         backend = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
@@ -958,6 +993,57 @@ class TestInstallerContract(unittest.TestCase):
         self.assertIn("const managerRunnable", html)
         self.assertIn("emuAcceptable", html)
         self.assertIn("pv-status warn", html)
+
+    def test_packaged_installer_is_transactional_and_preserves_user_data(self):
+        installer = (ROOT / "webapp/install-packaged.cjs").read_text(encoding="utf-8")
+        main = (ROOT / "webapp/main.js").read_text(encoding="utf-8")
+        html = (ROOT / "webapp/renderer/installer.html").read_text(encoding="utf-8")
+
+        for marker in [
+            "inspectZip(zipPath)",
+            "assertDiskSpace(",
+            "verifyBackendDir(stagingDir)",
+            "swapBackendDirectory(stagingDir, backendDest, send)",
+            "copyPackagedDataPreservingUserFiles",
+            "shouldOverwritePackagedData",
+            ".backend.new.",
+            ".backend.incremental.",
+            "彻底卸载造笔.bat",
+            "dataRoot: dataDest",
+        ]:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, installer)
+
+        self.assertIn("if (n === 'config.json') return false", installer)
+        self.assertIn("if (n.startsWith('accounts/')", installer)
+        self.assertIn("if (n.startsWith('custom_task/')", installer)
+        self.assertIn("if (n.startsWith('battle_character/')", installer)
+        self.assertNotIn("taskkill /F /IM", installer)
+
+        self.assertIn("killStalePort5000([...roots])", main)
+        self.assertIn("if ($owned)", main)
+        self.assertIn("mode: 'existing'", main)
+        self.assertIn("allowManagedExisting: true", main)
+        self.assertIn("AUTOSCRIPTOR_DATA_DIR: getRuntimeDataRoot()", main)
+
+        self.assertIn("事务切换", html)
+        self.assertIn("保留 <code>config.json</code>", html)
+
+    def test_release_packaging_has_verification_and_optional_signing(self):
+        staging = (ROOT / "webapp/electron-builder.staging.config.js").read_text(encoding="utf-8")
+        release = (ROOT / "webapp/electron-builder.release.config.js").read_text(encoding="utf-8")
+        build = (ROOT / "scripts/build_release.py").read_text(encoding="utf-8")
+        verify = (ROOT / "webapp/scripts/verify-pack.cjs").read_text(encoding="utf-8")
+
+        for content in [staging, release]:
+            self.assertIn("AUTOSCRIPTOR_CODE_SIGN", content)
+            self.assertIn("signAndEditExecutable: codeSigningEnabled", content)
+
+        self.assertIn('env.get("AUTOSCRIPTOR_CODE_SIGN") == "1"', build)
+        self.assertIn('"verify-pack"', build)
+        self.assertIn("打包自检失败", build)
+        self.assertIn("leakedMaps", verify)
+        self.assertIn("backend.zip is missing autoscriptor-engine.exe", verify)
 
 
 class TestUpdaterGitCommandContract(unittest.TestCase):

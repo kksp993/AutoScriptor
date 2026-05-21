@@ -209,6 +209,12 @@ function isInstalled() {
   return fs.existsSync(path.join(getRoot(), '.venv', 'Scripts', 'python.exe'));
 }
 
+function getRuntimeDataRoot() {
+  const existing = readInstallJsonExisting();
+  if (existing.dataRoot) return existing.dataRoot;
+  return path.join(getRoot(), 'data');
+}
+
 /** 安装向导专用：命令行带 `--installer` / `--install-wizard` 时始终只打开向导，不启动主窗口与 Python。 */
 function isInstallerWizardArgv() {
   return process.argv.some((a) => a === '--installer' || a === '--install-wizard');
@@ -219,16 +225,17 @@ function readInstallJsonExisting() {
   try {
     const marker = path.join(app.getPath('userData'), 'install.json');
     if (!fs.existsSync(marker)) {
-      return { hasExisting: false, installRoot: null, version: null };
+      return { hasExisting: false, installRoot: null, dataRoot: null, version: null };
     }
     const j = JSON.parse(fs.readFileSync(marker, 'utf8'));
     const ir = j.installRoot && typeof j.installRoot === 'string' ? path.resolve(j.installRoot) : null;
     if (!ir || !fs.existsSync(ir)) {
-      return { hasExisting: false, installRoot: null, version: j.version || null };
+      return { hasExisting: false, installRoot: null, dataRoot: null, version: j.version || null };
     }
-    return { hasExisting: true, installRoot: ir, version: j.version || null };
+    const dataRoot = j.dataRoot && typeof j.dataRoot === 'string' ? path.resolve(j.dataRoot) : path.join(ir, 'data');
+    return { hasExisting: true, installRoot: ir, dataRoot, version: j.version || null };
   } catch (_) {
-    return { hasExisting: false, installRoot: null, version: null };
+    return { hasExisting: false, installRoot: null, dataRoot: null, version: null };
   }
 }
 
@@ -260,15 +267,48 @@ if (!gotLock) {
 }
 
 // ── Port cleanup ─────────────────────────────────────────────────────────────
-/**
- * Kill any stale process listening on port 5000 from a previous run.
- * Synchronous — safe to call before startPython().
- */
-function killStalePort5000() {
-  if (process.platform !== 'win32') return;
-  const { execSync } = require('child_process');
+function psQuote(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function normalizeRootForMatch(root) {
+  const s = String(root || '').trim();
+  if (s.length < 4) return null;
+  const r = path.resolve(s);
+  return r.endsWith(path.sep) ? r : r + path.sep;
+}
+
+function autoScriptorKillRoots(extraRoots = []) {
+  const roots = new Set();
+  const add = (r) => {
+    const n = normalizeRootForMatch(r);
+    if (n) roots.add(n);
+  };
   try {
-    const output = execSync('netstat -ano', { encoding: 'utf-8', timeout: 5000 });
+    const root = getRoot();
+    add(root);
+    add(path.join(root, 'backend'));
+  } catch (_) {}
+  try {
+    const existing = readInstallJsonExisting();
+    if (existing.installRoot) {
+      add(existing.installRoot);
+      add(path.join(existing.installRoot, 'backend'));
+    }
+  } catch (_) {}
+  add(path.dirname(process.execPath));
+  for (const r of extraRoots || []) add(r);
+  return [...roots];
+}
+
+/**
+ * Kill only AutoScriptor-owned processes listening on port 5000.
+ * Unrelated local services are left alone even when they bind the same port.
+ */
+function killStalePort5000(extraRoots = []) {
+  if (process.platform !== 'win32') return;
+  try {
+    const output = execFileSync('netstat.exe', ['-ano'], { encoding: 'utf-8', timeout: 5000, windowsHide: true });
     const pids = new Set();
     for (const line of output.split('\n')) {
       if (line.includes(':5000') && line.includes('LISTENING')) {
@@ -277,9 +317,46 @@ function killStalePort5000() {
         if (pid > 0 && pid !== process.pid) pids.add(pid);
       }
     }
-    for (const pid of pids) {
-      console.log(`[main] Killing stale process on port 5000 (PID: ${pid})`);
-      try { execSync(`taskkill /PID ${pid} /T /F`, { timeout: 5000 }); } catch (_) {}
+    if (pids.size === 0) return;
+
+    const roots = autoScriptorKillRoots(extraRoots);
+    if (roots.length === 0) {
+      console.warn('[main] Port 5000 is occupied, but no AutoScriptor root is known; leaving it alone.');
+      return;
+    }
+
+    const ps = `
+$pids = @(${[...pids].join(',')})
+$roots = @(${roots.map(psQuote).join(',')})
+foreach ($pidValue in $pids) {
+  try {
+    $proc = Get-CimInstance Win32_Process -Filter ("ProcessId=" + $pidValue)
+    if (-not $proc) { continue }
+    $exe = [string]$proc.ExecutablePath
+    $cmd = [string]$proc.CommandLine
+    $owned = $false
+    foreach ($r in $roots) {
+      if ($exe -and $exe.StartsWith($r, [System.StringComparison]::OrdinalIgnoreCase)) { $owned = $true; break }
+      if ($cmd -and $cmd.IndexOf($r, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $owned = $true; break }
+    }
+    if ($owned) {
+      & taskkill.exe /PID $pidValue /T /F 2>$null 1>$null
+      Write-Output ("killed:" + $pidValue)
+    } else {
+      Write-Output ("skipped:" + $pidValue + ":" + $exe)
+    }
+  } catch {
+    Write-Output ("error:" + $pidValue + ":" + $_.Exception.Message)
+  }
+}
+`;
+    const result = execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps],
+      { encoding: 'utf8', windowsHide: true, timeout: 30000 },
+    );
+    for (const line of String(result || '').split(/\r?\n/).filter(Boolean)) {
+      console.log('[main] port5000 cleanup:', line);
     }
   } catch (_) {}
 }
@@ -341,6 +418,7 @@ function startPython() {
         PYTHONUTF8: '1',
         AUTOSCRIPTOR_ELECTRON_PIPE: '1',
         AUTOSCRIPTOR_ELECTRON: '1',
+        AUTOSCRIPTOR_DATA_DIR: getRuntimeDataRoot(),
         UVICORN_LOG_LEVEL: 'info',
         NO_COLOR: '1',
       },
@@ -572,6 +650,8 @@ ipcMain.handle('installer:get-mode', () => {
 });
 
 ipcMain.handle('installer:default-install-dir', () => {
+  const existing = readInstallJsonExisting();
+  if (existing.installRoot) return existing.installRoot;
   return path.join(app.getPath('documents'), 'AutoScriptor');
 });
 
@@ -593,7 +673,8 @@ ipcMain.handle('installer:get-wizard-context', () => {
     const bat = path.join(existing.installRoot, '卸载造笔.bat');
     if (fs.existsSync(bat)) uninstallBatPath = bat;
   }
-  const needsUninstallGate = packaged && (engineOk || existing.hasExisting);
+  const canRepairExisting = packaged && (engineOk || existing.hasExisting);
+  const needsUninstallGate = false;
   return {
     isWizard,
     packaged,
@@ -603,6 +684,7 @@ ipcMain.handle('installer:get-wizard-context', () => {
     installRoot: existing.installRoot,
     recordVersion: existing.version,
     uninstallBatPath,
+    canRepairExisting,
     needsUninstallGate,
   };
 });
@@ -652,7 +734,7 @@ function releaseInstallLocks(opts) {
   addBackend(o.installRoot);
   if (o.previousInstallRoot) addBackend(o.previousInstallRoot);
 
-  killStalePort5000();
+  killStalePort5000([...roots]);
 
   if (process.platform !== 'win32' || roots.size === 0) {
     return { ok: true, killedNote: 'port5000' };
@@ -687,9 +769,24 @@ Get-CimInstance Win32_Process | ForEach-Object {
 
 ipcMain.handle('installer:release-install-locks', async (_event, opts) => releaseInstallLocks(opts));
 
-function validateInstallDir(dirPath) {
+function looksLikeManagedInstallRoot(resolved) {
+  try {
+    return (
+      fs.existsSync(path.join(resolved, 'backend')) ||
+      fs.existsSync(path.join(resolved, 'data', 'config.json')) ||
+      fs.existsSync(path.join(resolved, '卸载造笔.bat')) ||
+      fs.existsSync(path.join(resolved, '造笔.exe'))
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+function validateInstallDir(dirPath, opts = {}) {
   if (!dirPath || dirPath.length < 4) return { ok: false, reason: '请选择有效的安装目录' };
   const resolved = path.resolve(dirPath);
+  const mode = opts && opts.mode ? String(opts.mode) : 'install';
+  const allowManagedExisting = !(opts && opts.allowManagedExisting === false);
   if (process.platform === 'win32') {
     const low = resolved.toLowerCase();
     if (/^[a-z]:\\windows$/i.test(low) || low.includes(':\\windows\\system32')) {
@@ -709,9 +806,19 @@ function validateInstallDir(dirPath) {
       } catch (e) {
         return { ok: false, reason: '无法读取目录（可能被其他程序占用或权限不足）：' + e.message };
       }
-      if (entries.length > 0) {
-        return { ok: false, reason: `目录不为空（含 ${entries.length} 个项目）。请选择一个空目录，或创建新目录` };
+      const managedExisting = looksLikeManagedInstallRoot(resolved);
+      if (mode === 'existing') {
+        if (!managedExisting || !fs.existsSync(path.join(resolved, 'backend'))) {
+          return { ok: false, reason: '所选目录不是已安装的造笔目录，缺少 backend。' };
+        }
       }
+      if (entries.length > 0) {
+        if (!(allowManagedExisting && managedExisting)) {
+          return { ok: false, reason: `目录不为空（含 ${entries.length} 个项目）。请选择一个空目录，或创建新目录` };
+        }
+      }
+    } else if (mode === 'existing') {
+      return { ok: false, reason: '已安装目录不存在：' + resolved };
     }
     const parent = path.dirname(resolved);
     if (!fs.existsSync(parent)) {
@@ -725,19 +832,19 @@ function validateInstallDir(dirPath) {
     } catch (e) {
       return { ok: false, reason: '无法写入该目录（权限不足或磁盘已满）：' + e.message };
     }
-    return { ok: true, reason: '' };
+    return { ok: true, reason: '', existingInstall: looksLikeManagedInstallRoot(resolved) };
   } catch (e) {
     return { ok: false, reason: '校验异常：' + e.message };
   }
 }
 
-ipcMain.handle('installer:validate-install-dir', (_event, dirPath) => {
-  return validateInstallDir(String(dirPath || '').trim());
+ipcMain.handle('installer:validate-install-dir', (_event, dirPath, opts) => {
+  return validateInstallDir(String(dirPath || '').trim(), opts || {});
 });
 
 ipcMain.handle('installer:run-packaged', async (_event, opts) => {
   const installRoot = path.resolve(String(opts && opts.installRoot ? opts.installRoot : '').trim());
-  const dirCheck = validateInstallDir(installRoot);
+  const dirCheck = validateInstallDir(installRoot, { allowManagedExisting: true });
   if (!dirCheck.ok) {
     throw new Error(dirCheck.reason);
   }
@@ -779,7 +886,7 @@ ipcMain.handle('installer:run-packaged', async (_event, opts) => {
 
 ipcMain.handle('installer:apply-backend-incremental', async (_event, opts) => {
   const installRoot = path.resolve(String(opts && opts.installRoot ? opts.installRoot : '').trim());
-  const dirCheck = validateInstallDir(installRoot);
+  const dirCheck = validateInstallDir(installRoot, { mode: 'existing', allowManagedExisting: true });
   if (!dirCheck.ok) {
     throw new Error(dirCheck.reason);
   }
