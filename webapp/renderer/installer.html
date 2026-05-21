@@ -201,6 +201,19 @@
       margin-bottom: 32px;
       line-height: 1.6;
     }
+    .dry-run-result {
+      margin-top: 12px;
+      white-space: pre-line;
+      word-break: break-word;
+    }
+    .dry-run-result.ok {
+      background: rgba(22, 163, 74, 0.08);
+      border-color: rgba(22, 163, 74, 0.24);
+    }
+    .dry-run-result.fail {
+      background: rgba(239, 68, 68, 0.08);
+      border-color: rgba(239, 68, 68, 0.24);
+    }
 
     /* ── Welcome Features ──────────────────────────────────── */
     .features {
@@ -959,6 +972,7 @@
               <li>杀毒软件仍可能短暂锁定文件；若失败请稍后重试或暂时排除安装目录。</li>
             </ul>
             <p class="preflight-note">说明：无法保证解除<strong>所有</strong>第三方程序的占用；若仍报错，请关闭相关程序后重试。</p>
+            <div id="preflightDryRunResult" class="preflight-banner preflight-banner--muted dry-run-result" style="display:none;"></div>
           </div>
         </div>
 
@@ -1140,6 +1154,7 @@
         </div>
         <div class="btn-row">
           <button type="button" class="btn-secondary" id="btnPrev" style="display:none;">← 上一步</button>
+          <button type="button" class="btn-secondary" id="btnDryRun" style="display:none;">先做预检</button>
           <button type="button" class="btn-primary" id="btnNext">开始配置 →</button>
         </div>
       </div>
@@ -1238,6 +1253,7 @@
     ];
     const dots = document.querySelectorAll('.dot');
     const btnPrev = document.getElementById('btnPrev');
+    const btnDryRun = document.getElementById('btnDryRun');
     const btnNext = document.getElementById('btnNext');
 
     let pathsAllValid = false;
@@ -1273,8 +1289,15 @@
         btnPrev.disabled = !visible || !onClick;
         btnPrev.onclick = onClick;
       };
+      const setDryRun = (visible) => {
+        if (!btnDryRun) return;
+        btnDryRun.style.display = visible ? '' : 'none';
+        btnDryRun.disabled = !visible;
+        btnDryRun.onclick = visible ? runPackagedDryRun : null;
+      };
       switch (currentStep) {
         case 0:
+          setDryRun(false);
           setPrev(false, null);
           if (window._wizardGateActive && !window._wizardGateCanProceed) {
             btnNext.textContent = '请先卸载或刷新状态';
@@ -1287,30 +1310,35 @@
           }
           break;
         case 1:
+          setDryRun(false);
           setPrev(true, () => goToStep(0));
           btnNext.textContent = '开始安装';
           btnNext.disabled = false;
           btnNext.onclick = startInstall;
           break;
         case 2:
+          setDryRun(true);
           setPrev(true, () => goToStep(1));
           btnNext.textContent = '确认并继续安装';
           btnNext.disabled = false;
           btnNext.onclick = beginPackagedInstall;
           break;
         case 3:
+          setDryRun(false);
           setPrev(false, null);
           btnNext.textContent = '安装中...';
           btnNext.disabled = true;
           btnNext.onclick = null;
           break;
         case 4:
+          setDryRun(false);
           setPrev(false, null);
           btnNext.textContent = pathsAllValid ? '完成安装 →' : '验证中...';
           btnNext.disabled = !pathsAllValid;
           btnNext.onclick = pathsAllValid ? confirmAndFinish : null;
           break;
         case 5:
+          setDryRun(false);
           setPrev(false, null);
           btnNext.textContent = '启动 造笔';
           btnNext.disabled = false;
@@ -1450,7 +1478,7 @@
 
     window._installerPackagedMode = false;
 
-    async function validateInstallDirUI(dirPath) {
+    async function validateInstallDirUI(dirPath, opts = {}) {
       const bar = document.getElementById('installDirValidation');
       if (!bar) return true;
       if (!dirPath) {
@@ -1460,7 +1488,7 @@
       }
       if (!window.electron?.installer?.validateInstallDir) return true;
       try {
-        const r = await window.electron.installer.validateInstallDir(dirPath);
+        const r = await window.electron.installer.validateInstallDir(dirPath, opts);
         if (r.ok) {
           bar.className = 'pv-validation-bar show success';
           bar.textContent = r.existingInstall ? '✓ 已识别为现有造笔目录，将保留用户数据并修复/更新' : '✓ 目录可用';
@@ -1483,6 +1511,12 @@
       const verEl = document.getElementById('preflightOldVer');
       const h2 = document.getElementById('preflightH2');
       const sub = document.getElementById('preflightSub');
+      const dryEl = document.getElementById('preflightDryRunResult');
+      if (dryEl) {
+        dryEl.style.display = 'none';
+        dryEl.textContent = '';
+        dryEl.className = 'preflight-banner preflight-banner--muted dry-run-result';
+      }
       if (!window.electron?.installer?.getExistingInstallInfo) {
         if (ex) ex.style.display = 'none';
         if (fi) fi.style.display = 'block';
@@ -1513,6 +1547,79 @@
       }
     }
 
+    function formatDryRunBytes(n) {
+      if (!Number.isFinite(n)) return 'unknown';
+      const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+      let value = n;
+      let idx = 0;
+      while (value >= 1024 && idx < units.length - 1) {
+        value /= 1024;
+        idx += 1;
+      }
+      return value.toFixed(idx === 0 ? 0 : 1) + ' ' + units[idx];
+    }
+
+    function showDryRunResult(report) {
+      const box = document.getElementById('preflightDryRunResult');
+      if (!box) return;
+      const checks = Array.isArray(report?.checks) ? report.checks : [];
+      const warnings = Array.isArray(report?.warnings) ? report.warnings : [];
+      const errors = Array.isArray(report?.errors) ? report.errors : [];
+      const data = report?.plan?.data || null;
+      const backend = report?.plan?.backend || null;
+      const disk = report?.plan?.disk || null;
+      const lines = [
+        report?.ok ? 'Dry run 预检通过：未创建目录、未复制文件、未写注册表。' : 'Dry run 预检未通过：请先处理下列风险。',
+        '安装目录：' + (report?.installRoot || '-'),
+        'backend.zip：' + (report?.zipPath || '-'),
+      ];
+      if (backend) {
+        lines.push('backend：' + (backend.files || 0) + ' 个文件，解压后约 ' + formatDryRunBytes(backend.uncompressedBytes));
+      }
+      if (disk) {
+        lines.push('磁盘：预计需要 ' + formatDryRunBytes(disk.requiredBytes) + '，剩余 ' + formatDryRunBytes(disk.freeBytes));
+      }
+      if (data) {
+        lines.push('data：随包 ' + (data.sourceFiles || 0) + ' 个，写入/更新 ' + (data.copiedFiles || 0) + ' 个，保留用户文件 ' + (data.keptUserFiles || 0) + ' 个。');
+      }
+      const failedChecks = checks.filter(c => c && c.ok === false).map(c => c.detail);
+      const extraErrors = errors.filter(e => !failedChecks.includes(e));
+      if (failedChecks.length) lines.push('失败项：' + failedChecks.join('；'));
+      if (warnings.length) lines.push('提示：' + warnings.join('；'));
+      if (extraErrors.length) lines.push('错误：' + extraErrors.join('；'));
+      box.className = 'preflight-banner dry-run-result ' + (report?.ok ? 'ok' : 'fail');
+      box.textContent = lines.join('\n');
+      box.style.display = 'block';
+    }
+
+    async function runPackagedDryRun() {
+      const root = (document.getElementById('installPath').value || '').trim();
+      if (!root) {
+        showDryRunResult({ ok: false, errors: ['请选择安装目录'], checks: [], warnings: [] });
+        return;
+      }
+      if (!window.electron?.installer?.dryRunPackagedInstall) {
+        showDryRunResult({ ok: false, errors: ['当前安装器不支持 dry run 预检'], checks: [], warnings: [] });
+        return;
+      }
+      const oldText = btnDryRun ? btnDryRun.textContent : '';
+      if (btnDryRun) {
+        btnDryRun.disabled = true;
+        btnDryRun.textContent = '预检中...';
+      }
+      try {
+        const report = await window.electron.installer.dryRunPackagedInstall({ installRoot: root });
+        showDryRunResult(report);
+      } catch (e) {
+        showDryRunResult({ ok: false, errors: [String(e && e.message ? e.message : e)], checks: [], warnings: [] });
+      } finally {
+        if (btnDryRun) {
+          btnDryRun.disabled = false;
+          btnDryRun.textContent = oldText || '先做预检';
+        }
+      }
+    }
+
     async function beginPackagedInstall() {
       const root = (document.getElementById('installPath').value || '').trim();
       if (!root) {
@@ -1520,7 +1627,7 @@
         goToStep(1);
         return;
       }
-      const dirOk = await validateInstallDirUI(root);
+      const dirOk = await validateInstallDirUI(root, { readOnly: !!window._installerPackagedMode });
       if (!dirOk) {
         goToStep(1);
         return;
@@ -1560,7 +1667,7 @@
             addLog('请选择安装目录', 'error');
             return;
           }
-          const dirOk = await validateInstallDirUI(root);
+          const dirOk = await validateInstallDirUI(root, { readOnly: true });
           if (!dirOk) return;
           await refreshPreflightStep();
           goToStep(2);
@@ -1955,7 +2062,7 @@
           });
           if (chosen) {
             document.getElementById('installPath').value = chosen;
-            await validateInstallDirUI(chosen);
+            await validateInstallDirUI(chosen, { readOnly: !!window._installerPackagedMode });
           }
         });
       }

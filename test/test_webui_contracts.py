@@ -1045,6 +1045,47 @@ class TestInstallerContract(unittest.TestCase):
         self.assertIn("leakedMaps", verify)
         self.assertIn("backend.zip is missing autoscriptor-engine.exe", verify)
 
+    def test_packaged_installer_has_dry_run_and_lifecycle_tests(self):
+        installer = (ROOT / "webapp/install-packaged.cjs").read_text(encoding="utf-8")
+        main = (ROOT / "webapp/main.js").read_text(encoding="utf-8")
+        preload = (ROOT / "webapp/preload.js").read_text(encoding="utf-8")
+        html = (ROOT / "webapp/renderer/installer.html").read_text(encoding="utf-8")
+        package_json = (ROOT / "webapp/package.json").read_text(encoding="utf-8")
+        test_script = (ROOT / "webapp/scripts/test-install-packaged.cjs").read_text(encoding="utf-8")
+
+        for marker in [
+            "dryRunPackagedInstall",
+            "dryRunApplyBackendIncremental",
+            "validatePackagedInstallRoot",
+            "skipMumuConfig",
+            "skipRegistry",
+        ]:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, installer)
+
+        dry_handler = main.split("ipcMain.handle('installer:dry-run-packaged'")[1].split("ipcMain.handle('installer:run-packaged'")[0]
+        self.assertNotIn("validateInstallDir(", dry_handler)
+        self.assertIn("installer:dry-run-packaged", main)
+        self.assertIn("installer:dry-run-backend-incremental", main)
+        self.assertIn("opts && opts.readOnly", main)
+        self.assertIn("dryRunPackagedInstall", preload)
+        self.assertIn("dryRunBackendIncremental", preload)
+        self.assertIn("btnDryRun", html)
+        self.assertIn("runPackagedDryRun", html)
+        self.assertIn("readOnly: true", html)
+        self.assertIn("Dry run", html)
+        self.assertIn('"test:installer"', package_json)
+
+        for marker in [
+            "testDryRunAndInvalidTargets",
+            "testInstallRepairAndUninstallScript",
+            "testIncrementalUpdateAndRollback",
+            "parsePowerShellScript",
+            "KEEP_INSTALLER_TESTS",
+        ]:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, test_script)
+
 
 class TestUpdaterGitCommandContract(unittest.TestCase):
     def test_git_command_includes_safe_directory_for_repo_root(self):

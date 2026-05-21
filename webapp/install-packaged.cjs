@@ -200,6 +200,10 @@ function sha256FileSync(filePath) {
   return h.digest('hex');
 }
 
+function sha256Buffer(buf) {
+  return crypto.createHash('sha256').update(buf).digest('hex');
+}
+
 function safeSend(send, data) {
   if (typeof send === 'function') send(data);
 }
@@ -218,6 +222,134 @@ function formatBytes(n) {
     idx += 1;
   }
   return `${value.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+function looksLikeManagedInstallRoot(root) {
+  if (!fs.existsSync(root)) return false;
+  const markers = ['backend', 'Uninstall.ps1', '卸载造笔.bat', '造笔.exe'];
+  return markers.some((name) => fs.existsSync(path.join(root, name)))
+    || fs.existsSync(path.join(root, 'data', 'config.json'));
+}
+
+function validatePackagedInstallRoot(rootResolved) {
+  const parent = path.dirname(rootResolved);
+  if (!fs.existsSync(parent)) {
+    return {
+      ok: false,
+      reason: `父目录不存在: ${parent}`,
+      exists: false,
+      managed: false,
+      entryCount: 0,
+      existingEntries: [],
+    };
+  }
+
+  let exists = false;
+  let managed = false;
+  let existingEntries = [];
+  try {
+    exists = fs.existsSync(rootResolved);
+    if (exists) {
+      const st = fs.statSync(rootResolved);
+      if (!st.isDirectory()) {
+        return {
+          ok: false,
+          reason: '所选安装目录已被文件占用，请选择一个空目录',
+          exists: true,
+          managed: false,
+          entryCount: 0,
+          existingEntries: [],
+        };
+      }
+      existingEntries = fs.readdirSync(rootResolved);
+      managed = looksLikeManagedInstallRoot(rootResolved);
+      if (existingEntries.length > 0 && !managed) {
+        return {
+          ok: false,
+          reason: `目录不为空（含 ${existingEntries.length} 个项目）。请选择一个空目录，或先卸载旧版后重试。`,
+          exists: true,
+          managed: false,
+          entryCount: existingEntries.length,
+          existingEntries,
+        };
+      }
+    }
+    const probeDir = exists ? rootResolved : parent;
+    fs.accessSync(probeDir, fs.constants.W_OK | fs.constants.X_OK);
+  } catch (e) {
+    return {
+      ok: false,
+      reason: `无法写入目标目录: ${e.message}`,
+      exists,
+      managed,
+      entryCount: existingEntries.length,
+      existingEntries,
+    };
+  }
+
+  return {
+    ok: true,
+    reason: '',
+    exists,
+    managed,
+    entryCount: existingEntries.length,
+    existingEntries,
+  };
+}
+
+function planPackagedDataMerge(dataSrc, dataDest) {
+  const plan = {
+    sourceExists: !!dataSrc && fs.existsSync(dataSrc),
+    destinationExists: !!dataDest && fs.existsSync(dataDest),
+    sourceFiles: 0,
+    sourceBytes: 0,
+    copiedFiles: 0,
+    keptUserFiles: 0,
+    newFiles: 0,
+  };
+
+  if (!plan.sourceExists) {
+    return plan;
+  }
+
+  const walk = (srcDir) => {
+    for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+      const src = path.join(srcDir, entry.name);
+      const rel = path.relative(dataSrc, src);
+      const dest = path.join(dataDest, rel);
+      if (entry.isDirectory()) {
+        walk(src);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      plan.sourceFiles += 1;
+      plan.sourceBytes += fs.statSync(src).size;
+      if (fs.existsSync(dest)) {
+        if (shouldOverwritePackagedData(rel)) {
+          plan.copiedFiles += 1;
+        } else {
+          plan.keptUserFiles += 1;
+        }
+      } else {
+        plan.copiedFiles += 1;
+        plan.newFiles += 1;
+      }
+    }
+  };
+
+  walk(dataSrc);
+  return plan;
+}
+
+function resolveBackendZipPath({ zipPath, exeDir, resourcesPath }) {
+  const candidates = [];
+  if (zipPath) candidates.push(zipPath);
+  if (exeDir) candidates.push(path.join(exeDir, 'backend.zip'));
+  if (resourcesPath) candidates.push(path.join(resourcesPath, 'backend.zip'));
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) return candidate;
+  }
+  return candidates[0] || '';
 }
 
 function dirSizeSync(root) {
@@ -291,6 +423,362 @@ function inspectZip(zipPath) {
       zipfile.on('error', reject);
     });
   });
+}
+
+function addReportCheck(report, key, ok, detail, extra = {}) {
+  const check = { key, ok, detail, ...extra };
+  report.checks.push(check);
+  if (ok === false) report.errors.push(detail);
+  return check;
+}
+
+function finishDryRunReport(report) {
+  report.ok = report.errors.length === 0;
+  return report;
+}
+
+async function dryRunPackagedInstall(opts) {
+  const {
+    installRoot,
+    resourcesPath,
+    zipPath: zipPathOpt,
+    exeDir,
+    portableExePath,
+    appVersion,
+    userDataPath,
+    skipRegistry,
+    skipMumuConfig,
+  } = opts || {};
+
+  const report = {
+    kind: 'packaged-install',
+    ok: false,
+    installRoot: '',
+    zipPath: '',
+    version: String(appVersion || '1.0.0'),
+    checks: [],
+    warnings: [],
+    errors: [],
+    plan: {
+      mode: 'fresh',
+      actions: [],
+      sideEffects: [],
+    },
+  };
+
+  try {
+    const rootInput = String(installRoot || '').trim();
+    if (!rootInput) {
+      addReportCheck(report, 'installRoot', false, '未选择安装目录');
+      return finishDryRunReport(report);
+    }
+    const rootResolved = path.resolve(rootInput);
+    report.installRoot = rootResolved;
+
+    const rootCheck = validatePackagedInstallRoot(rootResolved);
+    report.plan.mode = rootCheck.exists && rootCheck.managed ? 'repair-or-upgrade' : 'fresh';
+    report.plan.installRoot = {
+      exists: rootCheck.exists,
+      managed: rootCheck.managed,
+      entryCount: rootCheck.entryCount,
+    };
+    addReportCheck(
+      report,
+      'installRoot',
+      rootCheck.ok,
+      rootCheck.ok
+        ? (rootCheck.exists ? '安装目录可写；将按现有目录状态执行' : '父目录可写；安装时会创建目标目录')
+        : rootCheck.reason,
+      rootCheck,
+    );
+
+    const zipPath = resolveBackendZipPath({ zipPath: zipPathOpt, exeDir, resourcesPath });
+    report.zipPath = zipPath;
+    if (!zipPath || !fs.existsSync(zipPath)) {
+      addReportCheck(report, 'backendZip', false, '找不到 backend.zip');
+      return finishDryRunReport(report);
+    }
+
+    const zipInfo = await inspectZip(zipPath);
+    const zipSize = fs.statSync(zipPath).size;
+    report.plan.backend = {
+      zipPath,
+      destination: path.join(rootResolved, 'backend'),
+      stagingPattern: path.join(rootResolved, '.backend.new.<timestamp>.<pid>'),
+      files: zipInfo.files,
+      zipBytes: zipSize,
+      uncompressedBytes: zipInfo.uncompressedBytes,
+      hasExistingBackend: fs.existsSync(path.join(rootResolved, 'backend')),
+      transactionalSwap: true,
+      rollbackOnSwapFailure: true,
+    };
+    addReportCheck(
+      report,
+      'backendZip',
+      true,
+      `backend.zip 可读取：${zipInfo.files} 个文件，解压后约 ${formatBytes(zipInfo.uncompressedBytes)}`,
+      { files: zipInfo.files, uncompressedBytes: zipInfo.uncompressedBytes },
+    );
+    addReportCheck(
+      report,
+      'backendEngine',
+      zipInfo.hasEngine,
+      zipInfo.hasEngine ? 'backend.zip 包含 autoscriptor-engine.exe' : 'backend.zip 缺少 autoscriptor-engine.exe',
+    );
+
+    const requiredBytes = zipInfo.uncompressedBytes + zipSize + 512 * 1024 * 1024;
+    const diskTarget = rootCheck.exists ? rootResolved : path.dirname(rootResolved);
+    const freeBytes = getFreeBytes(diskTarget);
+    report.plan.disk = {
+      target: diskTarget,
+      freeBytes,
+      requiredBytes,
+    };
+    if (freeBytes == null) {
+      const msg = '无法读取磁盘剩余空间；正式安装时仍会再次检查';
+      report.warnings.push(msg);
+      addReportCheck(report, 'diskSpace', null, msg, { requiredBytes });
+    } else {
+      addReportCheck(
+        report,
+        'diskSpace',
+        freeBytes >= requiredBytes,
+        freeBytes >= requiredBytes
+          ? `磁盘空间充足：剩余 ${formatBytes(freeBytes)}，预计需要 ${formatBytes(requiredBytes)}`
+          : `磁盘空间不足：剩余 ${formatBytes(freeBytes)}，预计需要 ${formatBytes(requiredBytes)}`,
+        { freeBytes, requiredBytes },
+      );
+    }
+
+    const dataSrc = exeDir ? path.join(exeDir, 'data') : '';
+    const dataDest = path.join(rootResolved, 'data');
+    const dataPlan = planPackagedDataMerge(dataSrc, dataDest);
+    report.plan.data = {
+      source: dataSrc,
+      destination: dataDest,
+      ...dataPlan,
+      preservePolicy: ['config.json', 'accounts/*.json', 'custom_task/**', 'battle_character/**'],
+    };
+    if (!dataPlan.sourceExists) {
+      report.warnings.push('未找到随包 data 目录；正式安装会跳过基础数据合并');
+    }
+
+    const launcherDest = path.join(rootResolved, '造笔.exe');
+    const launcherSource = portableExePath || '';
+    const launcherSourceExists = !!launcherSource && fs.existsSync(launcherSource);
+    report.plan.launcher = {
+      source: launcherSource,
+      destination: launcherDest,
+      willCopy: process.platform === 'win32' && launcherSourceExists,
+    };
+    if (process.platform === 'win32' && !launcherSourceExists) {
+      report.warnings.push('未找到安装包可执行文件路径；正式安装可能无法写入日常启动器 造笔.exe');
+    }
+
+    const markerPath = path.join(userDataPath || '', 'install.json');
+    report.plan.marker = {
+      path: markerPath,
+      willWrite: !!userDataPath,
+      dataRoot: dataDest,
+    };
+    if (!userDataPath) {
+      report.warnings.push('未提供 Electron userData 路径；正式安装无法记录 install.json');
+    }
+
+    report.plan.uninstall = {
+      ps1: path.join(rootResolved, 'Uninstall.ps1'),
+      keepDataBat: path.join(rootResolved, '卸载造笔.bat'),
+      removeAllBat: path.join(rootResolved, '彻底卸载造笔.bat'),
+      registryKey: 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\AutoScriptorZao',
+      willRegisterInAppsAndFeatures: !skipRegistry,
+    };
+
+    report.plan.mumuConfig = {
+      willAutoDetectAndWriteConfig: !skipMumuConfig,
+    };
+
+    report.plan.actions.push(
+      '读取并校验 backend.zip',
+      '解压到 .backend.new.<timestamp>.<pid> 临时目录',
+      report.plan.backend.hasExistingBackend ? '备份并事务切换现有 backend' : '创建新的 backend',
+      '合并随包 data，同时保留用户配置与自定义任务',
+      '写入 userData/install.json 安装标记',
+      '写入卸载脚本和应用程序卸载入口',
+    );
+    if (!skipMumuConfig) {
+      report.plan.actions.push('自动检测 MuMu/ADB 配置并写回 config.json');
+    }
+    report.plan.sideEffects.push('dry-run 本身不创建目录、不写注册表、不复制文件、不修改配置');
+  } catch (e) {
+    report.errors.push(e && e.message ? e.message : String(e));
+  }
+
+  return finishDryRunReport(report);
+}
+
+async function dryRunApplyBackendIncremental(opts) {
+  const { installRoot, zipPath } = opts || {};
+  const report = {
+    kind: 'backend-incremental',
+    ok: false,
+    installRoot: '',
+    zipPath: '',
+    checks: [],
+    warnings: [],
+    errors: [],
+    plan: {
+      replace: 0,
+      add: 0,
+      remove: 0,
+      skip: 0,
+      actions: [],
+    },
+  };
+
+  let zipfile = null;
+  try {
+    const rootInput = String(installRoot || '').trim();
+    if (!rootInput) {
+      addReportCheck(report, 'installRoot', false, '未选择安装目录');
+      return finishDryRunReport(report);
+    }
+    const rootResolved = path.resolve(rootInput);
+    report.installRoot = rootResolved;
+    report.zipPath = String(zipPath || '').trim();
+    const backendDest = path.join(rootResolved, 'backend');
+    if (!report.zipPath || !fs.existsSync(report.zipPath)) {
+      addReportCheck(report, 'incrementalZip', false, '找不到 backend_incremental.zip');
+      return finishDryRunReport(report);
+    }
+    addReportCheck(report, 'incrementalZip', true, '增量包可读取');
+
+    if (!fs.existsSync(backendDest) || !fs.statSync(backendDest).isDirectory()) {
+      addReportCheck(report, 'backendDir', false, 'backend 目录不存在，请先完整安装');
+      return finishDryRunReport(report);
+    }
+    addReportCheck(report, 'backendDir', true, 'backend 目录存在');
+
+    const freeBytes = getFreeBytes(rootResolved);
+    const requiredBytes = dirSizeSync(backendDest) + fs.statSync(report.zipPath).size + 512 * 1024 * 1024;
+    if (freeBytes == null) {
+      const msg = '无法读取磁盘剩余空间；正式增量更新时仍会再次检查';
+      report.warnings.push(msg);
+      addReportCheck(report, 'diskSpace', null, msg, { requiredBytes });
+    } else {
+      addReportCheck(
+        report,
+        'diskSpace',
+        freeBytes >= requiredBytes,
+        freeBytes >= requiredBytes
+          ? `磁盘空间充足：剩余 ${formatBytes(freeBytes)}，预计需要 ${formatBytes(requiredBytes)}`
+          : `磁盘空间不足：剩余 ${formatBytes(freeBytes)}，预计需要 ${formatBytes(requiredBytes)}`,
+        { freeBytes, requiredBytes },
+      );
+    }
+
+    let map;
+    ({ zipfile, map } = await openZipWithEntryMap(report.zipPath));
+    const mEntry = map.get('incremental_manifest.json');
+    if (!mEntry) {
+      addReportCheck(report, 'manifest', false, 'ZIP 中未找到 incremental_manifest.json');
+      return finishDryRunReport(report);
+    }
+    const raw = await readZipEntryBuffer(zipfile, mEntry);
+    const manifest = JSON.parse(raw.toString('utf8'));
+    if (!manifest || manifest.format !== 'backend_incremental_v1') {
+      addReportCheck(report, 'manifest', false, '不支持的增量清单格式（需要 backend_incremental_v1）');
+      return finishDryRunReport(report);
+    }
+    addReportCheck(report, 'manifest', true, '增量清单格式正确');
+    report.plan.manifest = {
+      fromLabel: manifest.from_label || '',
+      toLabel: manifest.to_label || '',
+    };
+
+    const removes = Array.isArray(manifest.remove) ? manifest.remove : [];
+    const entries = Array.isArray(manifest.entries) ? manifest.entries : [];
+    let engineWillExist = fs.existsSync(path.join(backendDest, 'autoscriptor-engine.exe'));
+
+    for (const relRaw of removes) {
+      const rel = String(relRaw).replace(/\\/g, '/');
+      if (rel.includes('..')) {
+        addReportCheck(report, 'removePath', false, '非法删除路径: ' + relRaw);
+        continue;
+      }
+      if (rel === 'autoscriptor-engine.exe') engineWillExist = false;
+      if (fs.existsSync(safeJoin(backendDest, rel))) report.plan.remove += 1;
+    }
+
+    for (const e of entries) {
+      const rel = String(e.path).replace(/\\/g, '/');
+      if (rel.includes('..') || rel === 'incremental_manifest.json') {
+        addReportCheck(report, 'entryPath', false, '非法路径: ' + e.path);
+        continue;
+      }
+      const target = safeJoin(backendDest, rel);
+      const zipEnt = map.get(rel);
+      if (!zipEnt) {
+        addReportCheck(report, 'entryZip', false, 'ZIP 内缺少文件: ' + rel);
+        continue;
+      }
+      const buf = await readZipEntryBuffer(zipfile, zipEnt);
+      const zipSha = sha256Buffer(buf);
+      if (zipSha !== e.new_sha256) {
+        addReportCheck(report, 'entrySha256', false, `ZIP 文件校验不匹配: ${rel}`);
+        continue;
+      }
+
+      if (e.action === 'replace') {
+        if (!fs.existsSync(target)) {
+          addReportCheck(report, 'entryBaseline', false, `缺少待替换文件: ${rel}`);
+          continue;
+        }
+        const cur = sha256FileSync(target);
+        if (cur === e.new_sha256) {
+          report.plan.skip += 1;
+        } else if (cur !== e.old_sha256) {
+          addReportCheck(report, 'entryBaseline', false, `基线不匹配，无法应用增量: ${rel}`);
+        } else {
+          report.plan.replace += 1;
+        }
+      } else if (e.action === 'add') {
+        if (fs.existsSync(target)) {
+          const cur = sha256FileSync(target);
+          if (cur === e.new_sha256) {
+            report.plan.skip += 1;
+          } else {
+            addReportCheck(report, 'entryExists', false, `路径已存在且内容不一致: ${rel}`);
+          }
+        } else {
+          report.plan.add += 1;
+        }
+      } else {
+        addReportCheck(report, 'entryAction', false, '未知条目 action: ' + e.action);
+      }
+      if (rel === 'autoscriptor-engine.exe' && ['replace', 'add'].includes(e.action)) engineWillExist = true;
+    }
+
+    addReportCheck(
+      report,
+      'backendEngine',
+      engineWillExist,
+      engineWillExist ? '更新后仍会保留 autoscriptor-engine.exe' : '更新后会缺少 autoscriptor-engine.exe',
+    );
+    report.plan.actions.push(
+      '复制当前 backend 到 .backend.incremental.<timestamp>.<pid>',
+      '校验 manifest 中的旧文件 SHA-256',
+      '写入新增/替换文件并校验新 SHA-256',
+      '事务切换 backend，失败时保留旧版本',
+    );
+  } catch (e) {
+    report.errors.push(e && e.message ? e.message : String(e));
+  } finally {
+    try {
+      if (zipfile) zipfile.close();
+    } catch (_) {}
+  }
+
+  return finishDryRunReport(report);
 }
 
 /**
@@ -498,11 +986,11 @@ async function applyBackendIncremental(opts) {
     const bump = (msg) => {
       step += 1;
       const pct = totalSteps <= 0 ? 100 : Math.min(99, 5 + Math.floor((90 * step) / totalSteps));
-      send({ type: 'progress', percent: pct, message: msg || `增量 ${step}/${totalSteps}` });
+      safeSend(send, { type: 'progress', percent: pct, message: msg || `增量 ${step}/${totalSteps}` });
     };
 
     if (manifest.from_label || manifest.to_label) {
-      send({
+      safeSend(send, {
         type: 'log',
         message: `[增量] 清单: ${manifest.from_label || '?'} → ${manifest.to_label || '?'}`,
       });
@@ -514,7 +1002,7 @@ async function applyBackendIncremental(opts) {
       const p = safeJoin(stagingDir, n);
       if (fs.existsSync(p)) {
         fs.rmSync(p, { force: true, recursive: true });
-        send({ type: 'log', message: `[增量] 已删除 ${n}` });
+        safeSend(send, { type: 'log', message: `[增量] 已删除 ${n}` });
       }
       bump(`已处理删除 ${step}/${totalSteps}`);
     }
@@ -540,7 +1028,7 @@ async function applyBackendIncremental(opts) {
         }
         const cur = sha256FileSync(target);
         if (cur === e.new_sha256) {
-          send({ type: 'log', message: `[增量] 已跳过(已是新版) ${rel}` });
+          safeSend(send, { type: 'log', message: `[增量] 已跳过(已是新版) ${rel}` });
           bump(`跳过 ${ei}/${entries.length}`);
           continue;
         }
@@ -553,7 +1041,7 @@ async function applyBackendIncremental(opts) {
         if (fs.existsSync(target)) {
           const cur = sha256FileSync(target);
           if (cur === e.new_sha256) {
-            send({ type: 'log', message: `[增量] 已存在且一致 ${rel}` });
+            safeSend(send, { type: 'log', message: `[增量] 已存在且一致 ${rel}` });
             bump(`跳过 ${ei}/${entries.length}`);
             continue;
           }
@@ -568,15 +1056,15 @@ async function applyBackendIncremental(opts) {
       if (got !== e.new_sha256) {
         throw new Error(`校验失败 ${rel}: 期望 SHA256 ${e.new_sha256}，得到 ${got}`);
       }
-      send({ type: 'log', message: `[增量] 已更新 ${rel}` });
+      safeSend(send, { type: 'log', message: `[增量] 已更新 ${rel}` });
       bump(`写入 ${ei}/${entries.length}`);
     }
 
     verifyBackendDir(stagingDir);
     await swapBackendDirectory(stagingDir, backendDest, send);
-    send({ type: 'progress', percent: 100, message: '增量更新完成' });
-    send({ type: 'log', message: '[增量] 引擎增量已应用，可重启造笔。' });
-    send({ type: 'complete' });
+    safeSend(send, { type: 'progress', percent: 100, message: '增量更新完成' });
+    safeSend(send, { type: 'log', message: '[增量] 引擎增量已应用，可重启造笔。' });
+    safeSend(send, { type: 'complete' });
   } finally {
     try {
       if (zipfile) zipfile.close();
@@ -595,7 +1083,7 @@ function copyDailyLauncher(installRoot, portableExePath, send) {
   const root = path.resolve(installRoot);
   const dest = path.join(root, '造笔.exe');
   if (!portableExePath || !fs.existsSync(portableExePath)) {
-    send({
+    safeSend(send, {
       type: 'log',
       message: '[启动器] 未找到安装包可执行文件路径，跳过写入 造笔.exe',
     });
@@ -603,21 +1091,25 @@ function copyDailyLauncher(installRoot, portableExePath, send) {
   }
   try {
     fs.copyFileSync(portableExePath, dest);
-    send({ type: 'log', message: `[启动器] 已写入日常启动器: ${dest}` });
+    safeSend(send, { type: 'log', message: `[启动器] 已写入日常启动器: ${dest}` });
   } catch (e) {
     const msg = e && e.message ? e.message : String(e);
-    send({ type: 'log', message: `[启动器] 写入 造笔.exe 失败: ${msg}` });
+    safeSend(send, { type: 'log', message: `[启动器] 写入 造笔.exe 失败: ${msg}` });
     throw new Error('无法写入安装目录下的 造笔.exe：' + msg);
   }
 }
 
-function registerUninstall(installRoot, displayVersion) {
+function registerUninstall(installRoot, displayVersion, opts = {}) {
   const ps1 = path.join(installRoot, 'Uninstall.ps1');
   const { execFileSync } = require('child_process');
   const sysRoot = process.env.SystemRoot || 'C:\\Windows';
   const psExe = path.join(sysRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   // 「应用和功能」调 UninstallString：直接填 .bat 在部分系统上无效；用 PowerShell -File 执行卸载脚本最稳
   const uninstallString = `"${psExe}" -NoProfile -ExecutionPolicy Bypass -File "${ps1}"`;
+  if (opts && opts.skipRegistry) {
+    safeSend(opts.send, { type: 'log', message: '[卸载] 测试模式：跳过写入 Windows 应用卸载注册表' });
+    return { ok: true, skipped: true, uninstallString };
+  }
   const ver = String(displayVersion || '1.0.0');
   const iconExe = path.join(installRoot, '造笔.exe');
   const ps = `
@@ -639,8 +1131,10 @@ if (Test-Path -LiteralPath ${JSON.stringify(iconExe)}) {
       windowsHide: true,
       encoding: 'utf8',
     });
+    return { ok: true, skipped: false, uninstallString };
   } catch (e) {
     console.warn('[install-packaged] 注册卸载失败（可忽略）:', e && e.message ? e.message : e);
+    return { ok: false, skipped: false, uninstallString, error: e && e.message ? e.message : String(e) };
   }
 }
 
@@ -654,24 +1148,20 @@ async function runPackagedInstall(opts) {
     appVersion,
     userDataPath,
     send,
-  } = opts;
+    skipMumuConfig = false,
+    skipRegistry = false,
+  } = opts || {};
 
-  let zipPath = zipPathOpt;
-  if (!zipPath || !fs.existsSync(zipPath)) {
-    const besideExe = path.join(exeDir, 'backend.zip');
-    const inRes = path.join(resourcesPath, 'backend.zip');
-    if (fs.existsSync(besideExe)) zipPath = besideExe;
-    else if (fs.existsSync(inRes)) zipPath = inRes;
-    else zipPath = zipPathOpt || besideExe;
-  }
+  let zipPath = resolveBackendZipPath({ zipPath: zipPathOpt, exeDir, resourcesPath });
   if (!fs.existsSync(zipPath)) {
     throw new Error(
       '找不到 backend.zip（应在 exe 同级或 resources 下）。请用完整脚本生成 dist/backend.zip 后重新打包 Electron。'
     );
   }
 
-  const rootResolved = path.resolve(installRoot);
-  fs.mkdirSync(rootResolved, { recursive: true });
+  const rootResolved = path.resolve(String(installRoot || '').trim());
+  const rootCheck = validatePackagedInstallRoot(rootResolved);
+  if (!rootCheck.ok) throw new Error(rootCheck.reason);
 
   const zipInfo = await inspectZip(zipPath);
   if (!zipInfo.hasEngine) {
@@ -682,6 +1172,7 @@ async function runPackagedInstall(opts) {
     zipInfo.uncompressedBytes + fs.statSync(zipPath).size + 512 * 1024 * 1024,
     send,
   );
+  fs.mkdirSync(rootResolved, { recursive: true });
 
   const backendDest = path.join(rootResolved, 'backend');
   const stagingDir = path.join(rootResolved, `.backend.new.${stamp()}.${process.pid}`);
@@ -691,23 +1182,23 @@ async function runPackagedInstall(opts) {
   }
   fs.mkdirSync(stagingDir, { recursive: true });
 
-  send({ type: 'log', message: `[解压] 压缩包: ${zipPath}` });
-  send({ type: 'log', message: `[解压] 临时目录: ${stagingDir}` });
+  safeSend(send, { type: 'log', message: `[解压] 压缩包: ${zipPath}` });
+  safeSend(send, { type: 'log', message: `[解压] 临时目录: ${stagingDir}` });
 
   const total = zipInfo.files;
-  send({ type: 'log', message: `[解压] 共 ${total} 个文件，开始解压（请稍候，杀软可能拖慢速度）…` });
-  send({ type: 'progress', percent: 3, message: `准备解压（${total} 个文件）…` });
+  safeSend(send, { type: 'log', message: `[解压] 共 ${total} 个文件，开始解压（请稍候，杀软可能拖慢速度）…` });
+  safeSend(send, { type: 'progress', percent: 3, message: `准备解压（${total} 个文件）…` });
 
   try {
     await extractZip(zipPath, stagingDir, {
       onFile: (done, name) => {
-        send({ type: 'log', message: `[解压] ${done}/${total} ${name}` });
+        safeSend(send, { type: 'log', message: `[解压] ${done}/${total} ${name}` });
         const pct = 5 + Math.floor((84 * done) / Math.max(total, 1));
-        send({ type: 'progress', percent: Math.min(pct, 89), message: `解压 ${done}/${total}` });
+        safeSend(send, { type: 'progress', percent: Math.min(pct, 89), message: `解压 ${done}/${total}` });
       },
     });
     verifyBackendDir(stagingDir);
-    send({ type: 'progress', percent: 90, message: '切换引擎文件…' });
+    safeSend(send, { type: 'progress', percent: 90, message: '切换引擎文件…' });
     await swapBackendDirectory(stagingDir, backendDest, send);
   } catch (e) {
     if (fs.existsSync(stagingDir)) {
@@ -716,8 +1207,8 @@ async function runPackagedInstall(opts) {
     throw e;
   }
 
-  send({ type: 'log', message: '[解压] 引擎文件已完成' });
-  send({ type: 'progress', percent: 94, message: '合并数据文件…' });
+  safeSend(send, { type: 'log', message: '[解压] 引擎文件已完成' });
+  safeSend(send, { type: 'progress', percent: 94, message: '合并数据文件…' });
 
   const dataSrc = path.join(exeDir, 'data');
   const dataDest = path.join(rootResolved, 'data');
@@ -729,8 +1220,12 @@ async function runPackagedInstall(opts) {
     fs.copyFileSync(tpl, cfg);
   }
 
-  const { applyMumuConfig } = require('./mumu-detect.cjs');
-  applyMumuConfig(rootResolved, send);
+  if (skipMumuConfig) {
+    safeSend(send, { type: 'log', message: '[MuMu] 测试模式：跳过自动检测与配置写入' });
+  } else {
+    const { applyMumuConfig } = require('./mumu-detect.cjs');
+    applyMumuConfig(rootResolved, send);
+  }
 
   const markerPath = path.join(userDataPath, 'install.json');
   fs.mkdirSync(userDataPath, { recursive: true });
@@ -740,21 +1235,40 @@ async function runPackagedInstall(opts) {
     version: String(appVersion || '1.0.0'),
   };
   fs.writeFileSync(markerPath, JSON.stringify(manifest, null, 2), 'utf-8');
-  send({ type: 'log', message: `[安装] 已记录安装路径: ${markerPath}` });
+  safeSend(send, { type: 'log', message: `[安装] 已记录安装路径: ${markerPath}` });
 
-  send({ type: 'progress', percent: 95, message: '写入日常启动器（造笔.exe）…' });
+  safeSend(send, { type: 'progress', percent: 95, message: '写入日常启动器（造笔.exe）…' });
   copyDailyLauncher(rootResolved, portableExePath, send);
 
-  send({ type: 'progress', percent: 97, message: '写入卸载程序…' });
+  safeSend(send, { type: 'progress', percent: 97, message: '写入卸载程序…' });
   writeUninstallPs1(rootResolved, markerPath);
-  registerUninstall(rootResolved, manifest.version);
-  send({
+  registerUninstall(rootResolved, manifest.version, { skipRegistry, send });
+  const registryNote = skipRegistry ? '；测试模式未写入「应用和功能」注册表' : '，并已注册「应用和功能」';
+  safeSend(send, {
     type: 'log',
-    message: `[卸载] 已写入 ${path.join(rootResolved, '卸载造笔.bat')}（保留 data）与 ${path.join(rootResolved, '彻底卸载造笔.bat')}，并已注册「应用和功能」`,
+    message: `[卸载] 已写入 ${path.join(rootResolved, '卸载造笔.bat')}（保留 data）与 ${path.join(rootResolved, '彻底卸载造笔.bat')}${registryNote}`,
   });
 
-  send({ type: 'progress', percent: 100, message: '安装完成' });
-  send({ type: 'complete' });
+  safeSend(send, { type: 'progress', percent: 100, message: '安装完成' });
+  safeSend(send, { type: 'complete' });
 }
 
-module.exports = { runPackagedInstall, applyBackendIncremental, writeUninstallPs1 };
+module.exports = {
+  runPackagedInstall,
+  applyBackendIncremental,
+  dryRunPackagedInstall,
+  dryRunApplyBackendIncremental,
+  writeUninstallPs1,
+  __test: {
+    safeJoin,
+    inspectZip,
+    sha256Buffer,
+    sha256FileSync,
+    looksLikeManagedInstallRoot,
+    validatePackagedInstallRoot,
+    planPackagedDataMerge,
+    resolveBackendZipPath,
+    registerUninstall,
+    shouldOverwritePackagedData,
+  },
+};

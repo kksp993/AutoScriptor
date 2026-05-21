@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('electron', {
     runUninstallBat: () => ipcRenderer.invoke('installer:run-uninstall-bat'),
     openInstallRoot: (root) => ipcRenderer.invoke('installer:open-install-root', root),
     releaseInstallLocks: (opts) => ipcRenderer.invoke('installer:release-install-locks', opts),
+    dryRunPackagedInstall: (opts) => ipcRenderer.invoke('installer:dry-run-packaged', opts),
+    dryRunBackendIncremental: (opts) => ipcRenderer.invoke('installer:dry-run-backend-incremental', opts),
     runPackagedInstall: (opts) => ipcRenderer.invoke('installer:run-packaged', opts),
     applyBackendIncremental: (opts) => ipcRenderer.invoke('installer:apply-backend-incremental', opts),
     startInstall:   (config) => ipcRenderer.send('installer:start', config),

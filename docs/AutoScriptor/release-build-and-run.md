@@ -156,6 +156,24 @@ cd D:\Projects\AutoScriptor
 - **进程占用**：安装前只结束安装目录内的后端进程，并且只清理属于造笔安装目录的 5000 端口监听，避免误杀其他本地服务。
 - **卸载**：安装目录写入 `卸载造笔.bat` 与 `彻底卸载造笔.bat`。控制面板/默认卸载保留 `data`；彻底卸载才移除整个安装目录。
 
+### 9.2 Dry run / lifecycle self-test
+
+- 安装向导在“安装前确认”页提供 **“先做预检”**。该 dry run 只读取 `backend.zip`、目标目录状态、磁盘空间与随包 `data` 计划，不创建安装目录、不复制文件、不写注册表、不修改 MuMu/ADB 配置。
+- 代码侧入口为 `dryRunPackagedInstall()`；增量更新也有 `dryRunApplyBackendIncremental()`，用于在真正复制 `.backend.incremental.*` 前校验 manifest、SHA-256 与基线是否匹配。
+- 本地生命周期测试命令：
+
+```powershell
+cd webapp
+npm run test:installer
+```
+
+测试会在 `%TEMP%` 下创建临时 release/安装目录，覆盖 dry run、非法非空目录、缺少引擎包、完整安装、修复安装、用户数据保留、卸载脚本 PowerShell 语法解析、增量更新、增量基线不匹配回滚。默认测试结束后删除临时目录；调试时可保留：
+
+```powershell
+$env:KEEP_INSTALLER_TESTS='1'
+npm run test:installer
+```
+
 ---
 
 ## 10. 输出目录分工
