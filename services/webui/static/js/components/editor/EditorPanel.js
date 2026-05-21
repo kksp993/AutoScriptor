@@ -85,7 +85,7 @@ const EditorPanel = {
           <el-tooltip placement="top" :show-after="0">
             <template #content>
               <div class="max-w-[268px] text-xs leading-relaxed text-left space-y-2">
-                <p>在<strong>当前选区</strong>（边缘优化后矩形）的<strong>中心</strong>点一下；与左侧「名称」及 <strong>T / I 校验</strong>（绿勾表示在当前画面上能定位到）对应同一块区域。</p>
+                <p>按当前选区生成 <strong>B/T/I</strong> 点击代码；有名称时优先用 T/I，只有框选无文字时用完整 B 区域。</p>
                 <p>操作会<strong>追加到下方录制区</strong>。<strong>模拟模式</strong>下只在画布上标红点，不下发模拟器。</p>
               </div>
             </template>
@@ -142,14 +142,23 @@ const EditorPanel = {
           <span class="text-xs text-gray-500">自定义代码执行</span>
           <el-input type="textarea" v-model="customExecCode" size="small"
             :autosize="{ minRows: 6, maxRows: 18 }"
+            @keydown="onCustomExecKeydown"
             placeholder="如 locate(T(&quot;确定&quot;))；最后一行为表达式则返回其值；为赋值（如 info = extract_info(...)）则返回左侧变量。也可用 __result__ = …"
             class="editor-custom-exec-input" />
-          <el-button size="small"
-            @click="executeCustomCode" :loading="execCustomLoading"
-            :disabled="!customExecCode.trim()"
-            class="w-full editor-custom-exec-run-btn">
-            <i class="fa fa-terminal mr-1"></i>执行
-          </el-button>
+          <div class="flex gap-1.5">
+            <el-button size="small" plain
+              @click="validateCustomCode"
+              :disabled="!customExecCode.trim()"
+              class="flex-1 min-w-0">
+              <i class="fa fa-check-circle-o mr-1"></i>校验
+            </el-button>
+            <el-button size="small"
+              @click="executeCustomCode" :loading="execCustomLoading"
+              :disabled="!customExecCode.trim()"
+              class="flex-1 min-w-0 editor-custom-exec-run-btn">
+              <i class="fa fa-terminal mr-1"></i>执行
+            </el-button>
+          </div>
         </div>
       </div>
     </div>
@@ -258,6 +267,17 @@ const EditorPanel = {
           </template>
           <span class="inline-flex"><el-button size="small" plain @click="appendExtractInfo" :disabled="!optimizedSel" :loading="extractPreviewLoading">
             提取信息
+          </el-button></span>
+        </el-tooltip>
+        <el-tooltip placement="top" :show-after="0">
+          <template #content>
+            <div class="max-w-[300px] text-xs leading-relaxed text-left space-y-1">
+              <p>生成数字角标/库存格子的批量提取模板。</p>
+              <p class="font-mono text-[11px] opacity-90 leading-snug">extract_info(make_box_grid(...), digital=True)</p>
+            </div>
+          </template>
+          <span class="inline-flex"><el-button size="small" plain @click="appendExtractGridInfo" :disabled="!optimizedSel">
+            数字网格
           </el-button></span>
         </el-tooltip>
         <el-tooltip placement="top" :show-after="0">
@@ -419,13 +439,14 @@ const EditorPanel = {
       const tgt = buildTarget();
       if (!tgt) return null;
       const b = optimizedSel.value;
-      if (!b || tgt.startsWith('B(')) return `click(B(${x},${y},1,1))`;
+      if (!b) return `click(B(${x},${y},1,1))`;
+      if (tgt.startsWith('B(')) return `click(${tgt})`;
       const cx = Math.floor((b.left + b.right) / 2);
       const cy = Math.floor((b.top + b.bottom) / 2);
       const dx = x - cx;
       const dy = y - cy;
       const offsetPart = (dx || dy) ? `, offset=(${dx},${dy})` : '';
-      return `click(${tgt}${offsetPart})`;
+      return `click(${tgt}${offsetPart}, timeout=3)`;
     }
 
     function appendCode(line) {
@@ -482,8 +503,6 @@ const EditorPanel = {
 
     /** extract_info 需 BoxTarget，代码使用当前选区 B（与 T/I 区域一致）；并请求预览结果 */
     async function appendExtractInfo() {
-      const r = requireTOrITarget();
-      if (!r.ok) return;
       const b = effectiveBox();
       if (!b) {
         ElementPlus.ElMessage.warning('请先框选区域');
@@ -513,6 +532,19 @@ const EditorPanel = {
       } finally {
         extractPreviewLoading.value = false;
       }
+    }
+
+    /** 数字角标/库存网格模板：first_box 与 grid_box 先用当前选区占位，便于后续手动改 row/col/整体区域。 */
+    function appendExtractGridInfo() {
+      const b = effectiveBox();
+      if (!b) {
+        ElementPlus.ElMessage.warning('请先框选第一个格子区域');
+        return;
+      }
+      const first = `Box(${b.left},${b.top},${b.width},${b.height})`;
+      const line = `counts = extract_info(make_box_grid(${first}, ${first}, row=1, col=1), digital=True)`;
+      appendCode(line);
+      ElementPlus.ElMessage.success('已添加「数字网格」模板');
     }
 
     // ── actions ──
@@ -819,7 +851,7 @@ const EditorPanel = {
 
     /** 画布右键拖拽滑动：起止点与遥控器 swipe API 一致 */
     async function onCanvasRemoteSwipe({ x1, y1, x2, y2 }) {
-      appendCode(`swipe(B(${x1},${y1},1,1), B(${x2},${y2},1,1))`);
+      appendCode(`swipe(B(${x1},${y1},1,1), B(${x2},${y2},1,1), duration_s=1)`);
       if (virtualRemoteOnly.value) {
         virtualSwipeLines.value = [...virtualSwipeLines.value, { x1, y1, x2, y2 }];
         ElementPlus.ElMessage.success('虚拟滑动（未下发模拟器）');
@@ -853,7 +885,7 @@ const EditorPanel = {
       const pts = dirMap[swipeDir.value];
 
       // generate code in parallel
-      appendCode(`swipe(B(${pts.x1},${pts.y1},1,1), B(${pts.x2},${pts.y2},1,1))`);
+      appendCode(`swipe(B(${pts.x1},${pts.y1},1,1), B(${pts.x2},${pts.y2},1,1), duration_s=1)`);
 
       if (virtualRemoteOnly.value) {
         virtualSwipeLines.value = [...virtualSwipeLines.value, {
@@ -915,6 +947,70 @@ const EditorPanel = {
     }
 
     /** 自定义代码：不写入操作录制区；以返回值 repr 为主展示，失败才提示错误 */
+    async function validateCustomCode() {
+      const code = (customExecCode.value || '').trim();
+      if (!code) { ElementPlus.ElMessage.warning('请输入代码'); return; }
+      try {
+        const res = await apiPost('/validate-code', { code });
+        if (!res || res.ok === false) {
+          const err = (res && res.error) ? String(res.error) : '校验失败';
+          ElementPlus.ElMessage.error(err.length > 800 ? err.slice(0, 800) + '…' : err);
+          return;
+        }
+        const warnings = Array.isArray(res.warnings) ? res.warnings : [];
+        const msg = warnings.length ? `语法通过；提示：${warnings.join('；')}` : '语法通过';
+        ElementPlus.ElMessage({
+          message: msg,
+          type: warnings.length ? 'warning' : 'success',
+          duration: warnings.length ? 5200 : 2600,
+          showClose: Boolean(warnings.length),
+        });
+      } catch (e) {
+        ElementPlus.ElMessage.error('校验请求失败: ' + e);
+      }
+    }
+
+    function onCustomExecKeydown(e) {
+      if (e.key !== 'Tab') return;
+      e.preventDefault();
+      const ta = e.target;
+      if (!ta || typeof ta.selectionStart !== 'number') return;
+      const value = customExecCode.value || '';
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+      const lineEnd = end > start ? value.indexOf('\n', end - 1) : -1;
+      const blockEnd = lineEnd === -1 ? value.length : lineEnd;
+      const before = value.slice(0, lineStart);
+      const block = value.slice(lineStart, blockEnd);
+      const after = value.slice(blockEnd);
+      const lines = block.split('\n');
+
+      if (e.shiftKey) {
+        let removedBeforeStart = 0;
+        let removedTotal = 0;
+        const nextLines = lines.map((line, idx) => {
+          const remove = line.startsWith('    ') ? 4 : (line.startsWith('\t') ? 1 : 0);
+          if (idx === 0) removedBeforeStart = remove;
+          removedTotal += remove;
+          return remove ? line.slice(remove) : line;
+        });
+        customExecCode.value = before + nextLines.join('\n') + after;
+        Vue.nextTick(() => {
+          const nextStart = Math.max(lineStart, start - removedBeforeStart);
+          const nextEnd = Math.max(nextStart, end - removedTotal);
+          ta.setSelectionRange(nextStart, nextEnd);
+        });
+        return;
+      }
+
+      const nextBlock = lines.map((line) => '    ' + line).join('\n');
+      customExecCode.value = before + nextBlock + after;
+      Vue.nextTick(() => {
+        ta.setSelectionRange(start + 4, end + 4 * lines.length);
+      });
+    }
+
     async function executeCustomCode() {
       const code = (customExecCode.value || '').trim();
       if (!code) { ElementPlus.ElMessage.warning('请输入代码'); return; }
@@ -989,8 +1085,8 @@ const EditorPanel = {
       onSelectionChange, onThresholdRelease,
       saveSelection, onCopy, remoteClick, remoteSwipe,
       onCanvasRemoteClick, onCanvasRemoteSwipe,
-      copyRecordedCode, executeCustomCode,
-      appendLocate, appendWaitAppear, appendWaitDisappear, appendSleepWait, appendExtractInfo,
+      copyRecordedCode, validateCustomCode, onCustomExecKeydown, executeCustomCode,
+      appendLocate, appendWaitAppear, appendWaitDisappear, appendSleepWait, appendExtractInfo, appendExtractGridInfo,
     };
   },
 };

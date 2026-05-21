@@ -141,7 +141,7 @@ def _fill_account_password(ctx_or_account, password = None):
     input(password)
     # Agree to terms checkbox (may already be checked)
     click(T("我已同意"), if_exist=True, timeout=2)
-    click(T("登录", box=Box(23,487,674,62).margin()), timeout=5)
+    click(T("登录", box=Box(23,487,674,62).margin()), timeout=5, repeat=2)
     sleep(1)
 
 
@@ -257,10 +257,3 @@ def login(account: str = None, password: str = None,
     _login.run(ctx)
 
 
-if __name__ == "__main__":
-    # 不预先解密，直到首次用到账密才弹窗
-    login(
-        None,
-        None,
-        None,
-    )

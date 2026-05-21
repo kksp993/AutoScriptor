@@ -1,6 +1,7 @@
 from AutoScriptor.core.targets import Target,B,I,T,V
 from AutoScriptor.core.api import *
 from AutoScriptor.core.background import BG_SIGNALS, BgSignals, bg
+from AutoScriptor.utils.box_grid import indexof, make_box_grid
 
 __all__ = [
  "Target",
@@ -8,6 +9,8 @@ __all__ = [
  "I",
  "T",
  "V",
+ "make_box_grid",
+ "indexof",
  "init",
  "click",
  "locate",

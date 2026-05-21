@@ -11,6 +11,7 @@ import ast
 import asyncio
 import base64
 import csv
+import builtins
 import os
 import traceback
 import types
@@ -34,6 +35,27 @@ _last_template: np.ndarray | None = None
 
 _LOCATE_SCALES = [0.5, 0.75, 1.0]
 _UI_MAP_COLUMNS = ["key", "text", "left", "top", "width", "height", "img"]
+_EDITOR_IMPORT_ALLOWLIST = (
+    "AutoScriptor",
+    "ZmxyOL",
+    "math",
+    "re",
+    "json",
+    "collections",
+    "itertools",
+    "functools",
+)
+
+
+def _editor_import_allowed(name: str) -> bool:
+    root = (name or "").split(".", 1)[0]
+    return any(root == item or name.startswith(item + ".") for item in _EDITOR_IMPORT_ALLOWLIST)
+
+
+def _editor_safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if level != 0 or not _editor_import_allowed(name):
+        raise ImportError(f"editor custom code import is not allowed: {name}")
+    return builtins.__import__(name, globals, locals, fromlist, level)
 
 
 def _locate_text_at_scale(screenshot, text, margin_box, color, scale):
@@ -671,6 +693,45 @@ async def editor_remote_swipe(request: Request):
 _MAX_SNIPPET_LEN = 16000
 
 
+def _validate_editor_snippet(code: str) -> dict:
+    code = (code or "").strip()
+    if not code:
+        return {"ok": False, "error": "代码为空"}
+    if len(code) > _MAX_SNIPPET_LEN:
+        return {"ok": False, "error": f"代码过长（上限 {_MAX_SNIPPET_LEN} 字符）"}
+    try:
+        tree = ast.parse(code)
+        compile(tree, "<editor>", "exec")
+    except SyntaxError as e:
+        loc = f"第 {e.lineno} 行"
+        if e.offset:
+            loc += f" 第 {e.offset} 列"
+        return {"ok": False, "error": f"语法错误（{loc}）: {e.msg}"}
+
+    warnings: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if not _editor_import_allowed(alias.name):
+                    warnings.append(f"导入 {alias.name} 会被执行器拦截")
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if not _editor_import_allowed(module):
+                warnings.append(f"导入 {module or '<relative>'} 会被执行器拦截")
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "sleep"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "time"
+        ):
+            warnings.append("建议使用 sleep(...)，不要使用 time.sleep(...)，这样停止按钮才能及时生效")
+
+    # Keep repeated AST warnings readable in the toast.
+    deduped = list(dict.fromkeys(warnings))[:6]
+    return {"ok": True, "warnings": deduped}
+
+
 def _editor_snippet_lhs_name(last_stmt: ast.stmt) -> str | None:
     """从最后一条语句解析「赋值左侧」可展示的单变量名；无法解析则返回 None。"""
     if isinstance(last_stmt, ast.Assign):
@@ -716,6 +777,7 @@ def _run_editor_snippet(
 
     from AutoScriptor.core.targets import B, I, T, V
     from AutoScriptor.utils.box import Box
+    from AutoScriptor.utils.box_grid import indexof, make_box_grid
 
     from AutoScriptor.core import api as api_mod
 
@@ -744,12 +806,20 @@ def _run_editor_snippet(
         "type": type,
         "repr": repr,
         "print": print,
+        "Exception": Exception,
+        "ValueError": ValueError,
+        "RuntimeError": RuntimeError,
+        "TypeError": TypeError,
+        "__import__": _editor_safe_import,
     }
 
     ns: dict = {
+        "__name__": "__editor__",
         "__builtins__": safe_builtins,
         "time": time_mod,
         "Box": Box,
+        "make_box_grid": make_box_grid,
+        "indexof": indexof,
         "B": B,
         "T": T,
         "I": I,
@@ -871,6 +941,17 @@ def _run_editor_snippet(
             patched_mc.screenshot = backup["screenshot"]
         if virtual_mixctrl is not None:
             api_mod.mixctrl = original_mixctrl
+
+
+@router.post("/validate-code")
+async def editor_validate_code(request: Request):
+    """校验自定义 Python 片段的语法，并提示执行器会拦截的明显问题。"""
+    try:
+        data = await request.json()
+        return _validate_editor_snippet(data.get("code", ""))
+    except Exception as e:
+        logger.error("editor/validate-code error: %s\n%s", e, traceback.format_exc())
+        return {"ok": False, "error": str(e)}
 
 
 @router.post("/execute-code")

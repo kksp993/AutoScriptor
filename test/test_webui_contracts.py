@@ -893,7 +893,8 @@ class TestWebUIServerRouteContract(unittest.TestCase):
 
         self.assertIn("function buildClickCodeAt(x, y)", content)
         self.assertIn("offsetPart = (dx || dy) ? `, offset=(${dx},${dy})` : ''", content)
-        self.assertIn("return `click(${tgt}${offsetPart})`", content)
+        self.assertIn("if (tgt.startsWith('B(')) return `click(${tgt})`", content)
+        self.assertIn("return `click(${tgt}${offsetPart}, timeout=3)`", content)
         self.assertNotIn(".margin()+(", content)
 
     def test_editor_save_keeps_template_crop_separate_from_search_box(self):

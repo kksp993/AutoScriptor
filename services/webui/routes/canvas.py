@@ -235,9 +235,7 @@ def _node_to_code(d: dict, indent: str) -> str:
         return ""
     if ntype == "click":
         parts = [d.get("target", 'T("确定")')]
-        t = d.get("timeout")
-        if t is not None and t != 30:
-            parts.append(f"timeout={t}")
+        parts.append(f"timeout={d.get('timeout', 3)}")
         if d.get("if_exist"):
             parts.append("if_exist=True")
         r = d.get("repeat")
@@ -246,8 +244,7 @@ def _node_to_code(d: dict, indent: str) -> str:
         return f"{indent}click({', '.join(parts)})"
     if ntype == "swipe":
         dur = d.get("duration_s", 1)
-        dur_part = f", duration_s={dur}" if dur != 1 else ""
-        return f"{indent}swipe({d.get('start_target', 'B(640,500,1,1)')}, {d.get('end_target', 'B(640,200,1,1)')}{dur_part})"
+        return f"{indent}swipe({d.get('start_target', 'B(640,500,1,1)')}, {d.get('end_target', 'B(640,200,1,1)')}, duration_s={dur})"
     if ntype == "sleep":
         return f"{indent}sleep({d.get('seconds', 1)})"
     if ntype == "input_text":
@@ -275,7 +272,8 @@ def _node_to_code(d: dict, indent: str) -> str:
     if ntype == "extract_info":
         pp = d.get("post_process", "lambda s: s.strip()")
         ene = "True" if d.get("ensure_not_empty", True) else "False"
-        return f"{indent}info = extract_info({d.get('target', 'B(0,0,1280,720)')}, post_process={pp}, ensure_not_empty={ene})"
+        digit_only = "True" if d.get("digit_only", False) else "False"
+        return f"{indent}info = extract_info({d.get('target', 'B(0,0,1280,720)')}, post_process={pp}, ensure_not_empty={ene}, digit_only={digit_only})"
     if ntype == "ensure_in":
         scene = str(d.get("scene", "主界面")).replace('"', '\\"')
         return f'{indent}ensure_in("{scene}")'
