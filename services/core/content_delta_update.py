@@ -42,6 +42,24 @@ except Exception:  # pragma: no cover
     parse_version = None
 
 
+PROTECTED_CONTENT_UPDATE_PREFIXES = (
+    "accounts/",
+    "battle_character/",
+    "custom_task/",
+    "data/accounts/",
+    "data/battle_character/",
+    "data/custom_task/",
+    "data/logs/",
+    "logs/",
+    ".autoscriptor/",
+)
+
+PROTECTED_CONTENT_UPDATE_FILES = {
+    "config.json",
+    "data/config.json",
+}
+
+
 def _compare_versions(local: str, remote: str) -> int:
     """返回 <0 若 local 更旧，0 相同，>0 若 local 更新。"""
     if parse_version is not None:
@@ -57,6 +75,97 @@ def _compare_versions(local: str, remote: str) -> int:
     if local == remote:
         return 0
     return -1 if local < remote else 1
+
+
+def normalize_update_relative_path(relative_path: str) -> str:
+    """统一 manifest relative_path 表达，用于策略判断与页面展示。"""
+    return relative_path.replace("\\", "/").strip().lstrip("/").lower()
+
+
+def is_protected_content_update_path(relative_path: str) -> bool:
+    """发行版内容更新不得直接覆盖的用户数据路径。"""
+    n = normalize_update_relative_path(relative_path)
+    if not n:
+        return True
+    if n in PROTECTED_CONTENT_UPDATE_FILES:
+        return True
+    return any(n.startswith(prefix) for prefix in PROTECTED_CONTENT_UPDATE_PREFIXES)
+
+
+def validate_content_update_paths(manifest: dict[str, Any]) -> None:
+    """阻止远端 manifest 覆盖用户配置、账号、自定义脚本、日志和更新状态。"""
+    arts = manifest.get("artifacts")
+    if not isinstance(arts, list):
+        return
+    protected: list[str] = []
+    for art in arts:
+        if not isinstance(art, dict):
+            continue
+        rel = art.get("relative_path")
+        if isinstance(rel, str) and is_protected_content_update_path(rel):
+            protected.append(rel)
+    if protected:
+        sample = ", ".join(protected[:5])
+        suffix = " ..." if len(protected) > 5 else ""
+        raise ValueError(f"manifest 试图更新受保护用户数据路径: {sample}{suffix}")
+
+
+def summarize_content_update_manifest(manifest: dict[str, Any] | None) -> dict[str, Any]:
+    """生成给 WebUI 展示的短计划，不暴露过长清单。"""
+    if not isinstance(manifest, dict):
+        return {
+            "content_version": None,
+            "artifact_count": 0,
+            "artifacts_preview": [],
+            "protected_paths": [],
+            "touches_backend": False,
+            "touches_shell": False,
+            "has_backend_incremental_zip": False,
+        }
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, list):
+        artifacts = []
+
+    preview: list[dict[str, Any]] = []
+    protected: list[str] = []
+    touches_backend = False
+    touches_shell = False
+    has_backend_incremental_zip = False
+    shell_names = {"造笔.exe", "autoscriptor-portable.exe", "autoscriptor.exe"}
+
+    for art in artifacts:
+        if not isinstance(art, dict):
+            continue
+        raw_rel = art.get("relative_path")
+        rel = raw_rel if isinstance(raw_rel, str) else ""
+        norm = normalize_update_relative_path(rel)
+        protected_flag = is_protected_content_update_path(rel)
+        if protected_flag:
+            protected.append(rel)
+        if norm.startswith("backend/"):
+            touches_backend = True
+        if norm == "backend_incremental.zip":
+            has_backend_incremental_zip = True
+        if norm in shell_names or norm.endswith("/造笔.exe"):
+            touches_shell = True
+        if len(preview) < 20:
+            preview.append(
+                {
+                    "kind": art.get("kind"),
+                    "relative_path": rel,
+                    "protected": protected_flag,
+                }
+            )
+
+    return {
+        "content_version": manifest.get("content_version"),
+        "artifact_count": len(artifacts),
+        "artifacts_preview": preview,
+        "protected_paths": protected[:20],
+        "touches_backend": touches_backend,
+        "touches_shell": touches_shell,
+        "has_backend_incremental_zip": has_backend_incremental_zip,
+    }
 
 
 class ContentDeltaUpdater:
@@ -211,11 +320,13 @@ class ContentDeltaUpdater:
             apply_security_checks_after_parse(
                 data, public_key_pem=pem, public_key_path=pem_path
             )
+            validate_content_update_paths(data)
             self.remote_manifest = data
             self.last_error = ""
             return data
         except Exception as e:
             self.last_error = str(e)
+            self.remote_manifest = None
             logger.warning(f"拉取 manifest 失败: {e}")
             return None
 
@@ -225,14 +336,18 @@ class ContentDeltaUpdater:
         """
         m = self.fetch_manifest()
         if m is None:
+            self.state = "failed"
             return False, self.last_error or "无法获取 manifest"
         remote = m.get("content_version")
         if not isinstance(remote, str) or not remote.strip():
+            self.state = "failed"
             return False, "manifest 缺少 content_version"
         local = self.get_local_content_version()
         cmp = _compare_versions(local, remote.strip())
         if cmp < 0:
+            self.state = "available"
             return True, f"{local} -> {remote.strip()}"
+        self.state = "idle"
         return False, f"已是最新 ({local})"
 
     def apply_manifest(self, manifest: dict[str, Any] | None = None) -> bool:
@@ -251,6 +366,7 @@ class ContentDeltaUpdater:
                 apply_security_checks_after_parse(
                     m, public_key_pem=pem_trust, public_key_path=pem_path_trust
                 )
+                validate_content_update_paths(m)
                 remote_ver = m.get("content_version")
                 if not isinstance(remote_ver, str) or not remote_ver.strip():
                     raise ValueError("manifest 缺少 content_version")
@@ -346,7 +462,10 @@ class ContentDeltaUpdater:
                 return False
 
     def get_status(self) -> dict[str, Any]:
+        manifest_summary = summarize_content_update_manifest(self.remote_manifest)
         return {
+            "kind": "release-content-manifest",
+            "available": bool(self.get_manifest_url()),
             "state": self.state,
             "content_version_local": self.get_local_content_version(),
             "manifest_url": self.get_manifest_url(),
@@ -357,6 +476,7 @@ class ContentDeltaUpdater:
                 if isinstance(self.remote_manifest, dict)
                 else None
             ),
+            "manifest_summary": manifest_summary,
         }
 
 

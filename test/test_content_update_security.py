@@ -16,6 +16,11 @@ from services.core.content_update_security import (  # noqa: E402
     validate_manifest_artifact_hashes,
     verify_manifest_ed25519_if_configured,
 )
+from services.core.content_delta_update import (  # noqa: E402
+    is_protected_content_update_path,
+    summarize_content_update_manifest,
+    validate_content_update_paths,
+)
 
 
 class TestUrlPolicy(unittest.TestCase):
@@ -80,6 +85,66 @@ class TestManifestHashes(unittest.TestCase):
                     ],
                 }
             )
+
+
+class TestContentUpdateUserDataPolicy(unittest.TestCase):
+    def test_user_data_paths_are_protected(self):
+        for rel in [
+            "config.json",
+            "data/config.json",
+            "data/accounts/default.json",
+            "data/custom_task/foo.py",
+            "data/battle_character/role.py",
+            ".autoscriptor/content_version.json",
+        ]:
+            with self.subTest(rel=rel):
+                self.assertTrue(is_protected_content_update_path(rel))
+
+    def test_product_paths_remain_updateable(self):
+        for rel in [
+            "backend/autoscriptor-engine.exe",
+            "services/webui/static/js/components/UpdatePanel.js",
+            "data/assets/config/ui_map.csv",
+            "backend_incremental.zip",
+        ]:
+            with self.subTest(rel=rel):
+                self.assertFalse(is_protected_content_update_path(rel))
+
+    def test_manifest_rejects_protected_user_data(self):
+        h = "a" * 64
+        manifest = {
+            "content_version": "1.0.1",
+            "artifacts": [
+                {
+                    "kind": "raw",
+                    "relative_path": "data/config.json",
+                    "url": "https://example.com/config.json",
+                    "sha256": h,
+                }
+            ],
+        }
+        with self.assertRaises(ValueError):
+            validate_content_update_paths(manifest)
+
+    def test_manifest_summary_flags_backend_incremental_package(self):
+        h = "a" * 64
+        summary = summarize_content_update_manifest(
+            {
+                "content_version": "1.0.1",
+                "artifacts": [
+                    {
+                        "kind": "raw",
+                        "relative_path": "backend_incremental.zip",
+                        "url": "https://example.com/backend_incremental.zip",
+                        "sha256": h,
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(summary["artifact_count"], 1)
+        self.assertTrue(summary["has_backend_incremental_zip"])
+        self.assertFalse(summary["protected_paths"])
 
 
 class TestEd25519Optional(unittest.TestCase):
