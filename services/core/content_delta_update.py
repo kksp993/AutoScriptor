@@ -19,6 +19,7 @@ import time
 from typing import Any
 
 from AutoScriptor.utils.logger import logger
+from AutoScriptor.utils.paths import get_app_root, get_data_root
 
 from services.core.binary_delta import (
     apply_bsdiff_patch,
@@ -65,15 +66,23 @@ class ContentDeltaUpdater:
     last_error: str = ""
     remote_manifest: dict[str, Any] | None = None
 
-    def __init__(self, root: str | None = None):
-        self._root = root or os.getcwd()
+    def __init__(self, root: str | None = None, config_path: str | None = None):
+        self._root = root or str(get_app_root())
+        if config_path is not None:
+            self._config_path = config_path
+        elif root is not None:
+            self._config_path = os.path.join(self._root, "config.json")
+        else:
+            self._config_path = str(get_data_root() / "config.json")
         self._lock = threading.Lock()
 
     def _version_file(self) -> str:
         return os.path.join(self._root, ".autoscriptor", "content_version.json")
 
     def _load_config_json(self) -> dict[str, Any]:
-        cfg_path = os.path.join(self._root, "config.json")
+        cfg_path = self._config_path
+        if not os.path.isfile(cfg_path):
+            cfg_path = os.path.join(self._root, "config.json")
         if not os.path.isfile(cfg_path):
             return {}
         try:

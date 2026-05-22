@@ -89,8 +89,10 @@ function writeUninstallPs1(installRoot, userDataInstallJson) {
     'function Stop-UnderRoot {',
     '  try {',
     '    Get-CimInstance Win32_Process | Where-Object {',
-    '      ($_.ExecutablePath -and ($_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase))) -or',
-    '      ($_.CommandLine -and ($_.CommandLine.IndexOf($root, [System.StringComparison]::OrdinalIgnoreCase) -ge 0))',
+    '      ($_.ProcessId -ne $PID) -and (',
+    '        ($_.ExecutablePath -and ($_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase))) -or',
+    '        ($_.CommandLine -and ($_.CommandLine.IndexOf($root, [System.StringComparison]::OrdinalIgnoreCase) -ge 0))',
+    '      )',
     '    } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }',
     '  } catch { }',
     '}',
@@ -145,8 +147,10 @@ function writeUninstallPs1(installRoot, userDataInstallJson) {
     'if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue }',
     'try {',
     '  Get-CimInstance Win32_Process | Where-Object {',
-    '    ($_.ExecutablePath -and ($_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase))) -or',
-    '    ($_.CommandLine -and ($_.CommandLine.IndexOf($root, [System.StringComparison]::OrdinalIgnoreCase) -ge 0))',
+    '    ($_.ProcessId -ne $PID) -and (',
+    '      ($_.ExecutablePath -and ($_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase))) -or',
+    '      ($_.CommandLine -and ($_.CommandLine.IndexOf($root, [System.StringComparison]::OrdinalIgnoreCase) -ge 0))',
+    '    )',
     '  } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }',
     '} catch { }',
     'Start-Sleep -Seconds 2',
@@ -339,6 +343,262 @@ function planPackagedDataMerge(dataSrc, dataDest) {
 
   walk(dataSrc);
   return plan;
+}
+
+function readJsonObject(filePath) {
+  const result = {
+    exists: fs.existsSync(filePath),
+    ok: false,
+    path: filePath,
+    data: null,
+    error: '',
+  };
+  if (!result.exists) {
+    result.error = 'missing';
+    return result;
+  }
+  try {
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      result.error = 'not a JSON object';
+      return result;
+    }
+    result.ok = true;
+    result.data = data;
+  } catch (e) {
+    result.error = e && e.message ? e.message : String(e);
+  }
+  return result;
+}
+
+function isPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function mergeMissingConfigDefaults(current, defaults, prefix = '', changes = []) {
+  if (!isPlainObject(current) || !isPlainObject(defaults)) return current;
+  for (const [key, defaultValue] of Object.entries(defaults)) {
+    const p = prefix ? `${prefix}.${key}` : key;
+    if (!(key in current)) {
+      current[key] = cloneJson(defaultValue);
+      changes.push(p);
+      continue;
+    }
+    if (isPlainObject(current[key]) && isPlainObject(defaultValue)) {
+      mergeMissingConfigDefaults(current[key], defaultValue, p, changes);
+    }
+  }
+  return current;
+}
+
+function previewConfigDefaultMerge(defaults, current) {
+  const changes = [];
+  if (!isPlainObject(defaults) || !isPlainObject(current)) {
+    return { merged: current, missingKeys: changes };
+  }
+  const merged = cloneJson(current);
+  mergeMissingConfigDefaults(merged, defaults, '', changes);
+  return { merged, missingKeys: changes };
+}
+
+function chooseConfigDefaults(sourceTemplate, sourceConfig) {
+  if (sourceTemplate && sourceTemplate.ok && isPlainObject(sourceTemplate.data)) {
+    return { path: sourceTemplate.path, data: sourceTemplate.data };
+  }
+  if (sourceConfig && sourceConfig.ok && isPlainObject(sourceConfig.data)) {
+    return { path: sourceConfig.path, data: sourceConfig.data };
+  }
+  return { path: '', data: null };
+}
+
+function listFilesRecursive(root) {
+  const out = [];
+  if (!root || !fs.existsSync(root)) return out;
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(p);
+      } else if (entry.isFile()) {
+        out.push(p);
+      }
+    }
+  };
+  walk(root);
+  return out;
+}
+
+function validateConfigShape(config, label, opts = {}) {
+  const errors = [];
+  const warnings = [];
+  const allowAbsoluteAccountsDir = !!opts.allowAbsoluteAccountsDir;
+  if (!config || typeof config !== 'object') {
+    errors.push(`${label}: config is not a JSON object`);
+    return { errors, warnings };
+  }
+  for (const key of ['app', 'emulator', 'ocr', 'deploy', 'accounts', 'current_account']) {
+    if (!(key in config)) errors.push(`${label}: missing ${key}`);
+  }
+  if (!config.app || typeof config.app !== 'object') {
+    errors.push(`${label}: app section must be an object`);
+  } else if (config.app.name !== 'ZmxyOL') {
+    errors.push(`${label}: app.name must be ZmxyOL`);
+  } else if (!('app_to_start' in config.app)) {
+    errors.push(`${label}: app.app_to_start is missing`);
+  }
+  if (!config.emulator || typeof config.emulator !== 'object') {
+    errors.push(`${label}: emulator section must be an object`);
+  } else {
+    for (const key of ['index', 'adb_addr', 'mumu_folder', 'emu_path', 'adb_path']) {
+      if (!(key in config.emulator)) errors.push(`${label}: emulator.${key} is missing`);
+    }
+  }
+  if (!config.accounts || typeof config.accounts !== 'object') {
+    errors.push(`${label}: accounts section must be an object`);
+  } else {
+    const accountsDir = String(config.accounts.dir || '').trim();
+    if (accountsDir && path.isAbsolute(accountsDir) && !allowAbsoluteAccountsDir) {
+      errors.push(`${label}: accounts.dir must not be an absolute path`);
+    } else if (accountsDir && path.isAbsolute(accountsDir)) {
+      warnings.push(`${label}: accounts.dir is an absolute external account directory`);
+    }
+  }
+  if (!config.current_account || typeof config.current_account !== 'string') {
+    errors.push(`${label}: current_account must be a non-empty string`);
+  }
+  const deploy = config.deploy || {};
+  if (deploy.content_manifest_url && !/^https?:\/\//i.test(String(deploy.content_manifest_url))) {
+    warnings.push(`${label}: deploy.content_manifest_url is not an http(s) URL`);
+  }
+  return { errors, warnings };
+}
+
+function inspectPackagedRuntimeData(dataSrc, dataDest, opts = {}) {
+  const report = {
+    source: dataSrc,
+    destination: dataDest,
+    effectiveConfigPath: '',
+    effectiveConfigSource: '',
+    errors: [],
+    warnings: [],
+    checks: {},
+    mumuPreview: null,
+    configDefaults: {
+      source: '',
+      target: '',
+      missingKeys: [],
+      willWrite: false,
+    },
+  };
+
+  if (!dataSrc || !fs.existsSync(dataSrc) || !fs.statSync(dataSrc).isDirectory()) {
+    report.errors.push('packaged data directory is missing');
+    return report;
+  }
+  report.checks.dataDirectory = true;
+
+  const sourceConfig = readJsonObject(path.join(dataSrc, 'config.json'));
+  const sourceTemplate = readJsonObject(path.join(dataSrc, 'config template.json'));
+  report.checks.sourceConfig = sourceConfig.ok;
+  report.checks.sourceTemplate = sourceTemplate.ok;
+  if (!sourceConfig.ok) report.errors.push(`packaged data/config.json invalid: ${sourceConfig.error}`);
+  if (!sourceTemplate.ok) report.errors.push(`packaged data/config template.json invalid: ${sourceTemplate.error}`);
+  if (sourceConfig.ok) {
+    const cfgCheck = validateConfigShape(sourceConfig.data, 'packaged data/config.json');
+    report.errors.push(...cfgCheck.errors);
+    report.warnings.push(...cfgCheck.warnings);
+  }
+  if (sourceTemplate.ok) {
+    const tplCheck = validateConfigShape(sourceTemplate.data, 'packaged data/config template.json');
+    report.errors.push(...tplCheck.errors);
+    report.warnings.push(...tplCheck.warnings);
+  }
+
+  const defaults = chooseConfigDefaults(sourceTemplate, sourceConfig);
+  report.configDefaults.source = defaults.path;
+  const existingConfigPath = path.join(dataDest, 'config.json');
+  const hasExistingConfig = fs.existsSync(existingConfigPath);
+  const effective = hasExistingConfig ? readJsonObject(existingConfigPath) : sourceConfig;
+  report.effectiveConfigPath = effective.path;
+  report.effectiveConfigSource = hasExistingConfig ? 'existing-user-data' : 'packaged-data';
+  report.configDefaults.target = hasExistingConfig ? existingConfigPath : '';
+  report.checks.effectiveConfig = effective.ok;
+  if (!effective.ok) {
+    report.errors.push(`effective data/config.json invalid: ${effective.error}`);
+  } else {
+    let effectiveData = effective.data;
+    if (hasExistingConfig && defaults.data) {
+      const mergePlan = previewConfigDefaultMerge(defaults.data, effective.data);
+      effectiveData = mergePlan.merged;
+      report.configDefaults.missingKeys = mergePlan.missingKeys;
+      report.configDefaults.willWrite = mergePlan.missingKeys.length > 0;
+      if (mergePlan.missingKeys.length) {
+        report.warnings.push(
+          `existing data/config.json will be supplemented from packaged template: ${mergePlan.missingKeys.slice(0, 8).join(', ')}`
+        );
+      }
+    }
+    const effCheck = validateConfigShape(effectiveData, 'effective data/config.json', {
+      allowAbsoluteAccountsDir: hasExistingConfig,
+    });
+    report.errors.push(...effCheck.errors);
+    report.warnings.push(...effCheck.warnings);
+    if (opts.previewMumu !== false) {
+      try {
+        const { previewMumuConfig } = require('./mumu-detect.cjs');
+        report.mumuPreview = previewMumuConfig(effectiveData, { probeAdb: false });
+        if (report.mumuPreview.willNeedManualPaths) {
+          report.warnings.push('MuMu/ADB paths are not fully resolved; installer will require path validation after install');
+        }
+      } catch (e) {
+        report.warnings.push('MuMu preview failed: ' + (e && e.message ? e.message : String(e)));
+      }
+    }
+  }
+
+  const uiMapPath = path.join(dataSrc, 'assets', 'config', 'ui_map.csv');
+  report.checks.uiMap = fs.existsSync(uiMapPath) && fs.statSync(uiMapPath).isFile();
+  if (!report.checks.uiMap) {
+    report.errors.push('packaged data/assets/config/ui_map.csv is missing');
+  } else {
+    const header = fs.readFileSync(uiMapPath, 'utf8').split(/\r?\n/, 1)[0].split(',');
+    for (const col of ['key', 'text', 'left', 'top', 'width', 'height', 'img']) {
+      if (!header.includes(col)) report.errors.push(`ui_map.csv missing column: ${col}`);
+    }
+  }
+
+  const heroPath = path.join(dataSrc, 'battle_character', 'hero.py');
+  report.checks.battleCharacter = fs.existsSync(heroPath) && fs.statSync(heroPath).isFile();
+  if (!report.checks.battleCharacter) {
+    report.errors.push('packaged data/battle_character/hero.py is missing');
+  }
+
+  const accountJson = listFilesRecursive(path.join(dataSrc, 'accounts'))
+    .filter((f) => f.toLowerCase().endsWith('.json'))
+    .map((f) => path.relative(dataSrc, f).replace(/\\/g, '/'));
+  report.checks.noAccountJsonLeak = accountJson.length === 0;
+  if (accountJson.length) {
+    report.errors.push('packaged data/accounts contains user JSON files: ' + accountJson.slice(0, 5).join(', '));
+  }
+
+  const bytecode = listFilesRecursive(dataSrc)
+    .filter((f) => /\.(pyc|pyo)$/i.test(f) || f.toLowerCase().includes(`${path.sep}__pycache__${path.sep}`))
+    .map((f) => path.relative(dataSrc, f).replace(/\\/g, '/'));
+  report.checks.noPythonBytecode = bytecode.length === 0;
+  if (bytecode.length) {
+    report.errors.push('packaged data contains Python bytecode/cache files: ' + bytecode.slice(0, 5).join(', '));
+  }
+
+  report.checks.customTaskDir = fs.existsSync(path.join(dataSrc, 'custom_task'));
+  if (!report.checks.customTaskDir) {
+    report.warnings.push('packaged data/custom_task directory is missing; user scripts can still be created later');
+  }
+
+  return report;
 }
 
 function resolveBackendZipPath({ zipPath, exeDir, resourcesPath }) {
@@ -553,12 +813,29 @@ async function dryRunPackagedInstall(opts) {
     const dataSrc = exeDir ? path.join(exeDir, 'data') : '';
     const dataDest = path.join(rootResolved, 'data');
     const dataPlan = planPackagedDataMerge(dataSrc, dataDest);
+    const runtimePlan = inspectPackagedRuntimeData(dataSrc, dataDest, { previewMumu: !skipMumuConfig });
     report.plan.data = {
       source: dataSrc,
       destination: dataDest,
       ...dataPlan,
       preservePolicy: ['config.json', 'accounts/*.json', 'custom_task/**', 'battle_character/**'],
     };
+    report.plan.runtime = runtimePlan;
+    for (const w of runtimePlan.warnings) report.warnings.push(w);
+    addReportCheck(
+      report,
+      'runtimeData',
+      runtimePlan.errors.length === 0,
+      runtimePlan.errors.length === 0
+        ? `runtime data OK; config=${runtimePlan.effectiveConfigSource || 'unknown'}`
+        : 'runtime data validation failed: ' + runtimePlan.errors.join('; '),
+      {
+        effectiveConfigPath: runtimePlan.effectiveConfigPath,
+        effectiveConfigSource: runtimePlan.effectiveConfigSource,
+        checks: runtimePlan.checks,
+        mumuPreview: runtimePlan.mumuPreview,
+      },
+    );
     if (!dataPlan.sourceExists) {
       report.warnings.push('未找到随包 data 目录；正式安装会跳过基础数据合并');
     }
@@ -944,6 +1221,30 @@ function copyPackagedDataPreservingUserFiles(dataSrc, dataDest, send) {
   });
 }
 
+function applyConfigDefaultsFromPackagedData(dataSrc, dataDest, send) {
+  const sourceConfig = readJsonObject(path.join(dataSrc, 'config.json'));
+  const sourceTemplate = readJsonObject(path.join(dataSrc, 'config template.json'));
+  const defaults = chooseConfigDefaults(sourceTemplate, sourceConfig);
+  const targetPath = path.join(dataDest, 'config.json');
+  if (!defaults.data || !fs.existsSync(targetPath)) {
+    return { ok: false, changed: false, missingKeys: [], reason: 'config defaults or target config missing' };
+  }
+  const current = readJsonObject(targetPath);
+  if (!current.ok) {
+    return { ok: false, changed: false, missingKeys: [], reason: current.error || 'target config invalid' };
+  }
+  const mergePlan = previewConfigDefaultMerge(defaults.data, current.data);
+  if (!mergePlan.missingKeys.length) {
+    return { ok: true, changed: false, missingKeys: [] };
+  }
+  fs.writeFileSync(targetPath, JSON.stringify(mergePlan.merged, null, 2) + '\n', 'utf8');
+  safeSend(send, {
+    type: 'log',
+    message: `[配置] 已用随包模板补齐 ${mergePlan.missingKeys.length} 个缺失配置项（保留原有用户值）`,
+  });
+  return { ok: true, changed: true, missingKeys: mergePlan.missingKeys };
+}
+
 /**
  * 将增量包应用到 installRoot/backend/：先删 manifest.remove，再按条目校验并解压覆盖。
  * @param {{ installRoot: string, zipPath: string, send: (data: object) => void }} opts
@@ -1172,6 +1473,12 @@ async function runPackagedInstall(opts) {
     zipInfo.uncompressedBytes + fs.statSync(zipPath).size + 512 * 1024 * 1024,
     send,
   );
+  const dataSrc = path.join(exeDir, 'data');
+  const dataDest = path.join(rootResolved, 'data');
+  const runtimePlan = inspectPackagedRuntimeData(dataSrc, dataDest, { previewMumu: false });
+  if (runtimePlan.errors.length) {
+    throw new Error('runtime data validation failed: ' + runtimePlan.errors.join('; '));
+  }
   fs.mkdirSync(rootResolved, { recursive: true });
 
   const backendDest = path.join(rootResolved, 'backend');
@@ -1210,9 +1517,8 @@ async function runPackagedInstall(opts) {
   safeSend(send, { type: 'log', message: '[解压] 引擎文件已完成' });
   safeSend(send, { type: 'progress', percent: 94, message: '合并数据文件…' });
 
-  const dataSrc = path.join(exeDir, 'data');
-  const dataDest = path.join(rootResolved, 'data');
   copyPackagedDataPreservingUserFiles(dataSrc, dataDest, send);
+  applyConfigDefaultsFromPackagedData(dataSrc, dataDest, send);
 
   const tpl = path.join(rootResolved, 'config template.json');
   const cfg = path.join(rootResolved, 'config.json');
@@ -1267,6 +1573,9 @@ module.exports = {
     looksLikeManagedInstallRoot,
     validatePackagedInstallRoot,
     planPackagedDataMerge,
+    inspectPackagedRuntimeData,
+    previewConfigDefaultMerge,
+    applyConfigDefaultsFromPackagedData,
     resolveBackendZipPath,
     registerUninstall,
     shouldOverwritePackagedData,

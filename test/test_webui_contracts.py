@@ -940,6 +940,8 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("cropped = _last_screenshot[template_top:template_bottom, template_left:template_right]", backend)
         self.assertIn("raw_fn = f\"{pinyin_name}@{save_left}#{save_top}#{save_w}#{save_h}.png\"", backend)
         self.assertIn("_is_fullscreen_like_rect", backend)
+        self.assertIn("from AutoScriptor.utils.paths import get_assets_dir", backend)
+        self.assertIn("assets_root = get_assets_dir()", backend)
 
         self.assertIn("function templateBox()", frontend)
         self.assertIn("const tb = templateBox();", frontend)
@@ -979,6 +981,8 @@ class TestInstallerContract(unittest.TestCase):
 
         self.assertIn("安装器将把 MuMuManager 异常视为警告", content)
         self.assertIn('results["emu_path"]["exists"]', content)
+        self.assertIn("_check_configured_adb_device", content)
+        self.assertIn('operationReady', content)
         self.assertNotIn('and results["emu_path"]["exists"] and results["emu_path"]["runnable"]', content)
 
     def test_electron_installer_matches_mumu_manager_fallback_policy(self):
@@ -988,11 +992,14 @@ class TestInstallerContract(unittest.TestCase):
         self.assertIn('"${emuPath}" version', content)
         self.assertIn("安装器将把 MuMuManager 异常视为警告", content)
         self.assertIn("results.adb_path.runnable", content)
+        self.assertIn("checkConfiguredAdbDevice", content)
         self.assertIn("&& results.emu_path.exists", content)
         self.assertNotIn("&& results.emu_path.exists && results.emu_path.runnable", content)
         self.assertIn("const managerRunnable", html)
         self.assertIn("emuAcceptable", html)
         self.assertIn("pv-status warn", html)
+        self.assertIn("operationReady", content)
+        self.assertIn("启动 MuMu 后请在 WebUI", html)
 
     def test_packaged_installer_is_transactional_and_preserves_user_data(self):
         installer = (ROOT / "webapp/install-packaged.cjs").read_text(encoding="utf-8")
@@ -1018,6 +1025,7 @@ class TestInstallerContract(unittest.TestCase):
         self.assertIn("if (n.startsWith('accounts/')", installer)
         self.assertIn("if (n.startsWith('custom_task/')", installer)
         self.assertIn("if (n.startsWith('battle_character/')", installer)
+        self.assertIn("ProcessId -ne $PID", installer)
         self.assertNotIn("taskkill /F /IM", installer)
 
         self.assertIn("killStalePort5000([...roots])", main)
@@ -1033,6 +1041,7 @@ class TestInstallerContract(unittest.TestCase):
         staging = (ROOT / "webapp/electron-builder.staging.config.js").read_text(encoding="utf-8")
         release = (ROOT / "webapp/electron-builder.release.config.js").read_text(encoding="utf-8")
         build = (ROOT / "scripts/build_release.py").read_text(encoding="utf-8")
+        prereq = (ROOT / "scripts/verify_packaging_prereqs.py").read_text(encoding="utf-8")
         verify = (ROOT / "webapp/scripts/verify-pack.cjs").read_text(encoding="utf-8")
 
         for content in [staging, release]:
@@ -1043,7 +1052,13 @@ class TestInstallerContract(unittest.TestCase):
         self.assertIn('"verify-pack"', build)
         self.assertIn("打包自检失败", build)
         self.assertIn("leakedMaps", verify)
-        self.assertIn("backend.zip is missing autoscriptor-engine.exe", verify)
+        self.assertIn("validateDataRoot(dataRoot)", verify)
+        self.assertIn("packaged data must not contain user account JSON files", verify)
+        self.assertIn("backend.zip is missing required runtime files", verify)
+        self.assertIn("app.app_to_start", verify)
+        self.assertIn("must be generated from config template.json", verify)
+        self.assertIn("_check_config_template", prereq)
+        self.assertIn("_check_generated_code_templates", prereq)
 
     def test_packaged_installer_has_dry_run_and_lifecycle_tests(self):
         installer = (ROOT / "webapp/install-packaged.cjs").read_text(encoding="utf-8")
@@ -1057,6 +1072,8 @@ class TestInstallerContract(unittest.TestCase):
             "dryRunPackagedInstall",
             "dryRunApplyBackendIncremental",
             "validatePackagedInstallRoot",
+            "inspectPackagedRuntimeData",
+            "applyConfigDefaultsFromPackagedData",
             "skipMumuConfig",
             "skipRegistry",
         ]:

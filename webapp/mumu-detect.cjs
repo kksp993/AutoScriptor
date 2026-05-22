@@ -6,7 +6,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync, execSync } = require('child_process');
 
 const COMMON_NAMES = [
   'Netease\\MuMu',
@@ -162,8 +162,8 @@ function emulatorPathsNeedFill(emulator) {
 
 function adbSerial(adbPath) {
   try {
-    execSync(`"${adbPath}" start-server`, { stdio: 'pipe', timeout: 8000 });
-    const r = execSync(`"${adbPath}" devices`, { encoding: 'utf-8', timeout: 8000 });
+    execFileSync(adbPath, ['start-server'], { stdio: 'pipe', timeout: 8000, windowsHide: true });
+    const r = execFileSync(adbPath, ['devices'], { encoding: 'utf-8', timeout: 8000, windowsHide: true });
     const lines = (r || '').split(/\r?\n/);
     for (const ln of lines) {
       if (ln.includes('\tdevice')) {
@@ -176,6 +176,179 @@ function adbSerial(adbPath) {
     }
   } catch (_) {}
   return null;
+}
+
+function adbDeviceRows(adbPath) {
+  try {
+    execFileSync(adbPath, ['start-server'], { stdio: 'pipe', timeout: 8000, windowsHide: true });
+    const r = execFileSync(adbPath, ['devices'], { encoding: 'utf-8', timeout: 8000, windowsHide: true });
+    return (r || '')
+      .split(/\r?\n/)
+      .map((ln) => ln.trim())
+      .filter((ln) => ln && !ln.toLowerCase().startsWith('list of devices'))
+      .map((ln) => {
+        const parts = ln.split(/\s+/);
+        return { serial: parts[0] || '', state: parts[1] || '', raw: ln };
+      })
+      .filter((row) => row.serial);
+  } catch (_) {
+    return [];
+  }
+}
+
+function adbState(adbPath, serial) {
+  const s = String(serial || '').trim();
+  if (!s || s.startsWith('YOUR_') || s.endsWith(':0')) {
+    return { ok: false, state: '', detail: '未配置 ADB 设备地址' };
+  }
+  try {
+    const out = execFileSync(adbPath, ['-s', s, 'get-state'], {
+      encoding: 'utf-8',
+      timeout: 5000,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    return { ok: out === 'device', state: out, detail: out ? `state=${out}` : 'get-state 无输出' };
+  } catch (e) {
+    const detail = String((e.stderr || e.stdout || e.message || '')).trim();
+    return { ok: false, state: '', detail: detail || 'get-state failed' };
+  }
+}
+
+function reconnectAdbSerial(adbPath, serial) {
+  const s = String(serial || '').trim();
+  if (!s || !s.includes(':') || s.startsWith('YOUR_') || s.endsWith(':0')) return false;
+  try {
+    execFileSync(adbPath, ['disconnect', s], { encoding: 'utf-8', timeout: 5000, windowsHide: true });
+  } catch (_) {}
+  try {
+    execFileSync(adbPath, ['connect', s], { encoding: 'utf-8', timeout: 8000, windowsHide: true });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function checkConfiguredAdbDevice(adbPath, preferredSerial) {
+  const serial = String(preferredSerial || '').trim();
+  const rows = adbDeviceRows(adbPath);
+  const usableRows = rows.filter((row) => row.state === 'device');
+  const fallback = usableRows.find((row) => row.serial.startsWith('127.0.0.1:')) || usableRows[0] || null;
+  if (!serial || serial.startsWith('YOUR_') || serial.endsWith(':0')) {
+    return fallback
+      ? { connected: true, serial: fallback.serial, detail: '已连接设备 ' + fallback.serial, fallbackSerial: '' }
+      : { connected: false, serial: '', detail: '未检测到已连接设备（模拟器可能未运行）', fallbackSerial: '' };
+  }
+
+  let state = adbState(adbPath, serial);
+  if (!state.ok && serial.includes(':')) {
+    reconnectAdbSerial(adbPath, serial);
+    state = adbState(adbPath, serial);
+  }
+  if (state.ok) {
+    return { connected: true, serial, detail: '配置设备已连接 ' + serial, fallbackSerial: '' };
+  }
+
+  const row = rows.find((item) => item.serial === serial);
+  const rowState = row ? row.state : '';
+  const detail = rowState
+    ? `配置设备 ${serial} 状态为 ${rowState}`
+    : `配置设备 ${serial} 未连接`;
+  const fallbackText = fallback
+    ? `；另检测到 ${fallback.serial} 可用，但运行时会优先使用配置地址`
+    : '';
+  return {
+    connected: false,
+    serial,
+    detail: `${detail}${fallbackText}。${state.detail || ''}`.trim(),
+    fallbackSerial: fallback ? fallback.serial : '',
+  };
+}
+
+function clonePlain(obj) {
+  return JSON.parse(JSON.stringify(obj || {}));
+}
+
+function previewMumuConfig(configData, opts = {}) {
+  const data = clonePlain(configData);
+  const emulator = data.emulator || {};
+  data.emulator = emulator;
+
+  const report = {
+    candidates: 0,
+    chosen: '',
+    changed: false,
+    emulator: {
+      mumu_folder: String(emulator.mumu_folder || ''),
+      emu_path: String(emulator.emu_path || ''),
+      adb_path: String(emulator.adb_path || ''),
+      adb_addr: String(emulator.adb_addr || ''),
+    },
+    pathStatus: {
+      mumu_folder: pathIsValidForKey('mumu_folder', emulator.mumu_folder),
+      emu_path: pathIsValidForKey('emu_path', emulator.emu_path),
+      adb_path: pathIsValidForKey('adb_path', emulator.adb_path),
+    },
+    willNeedManualPaths: false,
+    willNeedRunningDevice: false,
+    adbDevice: null,
+  };
+
+  const before = JSON.stringify(report.emulator);
+  if (emulatorPathsNeedFill(emulator)) {
+    const candidates = searchMumuFolders();
+    report.candidates = candidates.length;
+    let chosen = null;
+    for (const c of candidates) {
+      if (c.toLowerCase().includes('global')) continue;
+      chosen = c;
+      break;
+    }
+    if (chosen) {
+      report.chosen = chosen;
+      const paths = deriveFromFolder(chosen);
+      for (const [k, v] of Object.entries(paths)) {
+        if (!v) continue;
+        const cur = String(emulator[k] || '');
+        const curOk = cur && !cur.startsWith('YOUR_') && pathIsValidForKey(k, cur);
+        if (!curOk) emulator[k] = v;
+      }
+    }
+  }
+
+  if (opts.probeAdb && emulator.adb_path) {
+    const addr = String(emulator.adb_addr || '');
+    if (!addr || addr.startsWith('YOUR_') || addr.endsWith(':0')) {
+      const serial = adbSerial(emulator.adb_path);
+      if (serial) emulator.adb_addr = serial;
+    }
+  }
+
+  report.emulator = {
+    mumu_folder: String(emulator.mumu_folder || ''),
+    emu_path: String(emulator.emu_path || ''),
+    adb_path: String(emulator.adb_path || ''),
+    adb_addr: String(emulator.adb_addr || ''),
+  };
+  report.pathStatus = {
+    mumu_folder: pathIsValidForKey('mumu_folder', emulator.mumu_folder),
+    emu_path: pathIsValidForKey('emu_path', emulator.emu_path),
+    adb_path: pathIsValidForKey('adb_path', emulator.adb_path),
+  };
+  report.changed = before !== JSON.stringify(report.emulator);
+  report.willNeedManualPaths = !(
+    report.pathStatus.mumu_folder
+    && report.pathStatus.emu_path
+    && report.pathStatus.adb_path
+  );
+  const addr = report.emulator.adb_addr;
+  report.willNeedRunningDevice = !addr || addr.startsWith('YOUR_') || addr.endsWith(':0');
+  if (opts.probeAdb && emulator.adb_path) {
+    const device = checkConfiguredAdbDevice(emulator.adb_path, addr);
+    report.adbDevice = device;
+    report.willNeedRunningDevice = !device.connected;
+  }
+  return report;
 }
 
 function applyMumuConfig(installRoot, send) {
@@ -237,6 +410,9 @@ function applyMumuConfig(installRoot, send) {
       emulator.adb_addr = serial;
       send({ type: 'log', message: `[ADB] 设备地址: ${serial}` });
     }
+  } else if (adbPath && addr) {
+    const device = checkConfiguredAdbDevice(adbPath, addr);
+    send({ type: 'log', message: `[ADB] ${device.detail}` });
   }
 
   try {
@@ -257,6 +433,8 @@ function validateMumuSetup(emulator) {
     adb_path:    { exists: false, runnable: false, version: '', detail: '' },
     adb_device:  { connected: false, serial: '', detail: '' },
     overall:     false,
+    operationReady: false,
+    needsRunningDevice: false,
   };
 
   const folder = String(emulator.mumu_folder || '').trim();
@@ -350,14 +528,11 @@ function validateMumuSetup(emulator) {
   }
 
   if (results.adb_path.runnable) {
-    const serial = adbSerial(adbPath);
-    if (serial) {
-      results.adb_device.connected = true;
-      results.adb_device.serial = serial;
-      results.adb_device.detail = '已连接设备 ' + serial;
-    } else {
-      results.adb_device.detail = '未检测到已连接设备（模拟器可能未运行）';
-    }
+    const device = checkConfiguredAdbDevice(adbPath, emulator.adb_addr);
+    results.adb_device.connected = device.connected;
+    results.adb_device.serial = device.serial;
+    results.adb_device.detail = device.detail;
+    if (device.fallbackSerial) results.adb_device.fallback_serial = device.fallbackSerial;
   } else {
     results.adb_device.detail = 'ADB 不可用，跳过设备检测';
   }
@@ -373,8 +548,10 @@ function validateMumuSetup(emulator) {
   results.overall = results.mumu_folder.exists
     && results.emu_path.exists
     && results.adb_path.exists && results.adb_path.runnable;
+  results.operationReady = results.overall && results.adb_device.connected;
+  results.needsRunningDevice = results.overall && !results.adb_device.connected;
 
   return results;
 }
 
-module.exports = { applyMumuConfig, validateMumuSetup };
+module.exports = { applyMumuConfig, validateMumuSetup, previewMumuConfig };
