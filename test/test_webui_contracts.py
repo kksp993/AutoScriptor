@@ -1104,6 +1104,34 @@ class TestInstallerContract(unittest.TestCase):
                 self.assertIn(marker, test_script)
 
 
+class TestReleaseUpdatePanelContract(unittest.TestCase):
+    def test_update_panel_separates_release_manifest_from_source_git(self):
+        panel = (ROOT / "services/webui/static/js/components/UpdatePanel.js").read_text(encoding="utf-8")
+
+        for marker in [
+            "/api/content-update/status",
+            "/api/content-update/check",
+            "/api/content-update/apply",
+            "发行版更新",
+            "应用内容更新",
+            "源码仓库更新",
+            "sourceStatus.available === false",
+            "/api/update/status",
+            "/api/update/check",
+            "/api/update/run",
+        ]:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, panel)
+
+        release_section = panel.split('<span class="text-lg font-semibold">发行版更新</span>', 1)[1].split(
+            '<span class="text-lg font-semibold">源码仓库更新</span>',
+            1,
+        )[0]
+        self.assertNotIn("/api/update/check", release_section)
+        self.assertNotIn("Git 拉取", release_section)
+        self.assertIn("用户配置、账号、自定义任务和职业脚本会被保护", release_section)
+
+
 class TestUpdaterGitCommandContract(unittest.TestCase):
     def test_git_command_includes_safe_directory_for_repo_root(self):
         with patch.dict(sys.modules, autoscriptor_logger_stubs()):
@@ -1117,6 +1145,21 @@ class TestUpdaterGitCommandContract(unittest.TestCase):
         self.assertEqual(cmd[1], "-c")
         self.assertEqual(cmd[2], f"safe.directory={str(ROOT).replace(chr(92), '/')}")
         self.assertEqual(cmd[-2:], ["status", "--short"])
+
+    def test_git_update_disabled_outside_git_repo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(sys.modules, autoscriptor_logger_stubs()):
+                sys.modules.pop("services.core.updater", None)
+                from services.core.updater import Updater
+
+            updater = Updater()
+            updater._root = tmp
+
+            status = updater.get_status()
+
+            self.assertFalse(status["available"])
+            self.assertEqual(status["state"], "disabled")
+            self.assertIn("源码更新不可用", status["last_error"])
 
 
 class TestZmxyRedeemCollectorContract(unittest.TestCase):

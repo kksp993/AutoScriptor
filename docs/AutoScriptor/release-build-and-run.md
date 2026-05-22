@@ -156,7 +156,17 @@ cd D:\Projects\AutoScriptor
 - **进程占用**：安装前只结束安装目录内的后端进程，并且只清理属于造笔安装目录的 5000 端口监听，避免误杀其他本地服务。
 - **卸载**：安装目录写入 `卸载造笔.bat` 与 `彻底卸载造笔.bat`。控制面板/默认卸载保留 `data`；彻底卸载才移除整个安装目录。
 
-### 9.2 Dry run / lifecycle self-test
+### 9.2 发行版更新通道
+
+最终用户不应为了少量代码变更反复下载完整安装包。当前发布链路区分三种更新：
+
+- **完整安装包**：首次安装、壳层/安装器大改、增量基线不匹配时使用，体积最大但最稳。
+- **`backend_incremental.zip`**：由 `scripts/release/release_backend_incremental.py` 对比旧 `backend.zip` 或旧 `gui.dist` 生成，仅包含变化文件和 `incremental_manifest.json`。安装器/Electron 会先 dry-run 校验基线 SHA-256，再事务切换 `backend/`。
+- **发行版 manifest 内容更新**：WebUI 的“发行版更新”页调用 `/api/content-update/*`，按 `deploy.content_manifest_url` 拉取 HTTPS manifest、校验 hash/签名后写入允许的文件。该通道会拒绝覆盖 `config.json`、`data/config.json`、账号、`custom_task`、`battle_character`、日志和 `.autoscriptor` 状态目录。
+
+WebUI 的“源码仓库更新”只服务开发/源码部署：它需要 `.git`，会执行 `git fetch/pull` 和 `pip install`。发行包里该通道会显示不可用，避免把最终用户带到必然失败的 Git 更新路径。
+
+### 9.3 Dry run / lifecycle self-test
 
 - 安装向导在“安装前确认”页提供 **“先做预检”**。该 dry run 只读取 `backend.zip`、目标目录状态、磁盘空间与随包 `data` 计划，不创建安装目录、不复制文件、不写注册表、不修改 MuMu/ADB 配置。
 - 代码侧入口为 `dryRunPackagedInstall()`；增量更新也有 `dryRunApplyBackendIncremental()`，用于在真正复制 `.backend.incremental.*` 前校验 manifest、SHA-256 与基线是否匹配。
