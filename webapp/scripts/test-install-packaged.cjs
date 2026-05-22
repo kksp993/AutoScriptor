@@ -64,6 +64,39 @@ function sha256Text(text) {
   return crypto.createHash('sha256').update(Buffer.from(text, 'utf8')).digest('hex');
 }
 
+function validPackagedConfig(name) {
+  return {
+    app: {
+      app_to_start: 'org.yjmobile.zmxy',
+      auto_start: true,
+      max_retry: 2,
+      name: 'ZmxyOL',
+      restart_on_error: true,
+      run_in_background: false,
+      debug_mode: true,
+      cpu_cores: 4,
+    },
+    ocr: { use_gpu: false },
+    emulator: {
+      index: 0,
+      adb_addr: 'YOUR_ADB_ADDR, e.g.127.0.0.1:16384',
+      mumu_folder: 'YOUR_MUMU_FOLDER, e.g.C:/Program Files/Netease/MuMu',
+      emu_path: 'YOUR_EMU_PATH, e.g.C:/Program Files/Netease/MuMu/nx_main/MuMuManager.exe',
+      adb_path: 'YOUR_ADB_PATH, e.g.C:/Program Files/Netease/MuMu/nx_main/adb.exe',
+      post_execution: 'none',
+    },
+    llm: { use_agent: false, url: 'http://localhost:11434/v1', model: 'test' },
+    scheduler: { auto_start: false },
+    deploy: { log_level: 'info', theme: 'dark', password: null },
+    notify: { enabled: false, config_yaml: 'provider: null' },
+    update: { auto_check: true, check_interval_minutes: 30, auto_restart_time: null },
+    remote_access: { enabled: false, ssh_server: null, ssh_user: null, ssh_executable: 'ssh' },
+    accounts: { dir: '' },
+    current_account: 'default',
+    news: { account: 'fixture', password: name },
+  };
+}
+
 function makeZipFromDir(srcDir, zipPath) {
   fs.rmSync(zipPath, { force: true });
   powershell(
@@ -94,10 +127,15 @@ function createReleaseFixture(tmp, name, options = {}) {
   makeZipFromDir(zipSrc, zipPath);
 
   const dataRoot = path.join(exeDir, 'data');
-  writeText(path.join(dataRoot, 'config.json'), JSON.stringify({ version: name, emulator: {} }, null, 2));
-  writeText(path.join(dataRoot, 'accounts', 'default.json'), JSON.stringify({ account: name }, null, 2));
+  const cfg = options.config || validPackagedConfig(name);
+  writeText(path.join(dataRoot, 'config template.json'), JSON.stringify(cfg, null, 2));
+  writeText(path.join(dataRoot, 'config.json'), JSON.stringify(cfg, null, 2));
+  writeText(path.join(dataRoot, 'accounts', '.gitkeep'), '');
   writeText(path.join(dataRoot, 'custom_task', 'packaged.py'), `# packaged ${name}\n`);
+  writeText(path.join(dataRoot, 'battle_character', 'hero.py'), `# battle character ${name}\n`);
   writeText(path.join(dataRoot, 'battle_character', 'packaged.json'), JSON.stringify({ name }, null, 2));
+  writeText(path.join(dataRoot, 'assets', 'config', 'ui_map.csv'), 'key,text,left,top,width,height,img\n');
+  writeText(path.join(dataRoot, 'assets', 'pic', '.gitkeep'), '');
   writeText(path.join(dataRoot, 'common', 'packaged.txt'), `common ${name}\n`);
 
   const portableExe = path.join(exeDir, 'AutoScriptor-Portable.exe');
@@ -206,6 +244,36 @@ async function testDryRunAndInvalidTargets(tmp) {
   );
   assert(!fs.existsSync(badInstallRoot), 'failed package validation should not create install root');
 
+  const badConfigRelease = createReleaseFixture(tmp, 'bad-config', { config: { emulator: {} } });
+  const badConfigRoot = path.join(tmp, 'bad-config-install');
+  const badConfigReport = await dryRunPackagedInstall({
+    installRoot: badConfigRoot,
+    exeDir: badConfigRelease.exeDir,
+    zipPath: badConfigRelease.zipPath,
+    portableExePath: badConfigRelease.portableExe,
+    userDataPath,
+  });
+  assert(!badConfigReport.ok, 'dry-run must reject packaged data with invalid config');
+  assert(
+    badConfigReport.errors.some((e) => String(e).includes('runtime data validation failed')),
+    'dry-run should report runtime data validation failure',
+  );
+  await assertRejects(
+    () => runPackagedInstall({
+      installRoot: badConfigRoot,
+      exeDir: badConfigRelease.exeDir,
+      resourcesPath: badConfigRelease.exeDir,
+      zipPath: badConfigRelease.zipPath,
+      portableExePath: badConfigRelease.portableExe,
+      userDataPath,
+      skipMumuConfig: true,
+      skipRegistry: true,
+    }),
+    /runtime data validation failed/,
+    'actual installer must reject packaged data with invalid config',
+  );
+  assert(!fs.existsSync(badConfigRoot), 'failed runtime data validation should not create install root');
+
   assert(__test.safeJoin(tmp, 'safe/path.txt').startsWith(tmp), 'safeJoin should accept normal relative paths');
   assertRejects(() => Promise.resolve(__test.safeJoin(tmp, '../evil.txt')), /非法|zip/i);
 }
@@ -243,12 +311,37 @@ async function testInstallRepairAndUninstallScript(tmp) {
   assert(marker.installRoot === path.resolve(installRoot), 'install marker should contain installRoot');
   assert(marker.dataRoot === path.join(path.resolve(installRoot), 'data'), 'install marker should contain dataRoot');
   parsePowerShellScript(path.join(installRoot, 'Uninstall.ps1'));
+  assertIncludes(readText(path.join(installRoot, 'Uninstall.ps1')), 'ProcessId -ne $PID', 'uninstaller must not kill its own PowerShell process');
   assertIncludes(readText(path.join(installRoot, '彻底卸载造笔.bat')), '-RemoveUserData', 'remove-all bat should request user data removal');
 
-  writeText(path.join(installRoot, 'data', 'config.json'), JSON.stringify({ user: 'kept' }, null, 2));
+  const userCfg = validPackagedConfig('user-kept');
+  userCfg.user_marker = 'kept';
+  userCfg.accounts.dir = path.join(tmp, 'external-accounts');
+  delete userCfg.deploy;
+  delete userCfg.update;
+  writeText(path.join(installRoot, 'data', 'config.json'), JSON.stringify(userCfg, null, 2));
   writeText(path.join(installRoot, 'data', 'accounts', 'default.json'), JSON.stringify({ userAccount: 'kept' }, null, 2));
   writeText(path.join(installRoot, 'data', 'custom_task', 'packaged.py'), '# user custom kept\n');
   writeText(path.join(installRoot, 'data', 'battle_character', 'packaged.json'), JSON.stringify({ userBattle: 'kept' }, null, 2));
+
+  const repairDryRun = await dryRunPackagedInstall({
+    installRoot,
+    exeDir: releaseV2.exeDir,
+    resourcesPath: releaseV2.exeDir,
+    zipPath: releaseV2.zipPath,
+    portableExePath: releaseV2.portableExe,
+    appVersion: '2.0.0',
+    userDataPath,
+  });
+  assert(repairDryRun.ok, `repair dry-run should pass with legacy user config: ${JSON.stringify(repairDryRun.errors)}`);
+  assert(
+    repairDryRun.plan.runtime.configDefaults.willWrite,
+    'repair dry-run should report missing config defaults that will be written',
+  );
+  assert(
+    repairDryRun.plan.runtime.configDefaults.missingKeys.includes('deploy'),
+    'repair dry-run should name missing deploy defaults',
+  );
 
   await runPackagedInstall({
     installRoot,
@@ -266,7 +359,11 @@ async function testInstallRepairAndUninstallScript(tmp) {
   assertIncludes(readText(path.join(installRoot, 'backend', 'lib', 'version.txt')), 'v2', 'repair install should replace backend');
   assert(fs.existsSync(path.join(installRoot, 'backend', 'lib', 'new-full.txt')), 'repair install should install new backend files');
   assert(!fs.existsSync(path.join(installRoot, 'backend', 'old-only.txt')), 'repair install should remove stale backend files');
-  assertIncludes(readText(path.join(installRoot, 'data', 'config.json')), 'kept', 'config.json should be preserved');
+  const repairedConfig = JSON.parse(readText(path.join(installRoot, 'data', 'config.json')));
+  assert(repairedConfig.user_marker === 'kept', 'config user values should be preserved');
+  assert(repairedConfig.accounts.dir === userCfg.accounts.dir, 'absolute external accounts dir should be preserved for existing user config');
+  assert(repairedConfig.deploy && repairedConfig.deploy.theme === 'dark', 'missing deploy defaults should be added from packaged template');
+  assert(repairedConfig.update && repairedConfig.update.auto_check === true, 'missing update defaults should be added from packaged template');
   assertIncludes(readText(path.join(installRoot, 'data', 'accounts', 'default.json')), 'userAccount', 'account json should be preserved');
   assertIncludes(readText(path.join(installRoot, 'data', 'custom_task', 'packaged.py')), 'user custom', 'custom task should be preserved');
   assertIncludes(readText(path.join(installRoot, 'data', 'battle_character', 'packaged.json')), 'userBattle', 'battle character data should be preserved');

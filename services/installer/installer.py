@@ -389,6 +389,86 @@ def _adb_detect_serial(adb_path: str) -> str | None:
         return None
 
 
+def _adb_device_rows(adb_path: str) -> list[tuple[str, str]]:
+    try:
+        subprocess.run([adb_path, "start-server"], capture_output=True, text=True, timeout=5)
+        out = subprocess.run([adb_path, "devices"], capture_output=True, text=True, timeout=5)
+        rows: list[tuple[str, str]] = []
+        for line in (out.stdout or "").splitlines():
+            line = line.strip()
+            if not line or line.lower().startswith("list of devices"):
+                continue
+            parts = line.split()
+            if len(parts) >= 2:
+                rows.append((parts[0], parts[1]))
+        return rows
+    except Exception:
+        return []
+
+
+def _adb_state(adb_path: str, serial: str) -> tuple[bool, str]:
+    s = str(serial or "").strip()
+    if not s or s.startswith("YOUR_") or s.endswith(":0"):
+        return False, "未配置 ADB 设备地址"
+    try:
+        r = subprocess.run(
+            [adb_path, "-s", s, "get-state"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        state = (r.stdout or "").strip()
+        if r.returncode == 0 and state == "device":
+            return True, "state=device"
+        detail = (r.stderr or r.stdout or "").strip()
+        return False, detail or f"state={state or '?'}"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _adb_reconnect_serial(adb_path: str, serial: str) -> None:
+    s = str(serial or "").strip()
+    if not s or ":" not in s or s.startswith("YOUR_") or s.endswith(":0"):
+        return
+    try:
+        subprocess.run([adb_path, "disconnect", s], capture_output=True, text=True, timeout=5)
+    except Exception:
+        pass
+    try:
+        subprocess.run([adb_path, "connect", s], capture_output=True, text=True, timeout=8)
+    except Exception:
+        pass
+
+
+def _check_configured_adb_device(adb_path: str, preferred_serial: str) -> dict:
+    serial = str(preferred_serial or "").strip()
+    rows = _adb_device_rows(adb_path)
+    usable = [(s, st) for s, st in rows if st == "device"]
+    fallback = next(((s, st) for s, st in usable if s.startswith("127.0.0.1:")), usable[0] if usable else None)
+    if not serial or serial.startswith("YOUR_") or serial.endswith(":0"):
+        if fallback:
+            return {"connected": True, "serial": fallback[0], "detail": f"已连接设备 {fallback[0]}", "fallback_serial": ""}
+        return {"connected": False, "serial": "", "detail": "未检测到已连接设备（模拟器可能未运行）", "fallback_serial": ""}
+
+    ok, detail = _adb_state(adb_path, serial)
+    if not ok and ":" in serial:
+        _adb_reconnect_serial(adb_path, serial)
+        ok, detail = _adb_state(adb_path, serial)
+    if ok:
+        return {"connected": True, "serial": serial, "detail": f"配置设备已连接 {serial}", "fallback_serial": ""}
+
+    row_state = next((st for s, st in rows if s == serial), "")
+    base = f"配置设备 {serial} 状态为 {row_state}" if row_state else f"配置设备 {serial} 未连接"
+    extra = f"；另检测到 {fallback[0]} 可用，但运行时会优先使用配置地址" if fallback else ""
+    return {
+        "connected": False,
+        "serial": serial,
+        "detail": f"{base}{extra}。{detail}".strip(),
+        "fallback_serial": fallback[0] if fallback else "",
+    }
+
+
 def validate_mumu_setup(emulator: dict) -> dict:
     """对 emulator 配置做功能性验证，返回结构化检测报告。"""
     results: dict = {
@@ -397,6 +477,8 @@ def validate_mumu_setup(emulator: dict) -> dict:
         "adb_path": {"exists": False, "runnable": False, "version": "", "detail": ""},
         "adb_device": {"connected": False, "serial": "", "detail": ""},
         "overall": False,
+        "operationReady": False,
+        "needsRunningDevice": False,
     }
 
     folder = str(emulator.get("mumu_folder", "") or "").strip()
@@ -479,13 +561,12 @@ def validate_mumu_setup(emulator: dict) -> dict:
         results["adb_path"]["detail"] = "文件不存在" if adb_path else "未配置"
 
     if results["adb_path"]["runnable"]:
-        serial = _adb_detect_serial(adb_path)
-        if serial:
-            results["adb_device"]["connected"] = True
-            results["adb_device"]["serial"] = serial
-            results["adb_device"]["detail"] = f"已连接设备 {serial}"
-        else:
-            results["adb_device"]["detail"] = "未检测到已连接设备（模拟器可能未运行）"
+        device = _check_configured_adb_device(adb_path, str(emulator.get("adb_addr", "") or ""))
+        results["adb_device"]["connected"] = device["connected"]
+        results["adb_device"]["serial"] = device["serial"]
+        results["adb_device"]["detail"] = device["detail"]
+        if device.get("fallback_serial"):
+            results["adb_device"]["fallback_serial"] = device["fallback_serial"]
     else:
         results["adb_device"]["detail"] = "ADB 不可用，跳过设备检测"
 
@@ -503,6 +584,8 @@ def validate_mumu_setup(emulator: dict) -> dict:
         and results["emu_path"]["exists"]
         and results["adb_path"]["exists"] and results["adb_path"]["runnable"]
     )
+    results["operationReady"] = bool(results["overall"] and results["adb_device"]["connected"])
+    results["needsRunningDevice"] = bool(results["overall"] and not results["adb_device"]["connected"])
     return results
 
 

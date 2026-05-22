@@ -1582,6 +1582,24 @@
       if (data) {
         lines.push('data：随包 ' + (data.sourceFiles || 0) + ' 个，写入/更新 ' + (data.copiedFiles || 0) + ' 个，保留用户文件 ' + (data.keptUserFiles || 0) + ' 个。');
       }
+      const runtime = report?.plan?.runtime;
+      if (runtime) {
+        lines.push('配置：' + (runtime.effectiveConfigSource || 'unknown') + ' → ' + (runtime.effectiveConfigPath || '-'));
+        const checks = runtime.checks || {};
+        const okCount = Object.values(checks).filter(Boolean).length;
+        lines.push('运行数据：' + okCount + '/' + Object.keys(checks).length + ' 项通过');
+        const defaults = runtime.configDefaults;
+        if (defaults && defaults.willWrite) {
+          lines.push('配置补齐：将补 ' + defaults.missingKeys.length + ' 个缺失项，保留现有用户值');
+        }
+        const mumu = runtime.mumuPreview;
+        if (mumu) {
+          const ready = mumu.willNeedManualPaths
+            ? '需安装后确认路径'
+            : (mumu.willNeedRunningDevice ? '路径可用，需启动模拟器确认连接' : '路径与设备可用');
+          lines.push('MuMu：' + ready + (mumu.chosen ? '，预估使用 ' + mumu.chosen : ''));
+        }
+      }
       const failedChecks = checks.filter(c => c && c.ok === false).map(c => c.detail);
       const extraErrors = errors.filter(e => !failedChecks.includes(e));
       if (failedChecks.length) lines.push('失败项：' + failedChecks.join('；'));
@@ -1836,8 +1854,13 @@
 
       if (report.overall) {
         const parts = ['路径有效', managerRunnable ? 'MuMuManager 正常' : 'MuMuManager 警告，ADB 路径可用'];
-        if (deviceOk) parts.push('设备已连接');
-        showValidationBar('success', '✓ 功能检测通过：' + parts.join('，') + '。可以继续完成安装。');
+        if (report.operationReady) {
+          parts.push('设备已连接，可操作');
+          showValidationBar('success', '✓ 功能检测通过：' + parts.join('，') + '。可以继续完成安装。');
+        } else {
+          showValidationBar('success',
+            '✓ 路径检测通过：' + parts.join('，') + '。未检测到运行中的设备，安装可继续；启动 MuMu 后请在 WebUI「启动诊断」确认操作链路。');
+        }
       } else {
         const issues = [];
         if (!report.mumu_folder?.exists) {

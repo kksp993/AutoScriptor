@@ -585,9 +585,12 @@ async def editor_save(request: Request):
         if free_y:
             save_top, save_h = 0, frame_h
 
-        pic_dir = os.path.join(os.getcwd(), cfg["app"]["name"], "assets", "pic")
+        from AutoScriptor.utils.paths import get_assets_dir
+
+        assets_root = get_assets_dir()
+        pic_dir = str(assets_root / "pic")
         os.makedirs(pic_dir, exist_ok=True)
-        csv_path = os.path.join(os.getcwd(), cfg["app"]["name"], "assets", "config", "ui_map.csv")
+        csv_path = str(assets_root / "config" / "ui_map.csv")
         rows = _read_ui_map_rows(csv_path)
         existing = next((row for row in rows if row.get("key") == name), None)
 

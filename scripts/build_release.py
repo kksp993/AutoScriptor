@@ -547,7 +547,12 @@ def collect_data():
     bc_src = PROJECT_ROOT / "data" / "battle_character"
     bc_dst = DATA_DIR / "battle_character"
     if bc_src.is_dir():
-        shutil.copytree(bc_src, bc_dst, dirs_exist_ok=True)
+        shutil.copytree(
+            bc_src,
+            bc_dst,
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+        )
         print("[data] battle_character/")
     else:
         bc_dst.mkdir(parents=True, exist_ok=True)
@@ -567,9 +572,13 @@ def collect_data():
         shutil.copytree(assets_pic_src, pic_dst, dirs_exist_ok=True)
         print("[data] assets/pic/")
 
-    # license/ 目录 (占位)
+    # license/ 目录 (占位)。electron-builder 不会稳定复制空目录，放一个小文件保证发布包结构可验证。
     LICENSE_DIR.mkdir(parents=True, exist_ok=True)
-    print("[data] license/ (空目录)")
+    (LICENSE_DIR / "README.txt").write_text(
+        "Reserved for release license notices and third-party attributions.\n",
+        encoding="utf-8",
+    )
+    print("[data] license/ (README.txt)")
 
     # logs/ 目录 (占位)
     (DATA_DIR / "logs").mkdir(parents=True, exist_ok=True)
@@ -578,7 +587,12 @@ def collect_data():
     custom_src = PROJECT_ROOT / "data" / "custom_task"
     custom_dst = DATA_DIR / "custom_task"
     if custom_src.is_dir():
-        shutil.copytree(custom_src, custom_dst, dirs_exist_ok=True)
+        shutil.copytree(
+            custom_src,
+            custom_dst,
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+        )
         print("[data] custom_task/")
     else:
         custom_dst.mkdir(parents=True, exist_ok=True)
@@ -731,6 +745,22 @@ def maybe_reexec_with_full_python() -> None:
     except OSError:
         return
     script = Path(__file__).resolve()
+    try:
+        probe = subprocess.run(
+            [str(preferred), "-c", "import sys; print(sys.executable)"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"[build] 警告: .venv-nuitka 不可执行，继续使用当前解释器: {e}")
+        return
+    if probe.returncode != 0:
+        msg = (probe.stderr or probe.stdout or "").strip().splitlines()
+        detail = msg[0] if msg else f"exit {probe.returncode}"
+        print(f"[build] 警告: .venv-nuitka 不可执行，继续使用当前解释器: {detail}")
+        return
     print(f"[build] 改用完整 Python 环境: {preferred}")
     result = subprocess.run([str(preferred), str(script)] + sys.argv[1:])
     sys.exit(result.returncode)
