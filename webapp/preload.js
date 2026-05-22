@@ -36,4 +36,11 @@ contextBridge.exposeInMainWorld('electron', {
     validateInstallDir: (p, opts) => ipcRenderer.invoke('installer:validate-install-dir', p, opts || {}),
     savePaths:       (paths) => ipcRenderer.invoke('installer:save-paths', paths),
   },
+
+  releaseUpdate: {
+    choosePackage: () => ipcRenderer.invoke('release-update:choose-package'),
+    dryRunPackage: (opts) => ipcRenderer.invoke('release-update:dry-run', opts || {}),
+    applyPackage: (opts) => ipcRenderer.invoke('release-update:apply', opts || {}),
+    onProgress: (cb) => ipcRenderer.on('release-update:progress', (_e, data) => cb(data)),
+  },
 });

@@ -154,6 +154,7 @@ async function main() {
   await copyNodeModule('pend');
   await copyPlainRequired('install-packaged.cjs');
   await copyPlainRequired('mumu-detect.cjs');
+  await copyPlainRequired('release-update.cjs');
   await writePackageJson();
 }
 

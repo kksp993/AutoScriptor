@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -110,6 +111,22 @@ def _check_runtime_data_tree() -> list[str]:
     return errors
 
 
+def _check_windows_vc_runtime() -> list[str]:
+    if sys.platform != "win32":
+        return []
+    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+    system_dir = system_root / ("System32" if sys.maxsize > 2**32 else "SysWOW64")
+    required = ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll", "concrt140.dll"]
+    missing = [name for name in required if not (system_dir / name).is_file()]
+    if not missing:
+        return []
+    return [
+        "missing VC++ runtime DLLs in "
+        f"{system_dir}: {', '.join(missing)}; install Microsoft VC++ 2015-2022 Redistributable "
+        "or build on a machine that can bundle these DLLs"
+    ]
+
+
 def _check_generated_code_templates() -> list[str]:
     snippets = [
         'from AutoScriptor import *\nclick(B(10, 20, 30, 40), timeout=3)',
@@ -142,6 +159,7 @@ def _check_repo_files() -> list[str]:
         errors.append(f"缺少显式 import multipart（{sv.relative_to(PROJECT_ROOT)}）")
     errors.extend(_check_config_template())
     errors.extend(_check_runtime_data_tree())
+    errors.extend(_check_windows_vc_runtime())
     errors.extend(_check_generated_code_templates())
     return errors
 
@@ -149,6 +167,19 @@ def _check_repo_files() -> list[str]:
 def _run_py(py: str, code: str) -> tuple[int, str]:
     r = subprocess.run(
         [py, "-c", code],
+        cwd=str(PROJECT_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    out = (r.stdout or "") + (r.stderr or "")
+    return r.returncode, out.strip()
+
+
+def _run_py_args(py: str, args: list[str], code: str) -> tuple[int, str]:
+    r = subprocess.run(
+        [py, *args, "-c", code],
         cwd=str(PROJECT_ROOT),
         capture_output=True,
         text=True,
@@ -199,6 +230,20 @@ def main() -> int:
             "  WARN: base_prefix 指向 Scripts，疑似嵌入式 Python venv；"
             "若 Nuitka 产物缺 encodings，请改为完整 Python 安装版，见 docs/AutoScriptor/nuitka-reference.md"
         )
+
+    print("[verify] 检查 Nuitka no-site 重启语义（python -S 必须生效）…")
+    code, out = _run_py_args(py, ["-S"], "import sys; print(int(sys.flags.no_site))")
+    if code != 0:
+        print(f"  FAIL: 无法执行 {py} -S\n{out}")
+        return 1
+    if out.splitlines()[:1] != ["1"]:
+        print(
+            "  FAIL: python -S 后 sys.flags.no_site 仍不是 1；"
+            "Nuitka 会反复重启自身。请检查 pythonXY._pth / sitecustomize，移除强制 import site。"
+        )
+        print(f"  输出: {out}")
+        return 1
+    print("  OK")
 
     print("[verify] 批量 import 关键依赖（multipart / fastapi / …）…")
     code, out = _run_py(py, _IMPORT_LINE)

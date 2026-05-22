@@ -39,6 +39,7 @@ const config = {
     'preload.js',
     'install-packaged.cjs',
     'mumu-detect.cjs',
+    'release-update.cjs',
     'icon.png',
     'icon.ico',
     'renderer/**',

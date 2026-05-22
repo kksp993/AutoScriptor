@@ -1052,6 +1052,8 @@ class TestInstallerContract(unittest.TestCase):
         self.assertIn('"verify-pack"', build)
         self.assertIn("打包自检失败", build)
         self.assertIn("leakedMaps", verify)
+        self.assertIn("release-update.cjs", verify)
+        self.assertIn("assertAsarEntry", verify)
         self.assertIn("validateDataRoot(dataRoot)", verify)
         self.assertIn("packaged data must not contain user account JSON files", verify)
         self.assertIn("backend.zip is missing required runtime files", verify)
@@ -1107,11 +1109,20 @@ class TestInstallerContract(unittest.TestCase):
 class TestReleaseUpdatePanelContract(unittest.TestCase):
     def test_update_panel_separates_release_manifest_from_source_git(self):
         panel = (ROOT / "services/webui/static/js/components/UpdatePanel.js").read_text(encoding="utf-8")
+        main = (ROOT / "webapp/main.js").read_text(encoding="utf-8")
+        preload = (ROOT / "webapp/preload.js").read_text(encoding="utf-8")
+        release_update = (ROOT / "webapp/release-update.cjs").read_text(encoding="utf-8")
+        package_json = (ROOT / "webapp/package.json").read_text(encoding="utf-8")
+        prepare = (ROOT / "webapp/scripts/prepare-release-shell.cjs").read_text(encoding="utf-8")
+        release_config = (ROOT / "webapp/electron-builder.release.config.js").read_text(encoding="utf-8")
 
         for marker in [
             "/api/content-update/status",
             "/api/content-update/check",
             "/api/content-update/apply",
+            "本地小版本更新包",
+            "dryRunPackage",
+            "applyPackage",
             "发行版更新",
             "应用内容更新",
             "源码仓库更新",
@@ -1130,6 +1141,41 @@ class TestReleaseUpdatePanelContract(unittest.TestCase):
         self.assertNotIn("/api/update/check", release_section)
         self.assertNotIn("Git 拉取", release_section)
         self.assertIn("用户配置、账号、自定义任务和职业脚本会被保护", release_section)
+
+        for marker in [
+            "release-update:dry-run",
+            "release-update:apply",
+            "stopBackendForUpdate",
+            "applyLocalReleaseUpdate",
+        ]:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, main)
+        self.assertIn("releaseUpdate", preload)
+        self.assertIn("autoscriptor_update_v1", release_update)
+        self.assertIn("dryRunLocalReleaseUpdate", release_update)
+        self.assertIn("applyLocalReleaseUpdate", release_update)
+        self.assertIn("readJsonObjectIfExists", release_update)
+        self.assertIn("data/config.json is invalid", release_update)
+        self.assertIn("release-update.cjs", prepare)
+        self.assertIn("release-update.cjs", release_config)
+        self.assertIn('"test:release-update"', package_json)
+
+    def test_minor_update_package_generator_documents_cumulative_engine_updates(self):
+        script = (ROOT / "scripts/release/create_minor_update_package.py").read_text(encoding="utf-8")
+        docs = (ROOT / "docs/AutoScriptor/release-build-and-run.md").read_text(encoding="utf-8")
+
+        for marker in [
+            "autoscriptor_update_v1",
+            "minor-cumulative",
+            "backend/autoscriptor-engine.exe",
+            "--target-version",
+            "--include-backend",
+            "--copy-if-missing",
+        ]:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, script)
+        self.assertIn("1.1.0 -> 1.1.5", docs)
+        self.assertIn("AutoScriptor_Update_1.1.5.zip", docs)
 
 
 class TestUpdaterGitCommandContract(unittest.TestCase):

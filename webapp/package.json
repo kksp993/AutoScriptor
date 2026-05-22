@@ -9,6 +9,7 @@
     "prebuild": "node scripts/ensure-ico.cjs",
     "start": "node scripts/start-dev.cjs",
     "test:installer": "node scripts/test-install-packaged.cjs",
+    "test:release-update": "node scripts/test-release-update.cjs",
     "prepare-release-shell": "node scripts/prepare-release-shell.cjs",
     "verify-pack": "node scripts/verify-pack.cjs",
     "build": "electron-builder build --win --config electron-builder.config.js",

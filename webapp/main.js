@@ -404,6 +404,29 @@ function attachBackendProcessHandlers() {
   });
 }
 
+function stopBackendForUpdate() {
+  return new Promise((resolve) => {
+    const pid = pyPid || (pyProc && pyProc.pid);
+    const proc = pyProc;
+    pyPid = null;
+    pyProc = null;
+    serverReady = false;
+    if (pid) {
+      treeKill(pid, 'SIGTERM', (err) => {
+        if (err) console.warn('[release-update] stop backend:', err && err.message ? err.message : err);
+        setTimeout(resolve, 800);
+      });
+      return;
+    }
+    if (proc) {
+      try { proc.kill(); } catch (_) {}
+      setTimeout(resolve, 800);
+      return;
+    }
+    resolve();
+  });
+}
+
 function startPython() {
   const engineExe = getBackendEngineExe();
   if (app.isPackaged && fs.existsSync(engineExe)) {
@@ -953,6 +976,74 @@ ipcMain.handle('installer:apply-backend-incremental', async (_event, opts) => {
     send,
   });
   invalidateRootCache();
+});
+
+ipcMain.handle('release-update:choose-package', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择造笔小版本更新包',
+    properties: ['openFile'],
+    filters: [
+      { name: '造笔更新包', extensions: ['zip'] },
+      { name: '所有文件', extensions: ['*'] },
+    ],
+  });
+  if (result.canceled || !result.filePaths || !result.filePaths[0]) {
+    return { canceled: true, path: '' };
+  }
+  return { canceled: false, path: result.filePaths[0] };
+});
+
+ipcMain.handle('release-update:dry-run', async (_event, opts) => {
+  const existing = readInstallJsonExisting();
+  const installRootRaw = String((opts && opts.installRoot) || existing.installRoot || '').trim();
+  const packagePath = String((opts && opts.packagePath) || '').trim();
+  const { dryRunLocalReleaseUpdate } = require('./release-update.cjs');
+  return dryRunLocalReleaseUpdate({
+    installRoot: installRootRaw ? path.resolve(installRootRaw) : '',
+    packagePath,
+    currentVersion: String((opts && opts.currentVersion) || existing.version || '').trim(),
+    userDataPath: app.getPath('userData'),
+  });
+});
+
+ipcMain.handle('release-update:apply', async (_event, opts) => {
+  const existing = readInstallJsonExisting();
+  const installRootRaw = String((opts && opts.installRoot) || existing.installRoot || '').trim();
+  const installRoot = installRootRaw ? path.resolve(installRootRaw) : '';
+  const packagePath = String((opts && opts.packagePath) || '').trim();
+  const { dryRunLocalReleaseUpdate, applyLocalReleaseUpdate } = require('./release-update.cjs');
+  const dry = await dryRunLocalReleaseUpdate({
+    installRoot,
+    packagePath,
+    currentVersion: String((opts && opts.currentVersion) || existing.version || '').trim(),
+    userDataPath: app.getPath('userData'),
+  });
+  if (!dry.ok) return { ok: false, report: dry };
+
+  const send = (data) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('release-update:progress', data);
+    }
+  };
+  let result;
+  try {
+    send({ type: 'progress', percent: 1, message: '停止当前 backend…' });
+    await stopBackendForUpdate();
+    releaseInstallLocks({ installRoot });
+    result = await applyLocalReleaseUpdate({
+      installRoot,
+      packagePath,
+      currentVersion: String((opts && opts.currentVersion) || existing.version || '').trim(),
+      userDataPath: app.getPath('userData'),
+      send,
+    });
+    invalidateRootCache();
+    return result;
+  } finally {
+    if (!installerMode && isInstalled() && !pyProc) {
+      startPython();
+    }
+  }
 });
 
 ipcMain.on('installer:start', (event, config) => {

@@ -166,6 +166,15 @@ function hasEntry(entries, expected) {
   return entries.has(expected) || [...entries].some((e) => e.endsWith('/' + expected));
 }
 
+function assertAsarEntry(asarFiles, expected) {
+  const wanted = expected.replace(/\\/g, '/');
+  const ok = asarFiles.some((f) => {
+    const n = f.replace(/^\//, '').replace(/\\/g, '/');
+    return n === wanted || n.endsWith('/' + wanted);
+  });
+  if (!ok) fail('app.asar is missing required shell file', [wanted]);
+}
+
 async function main() {
   assertFile(asarPath, 'resources/app.asar');
 
@@ -192,6 +201,21 @@ async function main() {
   if (!hasMain) {
     fail('main entry is not inside app.asar', [`main=${pkgMain}`, `asar files=${asarFiles.length}`]);
   }
+  for (const required of [
+    'package.json',
+    'preload.js',
+    'install-packaged.cjs',
+    'mumu-detect.cjs',
+    'release-update.cjs',
+    'renderer/loading.html',
+    'renderer/installer.html',
+    'node_modules/tree-kill/index.js',
+    'node_modules/yauzl/index.js',
+    'node_modules/buffer-crc32/index.js',
+    'node_modules/pend/index.js',
+  ]) {
+    assertAsarEntry(asarFiles, required);
+  }
 
   const leakedMapsUnpacked = walkFiles(unpacked)
     .filter((f) => f.toLowerCase().endsWith('.map'))
@@ -216,14 +240,20 @@ async function main() {
   const zipInfo = await inspectZip(backendZip);
   const requiredBackendEntries = [
     'autoscriptor-engine.exe',
+    'msvcp140.dll',
+    'vcruntime140.dll',
+    'vcruntime140_1.dll',
+    'concrt140.dll',
     'services/webui/static/index.html',
     'services/webui/vendor/vue.global.js',
     'services/webui/vendor/element-plus.full.js',
     'pypinyin/pinyin_dict.json',
     'pypinyin/phrases_dict.json',
-    'wave.py',
   ];
   const missingBackendEntries = requiredBackendEntries.filter((entry) => !hasEntry(zipInfo.entries, entry));
+  if (!hasEntry(zipInfo.entries, 'wave.py') && !hasEntry(zipInfo.entries, 'wave.pyc')) {
+    missingBackendEntries.push('wave.py or wave.pyc');
+  }
   if (missingBackendEntries.length) {
     fail('backend.zip is missing required runtime files', missingBackendEntries);
   }

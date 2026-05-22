@@ -231,6 +231,34 @@ def ensure_windows_python_dev_files() -> None:
     sys.exit(1)
 
 
+def ensure_python_minus_s_disables_site() -> None:
+    """Fail fast if Nuitka's ``python -S`` re-exec would not disable site.
+
+    Some embedded-style Python distributions force ``import site`` from
+    ``pythonXY._pth``. Nuitka starts a clean compiler process with ``-S``; if
+    that still leaves ``sys.flags.no_site`` false, Nuitka can repeatedly
+    restart itself and create an unbounded process chain.
+    """
+    probe = subprocess.run(
+        [sys.executable, "-S", "-c", "import sys; print(int(sys.flags.no_site))"],
+        cwd=str(PROJECT_ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=10,
+    )
+    out = ((probe.stdout or "") + (probe.stderr or "")).strip()
+    if probe.returncode != 0 or out.splitlines()[:1] != ["1"]:
+        print("[nuitka] 错误: 当前 Python 的 `-S` 不能真正禁用 site，Nuitka 可能无限重启自身。")
+        print(f"[nuitka] 解释器: {sys.executable}")
+        if out:
+            print(f"[nuitka] 探测输出: {out}")
+        print("[nuitka] 请检查 pythonXY._pth / sitecustomize，移除强制 `import site` 后重试。")
+        sys.exit(1)
+
+
 # 仅对「体量极大、以二进制扩展为主」的包使用 nofollow，避免 OOM；Web/工具链（fastapi、dpath、yaml 等）
 # 必须能被打进 standalone，不可在此列表中，否则运行时报 excluded-module ImportError。
 # nofollow 的包不会进入 dist，编译结束后由 copy_nofollow_runtime_packages() 从 venv 拷入。
@@ -310,14 +338,46 @@ def _copy_site_entry(sp: Path, dst_root: Path, name: str) -> None:
         print(f"[post] 跳过（不存在）: {src}")
 
 
+def runtime_site_packages_root() -> Path | None:
+    """Return the dependency site-packages used for nofollow runtime copies.
+
+    Normal builds run from a venv, so sys.executable/../Lib/site-packages works.
+    Some release machines compile with a full base Python and pass the venv
+    packages through PYTHONPATH; support that explicitly so Nuitka gets a real
+    stdlib while post-copy still uses the pinned project dependencies.
+    """
+    candidates: list[Path] = []
+    explicit = os.environ.get("AUTOSCRIPTOR_RUNTIME_SITE_PACKAGES", "").strip()
+    if explicit:
+        candidates.append(Path(explicit))
+    candidates.append(Path(sys.executable).resolve().parent.parent / "Lib" / "site-packages")
+    for raw in sys.path:
+        if raw and raw.replace("\\", "/").lower().endswith("/site-packages"):
+            candidates.append(Path(raw))
+    seen: set[str] = set()
+    for p in candidates:
+        try:
+            resolved = p.resolve()
+        except OSError:
+            resolved = p
+        key = str(resolved).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if resolved.is_dir():
+            print(f"[post] site-packages: {resolved}")
+            return resolved
+    return None
+
+
 def copy_nofollow_runtime_packages() -> None:
     """将 --nofollow-import-to 涉及的包从当前解释器 venv 的 site-packages 拷入 gui.dist。
 
     Nuitka 在 deployment 模式下不会把这些目录打进 standalone；复制后运行时 sys.path 即可加载 .pyd。
     """
-    sp = Path(sys.executable).resolve().parent.parent / "Lib" / "site-packages"
-    if not sp.is_dir():
-        print(f"[post] 跳过：未找到 site-packages: {sp}")
+    sp = runtime_site_packages_root()
+    if sp is None:
+        print("[post] 跳过：未找到 site-packages")
         return
     dst_root = NUITKA_OUT
     dst_root.mkdir(parents=True, exist_ok=True)
@@ -408,16 +468,29 @@ def copy_stdlib_wave() -> None:
     stdlib = Path(sysconfig.get_path("stdlib"))
     src = stdlib / "wave.py"
     dst_root = NUITKA_OUT
-    if not src.is_file():
-        print(f"[post] 跳过 wave：未找到 {src}")
+    dst_root.mkdir(parents=True, exist_ok=True)
+    if src.is_file():
+        shutil.copy2(src, dst_root / "wave.py")
+        print("[post] wave.py (stdlib) -> gui.dist/")
         return
-    shutil.copy2(src, dst_root / "wave.py")
-    print("[post] wave.py (stdlib) -> gui.dist/")
+
+    embedded_zip = Path(sys.executable).resolve().parent / f"python{sys.version_info.major}{sys.version_info.minor}.zip"
+    if embedded_zip.is_file():
+        try:
+            with zipfile.ZipFile(embedded_zip) as zf:
+                if "wave.pyc" in zf.namelist():
+                    (dst_root / "wave.pyc").write_bytes(zf.read("wave.pyc"))
+                    print("[post] wave.pyc (python zip) -> gui.dist/")
+                    return
+        except (OSError, zipfile.BadZipFile) as e:
+            print(f"[post] 读取 {embedded_zip} 失败: {e}")
+    print(f"[post] 跳过 wave：未找到 {src} 或 {embedded_zip}!wave.pyc")
 
 
 def copy_pypinyin_package_data() -> None:
     """pypinyin 在运行时按 ``__file__`` 旁加载 ``*.json``；Nuitka 编译后须补拷数据文件。"""
-    sp = Path(sys.executable).resolve().parent.parent / "Lib" / "site-packages" / "pypinyin"
+    site_packages = runtime_site_packages_root()
+    sp = site_packages / "pypinyin" if site_packages else Path()
     dst = NUITKA_OUT / "pypinyin"
     if not sp.is_dir():
         print(f"[post] 跳过 pypinyin 数据：未找到 {sp}")
@@ -430,6 +503,50 @@ def copy_pypinyin_package_data() -> None:
             print(f"[post] pypinyin/{name} -> gui.dist/pypinyin/")
 
 
+VC_RUNTIME_DLLS = (
+    "msvcp140.dll",
+    "vcruntime140.dll",
+    "vcruntime140_1.dll",
+    "concrt140.dll",
+)
+
+
+def _windows_system_runtime_dir() -> Path:
+    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+    return system_root / ("System32" if sys.maxsize > 2**32 else "SysWOW64")
+
+
+def ensure_vc_runtime_dlls() -> None:
+    """Bundle VC++ runtime DLLs needed by binary wheels."""
+    if os.name != "nt":
+        return
+    NUITKA_OUT.mkdir(parents=True, exist_ok=True)
+    source_dir = _windows_system_runtime_dir()
+    missing: list[str] = []
+    for name in VC_RUNTIME_DLLS:
+        dst = NUITKA_OUT / name
+        if dst.is_file():
+            continue
+        candidates = [
+            source_dir / name,
+            Path(sys.executable).resolve().parent / name,
+        ]
+        copied = False
+        for src in candidates:
+            if src.is_file():
+                shutil.copy2(src, dst)
+                print(f"[post] {name} -> gui.dist/")
+                copied = True
+                break
+        if not copied:
+            missing.append(name)
+    if missing:
+        print(
+            "[post] 警告: 未找到 VC++ 运行库 DLL，目标电脑若未安装 VC++ 2015-2022 Runtime "
+            f"可能无法启动: {', '.join(missing)}"
+        )
+
+
 def run_nuitka(timings: list[tuple[str, float]] | None = None, jobs: int | None = None):
     """执行 Nuitka standalone 编译。
 
@@ -437,6 +554,7 @@ def run_nuitka(timings: list[tuple[str, float]] | None = None, jobs: int | None 
     """
     warn_if_embedded_style_venv()
     ensure_windows_python_dev_files()
+    ensure_python_minus_s_disables_site()
 
     cmd = [
         sys.executable,
@@ -511,6 +629,7 @@ def run_nuitka(timings: list[tuple[str, float]] | None = None, jobs: int | None 
     copy_stdlib_distutils()
     copy_stdlib_wave()
     copy_pypinyin_package_data()
+    ensure_vc_runtime_dlls()
     if timings is not None:
         timings.append(("Nuitka 后处理 (拷包/补文件)", time.perf_counter() - t_post))
 
@@ -606,6 +725,8 @@ def zip_backend_tree() -> None:
     if not NUITKA_OUT.is_dir():
         print(f"[zip] 错误: 缺少 Nuitka 目录 {NUITKA_OUT}，无法生成 backend.zip")
         sys.exit(1)
+    copy_stdlib_wave()
+    ensure_vc_runtime_dlls()
     zip_path = DIST_DIR / "backend.zip"
     if zip_path.exists():
         zip_path.unlink()
