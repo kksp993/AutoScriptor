@@ -158,11 +158,34 @@ cd D:\Projects\AutoScriptor
 
 ### 9.2 发行版更新通道
 
-最终用户不应为了少量代码变更反复下载完整安装包。当前发布链路区分三种更新：
+最终用户不应为了少量代码变更反复下载完整安装包。版本线按 `major.minor` 划分：
 
-- **完整安装包**：首次安装、壳层/安装器大改、增量基线不匹配时使用，体积最大但最稳。
-- **`backend_incremental.zip`**：由 `scripts/release/release_backend_incremental.py` 对比旧 `backend.zip` 或旧 `gui.dist` 生成，仅包含变化文件和 `incremental_manifest.json`。安装器/Electron 会先 dry-run 校验基线 SHA-256，再事务切换 `backend/`。
+- **同一 `x.y` 线的小版本**：例如 `1.1.0 -> 1.1.5`，使用累计小版本更新包 `AutoScriptor_Update_1.1.5.zip`。更新包必须包含从 `1.1.0` 到目标版本所需的全部 engine/少量附属文件变动，允许用户从 `1.1.0 / 1.1.1 / 1.1.3` 直接跳到 `1.1.5`。
+- **跨 `x.y` 线的大版本**：例如 `1.0.x -> 1.1.0`，使用完整安装包。依赖库、Nuitka 运行时、backend 目录布局、Electron 壳或安装器行为变化，都应走完整安装包。
+- **本地小版本更新包**：WebUI“检查更新”页支持选择或拖入 `.zip`。Electron 主进程先 dry-run 校验 `update_manifest.json`、版本线、SHA-256、写入路径与用户数据保护；应用时停止 backend，备份旧文件，替换 `backend/autoscriptor-engine.exe` 等少量文件，失败则回滚并重启旧 backend。
+- **`backend_incremental.zip`**：仍保留为特殊兜底，由 `scripts/release/release_backend_incremental.py` 对比旧 `backend.zip` 或旧 `gui.dist` 生成。它适合维护人员处理 backend 文件级差异，不作为普通用户默认更新路径。
 - **发行版 manifest 内容更新**：WebUI 的“发行版更新”页调用 `/api/content-update/*`，按 `deploy.content_manifest_url` 拉取 HTTPS manifest、校验 hash/签名后写入允许的文件。该通道会拒绝覆盖 `config.json`、`data/config.json`、账号、`custom_task`、`battle_character`、日志和 `.autoscriptor` 状态目录。
+
+生成小版本更新包：
+
+```powershell
+python scripts/release/create_minor_update_package.py `
+  --new-backend dist/gui.dist `
+  --target-version 1.1.5 `
+  --out dist/AutoScriptor_Update_1.1.5.zip
+```
+
+如果目标小版本还需要补少量目录或文件，可显式加入：
+
+```powershell
+python scripts/release/create_minor_update_package.py `
+  --new-backend dist/gui.dist `
+  --target-version 1.1.5 `
+  --out dist/AutoScriptor_Update_1.1.5.zip `
+  --include-backend services/webui/static/js/components/UpdatePanel.js `
+  --mkdir data/assets/cache `
+  --copy-if-missing docs/template.json=data/templates/template.json
+```
 
 WebUI 的“源码仓库更新”只服务开发/源码部署：它需要 `.git`，会执行 `git fetch/pull` 和 `pip install`。发行包里该通道会显示不可用，避免把最终用户带到必然失败的 Git 更新路径。
 
@@ -170,11 +193,13 @@ WebUI 的“源码仓库更新”只服务开发/源码部署：它需要 `.git`
 
 - 安装向导在“安装前确认”页提供 **“先做预检”**。该 dry run 只读取 `backend.zip`、目标目录状态、磁盘空间与随包 `data` 计划，不创建安装目录、不复制文件、不写注册表、不修改 MuMu/ADB 配置。
 - 代码侧入口为 `dryRunPackagedInstall()`；增量更新也有 `dryRunApplyBackendIncremental()`，用于在真正复制 `.backend.incremental.*` 前校验 manifest、SHA-256 与基线是否匹配。
+- 小版本本地更新入口为 `dryRunLocalReleaseUpdate()` / `applyLocalReleaseUpdate()`；测试覆盖同兼容线跳版本、跨线拒绝、降级拒绝、用户数据保护和失败回滚。
 - 本地生命周期测试命令：
 
 ```powershell
 cd webapp
 npm run test:installer
+npm run test:release-update
 ```
 
 测试会在 `%TEMP%` 下创建临时 release/安装目录，覆盖 dry run、非法非空目录、缺少引擎包、完整安装、修复安装、用户数据保留、卸载脚本 PowerShell 语法解析、增量更新、增量基线不匹配回滚。默认测试结束后删除临时目录；调试时可保留：
@@ -242,3 +267,4 @@ electron-builder **不会清空你的 `dist/`**；每次打桌面包会刷新 **
 - `build_release.py` 会在 electron-builder 后自动运行 `npm run verify-pack`，校验 Electron `app.asar` 入口、source map 泄漏和 backend payload。它会在 `backend.zip` 缺失或 zip 内不含 `autoscriptor-engine.exe` 时失败。
 - The installer treats a failing `MuMuManager version` command as a warning when ADB is usable. This matches runtime behavior: MuMuManager is useful for official lifecycle commands, while ADB is the stable fallback for app/package/input checks.
 - In the installer UI, this case is displayed as a yellow warning instead of a red blocking error. Users can finish installation, then use WebUI `启动诊断` to inspect MuMuManager, ADB, App, NemuIpc, OCR and UI Map layers separately.
+- `verify_packaging_prereqs.py` and `npm run verify-pack` also check the VC++ runtime DLLs used by native wheels (`msvcp140.dll`, `vcruntime140.dll`, `vcruntime140_1.dll`, `concrt140.dll`). `build_release.py` copies them into `backend.zip` when they are present in the Windows runtime directory.

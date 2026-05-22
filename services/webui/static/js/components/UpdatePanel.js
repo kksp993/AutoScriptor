@@ -33,6 +33,11 @@ const UpdatePanel = {
       },
       releaseHasUpdate: false,
       releaseMessage: '',
+      localPackagePath: '',
+      localDryRun: null,
+      localProgress: [],
+      localDryRunning: false,
+      localApplying: false,
       checkingRelease: false,
       applyingRelease: false,
       checkingSource: false,
@@ -92,12 +97,29 @@ const UpdatePanel = {
         (this.manifestSummary.protected_paths || []).length > 0
       );
     },
+    localUpdateApi() {
+      return window.electron && window.electron.releaseUpdate;
+    },
+    localDryRunOk() {
+      return !!(this.localDryRun && this.localDryRun.ok);
+    },
+    localPlanFiles() {
+      return (this.localDryRun && this.localDryRun.plan && this.localDryRun.plan.files) || [];
+    },
     changelogLines() {
       if (!this.sourceStatus.changelog) return [];
       return this.sourceStatus.changelog.split('\n').filter(l => l.trim());
     },
   },
   async mounted() {
+    if (this.localUpdateApi && this.localUpdateApi.onProgress) {
+      this.localUpdateApi.onProgress((data) => {
+        if (!data) return;
+        const msg = data.message || data.type || JSON.stringify(data);
+        this.localProgress.push(msg);
+        if (this.localProgress.length > 80) this.localProgress.shift();
+      });
+    }
     await Promise.all([this.loadReleaseStatus(), this.loadSourceStatus()]);
   },
   methods: {
@@ -186,6 +208,91 @@ const UpdatePanel = {
         this.applyingRelease = false;
       }
     },
+    localPackageName(path) {
+      if (!path) return '';
+      return String(path).split(/[\\/]/).pop();
+    },
+    setLocalPackage(path) {
+      this.localPackagePath = path || '';
+      this.localDryRun = null;
+      this.localProgress = [];
+    },
+    handleLocalDrop(e) {
+      const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      const filePath = file && (file.path || file.name);
+      if (!filePath || !String(filePath).toLowerCase().endsWith('.zip')) {
+        ElementPlus.ElMessage.warning('请拖入 .zip 更新包');
+        return;
+      }
+      if (!file.path) {
+        ElementPlus.ElMessage.warning('当前环境无法读取拖入文件路径，请使用“选择更新包”');
+        return;
+      }
+      this.setLocalPackage(file.path);
+    },
+    async chooseLocalPackage() {
+      if (!this.localUpdateApi) {
+        ElementPlus.ElMessage.warning('本地更新只在桌面版中可用');
+        return;
+      }
+      const result = await this.localUpdateApi.choosePackage();
+      if (result && !result.canceled && result.path) {
+        this.setLocalPackage(result.path);
+      }
+    },
+    async dryRunLocalPackage() {
+      if (!this.localUpdateApi || !this.localPackagePath) return;
+      this.localDryRunning = true;
+      this.localProgress = [];
+      try {
+        const report = await this.localUpdateApi.dryRunPackage({ packagePath: this.localPackagePath });
+        this.localDryRun = report;
+        if (report.ok) {
+          ElementPlus.ElMessage.success('更新包预检通过');
+        } else {
+          ElementPlus.ElMessage.error('更新包预检未通过');
+        }
+      } catch (e) {
+        this.localDryRun = {
+          ok: false,
+          errors: [String(e && e.message ? e.message : e)],
+          checks: [],
+          plan: { replace: 0, add: 0, skip: 0, mkdir: 0, requiresBackendStop: false, configDefaults: { missingKeys: [] }, files: [] },
+        };
+        ElementPlus.ElMessage.error('预检失败: ' + (e.message || e));
+      } finally {
+        this.localDryRunning = false;
+      }
+    },
+    async applyLocalPackage() {
+      if (!this.localUpdateApi || !this.localPackagePath || !this.localDryRunOk) return;
+      try {
+        await ElementPlus.ElMessageBox.confirm(
+          '将停止当前 backend，备份旧文件后应用此小版本更新包。完成后会自动重启 backend。',
+          '应用本地更新包',
+          { confirmButtonText: '开始更新', cancelButtonText: '取消', type: 'warning' },
+        );
+      } catch {
+        return;
+      }
+      this.localApplying = true;
+      this.localProgress = [];
+      try {
+        const result = await this.localUpdateApi.applyPackage({ packagePath: this.localPackagePath });
+        if (result && result.ok) {
+          this.localDryRun = result.report || this.localDryRun;
+          ElementPlus.ElMessage.success('小版本更新完成，正在恢复后端');
+          setTimeout(() => location.reload(), 2500);
+        } else {
+          this.localDryRun = result && result.report ? result.report : this.localDryRun;
+          ElementPlus.ElMessage.error('更新未执行，请查看预检结果');
+        }
+      } catch (e) {
+        ElementPlus.ElMessage.error('应用更新失败: ' + (e.message || e));
+      } finally {
+        this.localApplying = false;
+      }
+    },
     async checkSourceUpdate() {
       this.checkingSource = true;
       try {
@@ -264,6 +371,87 @@ const UpdatePanel = {
   },
   template: `
 <div class="bg-white rounded-xl shadow-md p-6 h-full overflow-y-auto">
+
+  <el-card shadow="hover" class="mb-6">
+    <template #header>
+      <div class="flex items-center justify-between gap-3">
+        <span class="text-lg font-semibold">本地小版本更新包</span>
+        <el-tag :type="localDryRunOk ? 'success' : 'info'" effect="dark" size="small">
+          {{ localDryRunOk ? '预检通过' : '待预检' }}
+        </el-tag>
+      </div>
+    </template>
+
+    <el-alert
+      v-if="!localUpdateApi"
+      type="info"
+      :closable="false"
+      show-icon
+      title="本地更新包只在 Electron 桌面版中可用。"
+    ></el-alert>
+
+    <div
+      v-else
+      class="mt-1"
+      @dragover.prevent
+      @drop.prevent="handleLocalDrop"
+      style="border:1px dashed #cbd5e1;border-radius:8px;padding:16px;background:#f8fafc;"
+    >
+      <div class="flex flex-wrap items-center gap-3">
+        <el-button @click="chooseLocalPackage">
+          <i class="fa fa-folder-open mr-1"></i>选择更新包
+        </el-button>
+        <el-button type="primary" :loading="localDryRunning" :disabled="!localPackagePath" @click="dryRunLocalPackage">
+          <i v-if="!localDryRunning" class="fa fa-check-circle mr-1"></i>先做预检
+        </el-button>
+        <el-button type="warning" :loading="localApplying" :disabled="!localDryRunOk" @click="applyLocalPackage">
+          <i v-if="!localApplying" class="fa fa-download mr-1"></i>应用更新
+        </el-button>
+      </div>
+      <div class="mt-3 text-sm text-slate-600">
+        {{ localPackagePath ? localPackageName(localPackagePath) : '可将 AutoScriptor_Update_x.y.z.zip 拖入此处。' }}
+      </div>
+    </div>
+
+    <el-descriptions v-if="localDryRun" class="mt-4" :column="3" border size="small">
+      <el-descriptions-item label="当前版本">{{ localDryRun.currentVersion || '-' }}</el-descriptions-item>
+      <el-descriptions-item label="目标版本">{{ localDryRun.targetVersion || '-' }}</el-descriptions-item>
+      <el-descriptions-item label="兼容线">{{ localDryRun.compatLine || '-' }}</el-descriptions-item>
+      <el-descriptions-item label="替换">{{ localDryRun.plan.replace }}</el-descriptions-item>
+      <el-descriptions-item label="新增">{{ localDryRun.plan.add }}</el-descriptions-item>
+      <el-descriptions-item label="跳过">{{ localDryRun.plan.skip }}</el-descriptions-item>
+      <el-descriptions-item label="需停后端">{{ localDryRun.plan.requiresBackendStop ? '是' : '否' }}</el-descriptions-item>
+      <el-descriptions-item label="补目录">{{ localDryRun.plan.mkdir }}</el-descriptions-item>
+      <el-descriptions-item label="配置补项">{{ localDryRun.plan.configDefaults.missingKeys.length }}</el-descriptions-item>
+    </el-descriptions>
+
+    <el-alert
+      v-if="localDryRun && localDryRun.errors && localDryRun.errors.length"
+      class="mt-4"
+      type="error"
+      :closable="false"
+      show-icon
+      :title="localDryRun.errors.join('；')"
+    ></el-alert>
+
+    <el-table v-if="localPlanFiles.length" class="mt-4" :data="localPlanFiles" size="small" border>
+      <el-table-column prop="action" label="动作" width="130"></el-table-column>
+      <el-table-column prop="path" label="路径" min-width="260">
+        <template #default="{ row }"><code class="text-xs">{{ row.path }}</code></template>
+      </el-table-column>
+      <el-table-column label="状态" width="120">
+        <template #default="{ row }">
+          <el-tag :type="row.same ? 'info' : (row.exists ? 'warning' : 'success')" size="small">
+            {{ row.same ? '已一致' : (row.exists ? '将替换' : '将新增') }}
+          </el-tag>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <div v-if="localProgress.length" class="mt-4 text-xs text-slate-600" style="max-height:140px;overflow:auto;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px;">
+      <div v-for="(line, i) in localProgress" :key="i">{{ line }}</div>
+    </div>
+  </el-card>
 
   <el-card shadow="hover" class="mb-6">
     <template #header>
