@@ -8,6 +8,10 @@ $ErrorActionPreference = "SilentlyContinue"
 function CommandPath([string]$Name) {
   $cmd = Get-Command $Name -ErrorAction SilentlyContinue
   if ($cmd) { return $cmd.Source }
+  if ($Name -eq "VBoxManage") {
+    $fallback = "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe"
+    if (Test-Path -LiteralPath $fallback -PathType Leaf) { return $fallback }
+  }
   return $null
 }
 

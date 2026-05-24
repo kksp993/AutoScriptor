@@ -18,8 +18,9 @@ function Require-File([string]$Path, [string]$Label) {
   }
 }
 
-$vbox = Get-Command VBoxManage -ErrorAction SilentlyContinue
-if (-not $vbox) {
+$vboxCmd = Get-Command VBoxManage -ErrorAction SilentlyContinue
+$vboxPath = if ($vboxCmd) { $vboxCmd.Source } else { "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" }
+if (-not (Test-Path -LiteralPath $vboxPath -PathType Leaf)) {
   throw "VBoxManage not found. Install Oracle VirtualBox first, then reopen PowerShell."
 }
 
@@ -35,15 +36,15 @@ New-Item -ItemType Directory -Force -Path $vmBase, $shared, $logs | Out-Null
 Copy-Item -LiteralPath $PackagePath -Destination (Join-Path $shared (Split-Path $PackagePath -Leaf)) -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "vm_guest_acceptance.ps1") -Destination (Join-Path $shared "vm_guest_acceptance.ps1") -Force
 
-$existing = & $vbox.Source list vms | Select-String -SimpleMatch "`"$VmName`""
+$existing = & $vboxPath list vms | Select-String -SimpleMatch "`"$VmName`""
 if (-not $existing) {
-  & $vbox.Source createvm --name $VmName --basefolder $vmBase --ostype Windows11_64 --register | Out-Host
-  & $vbox.Source modifyvm $VmName --memory $MemoryMB --cpus $CPUs --vram 128 --graphicscontroller vboxsvga --firmware efi --boot1 dvd --boot2 disk --nic1 nat --clipboard bidirectional --draganddrop bidirectional | Out-Host
-  & $vbox.Source createmedium disk --filename (Join-Path $vmBase "$VmName\$VmName.vdi") --size ($DiskGB * 1024) --format VDI | Out-Host
-  & $vbox.Source storagectl $VmName --name "SATA" --add sata --controller IntelAhci --portcount 4 --bootable on | Out-Host
-  & $vbox.Source storageattach $VmName --storagectl "SATA" --port 0 --device 0 --type hdd --medium (Join-Path $vmBase "$VmName\$VmName.vdi") | Out-Host
-  & $vbox.Source storageattach $VmName --storagectl "SATA" --port 1 --device 0 --type dvddrive --medium (Resolve-Path -LiteralPath $IsoPath) | Out-Host
-  & $vbox.Source sharedfolder add $VmName --name release --hostpath $shared --automount | Out-Host
+  & $vboxPath createvm --name $VmName --basefolder $vmBase --ostype Windows11_64 --register | Out-Host
+  & $vboxPath modifyvm $VmName --memory $MemoryMB --cpus $CPUs --vram 128 --graphicscontroller vboxsvga --firmware efi --boot1 dvd --boot2 disk --nic1 nat --clipboard bidirectional --draganddrop bidirectional | Out-Host
+  & $vboxPath createmedium disk --filename (Join-Path $vmBase "$VmName\$VmName.vdi") --size ($DiskGB * 1024) --format VDI | Out-Host
+  & $vboxPath storagectl $VmName --name "SATA" --add sata --controller IntelAhci --portcount 4 --bootable on | Out-Host
+  & $vboxPath storageattach $VmName --storagectl "SATA" --port 0 --device 0 --type hdd --medium (Join-Path $vmBase "$VmName\$VmName.vdi") | Out-Host
+  & $vboxPath storageattach $VmName --storagectl "SATA" --port 1 --device 0 --type dvddrive --medium (Resolve-Path -LiteralPath $IsoPath) | Out-Host
+  & $vboxPath sharedfolder add $VmName --name release --hostpath $shared --automount | Out-Host
 } else {
   Write-Host "VM already exists: $VmName"
 }
@@ -61,5 +62,5 @@ Write-Host "  powershell -ExecutionPolicy Bypass -File \\VBOXSVR\release\vm_gues
 Write-Host "  powershell -ExecutionPolicy Bypass -File \\VBOXSVR\release\vm_guest_acceptance.ps1 -Mode PostInstall"
 
 if ($Start) {
-  & $vbox.Source startvm $VmName --type gui | Out-Host
+  & $vboxPath startvm $VmName --type gui | Out-Host
 }
