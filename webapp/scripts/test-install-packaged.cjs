@@ -312,6 +312,7 @@ async function testInstallRepairAndUninstallScript(tmp) {
   assert(marker.dataRoot === path.join(path.resolve(installRoot), 'data'), 'install marker should contain dataRoot');
   parsePowerShellScript(path.join(installRoot, 'Uninstall.ps1'));
   assertIncludes(readText(path.join(installRoot, 'Uninstall.ps1')), 'ProcessId -ne $PID', 'uninstaller must not kill its own PowerShell process');
+  assertIncludes(readText(path.join(installRoot, 'Uninstall.ps1')), 'Split-Path -Leaf $_.ExecutablePath', 'uninstaller should stop temporary portable app processes by executable name');
   assertIncludes(readText(path.join(installRoot, '彻底卸载造笔.bat')), '-RemoveUserData', 'remove-all bat should request user data removal');
 
   const userCfg = validPackagedConfig('user-kept');
@@ -319,7 +320,7 @@ async function testInstallRepairAndUninstallScript(tmp) {
   userCfg.accounts.dir = path.join(tmp, 'external-accounts');
   delete userCfg.deploy;
   delete userCfg.update;
-  writeText(path.join(installRoot, 'data', 'config.json'), JSON.stringify(userCfg, null, 2));
+  writeText(path.join(installRoot, 'data', 'config.json'), '\ufeff' + JSON.stringify(userCfg, null, 2));
   writeText(path.join(installRoot, 'data', 'accounts', 'default.json'), JSON.stringify({ userAccount: 'kept' }, null, 2));
   writeText(path.join(installRoot, 'data', 'custom_task', 'packaged.py'), '# user custom kept\n');
   writeText(path.join(installRoot, 'data', 'battle_character', 'packaged.json'), JSON.stringify({ userBattle: 'kept' }, null, 2));
@@ -368,6 +369,42 @@ async function testInstallRepairAndUninstallScript(tmp) {
   assertIncludes(readText(path.join(installRoot, 'data', 'custom_task', 'packaged.py')), 'user custom', 'custom task should be preserved');
   assertIncludes(readText(path.join(installRoot, 'data', 'battle_character', 'packaged.json')), 'userBattle', 'battle character data should be preserved');
   assertIncludes(readText(path.join(installRoot, 'data', 'common', 'packaged.txt')), 'v2', 'unprotected packaged data should update');
+  assertNoBackendStaging(installRoot);
+}
+
+async function testInstallProgressIsThrottled(tmp) {
+  const extraBackendFiles = {};
+  for (let i = 0; i < 360; i++) {
+    extraBackendFiles[`bulk/file-${String(i).padStart(4, '0')}.txt`] = `bulk ${i}\n`;
+  }
+
+  const release = createReleaseFixture(tmp, 'progress', { extraBackendFiles });
+  const installRoot = path.join(tmp, 'progress-install');
+  const userDataPath = path.join(tmp, 'progress-userdata');
+  const events = [];
+
+  await runPackagedInstall({
+    installRoot,
+    exeDir: release.exeDir,
+    resourcesPath: release.exeDir,
+    zipPath: release.zipPath,
+    portableExePath: release.portableExe,
+    appVersion: '1.0.0',
+    userDataPath,
+    skipMumuConfig: true,
+    skipRegistry: true,
+    send: (data) => events.push(data),
+  });
+
+  const extractLogs = events.filter((e) => e.type === 'log' && String(e.message || '').startsWith('[解压] '));
+  const extractProgress = events.filter((e) => e.type === 'progress' && String(e.message || '').startsWith('解压 '));
+  assert(extractLogs.length < 60, `extract logs should be throttled, got ${extractLogs.length}`);
+  assert(extractProgress.length < 150, `extract progress should be throttled, got ${extractProgress.length}`);
+  assert(events.some((e) => e.type === 'complete'), 'installer should emit complete');
+  assert(
+    fs.existsSync(path.join(installRoot, 'backend', 'bulk', 'file-0359.txt')),
+    'bulk backend fixture should be installed',
+  );
   assertNoBackendStaging(installRoot);
 }
 
@@ -466,6 +503,7 @@ async function main() {
   try {
     await testDryRunAndInvalidTargets(tmp);
     await testInstallRepairAndUninstallScript(tmp);
+    await testInstallProgressIsThrottled(tmp);
     await testIncrementalUpdateAndRollback(tmp);
     console.log('[installer-test] OK');
     console.log(`[installer-test] temp root ${keep ? 'kept' : 'removed'}:`, tmp);

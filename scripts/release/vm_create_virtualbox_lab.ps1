@@ -39,7 +39,11 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot "vm_guest_acceptance.ps1") -Dest
 $existing = & $vboxPath list vms | Select-String -SimpleMatch "`"$VmName`""
 if (-not $existing) {
   & $vboxPath createvm --name $VmName --basefolder $vmBase --ostype Windows11_64 --register | Out-Host
-  & $vboxPath modifyvm $VmName --memory $MemoryMB --cpus $CPUs --vram 128 --graphicscontroller vboxsvga --firmware efi --boot1 dvd --boot2 disk --nic1 nat --clipboard bidirectional --draganddrop bidirectional | Out-Host
+  & $vboxPath modifyvm $VmName --memory $MemoryMB --cpus $CPUs --vram 128 --graphicscontroller vboxsvga --firmware efi --tpm-type 2.0 --boot1 dvd --boot2 disk --nic1 nat --clipboard bidirectional --draganddrop bidirectional | Out-Host
+  & $vboxPath modifynvram $VmName inituefivarstore | Out-Host
+  & $vboxPath modifynvram $VmName enrollorclpk | Out-Host
+  & $vboxPath modifynvram $VmName enrollmssignatures | Out-Host
+  & $vboxPath modifynvram $VmName secureboot --enable | Out-Host
   & $vboxPath createmedium disk --filename (Join-Path $vmBase "$VmName\$VmName.vdi") --size ($DiskGB * 1024) --format VDI | Out-Host
   & $vboxPath storagectl $VmName --name "SATA" --add sata --controller IntelAhci --portcount 4 --bootable on | Out-Host
   & $vboxPath storageattach $VmName --storagectl "SATA" --port 0 --device 0 --type hdd --medium (Join-Path $vmBase "$VmName\$VmName.vdi") | Out-Host

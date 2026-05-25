@@ -2,8 +2,10 @@ param(
   [ValidateSet("PreInstall", "PostInstall", "UninstallKeepData", "UninstallRemoveAll")]
   [string]$Mode = "PostInstall",
   [string]$PackagePath = "\\VBOXSVR\release\AutoScriptor_Zao_Install_1.0.0.exe",
-  [string]$InstallRoot = "$env:LOCALAPPDATA\AutoScriptorReleaseTest",
-  [string]$OutDir = "\\VBOXSVR\release\logs"
+  [string]$LocalPackagePath = "$env:USERPROFILE\Downloads\AutoScriptor_Zao_Install_1.0.0.exe",
+  [string]$InstallRoot = "$env:USERPROFILE\Documents\AutoScriptor",
+  [string]$OutDir = "\\VBOXSVR\release\logs",
+  [int]$WebUiTimeoutSeconds = 240
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,6 +33,81 @@ function Assert-Dir($Path, $Name, [ref]$Errors) {
   }
 }
 
+function Wait-Condition([scriptblock]$Condition, [int]$TimeoutSeconds = 60, [int]$PollSeconds = 2) {
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
+    if (& $Condition) { return $true }
+    Start-Sleep -Seconds $PollSeconds
+  }
+  return (& $Condition)
+}
+
+function Wait-WebUi($Uri, [int]$TimeoutSeconds = 90) {
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  $attempts = 0
+  $lastError = ""
+  while ((Get-Date) -lt $deadline) {
+    $attempts += 1
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+      $resp = Invoke-WebRequest -Uri $Uri -UseBasicParsing -TimeoutSec 5
+      $sw.Stop()
+      return [ordered]@{
+        Ok = $true
+        Attempts = $attempts
+        StatusCode = [int]$resp.StatusCode
+        ElapsedMs = [int]$sw.ElapsedMilliseconds
+        LastError = $lastError
+      }
+    } catch {
+      $sw.Stop()
+      $lastError = $_.Exception.Message
+      Start-Sleep -Seconds 2
+    }
+  }
+  return [ordered]@{
+    Ok = $false
+    Attempts = $attempts
+    StatusCode = $null
+    ElapsedMs = $null
+    LastError = $lastError
+  }
+}
+
+function Export-Diagnostics($LogRoot, $InstallRoot) {
+  try {
+    $escapedRoot = [regex]::Escape($InstallRoot)
+    Get-CimInstance Win32_Process |
+      Where-Object {
+        ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($InstallRoot, [System.StringComparison]::OrdinalIgnoreCase)) -or
+        ($_.CommandLine -and ($_.CommandLine -match $escapedRoot -or $_.CommandLine -match "autoscriptor|AutoScriptor|造笔"))
+      } |
+      Select-Object ProcessId, Name, ExecutablePath, CommandLine |
+      Export-Csv -NoTypeInformation -Encoding UTF8 -LiteralPath (Join-Path $LogRoot "processes.csv")
+  } catch {
+    $_ | Out-File -Encoding UTF8 -Append -LiteralPath (Join-Path $LogRoot "diagnostics-error.log")
+  }
+
+  try {
+    $userData = Join-Path $env:APPDATA "autoscriptor"
+    if (Test-Path -LiteralPath $userData) {
+      Get-ChildItem -LiteralPath $userData -Force |
+        Select-Object Name, Length, LastWriteTime, FullName |
+        Export-Csv -NoTypeInformation -Encoding UTF8 -LiteralPath (Join-Path $LogRoot "userdata-files.csv")
+      $marker = Join-Path $userData "install.json"
+      if (Test-Path -LiteralPath $marker) {
+        Copy-Item -LiteralPath $marker -Destination (Join-Path $LogRoot "install.json") -Force
+      }
+    }
+  } catch {
+    $_ | Out-File -Encoding UTF8 -Append -LiteralPath (Join-Path $LogRoot "diagnostics-error.log")
+  }
+}
+
+$DailyLauncherName = "$([char]0x9020)$([char]0x7b14).exe"
+$KeepDataUninstallName = "$([char]0x5378)$([char]0x8f7d)$([char]0x9020)$([char]0x7b14).bat"
+$RemoveAllUninstallName = "$([char]0x5f7b)$([char]0x5e95)$([char]0x5378)$([char]0x8f7d)$([char]0x9020)$([char]0x7b14).bat"
+
 $logRoot = New-LogRoot
 $errors = @()
 $warnings = @()
@@ -41,8 +118,11 @@ $report = [ordered]@{
   Computer = $env:COMPUTERNAME
   User = $env:USERNAME
   PackagePath = $PackagePath
+  LocalPackagePath = $LocalPackagePath
   InstallRoot = $InstallRoot
-  Checks = [ordered]@{}
+  Checks = [ordered]@{
+    WebUiTimeoutSeconds = $WebUiTimeoutSeconds
+  }
   Errors = $errors
   Warnings = $warnings
 }
@@ -52,17 +132,28 @@ if ($Mode -eq "PreInstall") {
   if (-not $errors.Count) {
     $hash = Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256
     $report.Checks.PackageSha256 = $hash.Hash
-    Start-Process -FilePath $PackagePath
-    $warnings += "Installer started. Choose install root: $InstallRoot, then rerun this script with -Mode PostInstall."
+    $localDir = Split-Path -Parent $LocalPackagePath
+    New-Item -ItemType Directory -Force -Path $localDir | Out-Null
+    Copy-Item -LiteralPath $PackagePath -Destination $LocalPackagePath -Force
+    $localHash = Get-FileHash -LiteralPath $LocalPackagePath -Algorithm SHA256
+    $report.Checks.LocalPackageSha256 = $localHash.Hash
+    if ($localHash.Hash -ne $hash.Hash) {
+      $errors += "Local package hash mismatch after copy: $LocalPackagePath"
+    } else {
+      Start-Process -FilePath $LocalPackagePath
+      $warnings += "Installer copied locally and started. Choose install root: $InstallRoot, then rerun this script with -Mode PostInstall."
+    }
   }
 } elseif ($Mode -eq "PostInstall") {
   Assert-Dir $InstallRoot "install root" ([ref]$errors)
   Assert-File (Join-Path $InstallRoot "backend\autoscriptor-engine.exe") "engine" ([ref]$errors)
+  Assert-File (Join-Path $InstallRoot "backend\vcomp140.dll") "VC OpenMP runtime" ([ref]$errors)
+  Assert-File (Join-Path $InstallRoot "backend\paddle\libs\mkldnn.dll") "Paddle MKLDNN runtime" ([ref]$errors)
   Assert-File (Join-Path $InstallRoot "data\config.json") "data/config.json" ([ref]$errors)
   Assert-File (Join-Path $InstallRoot "Uninstall.ps1") "Uninstall.ps1" ([ref]$errors)
-  Assert-File (Join-Path $InstallRoot "卸载造笔.bat") "keep-data uninstall bat" ([ref]$errors)
-  Assert-File (Join-Path $InstallRoot "彻底卸载造笔.bat") "remove-all uninstall bat" ([ref]$errors)
-  Assert-File (Join-Path $InstallRoot "造笔.exe") "daily launcher" ([ref]$errors)
+  Assert-File (Join-Path $InstallRoot $KeepDataUninstallName) "keep-data uninstall bat" ([ref]$errors)
+  Assert-File (Join-Path $InstallRoot $RemoveAllUninstallName) "remove-all uninstall bat" ([ref]$errors)
+  Assert-File (Join-Path $InstallRoot $DailyLauncherName) "daily launcher" ([ref]$errors)
 
   $cfgPath = Join-Path $InstallRoot "data\config.json"
   if (Test-Path -LiteralPath $cfgPath) {
@@ -81,35 +172,39 @@ if ($Mode -eq "PreInstall") {
     $errors += "Windows uninstall registry key missing: $uninstallKey"
   }
 
-  $launcher = Join-Path $InstallRoot "造笔.exe"
+  $launcher = Join-Path $InstallRoot $DailyLauncherName
   if (Test-Path -LiteralPath $launcher) {
     $proc = Start-Process -FilePath $launcher -PassThru
-    Start-Sleep -Seconds 12
-    try {
-      $resp = Invoke-WebRequest -Uri "http://127.0.0.1:5000" -UseBasicParsing -TimeoutSec 5
-      $report.Checks.WebUiHttpStatus = [int]$resp.StatusCode
-    } catch {
-      $errors += "WebUI did not respond on 127.0.0.1:5000: $($_.Exception.Message)"
+    $report.Checks.LauncherProcessId = $proc.Id
+    $web = Wait-WebUi "http://127.0.0.1:5000" $WebUiTimeoutSeconds
+    $report.Checks.WebUi = $web
+    if (-not $web.Ok) {
+      $errors += "WebUI did not respond on 127.0.0.1:5000 within ${WebUiTimeoutSeconds}s: $($web.LastError)"
     }
-    Get-Process | Where-Object { $_.Path -like "$InstallRoot*" } | Select-Object Id,ProcessName,Path | Export-Csv -NoTypeInformation -Encoding UTF8 -LiteralPath (Join-Path $logRoot "processes.csv")
+    Export-Diagnostics $logRoot $InstallRoot
   }
 } elseif ($Mode -eq "UninstallKeepData") {
-  $bat = Join-Path $InstallRoot "卸载造笔.bat"
+  $bat = Join-Path $InstallRoot $KeepDataUninstallName
   Assert-File $bat "keep-data uninstall bat" ([ref]$errors)
   if (-not $errors.Count) {
     Start-Process -FilePath $bat -Wait
-    Start-Sleep -Seconds 5
+    $report.Checks.AppFilesRemoved = Wait-Condition { -not (Test-Path (Join-Path $InstallRoot "backend")) } 45 2
     $report.Checks.DataStillExists = Test-Path (Join-Path $InstallRoot "data")
+    $report.Checks.UninstallRegistryRemoved = -not (Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\AutoScriptorZao")
+    if (-not $report.Checks.AppFilesRemoved) { $errors += "backend should be removed by keep-data uninstall" }
     if (-not $report.Checks.DataStillExists) { $errors += "data should be preserved by keep-data uninstall" }
+    if (-not $report.Checks.UninstallRegistryRemoved) { $errors += "uninstall registry should be removed by keep-data uninstall" }
+    Export-Diagnostics $logRoot $InstallRoot
   }
 } elseif ($Mode -eq "UninstallRemoveAll") {
-  $bat = Join-Path $InstallRoot "彻底卸载造笔.bat"
+  $bat = Join-Path $InstallRoot $RemoveAllUninstallName
   Assert-File $bat "remove-all uninstall bat" ([ref]$errors)
   if (-not $errors.Count) {
     Start-Process -FilePath $bat -Wait
-    Start-Sleep -Seconds 10
+    $null = Wait-Condition { -not (Test-Path $InstallRoot) } 60 2
     $report.Checks.InstallRootRemoved = -not (Test-Path $InstallRoot)
     if (-not $report.Checks.InstallRootRemoved) { $errors += "install root still exists after remove-all uninstall" }
+    Export-Diagnostics $logRoot $InstallRoot
   }
 }
 

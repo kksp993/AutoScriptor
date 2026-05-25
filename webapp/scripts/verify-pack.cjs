@@ -244,9 +244,13 @@ async function main() {
     'vcruntime140.dll',
     'vcruntime140_1.dll',
     'concrt140.dll',
+    'vcomp140.dll',
     'services/webui/static/index.html',
     'services/webui/vendor/vue.global.js',
     'services/webui/vendor/element-plus.full.js',
+    'encodings/__init__.py',
+    'encodings/aliases.py',
+    'encodings/utf_8.py',
     'pypinyin/pinyin_dict.json',
     'pypinyin/phrases_dict.json',
   ];

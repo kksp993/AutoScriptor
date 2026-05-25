@@ -25,7 +25,6 @@ from AutoScriptor.utils.logger import logger, _TaskFilter as _LogTaskFilter
 from AutoScriptor.control.MumuAdaptor.device_facade import get_device_facade
 from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.game_profession import GAME_PROFESSIONS
-from ZmxyOL.task.battle_task_params import battle_flow_allowed_for_task
 from services.core.task_manager import TaskManager
 from services.core.banner import _print_banner
 from services.core.scheduler import scheduler, SchedulerState
@@ -35,6 +34,12 @@ from services.webui.lifecycle_service import WebUILifecycleService
 from services.webui.runtime_controller import RuntimeController
 from services.webui.state_version import bump_version, current_version
 from services.webui.task_tree_service import task_tree_service
+
+
+def _battle_flow_allowed_for_task(flow_value: str, task_path: str | None) -> bool:
+    from ZmxyOL.task.battle_task_params import battle_flow_allowed_for_task
+
+    return battle_flow_allowed_for_task(flow_value, task_path)
 
 # FastAPI Form/UploadFile 运行时依赖；Nuitka 不会从 fastapi 静态跟到该包，须显式 import 以打入 standalone
 import multipart  # noqa: F401
@@ -848,7 +853,7 @@ async def enum_options_api(request: Request):
                         task_path
                         and EnumClass.__name__ == 'BattleFlowName'
                         and isinstance(m.value, str)
-                        and not battle_flow_allowed_for_task(m.value, task_path)
+                        and not _battle_flow_allowed_for_task(m.value, task_path)
                     ):
                         continue
                     opts.append({"value": m.name, "label": label})

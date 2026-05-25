@@ -44,12 +44,15 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import os
+import re
 import shutil
+import socket
 import stat
 import subprocess
 import sys
 import sysconfig
 import time
+import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -259,9 +262,9 @@ def ensure_python_minus_s_disables_site() -> None:
         sys.exit(1)
 
 
-# 仅对「体量极大、以二进制扩展为主」的包使用 nofollow，避免 OOM；Web/工具链（fastapi、dpath、yaml 等）
-# 必须能被打进 standalone，不可在此列表中，否则运行时报 excluded-module ImportError。
-# nofollow 的包不会进入 dist，编译结束后由 copy_nofollow_runtime_packages() 从 venv 拷入。
+# Heavy or highly dynamic third-party packages are nofollowed and copied from
+# the pinned runtime venv after compilation. Project modules stay compiled, while
+# framework/SDK wheels remain normal importable packages inside gui.dist.
 _NUITKA_NOFOLLOW = [
     "numpy",
     "cv2",
@@ -281,6 +284,44 @@ _NUITKA_NOFOLLOW = [
     "matplotlib",
     "pandas",
     "playwright",
+    "requests",
+    "urllib3",
+    "charset_normalizer",
+    "cryptography",
+    "cffi",
+    "pycparser",
+    "Crypto",
+    "onepush",
+    "openai",
+    "distro",
+    "jiter",
+    "fastapi",
+    "starlette",
+    "pydantic",
+    "pydantic_core",
+    "annotated_types",
+    "annotated_doc",
+    "uvicorn",
+    "websockets",
+    "tzdata",
+    "click",
+    "colorama",
+    "yaml",
+    "httpx",
+    "httpcore",
+    "anyio",
+    "certifi",
+    "h11",
+    "idna",
+    "sniffio",
+]
+
+_NUITKA_NOFOLLOW_ONLY = [
+    "pip",
+    "ensurepip",
+    "rich",
+    "pygments",
+    "prompt_toolkit",
 ]
 
 # nofollow 大包旁路：paddle 的 pip/httpx 依赖、skimage 的 pip 依赖等，须拷入 gui.dist。
@@ -321,8 +362,21 @@ _PADDLE_SATELLITE = (
     "rapidfuzz",
     "tqdm",
     "visualdl",
+    # questionary is pulled by legacy CLI/config helpers exposed through AutoScriptor.__all__.
+    "questionary",
+    "prompt_toolkit",
+    "pygments",
+    "wcwidth",
+    "exceptiongroup",
+    "typing_inspection",
 )
-_PADDLE_SATELLITE_FILES = ("decorator.py", "typing_extensions.py", "six.py")
+_PADDLE_SATELLITE_FILES = (
+    "decorator.py",
+    "typing_extensions.py",
+    "six.py",
+    "socks.py",
+    "sockshandler.py",
+)
 
 
 def _copy_site_entry(sp: Path, dst_root: Path, name: str) -> None:
@@ -336,6 +390,18 @@ def _copy_site_entry(sp: Path, dst_root: Path, name: str) -> None:
         print(f"[post] {name} -> gui.dist/")
     else:
         print(f"[post] 跳过（不存在）: {src}")
+
+
+def _copy_site_glob(sp: Path, dst_root: Path, pattern: str) -> None:
+    """Copy top-level binary/helper files whose names include ABI tags."""
+    matched = False
+    for src in sp.glob(pattern):
+        if src.is_file():
+            shutil.copy2(src, dst_root / src.name)
+            print(f"[post] {src.name} -> gui.dist/")
+            matched = True
+    if not matched:
+        print(f"[post] 跳过（不存在）: {sp / pattern}")
 
 
 def runtime_site_packages_root() -> Path | None:
@@ -418,6 +484,10 @@ def copy_nofollow_runtime_packages() -> None:
     for fname in _PADDLE_SATELLITE_FILES:
         _copy_site_entry(sp, dst_root, fname)
 
+    # cffi keeps the actual extension module at site-packages root.
+    _copy_site_glob(sp, dst_root, "_cffi_backend*.pyd")
+    _copy_site_entry(sp, dst_root, "_yaml")
+
     # 部分库的 importlib.metadata 依赖 .dist-info
     needles = (
         "numpy", "opencv", "pillow", "paddle", "scipy", "pandas", "matplotlib",
@@ -431,7 +501,15 @@ def copy_nofollow_runtime_packages() -> None:
         "beautifulsoup", "tqdm", "pymupdf", "openpyxl", "pdf2docx", "premailer",
         "rapidfuzz", "visualdl", "python-docx", "lxml", "fire", "cython",
         "fonttools",
-        "python_multipart",
+        "python_multipart", "requests", "urllib3", "charset-normalizer",
+        "charset_normalizer", "cryptography", "cffi", "pycparser",
+        "pycryptodome", "crypto", "onepush", "openai", "distro", "jiter",
+        "fastapi", "starlette", "pydantic", "pydantic-core",
+        "pydantic_core", "annotated-types", "annotated_types",
+        "annotated-doc", "annotated_doc", "uvicorn", "websockets",
+        "tzdata", "click", "colorama", "pyyaml",
+        "questionary", "prompt-toolkit", "prompt_toolkit", "pygments", "wcwidth",
+        "exceptiongroup", "typing-inspection", "typing_inspection",
     )
     for item in sp.iterdir():
         if not item.is_dir() or not item.name.endswith(".dist-info"):
@@ -443,6 +521,103 @@ def copy_nofollow_runtime_packages() -> None:
             print(f"[post] {item.name} -> gui.dist/")
 
 
+def _nuitka_output_python_version() -> tuple[int, int] | None:
+    """Infer the Python ABI used by an existing gui.dist from pythonXY.dll."""
+    if not NUITKA_OUT.is_dir():
+        return None
+    for dll in NUITKA_OUT.glob("python*.dll"):
+        match = re.fullmatch(r"python(\d)(\d{2})\.dll", dll.name.lower())
+        if match:
+            return int(match.group(1)), int(match.group(2))
+    return None
+
+
+def _venv_home_from_cfg() -> Path | None:
+    cfg = PROJECT_ROOT / ".venv-nuitka" / "pyvenv.cfg"
+    if not cfg.is_file():
+        return None
+    try:
+        for line in cfg.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.lower().startswith("home"):
+                _, value = line.split("=", 1)
+                home = Path(value.strip())
+                return home if home.exists() else None
+    except OSError:
+        return None
+    return None
+
+
+def _python_home_version(home: Path) -> tuple[int, int] | None:
+    exe = home / ("python.exe" if os.name == "nt" else "python")
+    if not exe.is_file():
+        return None
+    try:
+        out = subprocess.check_output(
+            [str(exe), "-c", "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')"],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        ).strip()
+        major, minor = out.split(".", 1)
+        return int(major), int(minor)
+    except Exception:
+        return None
+
+
+def _stdlib_candidates() -> list[tuple[Path, tuple[int, int] | None, str]]:
+    candidates: list[tuple[Path, tuple[int, int] | None, str]] = []
+    seen: set[Path] = set()
+
+    def add(path: Path, version: tuple[int, int] | None, label: str) -> None:
+        try:
+            resolved = path.resolve()
+        except OSError:
+            resolved = path
+        if resolved in seen:
+            return
+        seen.add(resolved)
+        candidates.append((path, version, label))
+
+    current_stdlib = Path(sysconfig.get_path("stdlib"))
+    add(current_stdlib, (sys.version_info.major, sys.version_info.minor), "current interpreter")
+
+    home = _venv_home_from_cfg()
+    if home is not None:
+        add(home / "Lib", _python_home_version(home), ".venv-nuitka home")
+
+    base_prefix = Path(sys.base_prefix)
+    add(base_prefix / "Lib", (sys.version_info.major, sys.version_info.minor), "sys.base_prefix")
+    return candidates
+
+
+def resolve_runtime_stdlib(required: tuple[str, ...]) -> Path:
+    """Pick a stdlib matching gui.dist's Python ABI, especially for --skip-nuitka.
+
+    A common failure mode is running --skip-nuitka with the host Python while
+    reusing a Python 3.10 Nuitka engine. Copying 3.13 encodings into that tree
+    can satisfy init_fs_encoding but crash the executable later. Treat a version
+    mismatch as a build error, not a warning.
+    """
+    target = _nuitka_output_python_version() or (sys.version_info.major, sys.version_info.minor)
+    skipped: list[str] = []
+    for stdlib, version, label in _stdlib_candidates():
+        missing = [name for name in required if not (stdlib / name).exists()]
+        if missing:
+            skipped.append(f"{label}: missing {', '.join(missing)} at {stdlib}")
+            continue
+        if version is not None and version != target:
+            skipped.append(f"{label}: Python {version[0]}.{version[1]} != target {target[0]}.{target[1]} at {stdlib}")
+            continue
+        print(f"[post] stdlib source: {stdlib} ({label}, target Python {target[0]}.{target[1]})")
+        return stdlib
+
+    print("[post] 错误: 未找到与 gui.dist Python ABI 匹配的 stdlib。")
+    for item in skipped:
+        print(f"  - {item}")
+    sys.exit(1)
+
+
 def copy_stdlib_distutils() -> None:
     """将 CPython 标准库 Lib/distutils 拷入 gui.dist。
 
@@ -452,7 +627,7 @@ def copy_stdlib_distutils() -> None:
     注意：venv 下 ``sys.executable`` 的上一级 ``Lib`` 通常只有 site-packages，**没有**标准库
     ``distutils``；必须从 ``sysconfig.get_path('stdlib')``（与 ``sys.base_prefix`` 对齐）取源。
     """
-    stdlib = Path(sysconfig.get_path("stdlib"))
+    stdlib = resolve_runtime_stdlib(("distutils",))
     src = stdlib / "distutils"
     dst_root = NUITKA_OUT
     if not src.is_dir():
@@ -465,7 +640,7 @@ def copy_stdlib_distutils() -> None:
 
 def copy_stdlib_wave() -> None:
     """将 ``Lib/wave.py`` 拷入 gui.dist（与 ``--include-module=wave`` 二选一即可；增量未重编时可用于补拷）。"""
-    stdlib = Path(sysconfig.get_path("stdlib"))
+    stdlib = resolve_runtime_stdlib(("wave.py",))
     src = stdlib / "wave.py"
     dst_root = NUITKA_OUT
     dst_root.mkdir(parents=True, exist_ok=True)
@@ -485,6 +660,58 @@ def copy_stdlib_wave() -> None:
         except (OSError, zipfile.BadZipFile) as e:
             print(f"[post] 读取 {embedded_zip} 失败: {e}")
     print(f"[post] 跳过 wave：未找到 {src} 或 {embedded_zip}!wave.pyc")
+
+
+def copy_stdlib_runtime_helpers() -> None:
+    """Copy stdlib modules imported by nofollowed source packages at runtime.
+
+    Several large packages are copied as source instead of compiled by Nuitka
+    (Paddle/PaddleOCR/scipy/skimage/requests). They perform optional imports
+    deep inside their import graph, so a tiny hand-maintained stdlib list turns
+    into whack-a-mole on clean Windows machines. Copy the small CPython Lib
+    surface that is safe for runtime use, while excluding installers, venv
+    tooling, and site-packages.
+    """
+    stdlib = resolve_runtime_stdlib(("site.py", "pydoc.py", "unittest"))
+    dst_root = NUITKA_OUT
+    excluded_dirs = {
+        "__pycache__",
+        "ensurepip",
+        "idlelib",
+        "site-packages",
+        "test",
+        "tkinter",
+        "turtledemo",
+        "venv",
+    }
+    excluded_files = {"__phello__.foo.py", "antigravity.py", "this.py"}
+    copied_dirs = 0
+    copied_files = 0
+    for child in sorted(stdlib.iterdir(), key=lambda item: item.name.lower()):
+        if child.is_dir():
+            if child.name in excluded_dirs:
+                continue
+            shutil.copytree(child, dst_root / child.name, dirs_exist_ok=True)
+            copied_dirs += 1
+        elif child.is_file() and child.suffix == ".py" and child.name not in excluded_files:
+            shutil.copy2(child, dst_root / child.name)
+            copied_files += 1
+    print(f"[post] stdlib runtime helpers -> gui.dist/ ({copied_dirs} dirs, {copied_files} files)")
+
+
+def copy_stdlib_encodings() -> None:
+    """CPython 启动阶段必须能导入 encodings；缺失时 clean Windows 会直接启动失败。"""
+    stdlib = resolve_runtime_stdlib(("encodings",))
+    src = stdlib / "encodings"
+    dst_root = NUITKA_OUT
+    if not src.is_dir():
+        print(f"[post] 警告: 未找到 stdlib encodings: {src}")
+        return
+    dst = dst_root / "encodings"
+    if dst.exists():
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst)
+    print("[post] encodings/ (stdlib) -> gui.dist/")
 
 
 def copy_pypinyin_package_data() -> None:
@@ -508,6 +735,7 @@ VC_RUNTIME_DLLS = (
     "vcruntime140.dll",
     "vcruntime140_1.dll",
     "concrt140.dll",
+    "vcomp140.dll",
 )
 
 
@@ -547,6 +775,50 @@ def ensure_vc_runtime_dlls() -> None:
         )
 
 
+def ensure_python_stable_abi_dlls() -> None:
+    """Bundle python3.dll for abi3 wheels such as modern cryptography."""
+    if os.name != "nt":
+        return
+    NUITKA_OUT.mkdir(parents=True, exist_ok=True)
+    candidates: list[Path] = []
+    home = _venv_home_from_cfg()
+    if home is not None:
+        candidates.append(home)
+    candidates.extend(
+        [
+            Path(getattr(sys, "base_prefix", sys.prefix)).resolve(),
+            Path(sys.executable).resolve().parent,
+        ]
+    )
+    for name in ("python3.dll",):
+        dst = NUITKA_OUT / name
+        if dst.is_file():
+            continue
+        for base in candidates:
+            src = base / name
+            if src.is_file():
+                shutil.copy2(src, dst)
+                print(f"[post] {name} -> gui.dist/")
+                break
+        else:
+            print(f"[post] 警告: 未找到 {name}，abi3 扩展 wheel 可能无法加载")
+
+
+def post_process_nuitka_output(timings: list[tuple[str, float]] | None = None) -> None:
+    """Copy runtime packages and DLLs into gui.dist after compile or reuse."""
+    t_post = time.perf_counter()
+    copy_nofollow_runtime_packages()
+    copy_stdlib_distutils()
+    copy_stdlib_encodings()
+    copy_stdlib_wave()
+    copy_stdlib_runtime_helpers()
+    copy_pypinyin_package_data()
+    ensure_vc_runtime_dlls()
+    ensure_python_stable_abi_dlls()
+    if timings is not None:
+        timings.append(("Nuitka 后处理 (拷包/补文件)", time.perf_counter() - t_post))
+
+
 def run_nuitka(timings: list[tuple[str, float]] | None = None, jobs: int | None = None):
     """执行 Nuitka standalone 编译。
 
@@ -569,7 +841,9 @@ def run_nuitka(timings: list[tuple[str, float]] | None = None, jobs: int | None 
         "--follow-import-to=services",
         "--include-package=AutoScriptor",
         "--include-package=ZmxyOL",
-        "--include-package=services",
+        "--include-package=services.core",
+        "--include-package=services.webui",
+        "--include-module=services.single_instance",
         # setuptools 依赖；仅复制 setuptools 目录时，冻结环境需能解析该子模块
         "--include-package=_distutils_hack",
         # 不可 --include-package=distutils：与 setuptools._distutils 同编会 Nuitka duplicate locals（见 crash report）
@@ -577,6 +851,22 @@ def run_nuitka(timings: list[tuple[str, float]] | None = None, jobs: int | None 
         "--nofollow-import-to=distutils",
         # paddle.audio 等会 import wave；nofollow paddle 时静态分析易漏，显式纳入 standalone
         "--include-module=wave",
+        # nofollowed runtime packages (requests/httpx/etc.) import these stdlib
+        # packages dynamically; compiling the parent package avoids shadowing a
+        # copied stdlib directory with a non-package frozen module.
+        "--include-package=http",
+        "--include-package=email",
+        "--include-package=html",
+        "--include-package=urllib",
+        "--include-package=xml",
+        "--include-package=xmlrpc",
+        "--include-package=logging",
+        "--include-package=asyncio",
+        "--include-package=concurrent",
+        "--include-package=json",
+        "--include-package=unittest",
+        "--include-package=pydoc_data",
+        "--include-package=wsgiref",
         # FastAPI Form/UploadFile 依赖 python-multipart（import 名 multipart；另有顶层 python_multipart）。
         # 勿用 --include-package=multipart：Nuitka 4.x 在部分环境下 locateModule finding≠absolute 会 FATAL。
         # --follow-import-to 在判为 unused 时仍不打包；须 --include-module 强制纳入 standalone。
@@ -596,7 +886,7 @@ def run_nuitka(timings: list[tuple[str, float]] | None = None, jobs: int | None 
         "--show-memory",
         str(PROJECT_ROOT / "gui.py"),
     ]
-    for name in _NUITKA_NOFOLLOW:
+    for name in [*_NUITKA_NOFOLLOW, *_NUITKA_NOFOLLOW_ONLY]:
         cmd.insert(-1, f"--nofollow-import-to={name}")
 
     icon = PROJECT_ROOT / "webapp" / "buildResources" / "icon.ico"
@@ -624,14 +914,7 @@ def run_nuitka(timings: list[tuple[str, float]] | None = None, jobs: int | None 
         print("[nuitka] 编译失败!")
         sys.exit(1)
     print("[nuitka] 编译完成!")
-    t_post = time.perf_counter()
-    copy_nofollow_runtime_packages()
-    copy_stdlib_distutils()
-    copy_stdlib_wave()
-    copy_pypinyin_package_data()
-    ensure_vc_runtime_dlls()
-    if timings is not None:
-        timings.append(("Nuitka 后处理 (拷包/补文件)", time.perf_counter() - t_post))
+    post_process_nuitka_output(timings=timings)
 
 
 def collect_data():
@@ -725,8 +1008,11 @@ def zip_backend_tree() -> None:
     if not NUITKA_OUT.is_dir():
         print(f"[zip] 错误: 缺少 Nuitka 目录 {NUITKA_OUT}，无法生成 backend.zip")
         sys.exit(1)
+    copy_stdlib_encodings()
     copy_stdlib_wave()
+    copy_stdlib_runtime_helpers()
     ensure_vc_runtime_dlls()
+    ensure_python_stable_abi_dlls()
     zip_path = DIST_DIR / "backend.zip"
     if zip_path.exists():
         zip_path.unlink()
@@ -740,6 +1026,110 @@ def zip_backend_tree() -> None:
                 zf.write(fp, arc.as_posix())
                 n_files += 1
     print(f"[zip] 完成，共 {n_files} 个文件 -> {zip_path}")
+
+
+def _port_is_open(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.5)
+        return sock.connect_ex((host, port)) == 0
+
+
+def _terminate_process_tree(proc: subprocess.Popen) -> None:
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    else:
+        proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+
+def _tail(text: str, max_lines: int = 80) -> str:
+    lines = text.splitlines()
+    return "\n".join(lines[-max_lines:])
+
+
+def validate_engine_runtime(timeout_s: int = 90) -> None:
+    """Start the packaged engine and require the WebUI to answer on port 5000."""
+    engine = NUITKA_OUT / ("autoscriptor-engine.exe" if os.name == "nt" else "autoscriptor-engine")
+    if not engine.is_file():
+        print(f"[smoke] 错误: 缺少 engine: {engine}")
+        sys.exit(1)
+    if _port_is_open("127.0.0.1", 5000):
+        print("[smoke] 错误: 127.0.0.1:5000 已被占用，无法验证默认产品端口。")
+        sys.exit(1)
+
+    smoke_data = DIST_DIR / ".smoke-data"
+    if smoke_data.exists():
+        shutil.rmtree(smoke_data)
+    shutil.copytree(DATA_DIR, smoke_data)
+
+    env = os.environ.copy()
+    env.update({
+        "AUTOSCRIPTOR_ALLOW_MULTI_INSTANCE": "1",
+        "AUTOSCRIPTOR_ELECTRON": "1",
+        "AUTOSCRIPTOR_ELECTRON_PIPE": "1",
+        "AUTOSCRIPTOR_DATA_DIR": str(smoke_data.resolve()),
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
+        "UVICORN_LOG_LEVEL": "info",
+        "NO_COLOR": "1",
+    })
+    env.pop("PYTHONHOME", None)
+    env.pop("PYTHONPATH", None)
+
+    print(f"[smoke] 启动 engine: {engine}")
+    proc = subprocess.Popen(
+        [str(engine), "--electron"],
+        cwd=str(NUITKA_OUT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+    )
+    ready = False
+    deadline = time.perf_counter() + timeout_s
+    try:
+        while time.perf_counter() < deadline:
+            if proc.poll() is not None:
+                break
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:5000", timeout=2) as resp:
+                    body = resp.read(4096).decode("utf-8", errors="replace")
+                    if resp.status == 200 and ("AutoScriptor" in body or "造笔" in body):
+                        ready = True
+                        break
+            except Exception:
+                time.sleep(1)
+
+        if ready:
+            print("[smoke] WebUI 启动验证通过: http://127.0.0.1:5000")
+            return
+
+        if proc.poll() is None:
+            _terminate_process_tree(proc)
+        try:
+            stdout, stderr = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            stdout, stderr = "", ""
+        print(f"[smoke] 错误: engine 未在 {timeout_s}s 内启动成功，exit={proc.poll()}")
+        if stdout:
+            print("[smoke] stdout tail:\n" + _tail(stdout))
+        if stderr:
+            print("[smoke] stderr tail:\n" + _tail(stderr))
+        sys.exit(1)
+    finally:
+        _terminate_process_tree(proc)
+        shutil.rmtree(smoke_data, ignore_errors=True)
 
 
 def build_electron(
@@ -907,6 +1297,11 @@ def main():
         help="跳过 backend.zip 与 Electron（不装包；适合只验证/迭代 Python 引擎，省大量时间）",
     )
     parser.add_argument(
+        "--skip-engine-smoke",
+        action="store_true",
+        help="跳过打包 engine 启动烟测（仅在端口被占用或本机环境专门调试时使用）",
+    )
+    parser.add_argument(
         "--incremental-backend-from",
         default="",
         metavar="PATH",
@@ -978,9 +1373,16 @@ def main():
         run_nuitka(timings=timings, jobs=args.jobs)
     else:
         print("[nuitka] 已跳过")
+        post_process_nuitka_output(timings=timings)
 
     with timed_step(timings, "收集数据 (collect_data)"):
         collect_data()
+
+    if not args.skip_engine_smoke:
+        with timed_step(timings, "engine 启动烟测"):
+            validate_engine_runtime()
+    else:
+        print("[smoke] 已跳过 engine 启动烟测")
 
     if not args.skip_electron:
         with timed_step(timings, "打包 backend.zip"):

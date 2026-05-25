@@ -102,7 +102,9 @@ function readJsonObjectIfExists(filePath) {
   try {
     if (!fs.existsSync(filePath)) return result;
     result.exists = true;
-    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    let text = fs.readFileSync(filePath, 'utf8');
+    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+    const data = JSON.parse(text);
     if (!data || typeof data !== 'object' || Array.isArray(data)) {
       result.error = 'JSON is not an object';
       return result;

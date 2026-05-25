@@ -230,7 +230,7 @@ class ConfigManager:
                 logger.warning(f"账号文件不存在且创建失败: {path} ({e})")
                 self.current_acc = None
                 return
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8-sig") as f:
             data = json.load(f)
         self.current_acc = Account(name, data)
         self.current_acc.decrypt_credentials(pwd)
@@ -239,7 +239,7 @@ class ConfigManager:
         if not self.config_path.exists():
             self.global_cfg = {k: {} for k in _GLOBAL_KEYS}
         else:
-            with open(self.config_path, "r", encoding="utf-8") as f:
+            with open(self.config_path, "r", encoding="utf-8-sig") as f:
                 self.global_cfg = json.load(f)
         self.global_cfg.setdefault("tasks", {})
         self.global_cfg.setdefault("status", {})
