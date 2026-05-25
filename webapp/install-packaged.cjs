@@ -10,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const yauzl = require('yauzl');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 function safeJoin(dest, name) {
   const n = name.replace(/\\/g, '/');
@@ -76,6 +76,59 @@ function extractZip(zipPath, destDir, { onFile }) {
   });
 }
 
+function resolveWindowsTarExe() {
+  if (process.platform !== 'win32') return '';
+  const candidates = [
+    path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'),
+    'tar.exe',
+  ];
+  for (const candidate of candidates) {
+    const check = spawnSync(candidate, ['--version'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+    if (!check.error && check.status === 0) return candidate;
+  }
+  return '';
+}
+
+function extractZipWithNativeTar(zipPath, destDir, { send, total }) {
+  const tarExe = resolveWindowsTarExe();
+  if (!tarExe) return Promise.resolve({ attempted: false, ok: false });
+  safeSend(send, {
+    type: 'log',
+    message: `[解压] 使用系统 tar.exe 加速解压（${total} 个文件），完成前进度会停留在此步骤…`,
+  });
+  safeSend(send, { type: 'progress', percent: 8, message: '系统解压中…' });
+
+  return new Promise((resolve) => {
+    const child = spawn(tarExe, ['-xf', zipPath, '-C', destDir], {
+      windowsHide: true,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString('utf8');
+      if (stderr.length > 4000) stderr = stderr.slice(-4000);
+    });
+    child.on('error', (e) => {
+      safeSend(send, { type: 'log', message: `[解压] tar.exe 启动失败，回退 JS 解压：${e.message}` });
+      resolve({ attempted: true, ok: false });
+    });
+    child.on('close', (code) => {
+      if (code === 0) {
+        safeSend(send, { type: 'progress', percent: 89, message: `系统解压完成（${total} 个文件）` });
+        safeSend(send, { type: 'log', message: '[解压] tar.exe 解压完成' });
+        resolve({ attempted: true, ok: true });
+      } else {
+        const msg = stderr.trim() ? `：${stderr.trim()}` : '';
+        safeSend(send, { type: 'log', message: `[解压] tar.exe 解压失败，回退 JS 解压（exit=${code}${msg}）` });
+        resolve({ attempted: true, ok: false });
+      }
+    });
+  });
+}
+
 function writeUninstallPs1(installRoot, userDataInstallJson) {
   const rootResolved = path.resolve(installRoot);
   const rootJson = JSON.stringify(rootResolved);
@@ -90,6 +143,7 @@ function writeUninstallPs1(installRoot, userDataInstallJson) {
     '  try {',
     '    Get-CimInstance Win32_Process | Where-Object {',
     '      ($_.ProcessId -ne $PID) -and (',
+    '        ($_.ExecutablePath -and (@("造笔.exe","AutoScriptor-Portable.exe","autoscriptor-engine.exe") -contains (Split-Path -Leaf $_.ExecutablePath))) -or',
     '        ($_.ExecutablePath -and ($_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase))) -or',
     '        ($_.CommandLine -and ($_.CommandLine.IndexOf($root, [System.StringComparison]::OrdinalIgnoreCase) -ge 0))',
     '      )',
@@ -148,6 +202,7 @@ function writeUninstallPs1(installRoot, userDataInstallJson) {
     'try {',
     '  Get-CimInstance Win32_Process | Where-Object {',
     '    ($_.ProcessId -ne $PID) -and (',
+    '      ($_.ExecutablePath -and (@("造笔.exe","AutoScriptor-Portable.exe","autoscriptor-engine.exe") -contains (Split-Path -Leaf $_.ExecutablePath))) -or',
     '      ($_.ExecutablePath -and ($_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase))) -or',
     '      ($_.CommandLine -and ($_.CommandLine.IndexOf($root, [System.StringComparison]::OrdinalIgnoreCase) -ge 0))',
     '    )',
@@ -210,6 +265,54 @@ function sha256Buffer(buf) {
 
 function safeSend(send, data) {
   if (typeof send === 'function') send(data);
+}
+
+function createExtractProgressReporter(opts) {
+  const {
+    send,
+    total,
+    progressStart = 5,
+    progressSpan = 84,
+    progressMax = 89,
+    logEveryFiles = 500,
+    logMinIntervalMs = 1500,
+    progressMinIntervalMs = 250,
+  } = opts || {};
+
+  const totalSafe = Math.max(Number(total) || 0, 1);
+  let lastLogAt = 0;
+  let lastLogDone = 0;
+  let lastProgressAt = 0;
+  let lastProgressPct = -1;
+
+  return (done, name) => {
+    const now = Date.now();
+    const first = done === 1;
+    const final = done >= totalSafe;
+    const pct = Math.min(progressMax, progressStart + Math.floor((progressSpan * done) / totalSafe));
+
+    if (
+      first ||
+      final ||
+      pct !== lastProgressPct ||
+      now - lastProgressAt >= progressMinIntervalMs
+    ) {
+      safeSend(send, { type: 'progress', percent: pct, message: `解压 ${done}/${total}` });
+      lastProgressAt = now;
+      lastProgressPct = pct;
+    }
+
+    if (
+      first ||
+      final ||
+      done - lastLogDone >= logEveryFiles ||
+      now - lastLogAt >= logMinIntervalMs
+    ) {
+      safeSend(send, { type: 'log', message: `[解压] ${done}/${total} ${name}` });
+      lastLogAt = now;
+      lastLogDone = done;
+    }
+  };
 }
 
 function stamp() {
@@ -358,7 +461,9 @@ function readJsonObject(filePath) {
     return result;
   }
   try {
-    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    let text = fs.readFileSync(filePath, 'utf8');
+    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+    const data = JSON.parse(text);
     if (!data || typeof data !== 'object' || Array.isArray(data)) {
       result.error = 'not a JSON object';
       return result;
@@ -669,10 +774,13 @@ function inspectZip(zipPath) {
   return new Promise((resolve, reject) => {
     yauzl.open(zipPath, { lazyEntries: false }, (err, zipfile) => {
       if (err) return reject(err);
-      const info = { files: 0, uncompressedBytes: 0, hasEngine: false };
+      const info = { files: 0, uncompressedBytes: 0, hasEngine: false, unsafeEntries: [] };
       zipfile.on('entry', (entry) => {
         if (entry.fileName.endsWith('/')) return;
         const n = entry.fileName.replace(/\\/g, '/');
+        if (n.includes('..') || path.isAbsolute(n)) {
+          info.unsafeEntries.push(entry.fileName);
+        }
         info.files += 1;
         info.uncompressedBytes += Number(entry.uncompressedSize || 0);
         if (n === 'autoscriptor-engine.exe' || n.endsWith('/autoscriptor-engine.exe')) {
@@ -784,6 +892,15 @@ async function dryRunPackagedInstall(opts) {
       'backendEngine',
       zipInfo.hasEngine,
       zipInfo.hasEngine ? 'backend.zip 包含 autoscriptor-engine.exe' : 'backend.zip 缺少 autoscriptor-engine.exe',
+    );
+    addReportCheck(
+      report,
+      'backendZipPaths',
+      zipInfo.unsafeEntries.length === 0,
+      zipInfo.unsafeEntries.length === 0
+        ? 'backend.zip 路径安全'
+        : 'backend.zip 包含非法路径: ' + zipInfo.unsafeEntries.slice(0, 5).join(', '),
+      { unsafeEntries: zipInfo.unsafeEntries.slice(0, 20) },
     );
 
     const requiredBytes = zipInfo.uncompressedBytes + zipSize + 512 * 1024 * 1024;
@@ -1468,6 +1585,9 @@ async function runPackagedInstall(opts) {
   if (!zipInfo.hasEngine) {
     throw new Error('backend.zip 校验失败：压缩包内缺少 autoscriptor-engine.exe');
   }
+  if (zipInfo.unsafeEntries.length) {
+    throw new Error('backend.zip 校验失败：包含非法路径: ' + zipInfo.unsafeEntries.slice(0, 5).join(', '));
+  }
   assertDiskSpace(
     rootResolved,
     zipInfo.uncompressedBytes + fs.statSync(zipPath).size + 512 * 1024 * 1024,
@@ -1497,13 +1617,19 @@ async function runPackagedInstall(opts) {
   safeSend(send, { type: 'progress', percent: 3, message: `准备解压（${total} 个文件）…` });
 
   try {
-    await extractZip(zipPath, stagingDir, {
-      onFile: (done, name) => {
-        safeSend(send, { type: 'log', message: `[解压] ${done}/${total} ${name}` });
-        const pct = 5 + Math.floor((84 * done) / Math.max(total, 1));
-        safeSend(send, { type: 'progress', percent: Math.min(pct, 89), message: `解压 ${done}/${total}` });
-      },
-    });
+    const nativeExtract = await extractZipWithNativeTar(zipPath, stagingDir, { send, total });
+    if (!nativeExtract.ok) {
+      if (nativeExtract.attempted) {
+        await removeDirWithRetry(stagingDir, send, 'tar.exe 解压残留目录');
+        fs.mkdirSync(stagingDir, { recursive: true });
+      }
+      const reportExtractProgress = createExtractProgressReporter({ send, total });
+      await extractZip(zipPath, stagingDir, {
+        onFile: (done, name) => {
+          reportExtractProgress(done, name);
+        },
+      });
+    }
     verifyBackendDir(stagingDir);
     safeSend(send, { type: 'progress', percent: 90, message: '切换引擎文件…' });
     await swapBackendDirectory(stagingDir, backendDest, send);

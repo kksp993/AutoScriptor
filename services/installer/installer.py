@@ -605,7 +605,7 @@ def ensure_config_with_mumu(project_root: Path) -> None:
             }, ensure_ascii=False, indent=2), encoding="utf-8")
 
     try:
-        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        data = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
     except Exception:
         return
 

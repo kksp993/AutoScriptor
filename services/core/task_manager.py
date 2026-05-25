@@ -20,12 +20,11 @@ import dpath
 from AutoScriptor.utils.cancel import TaskCancelled, bind_cancel_event
 from AutoScriptor.utils.logger import logger
 
-from ZmxyOL import *
-from AutoScriptor import *
-import AutoScriptor.core.api as _core_api
+from AutoScriptor.core.background import bg
+from AutoScriptor.errors import TaskRequireReTry
+from AutoScriptor.utils.cancel import cancellable_sleep as sleep
 from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.task_registry import task_registry
-from AutoScriptor import TaskRequireReTry
 from AutoScriptor.utils.logger import set_current_task
 from services.core.runtime_context import runtime_ctx
 
@@ -125,6 +124,17 @@ def clamp_to_sched_window(ts: float, start_h: int, end_h: int) -> float:
     return datetime.datetime.combine(next_day, datetime.time(start_h, 0)).timestamp()
 
 
+def _is_request_human_takeover(exc: Exception) -> bool:
+    cls = exc.__class__
+    return cls.__name__ == "RequestHumanTakeover" and "NemuIpc" in cls.__module__
+
+
+class RequestHumanTakeover(Exception):
+    """Lightweight placeholder; real NemuIpc exceptions are detected lazily."""
+
+    pass
+
+
 class TaskManager:
     """管理任务执行、重试、错误恢复。"""
 
@@ -208,6 +218,11 @@ class TaskManager:
                 force_reload_tasks()
                 logger.info("✅ 任务重新加载完成")
             except Exception as e:
+                if _is_request_human_takeover(e):
+                    logger.error(f"Request requires human takeover: {task}, reason: {e}")
+                    with self._cfg_lock:
+                        self._update_next_exec_time(task)
+                    return False
                 logger.error(f"❌ 任务重新加载失败: {e}")
                 raise
             finally:
@@ -431,6 +446,7 @@ class TaskManager:
                 #     logger.warning("🔄 悬浮窗关闭失败，尝试完全重启模拟器")
                 #     return self._full_emulator_restart(app_name)
                 sleep(5)
+                from ZmxyOL.nav.map_manager import mm
                 mm.set_region("登录")
                 return True
             except Exception as e:
@@ -491,6 +507,7 @@ class TaskManager:
             sleep(3)
             runtime_ctx.refresh(cancel_check=self._check_cancel_requested)
             sleep(5)
+            from ZmxyOL.nav.map_manager import mm
             mm.set_region("登录")
             return True
         except Exception as e:

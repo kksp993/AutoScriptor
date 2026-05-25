@@ -671,6 +671,9 @@
       color: var(--accent);
       font-weight: 700;
     }
+    .summary-check.warn {
+      color: #d97706;
+    }
 
     .preflight-panel {
       margin-top: 8px;
@@ -1257,6 +1260,8 @@
     const btnNext = document.getElementById('btnNext');
 
     let pathsAllValid = false;
+    let pathValidationReady = false;
+    let pathValidationSkipped = false;
     window._wizardGateActive = false;
     window._wizardGateCanProceed = true;
 
@@ -1333,9 +1338,15 @@
         case 4:
           setDryRun(false);
           setPrev(false, null);
-          btnNext.textContent = pathsAllValid ? '完成安装 →' : '验证中...';
-          btnNext.disabled = !pathsAllValid;
-          btnNext.onclick = pathsAllValid ? confirmAndFinish : null;
+          if (!pathValidationReady) {
+            btnNext.textContent = '验证中...';
+            btnNext.disabled = true;
+            btnNext.onclick = null;
+          } else {
+            btnNext.textContent = pathsAllValid ? '完成安装 →' : '稍后配置 →';
+            btnNext.disabled = false;
+            btnNext.onclick = confirmAndFinish;
+          }
           break;
         case 5:
           setDryRun(false);
@@ -1441,6 +1452,7 @@
 
     let installStartTime = null;
     let elapsedTimer = null;
+    let installCompleteHandled = false;
 
     function formatElapsed(ms) {
       const s = Math.floor(ms / 1000);
@@ -1474,6 +1486,20 @@
       progressFill.style.width = pct + '%';
       progressPct.textContent = pct + '%';
       if (msg) progressLabel.textContent = msg;
+    }
+
+    function handleInstallComplete() {
+      if (installCompleteHandled) return;
+      installCompleteHandled = true;
+      stopElapsedTimer();
+      setProgress(100, '安装完成');
+      const total = installStartTime ? formatElapsed(Date.now() - installStartTime) : '';
+      const msg = window._installerPackagedMode
+        ? '✅ 引擎与数据已释放完成，正在验证环境配置...'
+        : '✅ 依赖安装完成，正在验证环境配置...';
+      addLog(msg + (total ? ` (耗时 ${total})` : ''), 'success');
+      installElapsedTotal = total;
+      setTimeout(() => goToStep(4), 600);
     }
 
     window._installerPackagedMode = false;
@@ -1651,6 +1677,7 @@
         return;
       }
       goToStep(3);
+      installCompleteHandled = false;
       startElapsedTimer();
       let previousInstallRoot = null;
       try {
@@ -1667,6 +1694,7 @@
           });
         }
         await window.electron.installer.runPackagedInstall({ installRoot: root });
+        handleInstallComplete();
       } catch (e) {
         addLog(String(e && e.message ? e.message : e), 'error');
         stopElapsedTimer();
@@ -1692,6 +1720,7 @@
           return;
         }
         goToStep(3);
+        installCompleteHandled = false;
         startElapsedTimer();
         if (window.electron && window.electron.installer) {
           window.electron.installer.startInstall({ pipSource: selectedPipSource });
@@ -1725,6 +1754,7 @@
 
     async function loadAndVerifyPaths() {
       pathsAllValid = false;
+      pathValidationReady = false;
       updateButton();
       const bar = document.getElementById('pvValidationBar');
       bar.className = 'pv-validation-bar';
@@ -1732,6 +1762,8 @@
 
       if (!window.electron?.installer?.readConfigPaths) {
         showValidationBar('error', '无法读取配置（Electron API 不可用）');
+        pathValidationReady = true;
+        updateButton();
         return;
       }
 
@@ -1800,6 +1832,7 @@
       }
       setPvState('adb_device', null, '等待功能检测');
       pathsAllValid = false;
+      pathValidationReady = true;
       updateButton();
       if (allOk) {
         showValidationBar('success', '路径均存在。请点击「运行功能检测」验证可执行文件是否真正可用。');
@@ -1813,6 +1846,8 @@
       const btn = document.getElementById('btnRunValidation');
       if (spinner) spinner.style.display = '';
       if (btn) btn.disabled = true;
+      pathValidationReady = false;
+      updateButton();
       showValidationBar('success', '正在运行功能检测…');
 
       try {
@@ -1826,6 +1861,8 @@
         showValidationBar('error', '功能检测调用失败: ' + (e.message || e));
         if (spinner) spinner.style.display = 'none';
         if (btn) btn.disabled = false;
+        pathValidationReady = true;
+        updateButton();
         return;
       }
       if (spinner) spinner.style.display = 'none';
@@ -1833,6 +1870,8 @@
 
       if (!report || report.error) {
         showValidationBar('error', '检测出错: ' + (report?.error || '未知错误'));
+        pathValidationReady = true;
+        updateButton();
         return;
       }
 
@@ -1848,6 +1887,7 @@
         report.adb_device?.detail || '');
 
       pathsAllValid = !!report.overall;
+      pathValidationReady = true;
       updateButton();
 
       document.querySelectorAll('.pv-help.show').forEach(h => h.classList.remove('show'));
@@ -1891,15 +1931,24 @@
     }
 
     async function confirmAndFinish() {
-      if (!pathsAllValid) return;
+      pathValidationSkipped = !pathsAllValid;
       try {
         await window.electron.installer.savePaths(currentPaths);
       } catch { /* ignore */ }
 
       if (installElapsedTotal) {
         const descEl = document.querySelector('.complete-desc');
-        if (descEl) descEl.innerHTML =
-          `造笔已准备就绪。<br>安装耗时 <strong>${installElapsedTotal}</strong>，点击下方按钮启动应用程序。`;
+        if (descEl) {
+          descEl.innerHTML = pathValidationSkipped
+            ? `造笔已安装完成。<br>安装耗时 <strong>${installElapsedTotal}</strong>，模拟器路径可稍后在应用中继续配置。`
+            : `造笔已准备就绪。<br>安装耗时 <strong>${installElapsedTotal}</strong>，点击下方按钮启动应用程序。`;
+        }
+      }
+      const summaryItems = document.querySelectorAll('.summary-item');
+      if (summaryItems && summaryItems[2]) {
+        summaryItems[2].innerHTML = pathValidationSkipped
+          ? '<span class="summary-check warn">!</span> 模拟器路径待配置'
+          : '<span class="summary-check">✓</span> 模拟器路径已配置';
       }
       goToStep(5);
     }
@@ -2054,14 +2103,7 @@
               btnNext.onclick = () => { goToStep(1); };
               break;
             case 'complete': {
-              stopElapsedTimer();
-              const total = installStartTime ? formatElapsed(Date.now() - installStartTime) : '';
-              const msg = window._installerPackagedMode
-                ? '✅ 引擎与数据已释放完成，正在验证环境配置...'
-                : '✅ 依赖安装完成，正在验证环境配置...';
-              addLog(msg + (total ? ` (耗时 ${total})` : ''), 'success');
-              installElapsedTotal = total;
-              setTimeout(() => goToStep(4), 600);
+              handleInstallComplete();
               break;
             }
           }

@@ -608,6 +608,19 @@ class TestConfigLifecycleContract(unittest.TestCase):
             self.assertTrue(calls)
             self.assertEqual(calls[-1][1], "config.json")
 
+    def test_config_load_accepts_utf8_bom(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module = import_app_config_for_test(tmp)
+            config_path = Path(tmp) / "config.json"
+            config_path.write_text(
+                json.dumps({"app": {"name": "ZmxyOL"}, "tasks": {}, "current_account": ""}),
+                encoding="utf-8-sig",
+            )
+
+            module.cfg.load_config()
+
+            self.assertEqual(module.cfg._config["app"]["name"], "ZmxyOL")
+
     def test_relative_accounts_dir_keeps_data_accounts_compatibility(self):
         with tempfile.TemporaryDirectory() as tmp:
             module = import_app_config_for_test(tmp)
@@ -809,15 +822,53 @@ class TestWebUIServerRouteContract(unittest.TestCase):
 
     def test_device_diagnostics_import_does_not_initialize_heavy_runtime(self):
         package_init = (ROOT / "AutoScriptor/__init__.py").read_text(encoding="utf-8")
+        core_init = (ROOT / "AutoScriptor/core/__init__.py").read_text(encoding="utf-8")
         mumu_init = (ROOT / "AutoScriptor/control/MumuAdaptor/__init__.py").read_text(encoding="utf-8")
         server = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        task_manager = (ROOT / "services/core/task_manager.py").read_text(encoding="utf-8")
 
         self.assertIn("def __getattr__", package_init)
+        self.assertIn("def __getattr__", core_init)
         self.assertIn("def __getattr__", mumu_init)
         self.assertNotIn("from AutoScriptor.core import *", package_init)
+        self.assertNotIn("from AutoScriptor.core.api import *", core_init)
         self.assertNotIn("from AutoScriptor import *", server)
+        self.assertNotIn("from AutoScriptor import *", task_manager)
+        self.assertNotIn("from ZmxyOL import *", task_manager)
         self.assertNotIn("from .mumu import Mumu", mumu_init)
         self.assertNotIn("from .api import *", mumu_init)
+
+    def test_webui_server_import_does_not_import_ocr_runtime(self):
+        code = r'''
+import builtins
+import sys
+
+orig = builtins.__import__
+blocked = {"paddle", "paddleocr"}
+
+def guard(name, globals=None, locals=None, fromlist=(), level=0):
+    if name.split(".")[0] in blocked:
+        raise RuntimeError("blocked import " + name)
+    return orig(name, globals, locals, fromlist, level)
+
+builtins.__import__ = guard
+import services.webui.server
+assert "paddle" not in sys.modules
+assert "paddleocr" not in sys.modules
+print("OK")
+'''
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+        proc = subprocess.run(
+            [sys.executable, "-X", "utf8", "-c", code],
+            cwd=str(ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("OK", proc.stdout)
 
     def test_editor_device_actions_acquire_runtime_session_on_demand(self):
         content = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
@@ -1049,6 +1100,9 @@ class TestInstallerContract(unittest.TestCase):
             self.assertIn("signAndEditExecutable: codeSigningEnabled", content)
 
         self.assertIn('env.get("AUTOSCRIPTOR_CODE_SIGN") == "1"', build)
+        self.assertIn("validate_engine_runtime", build)
+        self.assertIn("--skip-engine-smoke", build)
+        self.assertIn("resolve_runtime_stdlib", build)
         self.assertIn('"verify-pack"', build)
         self.assertIn("打包自检失败", build)
         self.assertIn("leakedMaps", verify)

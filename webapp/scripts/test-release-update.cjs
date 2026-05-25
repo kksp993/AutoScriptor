@@ -136,6 +136,8 @@ function manifestFor(targetVersion, entries = {}) {
 
 async function testCumulativeUpdateDryRunAndApply(tmp) {
   const { installRoot, userDataPath } = createInstalled(tmp, 'ok', '1.1.0');
+  const configPath = path.join(installRoot, 'data', 'config.json');
+  writeText(configPath, '\ufeff' + readText(configPath));
   const engine = 'new engine\n';
   const app = 'new app\n';
   const template = '{"template":true}\n';

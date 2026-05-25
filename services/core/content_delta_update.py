@@ -195,7 +195,7 @@ class ContentDeltaUpdater:
         if not os.path.isfile(cfg_path):
             return {}
         try:
-            with open(cfg_path, encoding="utf-8") as f:
+            with open(cfg_path, encoding="utf-8-sig") as f:
                 data = json.load(f)
             return data if isinstance(data, dict) else {}
         except Exception:

@@ -17,7 +17,7 @@ class ConfigManager:
     def _load_config(self):
         """加载配置文件"""
         if os.path.exists(self.config_path):
-            with open(self.config_path, 'r', encoding='utf-8') as f:
+            with open(self.config_path, 'r', encoding='utf-8-sig') as f:
                 self.config = json.load(f)
         else:
             self.config = {

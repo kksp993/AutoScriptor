@@ -220,6 +220,76 @@ function isInstallerWizardArgv() {
   return process.argv.some((a) => a === '--installer' || a === '--install-wizard');
 }
 
+function hasArg(name) {
+  return process.argv.some((a) => a === name || a.startsWith(`${name}=`));
+}
+
+function getArgValue(name) {
+  const prefix = `${name}=`;
+  const direct = process.argv.find((a) => a.startsWith(prefix));
+  if (direct) return direct.slice(prefix.length);
+  const idx = process.argv.indexOf(name);
+  if (idx >= 0 && idx + 1 < process.argv.length) return process.argv[idx + 1];
+  return '';
+}
+
+async function maybeRunHeadlessInstall() {
+  if (!hasArg('--headless-install')) return false;
+
+  const installRoot = path.resolve(
+    String(getArgValue('--install-root') || path.join(app.getPath('documents'), 'AutoScriptor')).trim(),
+  );
+  const reportPath = String(getArgValue('--install-report') || '').trim();
+  const events = [];
+  const writeReport = (payload) => {
+    if (!reportPath) return;
+    fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+    fs.writeFileSync(reportPath, JSON.stringify(payload, null, 2), 'utf8');
+  };
+  const send = (data) => {
+    events.push(data);
+    if (events.length > 300) events.shift();
+    if (data && data.message) console.log(data.message);
+  };
+
+  try {
+    const { dryRunPackagedInstall, runPackagedInstall } = require('./install-packaged.cjs');
+    const pkg = require('./package.json');
+    const common = {
+      installRoot,
+      resourcesPath: process.resourcesPath,
+      zipPath: getBackendZipPath(),
+      exeDir: path.dirname(process.execPath),
+      portableExePath: process.env.PORTABLE_EXECUTABLE_FILE || process.execPath,
+      appVersion: pkg.version,
+      userDataPath: app.getPath('userData'),
+    };
+    const dryRun = await dryRunPackagedInstall(common);
+    if (!dryRun.ok) {
+      throw new Error('headless install dry-run failed: ' + (dryRun.errors || []).join('; '));
+    }
+    await runPackagedInstall({
+      ...common,
+      send,
+      skipMumuConfig: hasArg('--skip-mumu-config'),
+      skipRegistry: hasArg('--skip-registry'),
+    });
+    writeReport({ ok: true, installRoot, dryRun, events });
+    app.exit(0);
+  } catch (e) {
+    writeReport({
+      ok: false,
+      installRoot,
+      error: e && e.message ? e.message : String(e),
+      stack: e && e.stack ? e.stack : '',
+      events,
+    });
+    console.error('[headless-install]', e && e.stack ? e.stack : e);
+    app.exit(1);
+  }
+  return true;
+}
+
 /** userData/install.json：与 installer:get-existing-install-info 一致。 */
 function readInstallJsonExisting() {
   try {
@@ -431,20 +501,23 @@ function startPython() {
   const engineExe = getBackendEngineExe();
   if (app.isPackaged && fs.existsSync(engineExe)) {
     const backendCwd = path.dirname(engineExe);
+    const backendEnv = {
+      ...process.env,
+      PYTHONIOENCODING: 'utf-8',
+      PYTHONUTF8: '1',
+      AUTOSCRIPTOR_ELECTRON_PIPE: '1',
+      AUTOSCRIPTOR_ELECTRON: '1',
+      AUTOSCRIPTOR_DATA_DIR: getRuntimeDataRoot(),
+      UVICORN_LOG_LEVEL: 'info',
+      NO_COLOR: '1',
+    };
+    delete backendEnv.PYTHONHOME;
+    delete backendEnv.PYTHONPATH;
     console.log('[main] Starting packaged engine:', engineExe, 'cwd:', backendCwd);
     pyProc = spawn(engineExe, ['--electron'], {
       cwd: backendCwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        PYTHONIOENCODING: 'utf-8',
-        PYTHONUTF8: '1',
-        AUTOSCRIPTOR_ELECTRON_PIPE: '1',
-        AUTOSCRIPTOR_ELECTRON: '1',
-        AUTOSCRIPTOR_DATA_DIR: getRuntimeDataRoot(),
-        UVICORN_LOG_LEVEL: 'info',
-        NO_COLOR: '1',
-      },
+      env: backendEnv,
     });
     attachBackendProcessHandlers();
     return;
@@ -1293,8 +1366,12 @@ function quitApp() {
 }
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   app.isQuitting = false;
+
+  if (await maybeRunHeadlessInstall()) {
+    return;
+  }
 
   if (isInstallerWizardArgv()) {
     createInstallerWindow();
