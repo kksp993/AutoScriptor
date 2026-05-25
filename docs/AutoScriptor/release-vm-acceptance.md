@@ -82,6 +82,40 @@ Logs are written to:
 - The daily launcher exists.
 - The local WebUI responds on `127.0.0.1:5000`.
 
+## MuMu-Capable Acceptance
+
+The clean VirtualBox VM is useful for installer hygiene, but it may not prove
+MuMu itself because nested virtualization can block Android emulators. Run this
+extra check on a Windows machine where MuMu or MuMu12 is already installed and
+can run normally:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\release\mumu_device_acceptance.ps1 `
+  -InstallRoot D:\AutoScriptor `
+  -ExercisePowerCycle `
+  -ExerciseScreenshot
+```
+
+What this adds:
+
+- Runs `backend\autoscriptor-engine.exe --runtime-import-smoke` from the
+  installed release tree, catching packaged-only import gaps such as
+  `MixControl`, `NemuIpc`, `box_grid`, editor routes, and digit extraction.
+- Verifies port `5000` is free before launch, so the test cannot accidentally
+  pass against a development WebUI.
+- Starts the packaged WebUI and checks `/api/refresh`,
+  `/api/runtime/snapshot`, `/api/overview`, and
+  `/api/device/diagnostics`.
+- By default, validates the device layer without requiring the game package.
+  Add `-RequireApp` only when the game is installed and task execution should
+  be validated too.
+- With `-ExercisePowerCycle`, shuts down the configured MuMu instance first and
+  proves AutoScriptor can start it again. With `-ExerciseScreenshot`, verifies
+  NemuIpc screenshot capture.
+
+Use `-ShutdownAfter` if the acceptance machine should leave MuMu closed after
+the run. Logs and JSON reports are written to the `-OutDir` folder.
+
 ## Manual Items Still Needed
 
 - MuMu real operation should be tested on a host/VM where MuMu can actually run. Nested virtualization may block MuMu inside VirtualBox.

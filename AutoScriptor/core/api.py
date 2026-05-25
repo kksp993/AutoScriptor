@@ -99,7 +99,7 @@ def ensure_app_running(
     mixctrl = MixControl(mumu, serial=adb_addr)
     logger.info("编排器初始化完成.")
     success = False
-    intervals = [1, 2, 3, 4, 5, 5, 5, 5]
+    intervals = [1, 2, 3, 3, 3, 3, 3, 3]
     for i, interval in enumerate(intervals, 1):
         click_result = {}
         def _click_test():
@@ -112,7 +112,7 @@ def ensure_app_running(
         t = threading.Thread(target=_click_test)
         t.daemon = True
         t.start()
-        join_with_cancel(t, 5, cancel_check)
+        join_with_cancel(t, 3, cancel_check)
         if not t.is_alive() and 'error' not in click_result:
             success = True
         if success:

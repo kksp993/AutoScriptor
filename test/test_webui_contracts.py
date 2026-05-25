@@ -724,7 +724,9 @@ class TestWebUIFrontendContract(unittest.TestCase):
 
         self.assertIn("mounted()", content)
         self.assertIn("this.refresh(false)", content)
-        self.assertIn("includeScreenshot ? '?screenshot=true' : ''", content)
+        self.assertIn("params.set('require_app', 'false')", content)
+        self.assertIn("device_overall", content)
+        self.assertIn("task_overall", content)
         self.assertIn("@click=\"refresh(true)\"", content)
         self.assertIn("默认轻量检查，不会主动读取模拟器截图", content)
 
@@ -786,13 +788,18 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("def ensure_device_session", runtime_context)
         self.assertIn("def has_device_session", runtime_context)
         self.assertIn("start_emulator=True", runtime_context)
-        self.assertIn("launch_app=True", runtime_context)
+        self.assertIn("launch_app: bool = True", runtime_context)
+        self.assertIn("launch_app=launch_app", runtime_context)
+        self.assertIn("launch_app=False", (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8"))
         self.assertIn("cancel_check=cancel_check", runtime_context)
         self.assertIn("runtime_ctx.refresh(cancel_check=self._check_cancel_requested)", scheduler)
         self.assertIn("_reload_deferred", scheduler)
         self.assertIn("_handle_watched_config_change", scheduler)
         self.assertIn("join_with_cancel", api)
         self.assertIn("sleep_with_cancel", api)
+        self.assertIn("intervals = [1, 2, 3, 3, 3, 3, 3, 3]", api)
+        self.assertIn("join_with_cancel(t, 3, cancel_check)", api)
+        self.assertNotIn("join_with_cancel(t, 5, cancel_check)", api)
 
     def test_device_facade_centralizes_manager_adb_nemu_checks(self):
         content = (ROOT / "AutoScriptor/control/MumuAdaptor/device_facade.py").read_text(encoding="utf-8")
@@ -1101,6 +1108,7 @@ class TestInstallerContract(unittest.TestCase):
 
         self.assertIn('env.get("AUTOSCRIPTOR_CODE_SIGN") == "1"', build)
         self.assertIn("validate_engine_runtime", build)
+        self.assertIn("--runtime-import-smoke", build)
         self.assertIn("--skip-engine-smoke", build)
         self.assertIn("resolve_runtime_stdlib", build)
         self.assertIn('"verify-pack"', build)
@@ -1115,6 +1123,43 @@ class TestInstallerContract(unittest.TestCase):
         self.assertIn("must be generated from config template.json", verify)
         self.assertIn("_check_config_template", prereq)
         self.assertIn("_check_generated_code_templates", prereq)
+
+    def test_mumu_acceptance_checks_packaged_runtime_webui_and_device(self):
+        script = (ROOT / "scripts/release/mumu_device_acceptance.ps1").read_text(encoding="utf-8")
+        gui = (ROOT / "gui.py").read_text(encoding="utf-8")
+        panel = (ROOT / "services/webui/static/js/components/DiagnosticsPanel.js").read_text(encoding="utf-8")
+
+        for marker in [
+            "--runtime-import-smoke",
+            "--mumu-runtime-probe",
+            "--mumu-probe-start",
+            "SkipStartProbe",
+            "Get-Port5000Owners",
+            "Stop-ProcessTree",
+            "/api/refresh",
+            "/api/runtime/snapshot",
+            "/api/overview",
+            "/api/device/diagnostics",
+            "device_overall",
+            "task_overall",
+        ]:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, script)
+
+        for marker in [
+            "AutoScriptor.core.control",
+            "AutoScriptor.control.NemuIpc.device.method.nemu_ipc",
+            "AutoScriptor.recognition.digit_rec",
+            "AutoScriptor.utils.box_grid",
+            "editor_safe_import_box_grid",
+            "editor_grid_extract_validation",
+        ]:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, gui)
+
+        self.assertIn("params.set('require_app', 'false')", panel)
+        self.assertIn("device_overall", panel)
+        self.assertIn("task_overall", panel)
 
     def test_packaged_installer_has_dry_run_and_lifecycle_tests(self):
         installer = (ROOT / "webapp/install-packaged.cjs").read_text(encoding="utf-8")

@@ -406,6 +406,185 @@ def _adb_device_rows(adb_path: str) -> list[tuple[str, str]]:
         return []
 
 
+def _parse_mumu_info_payload(text: str) -> list[dict]:
+    try:
+        data = json.loads((text or "").strip() or "{}")
+    except Exception:
+        return []
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    if isinstance(data, dict):
+        if "index" in data:
+            return [data]
+        return [item for item in data.values() if isinstance(item, dict) and "index" in item]
+    return []
+
+
+def _mumu_info_rows(emu_path: str) -> list[dict]:
+    p = str(emu_path or "").strip()
+    if not p or not Path(p).is_file():
+        return []
+    try:
+        r = subprocess.run(
+            [p, "info", "-v", "all"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if r.returncode == 0:
+            return _parse_mumu_info_payload(r.stdout or "")
+    except Exception:
+        pass
+    return []
+
+
+def _normalize_serial_host(host: str) -> str:
+    h = str(host or "").strip().lower()
+    if not h or h in {"localhost", "::1"}:
+        return "127.0.0.1"
+    return h
+
+
+def _split_adb_serial(serial: str) -> tuple[str, str] | None:
+    s = str(serial or "").strip()
+    if ":" not in s:
+        return None
+    host, port = s.rsplit(":", 1)
+    if not host or not port.isdigit():
+        return None
+    return _normalize_serial_host(host), port
+
+
+def _player_serial(player: dict) -> str:
+    port = str(player.get("adb_port", "") or "").strip()
+    if not port:
+        return ""
+    host = _normalize_serial_host(str(player.get("adb_host_ip", "127.0.0.1") or "127.0.0.1"))
+    return f"{host}:{port}"
+
+
+def _player_is_running(player: dict) -> bool:
+    if player.get("is_process_started") is True or player.get("is_android_started") is True:
+        return True
+    state = str(player.get("player_state", "") or "").lower()
+    return "start" in state or "running" in state
+
+
+def _sort_players_for_selection(players: list[dict]) -> list[dict]:
+    def key(player: dict):
+        running = 0 if _player_is_running(player) else 1
+        main = 0 if player.get("is_main") is True else 1
+        try:
+            index = int(player.get("index", 0))
+        except Exception:
+            index = 0
+        return running, main, index
+
+    return sorted(players, key=key)
+
+
+def _find_player_by_serial(players: list[dict], serial: str) -> dict | None:
+    target = _split_adb_serial(serial)
+    if target is None:
+        return None
+    target_host, target_port = target
+    for player in players:
+        current = _split_adb_serial(_player_serial(player))
+        if current is None:
+            continue
+        host, port = current
+        if port != target_port:
+            continue
+        if host == target_host or host == "127.0.0.1" or target_host == "127.0.0.1":
+            return player
+    return None
+
+
+def _coerce_player_index(player: dict | None):
+    if not player or player.get("index") is None:
+        return None
+    try:
+        return int(player.get("index"))
+    except Exception:
+        return str(player.get("index"))
+
+
+def _reconnect_mumu_player_ports(adb_path: str, players: list[dict]) -> None:
+    for player in _sort_players_for_selection(players):
+        if not _player_is_running(player):
+            continue
+        serial = _player_serial(player)
+        if serial:
+            _adb_reconnect_serial(adb_path, serial)
+
+
+def _choose_adb_device(adb_path: str, emu_path: str, preferred_serial: str, allow_fallback: bool = True) -> dict:
+    players = _mumu_info_rows(emu_path)
+    preferred = str(preferred_serial or "").strip()
+    if preferred and not preferred.startswith("YOUR_") and not preferred.endswith(":0"):
+        ok, detail = _adb_state(adb_path, preferred)
+        if not ok and ":" in preferred:
+            _adb_reconnect_serial(adb_path, preferred)
+            ok, detail = _adb_state(adb_path, preferred)
+        player = _find_player_by_serial(players, preferred)
+        if ok:
+            return {
+                "connected": True,
+                "serial": preferred,
+                "detail": f"配置设备已连接 {preferred}",
+                "fallback_serial": "",
+                "player": player,
+                "index": _coerce_player_index(player),
+            }
+        if not allow_fallback:
+            usable = [(s, st) for s, st in _adb_device_rows(adb_path) if st == "device"]
+            fallback = next(((s, st) for s, st in usable if s.startswith("127.0.0.1:")), usable[0] if usable else None)
+            extra = f"；另检测到 {fallback[0]} 可用，但运行时会优先使用配置地址" if fallback else ""
+            return {
+                "connected": False,
+                "serial": preferred,
+                "detail": f"配置设备 {preferred} 未连接{extra}。{detail}".strip(),
+                "fallback_serial": fallback[0] if fallback else "",
+                "player": player,
+                "index": _coerce_player_index(player),
+            }
+
+    _reconnect_mumu_player_ports(adb_path, players)
+    rows = [(s, st) for s, st in _adb_device_rows(adb_path) if st == "device"]
+    chosen: tuple[str, str] | None = None
+    player: dict | None = None
+    for candidate in _sort_players_for_selection(players):
+        for row in rows:
+            if _find_player_by_serial([candidate], row[0]):
+                chosen = row
+                player = candidate
+                break
+        if chosen:
+            break
+    if chosen is None:
+        chosen = next(((s, st) for s, st in rows if s.startswith("127.0.0.1:")), rows[0] if rows else None)
+        if chosen:
+            player = _find_player_by_serial(players, chosen[0])
+    if chosen:
+        return {
+            "connected": True,
+            "serial": chosen[0],
+            "detail": f"已连接设备 {chosen[0]}",
+            "fallback_serial": "",
+            "player": player,
+            "index": _coerce_player_index(player),
+        }
+    return {
+        "connected": False,
+        "serial": preferred,
+        "detail": "未检测到已连接设备（模拟器可能未运行）",
+        "fallback_serial": "",
+        "player": _find_player_by_serial(players, preferred) if preferred else None,
+        "index": None,
+    }
+
+
 def _adb_state(adb_path: str, serial: str) -> tuple[bool, str]:
     s = str(serial or "").strip()
     if not s or s.startswith("YOUR_") or s.endswith(":0"):
@@ -476,6 +655,7 @@ def validate_mumu_setup(emulator: dict) -> dict:
         "emu_path": {"exists": False, "runnable": False, "detail": ""},
         "adb_path": {"exists": False, "runnable": False, "version": "", "detail": ""},
         "adb_device": {"connected": False, "serial": "", "detail": ""},
+        "emulator_index": {"configured": emulator.get("index"), "detected": None, "match": None, "detail": ""},
         "overall": False,
         "operationReady": False,
         "needsRunningDevice": False,
@@ -561,12 +741,27 @@ def validate_mumu_setup(emulator: dict) -> dict:
         results["adb_path"]["detail"] = "文件不存在" if adb_path else "未配置"
 
     if results["adb_path"]["runnable"]:
-        device = _check_configured_adb_device(adb_path, str(emulator.get("adb_addr", "") or ""))
+        addr = str(emulator.get("adb_addr", "") or "")
+        needs_addr = not addr or addr.startswith("YOUR_") or addr.endswith(":0")
+        device = _choose_adb_device(adb_path, emu_path, addr, allow_fallback=needs_addr)
         results["adb_device"]["connected"] = device["connected"]
         results["adb_device"]["serial"] = device["serial"]
         results["adb_device"]["detail"] = device["detail"]
         if device.get("fallback_serial"):
             results["adb_device"]["fallback_serial"] = device["fallback_serial"]
+        results["emulator_index"]["detected"] = device.get("index")
+        configured = "" if emulator.get("index") is None else str(emulator.get("index"))
+        detected = "" if device.get("index") is None else str(device.get("index"))
+        if detected:
+            results["emulator_index"]["match"] = (not configured) or configured == detected
+            if results["emulator_index"]["match"]:
+                results["emulator_index"]["detail"] = f"ADB 地址对应 MuMu 实例 {detected}"
+            else:
+                results["emulator_index"]["detail"] = (
+                    f"配置 index={configured}，但 ADB 地址 {device['serial']} 对应 MuMu 实例 {detected}"
+                )
+        else:
+            results["emulator_index"]["detail"] = "未能从 MuMuManager info 反查 ADB 地址对应的实例序号"
     else:
         results["adb_device"]["detail"] = "ADB 不可用，跳过设备检测"
 
@@ -585,6 +780,9 @@ def validate_mumu_setup(emulator: dict) -> dict:
         and results["adb_path"]["exists"] and results["adb_path"]["runnable"]
     )
     results["operationReady"] = bool(results["overall"] and results["adb_device"]["connected"])
+    if results["operationReady"] and results["emulator_index"]["match"] is False:
+        results["operationReady"] = False
+        results["adb_device"]["detail"] += "；MuMu 实例序号与 ADB 地址不一致，请重新运行安装器配置或在设置中修正 index"
     results["needsRunningDevice"] = bool(results["overall"] and not results["adb_device"]["connected"])
     return results
 
@@ -635,24 +833,42 @@ def ensure_config_with_mumu(project_root: Path) -> None:
                 if not cur_ok:
                     emulator[k] = v
 
-    # 自动检测 adb 设备地址
+    # 自动检测 adb 设备地址，并同步 MuMu 多开 index，避免 ADB 操作与生命周期控制落到不同实例。
     adb_addr = str(emulator.get("adb_addr", ""))
-    if (not adb_addr or adb_addr.startswith("YOUR_") or adb_addr.endswith(":0")) and emulator.get("adb_path"):
-        serial = _adb_detect_serial(emulator["adb_path"]) or ""
-        if serial:
-            emulator["adb_addr"] = serial
-        else:
-            index_text = _prompt_text("请输入 MuMu 实例序号 (0-7，默认 0):", default="0")
-            try:
-                index = int(index_text) if index_text else 0
-            except Exception:
-                index = 0
-            if 0 <= index < len(COMMON_MUMU_PORTS):
-                emulator["index"] = index
-                emulator["adb_addr"] = f"127.0.0.1:{COMMON_MUMU_PORTS[index]}"
+    needs_addr = not adb_addr or adb_addr.startswith("YOUR_") or adb_addr.endswith(":0")
+    if emulator.get("adb_path"):
+        device = _choose_adb_device(
+            emulator["adb_path"],
+            str(emulator.get("emu_path", "") or ""),
+            adb_addr,
+            allow_fallback=needs_addr,
+        )
+        if device.get("connected") and (needs_addr or device.get("serial") == adb_addr):
+            emulator["adb_addr"] = device["serial"]
+            if device.get("index") is not None:
+                emulator["index"] = device["index"]
+        elif device.get("index") is not None and adb_addr and not adb_addr.startswith("YOUR_"):
+            emulator["index"] = device["index"]
+        elif needs_addr:
+            serial = _adb_detect_serial(emulator["adb_path"]) or ""
+            if serial:
+                emulator["adb_addr"] = serial
+                player = _find_player_by_serial(_mumu_info_rows(str(emulator.get("emu_path", "") or "")), serial)
+                index = _coerce_player_index(player)
+                if index is not None:
+                    emulator["index"] = index
             else:
-                emulator["index"] = 0
-                emulator["adb_addr"] = f"127.0.0.1:{COMMON_MUMU_PORTS[0]}"
+                index_text = _prompt_text("请输入 MuMu 实例序号 (0-7，默认 0):", default="0")
+                try:
+                    index = int(index_text) if index_text else 0
+                except Exception:
+                    index = 0
+                if 0 <= index < len(COMMON_MUMU_PORTS):
+                    emulator["index"] = index
+                    emulator["adb_addr"] = f"127.0.0.1:{COMMON_MUMU_PORTS[index]}"
+                else:
+                    emulator["index"] = 0
+                    emulator["adb_addr"] = f"127.0.0.1:{COMMON_MUMU_PORTS[0]}"
 
     # 回写
     try:

@@ -221,6 +221,7 @@ class Scheduler:
         self._reload_deferred = threading.Event()
         self._consecutive_errors = 0
         self._logged_in_character: tuple[str, str] | None = None  # (server, name)
+        self._retry_exhausted_tasks: set[tuple[str, str, str]] = set()
 
     # ── 注入 ──
 
@@ -237,6 +238,8 @@ class Scheduler:
     def activate(self):
         if self.state == SchedulerState.ERROR:
             return
+        if self.state != SchedulerState.RUNNING:
+            self._clear_retry_exhaustion()
         self._transition(SchedulerState.RUNNING)
         self._consecutive_errors = 0
         if self._task_manager:
@@ -260,6 +263,7 @@ class Scheduler:
     def reset(self):
         self._transition(SchedulerState.PENDING)
         self._consecutive_errors = 0
+        self._clear_retry_exhaustion()
         if self._task_manager:
             self._task_manager._reset_cancel()
 
@@ -347,13 +351,79 @@ class Scheduler:
             if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
                 self.mark_error()
 
+    # ── 调度周期 retry 上限 ──
+
+    @staticmethod
+    def _retry_key(char_key: tuple[str, str], task_key: str) -> tuple[str, str, str]:
+        return char_key[0] or "", char_key[1] or "", task_key
+
+    def _clear_retry_exhaustion(self) -> None:
+        self._retry_exhausted_tasks.clear()
+
+    def _is_retry_exhausted(self, char_key: tuple[str, str], task_key: str) -> bool:
+        return self._retry_key(char_key, task_key) in self._retry_exhausted_tasks
+
+    def _mark_retry_exhausted(self, char_key: tuple[str, str], task_key: str, max_retry: int) -> None:
+        key = self._retry_key(char_key, task_key)
+        if key in self._retry_exhausted_tasks:
+            return
+        self._retry_exhausted_tasks.add(key)
+        logger.warning(
+            "📅 任务已达到本次调度周期 retry 上限，后续将跳过直到重新启动调度: %s/%s %s (max_retry=%d)",
+            key[0],
+            key[1],
+            key[2],
+            max_retry,
+        )
+
+    def _filter_retry_available(self, char_key: tuple[str, str], tasks: list[str]) -> list[str]:
+        available = []
+        for task_key in tasks:
+            if self._is_retry_exhausted(char_key, task_key):
+                logger.info("📅 跳过本调度周期已耗尽 retry 的任务: %s/%s %s", char_key[0], char_key[1], task_key)
+                continue
+            available.append(task_key)
+        return available
+
     # ── 任务时间收集（共用） ──
 
     def _collect_active_times(self) -> list[float]:
         """收集当前账号下所有角色的 on=True 任务的「有效」下次执行时间（含 sched_window 等）。"""
         from AutoScriptor.utils.app_config import cfg
+        from AutoScriptor.utils.task_registry import task_registry
 
-        return collect_active_times_from_all_characters(cfg, dispatch_only=True)
+        if not self._retry_exhausted_tasks:
+            return collect_active_times_from_all_characters(cfg, dispatch_only=True)
+
+        now_ts = time.time()
+        result: list[float] = []
+        active = cfg.active_character()
+        active_key = (active.get("server", ""), active.get("name", ""))
+        chars = cfg._account_data.get("characters", {}) or {}
+
+        def _walk(node: dict, prefix: str, char_key: tuple[str, str]) -> None:
+            for key, val in node.items():
+                if not isinstance(val, dict):
+                    continue
+                path = f"{prefix}/{key}" if prefix else key
+                if "on" in val:
+                    if (
+                        val.get("on")
+                        and task_registry.has_task(path)
+                        and not self._is_retry_exhausted(char_key, path)
+                    ):
+                        result.append(calc_effective_next_time(val, now_ts))
+                else:
+                    _walk(val, path, char_key)
+
+        for server, name in self._iter_characters_schedule_order():
+            char_key = (server, name)
+            if char_key == active_key:
+                tasks_tree = cfg._config.get("tasks", {}) or {}
+            else:
+                tasks_tree = chars.get(server, {}).get(name, {}).get("tasks", {}) or {}
+            _walk(tasks_tree, "", char_key)
+        return result
 
     def _get_wait_interval(self) -> float:
         times = self._collect_active_times()
@@ -503,6 +573,7 @@ class Scheduler:
                 switched = True
                 self.invalidate_login()
                 due = self._collect_due(cfg.get("tasks") or {}, "", time.time())
+            due = self._filter_retry_available((server, name), due)
             if due:
                 if switched:
                     self._tasks_updated.set()
@@ -602,7 +673,10 @@ class Scheduler:
                         due = [
                             t
                             for t in collected_due
-                            if (*char_key, t) not in attempted_this_round
+                            if (
+                                (*char_key, t) not in attempted_this_round
+                                and not self._is_retry_exhausted(char_key, t)
+                            )
                         ]
                 if not due:
                     if failed_next_round and retry_round < max_retry:
@@ -677,6 +751,8 @@ class Scheduler:
                                 max_retry,
                             )
                         else:
+                            if explicit_tasks is None and not task_debug_mode:
+                                self._mark_retry_exhausted(char_key, task_key, max_retry)
                             total_failed += failed
                             self.record_result(0, failed)
                 except KeyboardInterrupt:
@@ -690,6 +766,8 @@ class Scheduler:
                     if retry_round < max_retry and not task_debug_mode:
                         failed_next_round.append((char_key, task_key))
                     else:
+                        if explicit_tasks is None and not task_debug_mode:
+                            self._mark_retry_exhausted(char_key, task_key, max_retry)
                         total_failed += 1
                         self._consecutive_errors += 1
                         if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:

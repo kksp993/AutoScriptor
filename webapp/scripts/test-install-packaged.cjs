@@ -13,6 +13,7 @@ const {
   dryRunApplyBackendIncremental,
   __test,
 } = require('../install-packaged.cjs');
+const mumuDetect = require('../mumu-detect.cjs');
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -170,6 +171,31 @@ function parsePowerShellScript(ps1Path) {
     `$ErrorActionPreference='Stop'; `
     + `$null = [scriptblock]::Create((Get-Content -Raw -LiteralPath ${psQuote(ps1Path)}))`,
   );
+}
+
+function testMumuInfoMappingHelpers() {
+  const helpers = mumuDetect.__test;
+  const rows = helpers.parseMumuInfoPayload(JSON.stringify({
+    0: {
+      index: '0',
+      is_main: true,
+      is_process_started: true,
+      adb_host_ip: '127.0.0.1',
+      adb_port: 16384,
+    },
+    1: {
+      index: '1',
+      is_main: false,
+      is_process_started: true,
+      adb_host_ip: '127.0.0.1',
+      adb_port: 16416,
+    },
+  }));
+
+  assert(rows.length === 2, 'MuMu info parser should support keyed object payloads');
+  assert(helpers.playerSerial(rows[1]) === '127.0.0.1:16416', 'player serial should use adb_host_ip:adb_port');
+  assert(helpers.findPlayerBySerial(rows, '127.0.0.1:16416').index === '1', 'serial must map to matching MuMu index');
+  assert(helpers.findPlayerBySerial(rows, 'localhost:16384').index === '0', 'localhost serial should normalize to 127.0.0.1');
 }
 
 async function testDryRunAndInvalidTargets(tmp) {
@@ -501,6 +527,7 @@ async function main() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'autoscriptor-installer-test-'));
   const keep = !!process.env.KEEP_INSTALLER_TESTS;
   try {
+    testMumuInfoMappingHelpers();
     await testDryRunAndInvalidTargets(tmp);
     await testInstallRepairAndUninstallScript(tmp);
     await testInstallProgressIsThrottled(tmp);

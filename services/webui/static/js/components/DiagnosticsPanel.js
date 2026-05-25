@@ -48,6 +48,12 @@ const DiagnosticsPanel = {
     overall() {
       return (this.diagnostics && this.diagnostics.overall) || { status: 'skipped', message: '尚未诊断' };
     },
+    deviceOverall() {
+      return (this.diagnostics && this.diagnostics.device_overall) || this.overall;
+    },
+    taskOverall() {
+      return (this.diagnostics && this.diagnostics.task_overall) || this.overall;
+    },
     generatedAt() {
       const ts = this.diagnostics && this.diagnostics.generated_at;
       return ts ? new Date(ts * 1000).toLocaleString() : '尚未刷新';
@@ -64,7 +70,10 @@ const DiagnosticsPanel = {
       this.loading = true;
       this.lastError = '';
       try {
-        const suffix = includeScreenshot ? '?screenshot=true' : '';
+        const params = new URLSearchParams();
+        if (includeScreenshot) params.set('screenshot', 'true');
+        params.set('require_app', 'false');
+        const suffix = '?' + params.toString();
         const result = await window.WebUIApi.request('GET', '/device/diagnostics' + suffix);
         const payload = result.data || {};
         if (!result.ok || payload.ok === false) {
@@ -152,6 +161,8 @@ const DiagnosticsPanel = {
     </div>
     <div class="diagnostics-summary-meta">
       <el-tag :type="statusType(overall.status)" size="large">{{ statusText(overall.status) }}</el-tag>
+      <el-tag :type="statusType(deviceOverall.status)">设备: {{ statusText(deviceOverall.status) }}</el-tag>
+      <el-tag :type="statusType(taskOverall.status)">任务: {{ statusText(taskOverall.status) }}</el-tag>
       <span>实例: {{ diagnostics && diagnostics.emulator_index || '-' }}</span>
       <span>ADB: {{ diagnostics && diagnostics.adb_addr || '-' }}</span>
       <span>刷新: {{ generatedAt }}</span>
