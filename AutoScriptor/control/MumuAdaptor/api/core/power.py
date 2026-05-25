@@ -6,6 +6,7 @@
 # @Software: PyCharm
 
 import time
+import json
 from typing import Callable
 
 from AutoScriptor.control.MumuAdaptor.device_facade import get_device_facade
@@ -21,10 +22,21 @@ class Power:
     def is_running(self) -> bool:
         """检测模拟器是否正在运行。"""
         try:
-            self.utils.set_operate('control')
-            ret_code, retval = self.utils.run_command(['info'])
+            self.utils.set_operate('info')
+            ret_code, retval = self.utils.run_command([])
             if ret_code == 0:
-                return 'running' in (retval or '').lower()
+                try:
+                    data = json.loads(retval or "{}")
+                    if isinstance(data, dict):
+                        return bool(
+                            data.get("is_process_started")
+                            or data.get("is_android_started")
+                            or "start" in str(data.get("player_state", "")).lower()
+                            or "running" in str(data.get("player_state", "")).lower()
+                        )
+                except Exception:
+                    pass
+                return 'running' in (retval or '').lower() or 'start_finished' in (retval or '').lower()
             logger.debug("MuMuManager info 失败，回退 ADB 检测: ret=%s, out=%s", ret_code, retval)
         except Exception:
             logger.debug("MuMuManager info 异常，回退 ADB 检测", exc_info=True)

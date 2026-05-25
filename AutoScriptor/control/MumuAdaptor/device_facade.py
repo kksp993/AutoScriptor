@@ -185,7 +185,16 @@ class DeviceFacade:
         if not exists:
             return _status("error", "MuMuManager path is missing", path=path, exists=False)
         try:
-            result = self.run_manager(["version"], operate=None, timeout=8)
+            from AutoScriptor.utils.perf import mumu_safe_subprocess
+
+            with mumu_safe_subprocess():
+                result = subprocess.run(
+                    [path, "version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=8,
+                    creationflags=CREATE_NO_WINDOW,
+                )
             version = ""
             try:
                 data = json.loads(result.stdout or "{}")
@@ -304,18 +313,31 @@ class DeviceFacade:
             return _status("error", f"UI Map status check failed: {exc}")
 
     @staticmethod
-    def _overall(checks: dict[str, dict[str, Any]], include_screenshot: bool) -> dict[str, Any]:
-        blocking = ["adb", "adb_device", "app"]
+    def _overall(
+        checks: dict[str, dict[str, Any]],
+        include_screenshot: bool,
+        *,
+        require_app: bool,
+    ) -> dict[str, Any]:
+        blocking = ["adb", "adb_device"]
+        if require_app:
+            blocking.append("app")
         if include_screenshot:
             blocking.append("nemu_ipc")
         states = [checks.get(name, {}).get("status") for name in blocking]
         if "error" in states:
-            return _status("error", "Device is not ready for task execution")
+            return _status(
+                "error",
+                "Device is not ready for task execution" if require_app else "Device is not ready",
+            )
         if "warn" in states:
             return _status("warn", "Device can be reached, but one or more layers need attention")
-        return _status("ok", "Device diagnostics passed")
+        return _status(
+            "ok",
+            "Device diagnostics passed" if not require_app else "Task execution diagnostics passed",
+        )
 
-    def diagnostics(self, *, include_screenshot: bool = False) -> dict[str, Any]:
+    def diagnostics(self, *, include_screenshot: bool = False, require_app: bool = False) -> dict[str, Any]:
         checks = {
             "manager": self._manager_version_check(),
             "adb": self._adb_check(),
@@ -325,12 +347,17 @@ class DeviceFacade:
             "ocr": self._ocr_check(),
             "ui_map": self._ui_map_check(),
         }
+        device_overall = self._overall(checks, include_screenshot, require_app=False)
+        task_overall = self._overall(checks, include_screenshot, require_app=True)
         return {
             "generated_at": time.time(),
             "adb_addr": self.adb_addr,
             "emulator_index": self.vm_index,
+            "require_app": bool(require_app),
             "checks": checks,
-            "overall": self._overall(checks, include_screenshot),
+            "device_overall": device_overall,
+            "task_overall": task_overall,
+            "overall": task_overall if require_app else device_overall,
         }
 
 

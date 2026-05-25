@@ -382,6 +382,29 @@ class TestMuMuPowerLifecycle(unittest.TestCase):
 
         self.assertTrue(module.Power(FakeUtils()).is_running())
 
+    def test_is_running_uses_top_level_info_command(self):
+        module = import_power_for_test()
+
+        class FakeUtils:
+            def __init__(self):
+                self.operate = None
+                self.commands = []
+
+            def get_vm_id(self):
+                return "1"
+
+            def set_operate(self, operate):
+                self.operate = operate
+
+            def run_command(self, args):
+                self.commands.append((self.operate, args))
+                return 0, '{"is_process_started": true, "is_android_started": true, "player_state": "start_finished"}'
+
+        utils = FakeUtils()
+
+        self.assertTrue(module.Power(utils).is_running())
+        self.assertEqual(utils.commands, [("info", [])])
+
 
 class TestMuMuAppLifecycle(unittest.TestCase):
     def test_get_installed_falls_back_to_adb_when_manager_crashes(self):
@@ -561,6 +584,37 @@ class TestDeviceFacadeDiagnostics(unittest.TestCase):
         self.assertEqual(calls, [("init", "127.0.0.1:16416"), ("screenshot",), ("release",)])
         self.assertEqual(checked["status"], "ok")
         self.assertEqual(checked["shape"], (720, 1280))
+
+    def test_device_diagnostics_do_not_require_game_app_by_default(self):
+        module = import_device_facade_for_test()
+        with tempfile.TemporaryDirectory() as tmp:
+            adb_path = str(Path(tmp) / "adb.exe")
+            emu_path = str(Path(tmp) / "MuMuManager.exe")
+            Path(adb_path).write_text("", encoding="utf-8")
+            Path(emu_path).write_text("", encoding="utf-8")
+            facade = self._facade(module, adb_path, emu_path)
+
+            def fake_run(cmd, **kwargs):
+                if cmd == [adb_path, "version"]:
+                    return SimpleNamespace(returncode=0, stdout="Android Debug Bridge version 1.0.41\n", stderr="")
+                if cmd[-1:] == ["version"]:
+                    return SimpleNamespace(returncode=0, stdout='{"version":"4.0.0"}', stderr="")
+                if cmd[-1:] == ["get-state"]:
+                    return SimpleNamespace(returncode=0, stdout="device\n", stderr="")
+                if cmd[-2:] == ["getprop", "sys.boot_completed"]:
+                    return SimpleNamespace(returncode=0, stdout="1\n", stderr="")
+                if cmd[-2:] == ["pm", "path"] or "pm" in cmd:
+                    return SimpleNamespace(returncode=1, stdout="", stderr="not installed")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with patch.object(module.subprocess, "run", side_effect=fake_run):
+                device_only = facade.diagnostics(include_screenshot=False)
+                task_required = facade.diagnostics(include_screenshot=False, require_app=True)
+
+        self.assertEqual(device_only["checks"]["app"]["status"], "error")
+        self.assertEqual(device_only["device_overall"]["status"], "ok")
+        self.assertEqual(device_only["overall"]["status"], "ok")
+        self.assertEqual(task_required["overall"]["status"], "error")
 
 
 class TestEnsureAppRunningLifecycle(unittest.TestCase):

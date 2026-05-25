@@ -98,6 +98,7 @@ def _ensure_editor_mixctrl(reason: str):
     return _get_runtime().ensure_device_session(
         reason=f"editor/{reason}",
         cancel_check=_ignore_cancel,
+        launch_app=False,
     )[0]
 
 

@@ -183,6 +183,43 @@ class TestRefresh(unittest.TestCase):
         self.assertEqual(core_api.mixctrl, "mix")
         self.assertEqual(autoscriptor.mumu, "mumu")
 
+    def test_editor_device_session_can_skip_game_launch(self):
+        calls = []
+        fake_cfg = {
+            "emulator": {"index": 3, "adb_addr": "127.0.0.1:16480"},
+            "app": {"app_to_start": "pkg", "auto_start": False},
+        }
+
+        def ensure_app_running(*args, **kwargs):
+            calls.append((args, kwargs))
+            return "mix", "mumu"
+
+        autoscriptor = types.ModuleType("AutoScriptor")
+        autoscriptor.__path__ = [os.path.join(os.path.dirname(__file__), "..", "..", "AutoScriptor")]
+        autoscriptor.ensure_app_running = ensure_app_running
+        core_pkg = types.ModuleType("AutoScriptor.core")
+        core_pkg.__path__ = [os.path.join(os.path.dirname(__file__), "..", "..", "AutoScriptor", "core")]
+        core_api = types.ModuleType("AutoScriptor.core.api")
+        app_config = types.ModuleType("AutoScriptor.utils.app_config")
+        app_config.cfg = fake_cfg
+
+        with patch.dict(sys.modules, {
+            "AutoScriptor": autoscriptor,
+            "AutoScriptor.core": core_pkg,
+            "AutoScriptor.core.api": core_api,
+            "AutoScriptor.utils.app_config": app_config,
+        }):
+            self.ctx.ensure_device_session(
+                reason="editor/screenshot",
+                cancel_check=lambda: None,
+                launch_app=False,
+            )
+
+        _args, kwargs = calls[0]
+        self.assertTrue(kwargs["start_emulator"])
+        self.assertFalse(kwargs["launch_app"])
+        self.assertTrue(self.ctx.is_initialized)
+
     def test_refresh_is_serialized(self):
         started = threading.Event()
         release = threading.Event()

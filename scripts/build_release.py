@@ -1085,6 +1085,33 @@ def validate_engine_runtime(timeout_s: int = 90) -> None:
     env.pop("PYTHONHOME", None)
     env.pop("PYTHONPATH", None)
 
+    import_report = smoke_data / "runtime-import-smoke.json"
+    print("[smoke] packaged runtime import smoke...")
+    import_smoke = subprocess.run(
+        [
+            str(engine),
+            "--runtime-import-smoke",
+            "--probe-out",
+            str(import_report),
+        ],
+        cwd=str(NUITKA_OUT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=90,
+    )
+    if import_smoke.returncode != 0:
+        print("[smoke] 错误: packaged runtime import smoke failed")
+        if import_smoke.stdout:
+            print("[smoke] stdout tail:\n" + _tail(import_smoke.stdout))
+        if import_smoke.stderr:
+            print("[smoke] stderr tail:\n" + _tail(import_smoke.stderr))
+        print(f"[smoke] report: {import_report}")
+        sys.exit(1)
+
     print(f"[smoke] 启动 engine: {engine}")
     proc = subprocess.Popen(
         [str(engine), "--electron"],

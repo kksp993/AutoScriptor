@@ -49,74 +49,64 @@ AutoScriptor 是一个基于 Python 的自动化脚本与任务编排器，专�
 
 **发行构建与日常运行**（`build_release.py` 参数、portable/NSIS、增量缓存、安装向导、`backend.zip` 与排错）：[docs/AutoScriptor/release-build-and-run.md](docs/AutoScriptor/release-build-and-run.md)
 
-## 环境配置
-
-**系统要求**：
-- Windows 10/11
-- MuMu 或 MuMu12 模拟器（暂不支持其他模拟器）
-- **Python 3.10.x**（项目依赖与安装脚本均按 3.10 设计）
-
-**虚拟环境与依赖**：
-- 首次通过下方启动器会在项目根目录创建 **`.venv`**，并按 `requirements.txt` 安装依赖（首次较慢，之后会跳过已安装步骤）。
-- 若本机没有 Python 3.10，`launcher.ps1` 可将官方 **3.10.11** 安装到仓库内的 **`.python310`**（无需管理员权限），再创建 `.venv`。
-
-**模拟器设置建议**：
-- 分辨率：平板 1280x720
-- 适当提高内存和 CPU 分配，以获得更好的运行性能
-
 ## 安装与首次运行
 
-### 桌面客户端（Electron）安装
+完整安装教程见根目录文档：[INSTALL.md](INSTALL.md)。
 
-1. 安装 [Node.js](https://nodejs.org/)（建议选用 LTS 版本）。
+请先选择安装路线：
 
-   - **推荐方式（适用于已启用 [winget](https://learn.microsoft.com/windows/package-manager/winget/) 的 Windows）**：
-     打开 **PowerShell（管理员或普通模式均可）**，执行：
-     ```powershell
-     winget install OpenJS.NodeJS.LTS -e --accept-source-agreements --accept-package-agreements
-     ```
-   - **手动下载安装包**：
-     也可以从官网下载 **`.msi` 安装包**，安装时勾选 **Add to PATH**（一般默认已勾选）。
+- **安装包安装**：面向普通用户。运行 `AutoScriptor_Zao_Install_*.exe`，不需要 Python、Node.js、Git 或源码仓库。
+- **源码安装**：面向开发者和维护者。需要 Git、Python 3.10、Node.js，并从仓库启动或构建。
 
-2. 验证安装
+<details>
+<summary>安装包安装快速步骤</summary>
 
-   - 安装完成后，一定要**关闭所有已有终端**，新开一个终端窗口（如 PowerShell 或命令提示符）。
-   - 执行 `node -v` 和 `npm -v`，可见版本号即表示安装成功。
+1. 在 Windows 10/11 x64 上安装并启动 MuMu 或 MuMu12，建议分辨率为平板 `1280x720`。
+2. 从可信来源获取 `AutoScriptor_Zao_Install_*.exe`，如发布者提供 SHA256，先用 `Get-FileHash -Algorithm SHA256` 校验。
+3. 双击安装包，选择普通用户可写目录，例如 `D:\AutoScriptor` 或 `Documents\AutoScriptor`，不建议选择 `C:\Program Files`。
+4. 在安装向导中先执行预检，再开始安装。首次解压 backend 可能需要数分钟。
+5. 按向导配置或验证 MuMu/ADB 路径。若暂时无法配置，可先完成安装，之后在 WebUI 启动诊断中继续处理。
+6. 双击安装目录中的 `造笔.exe` 启动，确认 `http://127.0.0.1:5000` 可访问。
+7. 默认卸载会保留 `data`；需要删除账号、配置和自定义数据时运行 `彻底卸载造笔.bat`。
 
-3. 常见问题与解决办法
+详细说明见 [INSTALL.md - 安装包安装](INSTALL.md#一安装包安装)。
 
-   - **npm 识别失败/未生效（如在编辑器终端）**：一般是因为旧终端窗口未刷新环境变量。
-     按照下列方法顺序尝试，直至解决：
-     - 关闭当前 IDE 或终端窗口，重新打开项目再试；
-     - 或直接在 Windows 自带终端（PowerShell/命令提示符）输入 `npm -v` 验证；
-     - 或在 PowerShell 内暂时刷新 PATH 后再进入 `webapp` 目录，示例代码如下：
-       ```powershell
-       $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-       node -v
-       npm -v
-       ```
-     - 如果仍无法识别：
-       1. 检查并确认 `C:\Program Files\nodejs\npm.cmd` 文件存在。
-       2. 若不存在请重新运行安装包或 `winget` 命令安装。
-       3. 如文件存在但环境变量无效，请进入「设置 → 系统 → 关于 → 高级系统设置 → 环境变量」，确认 `Path` 中包含 `C:\Program Files\nodejs`，调整后保存并新开终端再试。
+</details>
 
-4. 直接运行在仓库根目录执行：
+<details>
+<summary>源码安装快速步骤</summary>
 
-   ```bash
+1. 安装 Git、Python 3.10.x x64、Node.js LTS、MuMu 或 MuMu12。
+2. 获取源码并进入仓库目录。
+3. 先准备 Python 环境：
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\launcher.ps1 install-only
+   ```
+
+4. 启动源码 WebUI：
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\launcher.ps1 webui
+   ```
+
+5. 或启动 Electron 桌面端：
+
+   ```powershell
    cd webapp
    npm install
    npm start
    ```
 
-5. 安装器会自动创建 `.venv`、安装依赖、探测 MuMu/ADB 并写入配置。若只想安装依赖不启动界面，可运行：
+6. 维护者构建发行包：
 
    ```powershell
-   python services/installer/installer.py install-only --no-git-update
+   .\.venv-nuitka\Scripts\python.exe -X utf8 scripts\build_release.py
    ```
 
-   需要强制重装依赖时可加 `--fresh-install`。若 MuMuManager `version` 失败但 ADB 可用，安装器会给出警告但不再直接阻断。
+详细说明见 [INSTALL.md - 源码安装](INSTALL.md#二源码安装)，发行构建细节见 [docs/AutoScriptor/release-build-and-run.md](docs/AutoScriptor/release-build-and-run.md)。
 
-6. **从源码打发行包（维护者）**：在仓库根目录用 **`.venv-nuitka`** 执行 `python scripts/build_release.py`（可加 `-j 16` 等），默认产物为 **`dist_electron/AutoScriptor_Zao_Install.exe`**（单文件；首次运行即 HTML 安装向导，解压引擎并配置 MuMu/ADB）。完整说明见上文 **release-build-and-run** 文档。
+</details>
 
 ## 游戏内容配置
 

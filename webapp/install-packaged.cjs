@@ -1253,17 +1253,80 @@ async function removeDirWithRetry(targetDir, send, label = '目录') {
   return lastErr || new Error(`无法删除${label}: ${targetDir}`);
 }
 
+function isTransientFsLockError(err) {
+  const code = String(err && err.code ? err.code : '').toUpperCase();
+  return ['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY'].includes(code);
+}
+
+function releaseInstallLocksForRoot(installRoot, send) {
+  if (process.platform !== 'win32') return;
+  const root = path.resolve(installRoot);
+  const ps = `
+$ErrorActionPreference = 'Continue'
+$root = ${JSON.stringify(root)}
+$skip = @(${process.pid}, $PID)
+$killed = @()
+try {
+  Get-CimInstance Win32_Process | Where-Object {
+    ($skip -notcontains [int]$_.ProcessId) -and (
+      ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) -or
+      ($_.CommandLine -and $_.CommandLine.IndexOf($root, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)
+    )
+  } | ForEach-Object {
+    $killed += ([string]$_.ProcessId + ':' + [string]$_.Name)
+    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+  }
+} catch {
+  Write-Output ('error:' + $_.Exception.Message)
+}
+if ($killed.Count -gt 0) { Write-Output ('killed:' + ($killed -join ',')) }
+`;
+  try {
+    const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps], {
+      encoding: 'utf8',
+      timeout: 15000,
+      windowsHide: true,
+    });
+    const out = String(result.stdout || '').trim();
+    const err = String(result.stderr || '').trim();
+    if (out) safeSend(send, { type: 'log', message: `[锁释放] ${out}` });
+    if (err) safeSend(send, { type: 'log', message: `[锁释放] ${err}` });
+  } catch (e) {
+    safeSend(send, { type: 'log', message: `[锁释放] 进程检查失败: ${e && e.message ? e.message : e}` });
+  }
+}
+
+async function renameWithRetry(src, dest, send, label, installRoot) {
+  const max = 10;
+  let lastErr = null;
+  for (let i = 0; i < max; i++) {
+    try {
+      fs.renameSync(src, dest);
+      return;
+    } catch (e) {
+      lastErr = e;
+      const msg = e && e.message ? e.message : String(e);
+      if (!isTransientFsLockError(e) || i === max - 1) throw e;
+      safeSend(send, { type: 'log', message: `[重试 ${i + 1}/${max}] ${label} 被占用，尝试释放锁后重试: ${msg}` });
+      releaseInstallLocksForRoot(installRoot, send);
+      await sleepMs(Math.min(800 * (i + 1), 3000));
+    }
+  }
+  throw lastErr || new Error(`${label} 重命名失败: ${src} -> ${dest}`);
+}
+
 async function swapBackendDirectory(stagingDir, backendDest, send) {
   const backupDir = `${backendDest}.bak.${stamp()}.${process.pid}`;
+  const installRoot = path.dirname(backendDest);
   let oldMoved = false;
   let newMoved = false;
   try {
     if (fs.existsSync(backendDest)) {
-      fs.renameSync(backendDest, backupDir);
+      await renameWithRetry(backendDest, backupDir, send, '备份旧 backend', installRoot);
       oldMoved = true;
       safeSend(send, { type: 'log', message: `[事务] 已备份旧 backend: ${backupDir}` });
     }
-    fs.renameSync(stagingDir, backendDest);
+    await renameWithRetry(stagingDir, backendDest, send, '切换新 backend', installRoot);
     newMoved = true;
     safeSend(send, { type: 'log', message: '[事务] 已切换到新 backend。' });
   } catch (e) {
@@ -1272,14 +1335,18 @@ async function swapBackendDirectory(stagingDir, backendDest, send) {
         fs.rmSync(backendDest, { recursive: true, force: true });
       }
       if (oldMoved && fs.existsSync(backupDir) && !fs.existsSync(backendDest)) {
-        fs.renameSync(backupDir, backendDest);
+        await renameWithRetry(backupDir, backendDest, send, '回滚旧 backend', installRoot);
       }
     } catch (rollbackErr) {
       throw new Error(
         `backend 切换失败，且回滚也失败。切换错误: ${e.message}; 回滚错误: ${rollbackErr.message}`
       );
     }
-    throw new Error('backend 切换失败，已回滚旧版本。原始错误: ' + (e && e.message ? e.message : String(e)));
+    throw new Error(
+      'backend 切换失败，已回滚旧版本。原始错误: '
+      + (e && e.message ? e.message : String(e))
+      + '。若多次重试仍失败，通常是旧引擎进程、杀毒软件或系统索引持有文件句柄；请关闭造笔/MuMu 相关进程，必要时重启电脑后重试安装或更新。'
+    );
   }
 
   if (oldMoved && fs.existsSync(backupDir)) {

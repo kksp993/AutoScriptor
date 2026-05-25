@@ -1883,10 +1883,11 @@
       setPvState('adb_path', adbOk,
         (report.adb_path?.detail || '') + (report.adb_path?.version ? '' : ''));
       const deviceOk = report.adb_device?.connected;
-      setPvState('adb_device', deviceOk === true ? true : null,
+      const indexMismatch = report.emulator_index?.match === false;
+      setPvState('adb_device', indexMismatch ? 'warn' : (deviceOk === true ? true : null),
         report.adb_device?.detail || '');
 
-      pathsAllValid = !!report.overall;
+      pathsAllValid = !!report.overall && !indexMismatch;
       pathValidationReady = true;
       updateButton();
 
@@ -1897,6 +1898,9 @@
         if (report.operationReady) {
           parts.push('设备已连接，可操作');
           showValidationBar('success', '✓ 功能检测通过：' + parts.join('，') + '。可以继续完成安装。');
+        } else if (indexMismatch) {
+          showValidationBar('error',
+            '功能检测发现 MuMu 实例序号与 ADB 地址不一致。请重新运行自动配置，或在设置中修正 MuMu 多开编号后再检测。');
         } else {
           showValidationBar('success',
             '✓ 路径检测通过：' + parts.join('，') + '。未检测到运行中的设备，安装可继续；启动 MuMu 后请在 WebUI「启动诊断」确认操作链路。');

@@ -1008,9 +1008,12 @@ async def runtime_snapshot_api(request: Request):
 
 
 @app.get("/api/device/diagnostics")
-async def device_diagnostics_api(screenshot: bool = False):
+async def device_diagnostics_api(screenshot: bool = False, require_app: bool = False):
     try:
-        diagnostics = get_device_facade().diagnostics(include_screenshot=screenshot)
+        diagnostics = get_device_facade().diagnostics(
+            include_screenshot=screenshot,
+            require_app=require_app,
+        )
         return api_ok(diagnostics=diagnostics)
     except Exception as e:
         logger.error("device diagnostics error: %s", e)
