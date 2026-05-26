@@ -113,7 +113,7 @@ const TaskTreeTaskRow = {
               statusClasses[getTaskStatus(item)]
             ]"
             :title="runTaskDisabled ? '执行中不能修改任务状态' : '点击切换启用状态'"
-            @click.stop="toggleTask(item)">
+            @click.stop="handleStatusClick(item)">
         {{ statusLabels[getTaskStatus(item)] }}
       </span>
       <button type="button"
@@ -143,7 +143,7 @@ const TaskTreeTaskRow = {
   methods: {
     getTaskStatus(taskItem) {
       if (!taskItem.on) return 'disabled';
-      if (taskItem.error) return 'error';
+      if (taskItem.error || taskItem.human_takeover || taskItem.human_takeover_error) return 'error';
       return taskItem._due ? 'pending' : 'scheduled';
     },
     openTaskEditor() {
@@ -159,8 +159,24 @@ const TaskTreeTaskRow = {
         return;
       }
       taskItem.on = !taskItem.on;
-      if (taskItem.on) { taskItem.next_exec_time = 0; taskItem._due = true; }
+      if (taskItem.on) {
+        delete taskItem.human_takeover;
+        delete taskItem.human_takeover_error;
+        delete taskItem.human_takeover_at;
+        taskItem.next_exec_time = 0;
+        taskItem._due = true;
+      }
       else { taskItem._due = false; }
+    },
+    handleStatusClick(taskItem) {
+      if (taskItem.human_takeover_error) {
+        ElementPlus.ElMessageBox.alert(taskItem.human_takeover_error, '需要人工处理', {
+          type: 'error',
+          confirmButtonText: '确定',
+        });
+        return;
+      }
+      this.toggleTask(taskItem);
     },
     setupResizeObserver() {
       this.resizeObserver = new ResizeObserver(() => this.measure());
@@ -302,12 +318,18 @@ const TaskTree = {
         return;
       }
       item.on = !item.on;
-      if (item.on) { item.next_exec_time = 0; item._due = true; }
+      if (item.on) {
+        delete item.human_takeover;
+        delete item.human_takeover_error;
+        delete item.human_takeover_at;
+        item.next_exec_time = 0;
+        item._due = true;
+      }
       else { item._due = false; }
     },
     getTaskStatus(item) {
       if (!item.on) return 'disabled';
-      if (item.error) return 'error';
+      if (item.error || item.human_takeover || item.human_takeover_error) return 'error';
       return item._due ? 'pending' : 'scheduled';
     },
     countStatus(section) {

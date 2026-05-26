@@ -909,6 +909,44 @@ html.light .bg-white {
   background: #f8fafc;
 }
 
+.news-gift-frame-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.news-gift-frame-wrap {
+  position: relative;
+  height: min(76vh, 760px);
+  min-height: 520px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f8fafc;
+}
+
+.news-gift-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #ffffff;
+}
+
+.news-gift-frame-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #64748b;
+  background: rgba(248, 250, 252, 0.82);
+  pointer-events: none;
+}
+
 /* ── 总览页面：登录 + 仪表盘 ── */
 
 .ov-root {

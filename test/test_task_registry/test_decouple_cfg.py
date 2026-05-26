@@ -259,6 +259,24 @@ class TestSchedulerCollectDue(unittest.TestCase):
         due = sched._collect_due(tree, "", time.time())
         self.assertEqual(due, [])
 
+    def test_human_takeover_task_not_collected(self):
+        from services.core.scheduler import Scheduler
+        sched = Scheduler()
+
+        task_registry.register("cat/human", lambda: None, order=1)
+        tree = {
+            "cat": {
+                "human": {
+                    "on": True,
+                    "next_exec_time": 0,
+                    "human_takeover_error": "需要人工确认",
+                }
+            }
+        }
+
+        due = sched._collect_due(tree, "", time.time())
+        self.assertEqual(due, [])
+
 
 # ---------------------------------------------------------------------------
 # task_manager _prepare_task 从 TaskRegistry 取 fn

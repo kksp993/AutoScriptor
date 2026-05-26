@@ -57,7 +57,7 @@ def task(
             if remains == 0:
                 break
 
-            diff = extract_info(B(220, 474, 230, 62), post_process=lambda s: s.strip(), ensure_not_empty=True)
+            diff = extract_info(B(220, 474, 230, 62), post_process=lambda s: s.strip().replace("灾尼","灾厄"), ensure_not_empty=True)
             diff_repeat = (_DIFF_ORDER[nandu.value] - _DIFF_ORDER[diff]) % 3
             click(B(401, 494, 31, 29), repeat=diff_repeat)
 
