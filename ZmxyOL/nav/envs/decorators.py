@@ -20,6 +20,7 @@ LOC_ENV = "__LOC_ENV__"
 
 def swipe_up_down(from_idx:int, to_idx:int):
     for _ in range(abs(from_idx-to_idx)):
+        # 100<-->600
         swipe(B(10,350-sign(from_idx-to_idx)*250,0,0), B(10,350+sign(from_idx-to_idx)*250,0,0), duration_s=1)
 
 def swipe_left_right(from_idx:int, to_idx:int):

@@ -2,9 +2,10 @@
 import importlib
 import os
 import pathlib
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
+from AutoScriptor.utils.paths import is_compiled
 from AutoScriptor.utils.task_registry import task_registry
-from ZmxyOL.task.translations import translate_path_part, normalize_to_cn
+from ZmxyOL.task.translations import translate_path_part, normalize_cfg_key
 
 
 def get_min_order(node, path_prefix=""):
@@ -94,7 +95,13 @@ def get_custom_order_key(path: pathlib.Path):
 
 
 def gather_py_files():
-    """Collect all Python files under PACKAGE_PATH."""
+    """Collect all Python files under PACKAGE_PATH.
+
+    In compiled (Nuitka) mode, .py files don't exist on disk.
+    Return an empty list -- import_modules() will use the manifest instead.
+    """
+    if is_compiled():
+        return []
     return list(PACKAGE_PATH.rglob("*.py"))
 
 
@@ -115,6 +122,20 @@ def print_sorted_files(py_files):
 
 
 def import_modules(py_files):
+    """Import task modules.
+
+    In compiled mode (py_files is empty), use the explicit manifest list.
+    In dev mode, derive module names from file paths as before.
+    """
+    if not py_files and is_compiled():
+        from ZmxyOL.task._manifest import TASK_MODULES
+        for module_name in TASK_MODULES:
+            try:
+                importlib.import_module(module_name)
+            except Exception as e:
+                print(f"Error importing {module_name}: {e}")
+        return
+
     for py_file in py_files:
         if py_file.name == "__init__.py":
             continue
@@ -126,6 +147,51 @@ def import_modules(py_files):
             importlib.import_module(absolute_module_path)
         except Exception as e:
             print(f"Error importing {absolute_module_path}: {e}")
+
+
+def migrate_remove_daily_login_task(tasks: dict) -> None:
+    """daily_task/login/ 目录已被移除（登录由 scheduler 自动处理）。
+    清理当前角色 cfg['tasks']['每日任务'] 及账号文件中所有角色的残留 '登录' 分支。
+    """
+    daily = tasks.get("每日任务")
+    if isinstance(daily, dict):
+        daily.pop("登录", None)
+
+    chars = cfg._account_data.get("characters", {})
+    dirty = False
+    for srv_chars in chars.values():
+        for char_data in srv_chars.values():
+            if not isinstance(char_data, dict):
+                continue
+            char_daily = (char_data.get("tasks") or {}).get("每日任务")
+            if isinstance(char_daily, dict) and "登录" in char_daily:
+                char_daily.pop("登录")
+                dirty = True
+    if dirty:
+        cfg._save_account_file()
+
+
+def migrate_hgwj_daily_task_leaf_to_wanjiefuben(tasks: dict) -> None:
+    """旧版 hgwj/daily_task.py 在「荒古万界」下注册为中文键「每日任务」，与分类重名。
+    现改为 wanjiefuben.py → 「万界副本」。将旧叶节点配置合并到新键下。
+    """
+    root = tasks.get("每日任务")
+    if not isinstance(root, dict):
+        return
+    hgwj = root.get("荒古万界")
+    if not isinstance(hgwj, dict):
+        return
+    old = hgwj.pop("每日任务", None)
+    if not isinstance(old, dict):
+        return
+    if "on" not in old and "next_exec_time" not in old:
+        hgwj["每日任务"] = old
+        return
+    new_key = "万界副本"
+    if new_key in hgwj and isinstance(hgwj[new_key], dict):
+        hgwj[new_key] = {**hgwj[new_key], **old}
+    else:
+        hgwj[new_key] = old
 
 
 def normalize_cfg_tasks_to_cn():
@@ -155,14 +221,14 @@ def normalize_cfg_tasks_to_cn():
     original = cfg._config.get('tasks', {}) or {}
     normalized: dict = {}
     for key, value in original.items():
-        cn_key = normalize_to_cn(key)
+        cn_key = normalize_cfg_key(key)
         if isinstance(value, dict):
             # 递归规范化子树
             sub_cfg = {'__temp__': value}
             # 将一层展开并规范化
             tmp_normalized = {}
             for sub_k, sub_v in value.items():
-                cn_sub_k = normalize_to_cn(sub_k)
+                cn_sub_k = normalize_cfg_key(sub_k)
                 tmp_normalized[cn_sub_k] = sub_v
             deep_merge(normalized.setdefault(cn_key, {}), tmp_normalized)
         else:
@@ -174,11 +240,26 @@ def normalize_cfg_tasks_to_cn():
     except Exception:
         pass
 
+def _read_order_lines(order_file: pathlib.Path):
+    """读取已有 _order.txt；无文件或为空则返回 None。"""
+    if not order_file.is_file():
+        return None
+    try:
+        with open(order_file, 'r', encoding='utf-8') as f:
+            lines = [line.strip() for line in f.readlines() if line.strip()]
+        return lines if lines else None
+    except Exception:
+        return None
+
+
 def update_order_files(py_files):
-    """基于实际文件系统生成各层级 _order.txt（不创建新目录）。
-    - 子项按已加载并排序后的 cfg['tasks'] 的注册顺序排序；若无记录则置后。
-    - 根目录与 daily_task/hyper 可覆盖顺序，但仅包含已存在的子项。
+    """基于实际文件系统维护各层级 _order.txt（不创建新目录）。
+    - 若某目录下已有非空的 _order.txt，则保留其中的顺序，仅追加新子项、去掉已不存在的名。
+    - 仅在尚无 _order.txt（或为空）时，按注册顺序生成；根目录首次生成时可用固定前缀顺序。
+    - 编译模式下跳过（包目录不可写且无源文件）。
     """
+    if is_compiled():
+        return {}
     fixed_orders = {
         "": ["daily_task", "weekly_task", "event_task", "normal_task"],
     }
@@ -189,15 +270,26 @@ def update_order_files(py_files):
             return
         order_file = dir_path / '_order.txt'
         if "__pycache__" in dir_parts_eng: return
-        key = "/".join(dir_parts_eng)
-        override = fixed_orders.get(key)
-        if override:
-            present = set(child_names_eng)
-            ordered = [name for name in override if name in present]
+
+        existing = _read_order_lines(order_file)
+        present = set(child_names_eng)
+        if existing is not None:
+            merged = [name for name in existing if name in present]
+            seen = set(merged)
             for name in child_names_eng:
-                if name not in ordered:
-                    ordered.append(name)
-            child_names_eng = ordered
+                if name not in seen:
+                    merged.append(name)
+                    seen.add(name)
+            child_names_eng = merged
+        else:
+            key = "/".join(dir_parts_eng)
+            override = fixed_orders.get(key)
+            if override:
+                ordered = [name for name in override if name in present]
+                for name in child_names_eng:
+                    if name not in ordered:
+                        ordered.append(name)
+                child_names_eng = ordered
 
         with open(order_file, 'w', encoding='utf-8') as f:
             for name in child_names_eng:

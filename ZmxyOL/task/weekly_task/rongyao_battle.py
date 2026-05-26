@@ -1,11 +1,12 @@
 import traceback
-from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
 
 @register_task
-def task():
+def task(
+    battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
+):
     ensure_in("村庄")
     click(I("导航-挑战"))
     wait_for_appear(T("天选阁"))
@@ -18,20 +19,18 @@ def task():
         if first(get_colors(T("挑战",box=Box(894,569,190,72)))) != "黄色":
             break
         click(T("挑战",box=Box(894,569,190,72)))
-        bg.add(
-            name="try_exit",
-            identifier=T("确定"),
-            callback=lambda: [
-                bg.set_signal("try_exit", True),
-                bg.clear(),
-            ],
-            once=True
-        )
-        h.set(True,1).battle_loop(battle_weight=100)
+        with bg.scope("荣耀之战") as scope:
+            scope.add(
+                name="try_exit",
+                identifier=T("确定"),
+                callback=lambda: bg.set_signal("try_exit", True),
+                once=True
+            )
+            h.set(True,1).battle_loop(battle_weight=100)
         click(T("确定"), if_exist=True)
         click(B(1090,25,30,30))
     sleep(2)
-    click(B(1200,30,30,30))
+    click(B(1200,30,30,30),until=lambda: ui_T(I("加载中")))
     wait_for_appear(I("挑战-取经"))
     sleep(1)
     click(B(1200,30,30,30))

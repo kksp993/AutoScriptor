@@ -1,5 +1,5 @@
 import traceback
-from ZmxyOL.task.task_register import register_task
+from time import time
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
@@ -14,22 +14,23 @@ def battle():
     h.prop()
     h.sleep(0.5)
     h.skill(6)
-    bg.add(
-        name="FTT_battle",
-        identifier=(T("确认"),T("入劫")),
-        callback=lambda: [
-            bg.set_signal("try_exit", True),
-            bg.clear(),
-        ]
-    )
     cnt = 1
     bg.set_signal("try_exit", False)
-    while not bg.signal("try_exit"):
-        if cnt % 2 == 0:
-            h.skill(6)
-        else:
-            h.skill(5,5)
-        cnt += 1
+    deadline = time() + 120
+    with bg.scope("每日梵天塔") as scope:
+        scope.add(
+            name="战斗结束",
+            identifier=(T("确认"),T("入劫")),
+            callback=lambda: bg.set_signal("try_exit", True)
+        )
+        while not bg.signal("try_exit"):
+            if time() >= deadline:
+                raise TimeoutError("每日梵天塔战斗等待结束超时")
+            if cnt % 2 == 0:
+                h.skill(6)
+            else:
+                h.skill(5,5)
+            cnt += 1
     click(T("确认"))
     wait_for_disappear(I("加载中"))
 
@@ -50,10 +51,15 @@ def FTT_battle_one_round():
 
 
 @register_task
-def fanTianTa(battle_times=1):
+def fanTianTa(
+    battle_times=1,
+    claim_past=True,
+    battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
+):
+    """claim_past：每日领取时是否也点「过去」；账号未解锁过去时设为 False。"""
     ensure_in("极北",-1)
     click(B(0,120,90,100))
-    for diff in ["现在", "过去"]:
+    for diff in (["现在", "过去"] if claim_past else ["现在"]):
         click(T(diff),offset=(0,100))
         sleep(3)
         click(T("确认"), if_exist=True)
@@ -69,9 +75,13 @@ def fanTianTa(battle_times=1):
         else:
             click(T("碾压"))
             wait_for_appear(T("优先级"))
-            click(T("烦恼"))
-            click(T("立即碾压"))
-            click(T("空白处"))
+            remains = extract_info(B(341,505,310,57), post_process=lambda s: int(s.strip()[-2]), ensure_not_empty=True)
+            if remains > 0:
+                click(T("烦恼"))
+                click(T("立即碾压"))
+                click(T("空白处"))
+            else:
+                click(B(1011,49,57,52))
         sleep(3)
     click(B(30,30,30,30))
     sleep(1)

@@ -5,8 +5,26 @@ const SchedulerPanel = {
     logs: { type: Array, required: true },
     characterName: { type: String, default: '' },
     schedulerStatus: { type: Object, required: true },
+    executionBusy: { type: Boolean, default: false },
+    activeCharacter: { type: Object, default: () => ({ server: '', name: '' }) },
+    gameProfessionOptions: { type: Array, default: () => [] },
+    gameProfessionsByCharacter: { type: Object, default: () => ({}) },
   },
-  emits: ['start-run', 'stop-run', 'verify-account', 'open-add-account', 'reset-scheduler', 'clear-logs'],
+  emits: ['start-run', 'stop-run', 'reset-scheduler', 'clear-logs', 'set-game-profession'],
+  computed: {
+    /** 当前调度状态的文字说明，告知用户该状态的含义 */
+    schedStateHint() {
+      const s = this.overviewData.scheduler;
+      if (!s) return '';
+      if (s.state === 'running') return '调度已激活：将自动监控并执行到期任务';
+      if (s.state === 'error') return '调度已暂停：连续失败，请检查日志后点击「恢复调度」';
+      return '调度未激活：到期任务不会自动执行，需点击「开始运行」';
+    },
+    /** 当前角色是否处于「调度模式运行中」状态 */
+    isSchedulerRunning() {
+      return this.overviewData.scheduler && this.overviewData.scheduler.state === 'running';
+    },
+  },
   methods: {
     formatTimestamp(ts) {
       if (!ts || ts <= 0) return '\u2014';
@@ -35,6 +53,11 @@ const SchedulerPanel = {
     schedColor(color) {
       return { green: '#22c55e', orange: '#f59e0b', red: '#ef4444' }[color] || '#94a3b8';
     },
+    professionFor(server, name) {
+      const srv = this.gameProfessionsByCharacter && this.gameProfessionsByCharacter[server];
+      const v = srv && srv[name];
+      return v || '悟空';
+    },
   },
   template: `
 <div class="flex flex-col lg:flex-row gap-5 h-full min-h-0">
@@ -44,34 +67,47 @@ const SchedulerPanel = {
 
     <!-- 状态 + 下次执行 -->
     <div class="bg-gray-50 rounded-lg p-4 mb-4">
-      <div class="flex items-center gap-2 mb-2">
+      <div class="flex items-center gap-2 mb-1">
         <span class="w-3 h-3 rounded-full shrink-0" :style="{ backgroundColor: schedColor(overviewData.scheduler.color) }"></span>
-        <span class="text-sm font-medium" :style="{ color: schedColor(overviewData.scheduler.color) }">{{ overviewData.scheduler.label || '未知' }}</span>
+        <span class="text-sm font-medium" :style="{ color: schedColor(overviewData.scheduler.color) }" :title="schedStateHint">{{ overviewData.scheduler.label || '未知' }}</span>
         <span v-if="characterName" class="ml-auto text-xs px-2.5 py-1 bg-green-50 text-green-700 rounded"><i class="fa fa-user mr-1"></i>{{ characterName }}</span>
         <span v-else class="ml-auto text-xs px-2.5 py-1 bg-red-50 text-red-600 rounded">未验证</span>
       </div>
-      <div class="text-xs text-gray-500 mt-1 text-center">下次执行</div>
+      <div class="text-xs text-gray-400 mb-2" style="line-height:1.4">{{ schedStateHint }}</div>
+      <div v-if="activeCharacter.server && activeCharacter.name && gameProfessionOptions.length" class="flex items-center gap-2 mb-3 px-1">
+        <span class="text-xs text-gray-500 shrink-0">职业</span>
+        <el-select
+          size="small"
+          class="flex-1 min-w-0"
+          :model-value="professionFor(activeCharacter.server, activeCharacter.name)"
+          placeholder="游戏职业"
+          filterable
+          :disabled="executionBusy"
+          @change="v => $emit('set-game-profession', activeCharacter.server, activeCharacter.name, v)"
+        >
+          <el-option v-for="p in gameProfessionOptions" :key="p" :label="p" :value="p"></el-option>
+        </el-select>
+      </div>
+      <div class="text-xs text-gray-500 mt-1 text-center">下次执行（当前角色）</div>
       <div class="text-lg font-semibold text-dark mt-0.5 text-center">
-        <template v-if="overviewData.stats && overviewData.stats.pending > 0">-- --</template>
+        <template v-if="!isSchedulerRunning">-- --</template>
+        <template v-else-if="overviewData.stats && overviewData.stats.pending > 0">即将执行</template>
         <template v-else>{{ overviewData.scheduler.next_execution ? formatTimestamp(overviewData.scheduler.next_execution) : '暂无计划' }}</template>
       </div>
-      <div v-if="overviewData.stats && overviewData.stats.pending > 0" class="text-xs text-gray-400 mt-1 text-center">即将执行</div>
+      <div v-if="!isSchedulerRunning" class="text-xs text-gray-400 mt-1 text-center">调度未激活</div>
+      <div v-else-if="overviewData.stats && overviewData.stats.pending > 0" class="text-xs text-gray-400 mt-1 text-center">有到期任务等待执行</div>
       <div v-else-if="overviewData.scheduler.next_execution" class="text-xs text-gray-400 mt-1 text-center">
         {{ formatCountdown(overviewData.scheduler.next_execution) }}
       </div>
     </div>
 
-    <!-- 操作：主操作一行、账号一行，每行独立双列网格，左右边与面板 padding 对齐 -->
+    <!-- 操作：主操作一行，双列网格，左右边与面板 padding 对齐 -->
     <div class="sched-control-actions mb-4">
       <div class="sched-control-row">
-        <el-button type="primary" size="large" @click="$emit('start-run')" :disabled="!characterName"><i class="fa fa-play mr-1.5"></i>开始运行</el-button>
+        <el-button type="primary" size="large" @click="$emit('start-run')" :disabled="!characterName || executionBusy"><i class="fa fa-play mr-1.5"></i>开始运行</el-button>
         <el-button type="danger" size="large" @click="$emit('stop-run')"><i class="fa fa-stop mr-1.5"></i>终止执行</el-button>
       </div>
-      <div class="sched-control-row">
-        <el-button size="large" @click="$emit('verify-account')"><i class="fa fa-check mr-1.5"></i>账号验证</el-button>
-        <el-button size="large" @click="$emit('open-add-account')"><i class="fa fa-plus mr-1.5"></i>添加账号</el-button>
-      </div>
-      <el-button v-if="overviewData.scheduler.state==='error'" type="danger" size="large" @click="$emit('reset-scheduler')" class="sched-btn-full"><i class="fa fa-refresh mr-1.5"></i>恢复调度</el-button>
+      <el-button v-if="overviewData.scheduler.state==='error'" type="danger" size="large" @click="$emit('reset-scheduler')" :disabled="executionBusy" class="sched-btn-full"><i class="fa fa-refresh mr-1.5"></i>恢复调度</el-button>
     </div>
 
     <div v-if="overviewData.scheduler.consecutive_errors > 0" class="mb-4 px-3.5 py-2.5 bg-red-50 text-red-700 rounded-lg text-sm">

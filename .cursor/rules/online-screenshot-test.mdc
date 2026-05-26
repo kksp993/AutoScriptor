@@ -1,0 +1,29 @@
+---
+description: 在线截图测试流程：同帧截图、UTF-8/venv、裁剪可视化、批量识别、保形返回和耗时报告。
+globs:
+  - "**/*.py"
+alwaysApply: false
+---
+
+# 在线截图测试规则
+
+当用户说“截张图测一下”“在线测一下”“拿当前页面跑一下”“测试当前模拟器页面”等请求时，按在线截图测试处理。
+
+核心流程：
+
+1. 先截取一张实时图，带时间戳保存到 `logs/`，后续 locate/OCR/extract 都复用这同一帧；除非测试 UI 跳转，否则不要混用多次隐式截图。
+2. 使用 `.venv\Scripts\python.exe`。PowerShell 下设置 UTF-8 输出，例如 `$env:PYTHONIOENCODING='utf-8'` 或 `python -X utf8`，避免中文日志/文件内容被误判为编码损坏。
+3. 纯在线测试默认把临时脚本、裁剪图、框线叠加图、结果 JSON/TXT 放进新的 `logs/<topic>_<timestamp>/`，不要改生产源码。
+4. 先记录截图尺寸和坐标约定，再解释 `Box`。必须确认当前上下文里 `Box` 是 `(x, y, w, h)` 还是 `(x1, y1, x2, y2)`。
+5. 裁剪敏感任务必须保存 crop 或 overlay。先证明裁剪正确，再判断识别是否正确；错误要归因成裁剪/坐标错、识别错、或后处理错。
+6. OCR/extract 优先 batch，不要逐格慢循环。保持输入形状：`Box -> value`，`list[Box] -> list`，`list[list[Box]] -> nested list`。空位或不可读返回 `None`，不要删除或压缩。
+7. 能传同帧参数就传同帧，例如 locate 类调用传 `screenshot=frame`，extract/OCR 类调用传 `screenshot_frame=frame`，避免 UI 漂移。
+8. 用 `time.perf_counter()` 计时。必要时分别报告截图耗时、识别/代码耗时、总耗时；如果有 warm-up，要把 warm-up 和正式测量分开说明。
+9. 涉及不可逆游戏操作时，不要从低置信或互相矛盾的 OCR 结果里硬猜。宁可返回 `None`、暂停、或要求确认。没有 oracle 时，至少对比整行拼接、单格 crop、raw OCR/confidence 等独立证据。
+10. 最终反馈要包含保存的截图/调试目录、使用的 boxes/grid、保形后的识别值、耗时，以及准确率依据。
+
+项目注意事项：
+
+- 优先使用包内导入，例如 `from AutoScriptor.utils.box_grid import make_box_grid, indexof`；导入 PaddleOCR 后，顶层 `tools` 可能被第三方包遮蔽。
+- 背包数量等业务语义要和 OCR 语义分层：OCR 空徽标返回 `None`；业务层再把“缺失物品”转成 `0`，把“有物品但无数量徽标”转成 `1`。
+- 如果用户明确说实现前不要 peek 新困难截图，就必须先实现，再查看该截图验证。

@@ -9,7 +9,6 @@
 - 保持核心功能不变，提高代码可读性
 """
 
-import time
 from AutoScriptor import *
 from AutoScriptor.core.api import ui_idx
 from ZmxyOL.nav.envs.decorators import LOC_ENV
@@ -58,27 +57,27 @@ def locate_region(cnt = 0, check_only = False) -> tuple[str, str]:
     if cnt == 0:
         try:
             mixctrl.app.launch(cfg["app"]["app_to_start"])
-            time.sleep(2)
+            sleep(2)
         except Exception:
             pass
     """
         按优先级检查当前位置
     """
     cur_env, cur_loc = mm.get_region()
-    logger.info("# 1.1 检查当前ctx中的loc")
+    logger.debug("# 1.1 检查当前ctx中的loc")
     if cur_loc and check_loc_idx([cur_loc]) >= 0:
         return mm.set_region(cur_env, cur_loc)
     
-    logger.info("# 1.2 检查当前ctx中的env")
+    logger.debug("# 1.2 检查当前ctx中的env")
     if cur_env and check_env_idx([cur_env]) >= 0:
         return mm.set_region(cur_env)
     
-    logger.info("# 1.3 检查所有env")
+    logger.debug("# 1.3 检查所有env")
     idx = check_env_idx(list(mm.envs.keys()))
     if idx >= 0:
         return mm.set_region(list(mm.envs.keys())[idx])
     
-    logger.info("# 1.4 检查所有loc")
+    logger.debug("# 1.4 检查所有loc")
     idx = check_loc_idx(mm.locs.keys())
 
     if check_only: return "当前位置未知, 请自行判断下一步并尝试再次调用，请先根据当前的图像一步步关闭窗口，直至没有返回或关闭，再调用本工具"
@@ -151,7 +150,7 @@ def try_close_via_x():
             sleep(0.5)
         for target in wait_for_disappear_targets:
             while(ui_T(target)): 
-                time.sleep(0.5) 
+                sleep(0.5)
                 found = True
     
     return True 

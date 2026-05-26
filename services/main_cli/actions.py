@@ -12,7 +12,7 @@ from typing import Dict, Any, List, Optional
 from AutoScriptor.utils.logger import logger
 from pypinyin import lazy_pinyin
 
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.task_registry import task_registry
 from AutoScriptor.crypto.update_config import set_config, verify_config
 from AutoScriptor import edit_img

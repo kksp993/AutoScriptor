@@ -8,6 +8,7 @@
 import sys
 import os
 import inspect
+import threading
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -158,6 +159,90 @@ class TestBackgroundMonitorCallbacks(unittest.TestCase):
 
         self.assertIsNone(mon.signal("key"))
 
+    @patch.object(BackgroundMonitor, "start")
+    def test_stale_snapshot_callback_is_not_current_after_clear(self, _):
+        mon = BackgroundMonitor()
+        cb = MagicMock()
+        mon.add("evt", (MagicMock(),), cb)
+        old_info = mon._callbacks["evt"]
+
+        mon.clear()
+
+        self.assertFalse(mon._callback_is_current("evt", old_info))
+
+    @patch.object(BackgroundMonitor, "start")
+    def test_remove_with_expected_info_does_not_remove_replaced_callback(self, _):
+        mon = BackgroundMonitor()
+        old_cb = MagicMock()
+        new_cb = MagicMock()
+        mon.add("evt", (MagicMock(),), old_cb)
+        old_info = mon._callbacks["evt"]
+        mon.add("evt", (MagicMock(),), new_cb)
+
+        mon.remove("evt", expected_info=old_info)
+
+        self.assertIn("evt", mon._callbacks)
+        self.assertIs(mon._callbacks["evt"]["cb"], new_cb)
+
+    @patch.object(BackgroundMonitor, "start")
+    def test_scope_removes_callbacks_on_exit(self, _):
+        mon = BackgroundMonitor()
+        with mon.scope("battle") as scope:
+            name = scope.add("end", (MagicMock(),), MagicMock())
+            self.assertEqual(name, "battle:end")
+            self.assertIn("battle:end", mon._callbacks)
+
+        self.assertNotIn("battle:end", mon._callbacks)
+
+    @patch.object(BackgroundMonitor, "start")
+    def test_scope_removes_callbacks_on_exception(self, _):
+        mon = BackgroundMonitor()
+        with self.assertRaises(RuntimeError):
+            with mon.scope("battle") as scope:
+                scope.add("end", (MagicMock(),), MagicMock())
+                raise RuntimeError("boom")
+
+        self.assertEqual(mon.get_idfs(), set())
+
+    @patch.object(BackgroundMonitor, "start")
+    def test_scope_does_not_remove_replaced_callback(self, _):
+        mon = BackgroundMonitor()
+        replacement = MagicMock()
+        with mon.scope("battle") as scope:
+            scope.add("end", (MagicMock(),), MagicMock())
+            mon.add("battle:end", (MagicMock(),), replacement)
+
+        self.assertIn("battle:end", mon._callbacks)
+        self.assertIs(mon._callbacks["battle:end"]["cb"], replacement)
+
+    @patch.object(BackgroundMonitor, "start")
+    def test_protect_clear_ignores_external_clear(self, _):
+        mon = BackgroundMonitor()
+        mon.add("evt", (MagicMock(),), MagicMock())
+
+        with mon.protect_clear():
+            done = threading.Event()
+            t = threading.Thread(target=lambda: (mon.clear(clear_signals=True), done.set()))
+            t.start()
+            done.wait(1)
+            t.join(1)
+
+        self.assertIn("evt", mon._callbacks)
+
+    @patch.object(BackgroundMonitor, "start")
+    def test_protect_clear_allows_monitor_thread_clear(self, _):
+        mon = BackgroundMonitor()
+        mon.add("evt", (MagicMock(),), MagicMock())
+
+        with mon.protect_clear():
+            mon._enter_callback_thread()
+            try:
+                mon.clear()
+            finally:
+                mon._exit_callback_thread()
+
+        self.assertEqual(mon.get_idfs(), set())
+
 
 # ---------------------------------------------------------------------------
 # signal 读写
@@ -187,6 +272,20 @@ class TestBackgroundMonitorSignals(unittest.TestCase):
         self.assertIsNone(mon.signal("a"))
         self.assertIsNone(mon.signal("b"))
 
+    @patch.object(BackgroundMonitor, "start")
+    def test_wait_signal_returns_when_expected_matches(self, _):
+        mon = BackgroundMonitor()
+        mon.set_signal("ready", True)
+
+        self.assertTrue(mon.wait_signal("ready", timeout=0.1))
+
+    @patch.object(BackgroundMonitor, "start")
+    def test_wait_signal_times_out(self, _):
+        mon = BackgroundMonitor()
+
+        with self.assertRaises(TimeoutError):
+            mon.wait_signal("ready", timeout=0.01, interval=0.001)
+
 
 # ---------------------------------------------------------------------------
 # set_interval
@@ -205,6 +304,96 @@ class TestBackgroundMonitorInterval(unittest.TestCase):
         mon = BackgroundMonitor()
         mon.set_interval(0.5)
         self.assertEqual(mon._interval, 0.5)
+
+    @patch.object(BackgroundMonitor, "start")
+    def test_interval_context_restores_on_exit(self, _):
+        mon = BackgroundMonitor()
+        mon.set_interval(1.5)
+
+        with mon.interval(0.4):
+            self.assertEqual(mon._interval, 0.4)
+
+        self.assertEqual(mon._interval, 1.5)
+
+    @patch.object(BackgroundMonitor, "start")
+    def test_interval_context_restores_on_exception(self, _):
+        mon = BackgroundMonitor()
+        mon.set_interval(1.5)
+
+        with self.assertRaises(RuntimeError):
+            with mon.interval(0.4):
+                raise RuntimeError("boom")
+
+        self.assertEqual(mon._interval, 1.5)
+
+
+class TestMonitorDecorator(unittest.TestCase):
+
+    @patch.object(BackgroundMonitor, "start")
+    def test_monitor_decorator_registers_and_cleans_legacy_pairs(self, _):
+        mon = BackgroundMonitor()
+        cb = MagicMock()
+        idf = (MagicMock(),)
+
+        with patch.object(background, "bg", mon):
+            @background.monitor([(idf, cb)])
+            def run():
+                self.assertIn("run:0", mon._callbacks)
+                return "ok"
+
+            self.assertEqual(run(), "ok")
+
+        self.assertEqual(mon.get_idfs(), set())
+
+    @patch.object(BackgroundMonitor, "start")
+    def test_monitor_decorator_cleans_on_exception(self, _):
+        mon = BackgroundMonitor()
+
+        with patch.object(background, "bg", mon):
+            @background.monitor([("named", (MagicMock(),), MagicMock())])
+            def run():
+                self.assertIn("named", mon._callbacks)
+                raise RuntimeError("boom")
+
+            with self.assertRaises(RuntimeError):
+                run()
+
+        self.assertEqual(mon.get_idfs(), set())
+
+    @patch.object(BackgroundMonitor, "start")
+    def test_monitor_decorator_accepts_dict_pairs(self, _):
+        mon = BackgroundMonitor()
+        cb = MagicMock()
+
+        with patch.object(background, "bg", mon):
+            @background.monitor([{
+                "name": "dict_evt",
+                "identifier": (MagicMock(),),
+                "callback": cb,
+                "once": False,
+            }])
+            def run():
+                self.assertIn("dict_evt", mon._callbacks)
+                self.assertFalse(mon._callbacks["dict_evt"]["once"])
+
+            run()
+
+        self.assertEqual(mon.get_idfs(), set())
+
+    @patch.object(BackgroundMonitor, "start")
+    def test_monitor_decorator_does_not_remove_replaced_callback(self, _):
+        mon = BackgroundMonitor()
+        replacement = MagicMock()
+
+        with patch.object(background, "bg", mon):
+            @background.monitor([("named", (MagicMock(),), MagicMock())])
+            def run():
+                mon.add("named", (MagicMock(),), replacement)
+
+            run()
+
+        self.assertIn("named", mon._callbacks)
+        self.assertIs(mon._callbacks["named"]["cb"], replacement)
 
 
 if __name__ == "__main__":

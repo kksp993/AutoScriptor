@@ -1,17 +1,14 @@
 /**
- * EditorCanvas – 截图显示 + 鼠标框选 + 绿色 locate 框
+ * EditorCanvas – 截图显示 + 左键框选 + 绿色 locate 框 + 虚拟遥控红点/滑动线（canvas 叠加，不写入底图）
  *
- * 缩放策略：固定最大高度 MAX_H，取 fitWidth / fitHeight 较小值作为 scale，
- * 使图片完整显示且不超出视口。所有坐标在原始像素空间运算，渲染时乘以 scale。
- *
- * Props:
- *   imageSrc    – base64 data-url of the screenshot
- *   selection   – {left, top, right, bottom} in real coords (or null)
- *   locateBoxes – [{left,top,width,height}, ...]
- *   imgWidth / imgHeight – original image dimensions
+ * 左键拖拽：框选，触发 selection-change
+ * 右键单击：canvas-remote-click { x, y }
+ * 右键拖拽：canvas-remote-swipe { x1, y1, x2, y2 }
  *
  * Emits:
- *   selection-change({left, top, right, bottom})  – raw (unscaled) rect
+ *   selection-change({left, top, right, bottom})
+ *   canvas-remote-click({ x, y })
+ *   canvas-remote-swipe({ x1, y1, x2, y2 })
  */
 const EditorCanvas = {
   name: 'EditorCanvas',
@@ -19,15 +16,19 @@ const EditorCanvas = {
     imageSrc: { type: String, default: '' },
     selection: { type: Object, default: null },
     locateBoxes: { type: Array, default: () => [] },
+    /** 虚拟点击位置（逻辑像素），画红点 */
+    virtualClickMarkers: { type: Array, default: () => [] },
+    /** 虚拟滑动线段（逻辑像素） */
+    virtualSwipeLines: { type: Array, default: () => [] },
     imgWidth: { type: Number, default: 1280 },
     imgHeight: { type: Number, default: 720 },
   },
-  emits: ['selection-change'],
+  emits: ['selection-change', 'canvas-remote-click', 'canvas-remote-swipe'],
   template: `
-<div ref="wrapper" class="editor-canvas-wrapper w-full h-full">
+<div ref="wrapper" class="editor-canvas-wrapper w-full h-full" @contextmenu.prevent>
   <canvas ref="canvas"
     @mousedown="onMouseDown" @mousemove="onMouseMove" @mouseup="onMouseUp"
-    @mouseleave="onMouseUp"
+    @mouseleave="onMouseLeave"
     :style="{ cursor: 'crosshair', display: 'block', width: canvasStyleW + 'px', height: canvasStyleH + 'px', margin: '0 auto' }">
   </canvas>
 </div>`,
@@ -37,7 +38,7 @@ const EditorCanvas = {
     const wrapper = ref(null);
     const canvas = ref(null);
     const containerW = ref(1280);
-    const containerH = ref(600);   // updated by ResizeObserver
+    const containerH = ref(600);
 
     const scale = computed(() => {
       const fitW = containerW.value / props.imgWidth;
@@ -51,6 +52,9 @@ const EditorCanvas = {
     let drawing = false;
     let startX = 0, startY = 0;
     let curX = 0, curY = 0;
+
+    const rmbDrawing = ref(false);
+    let rStartX = 0, rStartY = 0, rCurX = 0, rCurY = 0;
     let ro = null;
 
     function toReal(px, py) {
@@ -78,14 +82,18 @@ const EditorCanvas = {
         ctx.fillStyle = '#1e293b';
         ctx.fillRect(0, 0, sw, sh);
         ctx.fillStyle = '#94a3b8';
-        ctx.font = '16px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('点击「刷新截图」获取画面', sw / 2, sh / 2);
+        const cx = sw / 2;
+        const cy = sh / 2;
+        ctx.font = '14px sans-serif';
+        ctx.fillText('拖入图片到此处可导入（离线标注 / 调试图）', cx, cy - 10);
+        ctx.font = '13px sans-serif';
+        ctx.fillStyle = '#64748b';
+        ctx.fillText('或点击左侧「刷新截图」获取模拟器画面', cx, cy + 12);
       }
 
       const s = scale.value;
 
-      // locate boxes (green)
       if (props.locateBoxes.length) {
         ctx.strokeStyle = '#00cc00';
         ctx.lineWidth = 2;
@@ -94,7 +102,38 @@ const EditorCanvas = {
         }
       }
 
-      // selection (red)
+      if (props.virtualSwipeLines.length) {
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 5]);
+        for (const ln of props.virtualSwipeLines) {
+          ctx.beginPath();
+          ctx.moveTo(ln.x1 * s, ln.y1 * s);
+          ctx.lineTo(ln.x2 * s, ln.y2 * s);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+      }
+
+      if (props.virtualClickMarkers.length) {
+        for (const m of props.virtualClickMarkers) {
+          const px = m.x * s;
+          const py = m.y * s;
+          const r = 5;
+          ctx.beginPath();
+          ctx.arc(px, py, r + 2, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(255,51,51,0.35)';
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(px, py, r, 0, Math.PI * 2);
+          ctx.fillStyle = '#ff3333';
+          ctx.fill();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      }
+
       const sel = drawing
         ? { left: Math.min(startX, curX), top: Math.min(startY, curY),
             right: Math.max(startX, curX), bottom: Math.max(startY, curY) }
@@ -104,9 +143,31 @@ const EditorCanvas = {
         ctx.lineWidth = 2;
         ctx.strokeRect(sel.left * s, sel.top * s, (sel.right - sel.left) * s, (sel.bottom - sel.top) * s);
       }
+
+      if (rmbDrawing.value) {
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.moveTo(rStartX * s, rStartY * s);
+        ctx.lineTo(rCurX * s, rCurY * s);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
     }
 
     function onMouseDown(e) {
+      if (e.button === 2) {
+        e.preventDefault();
+        rmbDrawing.value = true;
+        [rStartX, rStartY] = toReal(e.clientX, e.clientY);
+        rStartX = clamp(rStartX, 0, props.imgWidth);
+        rStartY = clamp(rStartY, 0, props.imgHeight);
+        rCurX = rStartX;
+        rCurY = rStartY;
+        redraw();
+        return;
+      }
       if (e.button !== 0) return;
       drawing = true;
       [startX, startY] = toReal(e.clientX, e.clientY);
@@ -114,14 +175,39 @@ const EditorCanvas = {
       startY = clamp(startY, 0, props.imgHeight);
       curX = startX; curY = startY;
     }
+
     function onMouseMove(e) {
+      if (rmbDrawing.value) {
+        [rCurX, rCurY] = toReal(e.clientX, e.clientY);
+        rCurX = clamp(rCurX, 0, props.imgWidth);
+        rCurY = clamp(rCurY, 0, props.imgHeight);
+        redraw();
+        return;
+      }
       if (!drawing) return;
       [curX, curY] = toReal(e.clientX, e.clientY);
       curX = clamp(curX, 0, props.imgWidth);
       curY = clamp(curY, 0, props.imgHeight);
       redraw();
     }
+
     function onMouseUp(e) {
+      if (e.button === 2) {
+        if (!rmbDrawing.value) return;
+        rmbDrawing.value = false;
+        let [ex, ey] = toReal(e.clientX, e.clientY);
+        ex = clamp(ex, 0, props.imgWidth);
+        ey = clamp(ey, 0, props.imgHeight);
+        const dist = Math.hypot(ex - rStartX, ey - rStartY);
+        if (dist < 6) {
+          emit('canvas-remote-click', { x: rStartX, y: rStartY });
+        } else {
+          emit('canvas-remote-swipe', { x1: rStartX, y1: rStartY, x2: ex, y2: ey });
+        }
+        redraw();
+        return;
+      }
+      if (e.button !== 0) return;
       if (!drawing) return;
       drawing = false;
       [curX, curY] = toReal(e.clientX, e.clientY);
@@ -132,6 +218,25 @@ const EditorCanvas = {
       if (right - left > 2 && bottom - top > 2) {
         emit('selection-change', { left, top, right, bottom });
       }
+      redraw();
+    }
+
+    function onMouseLeave(e) {
+      if (rmbDrawing.value) {
+        rmbDrawing.value = false;
+        redraw();
+      }
+      if (!drawing) return;
+      drawing = false;
+      [curX, curY] = toReal(e.clientX, e.clientY);
+      curX = clamp(curX, 0, props.imgWidth);
+      curY = clamp(curY, 0, props.imgHeight);
+      const left = Math.min(startX, curX), top = Math.min(startY, curY);
+      const right = Math.max(startX, curX), bottom = Math.max(startY, curY);
+      if (right - left > 2 && bottom - top > 2) {
+        emit('selection-change', { left, top, right, bottom });
+      }
+      redraw();
     }
 
     function loadImage(src) {
@@ -144,6 +249,8 @@ const EditorCanvas = {
     watch(() => props.imageSrc, (v) => loadImage(v));
     watch(() => props.selection, () => { if (!drawing) redraw(); }, { deep: true });
     watch(() => props.locateBoxes, () => redraw(), { deep: true });
+    watch(() => props.virtualClickMarkers, () => redraw(), { deep: true });
+    watch(() => props.virtualSwipeLines, () => redraw(), { deep: true });
     watch(canvasStyleW, () => nextTick(redraw));
     watch(canvasStyleH, () => nextTick(redraw));
 
@@ -161,6 +268,9 @@ const EditorCanvas = {
 
     onBeforeUnmount(() => { if (ro) ro.disconnect(); });
 
-    return { wrapper, canvas, canvasStyleW, canvasStyleH, onMouseDown, onMouseMove, onMouseUp };
+    return {
+      wrapper, canvas, canvasStyleW, canvasStyleH,
+      onMouseDown, onMouseMove, onMouseUp, onMouseLeave,
+    };
   },
 };

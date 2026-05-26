@@ -1,12 +1,13 @@
 import traceback
 from AutoScriptor.core.targets import ui_point
-from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
 
 @register_task(default_offset_hours=12)
-def eunan_fuBen():
+def eunan_fuBen(
+    battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
+):
     ensure_in("极北",-1)
     click(I("厄难魔域"),repeat=2,until=lambda: ui_T(I("厄难-右")))
     click(I("厄难-右"), until=lambda: ui_F(I("厄难-右")))

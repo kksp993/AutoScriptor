@@ -20,11 +20,30 @@ class TaskRegistry:
             cls._instance._tasks = {}
         return cls._instance
 
-    def register(self, path: str, fn, order: int, param_meta: dict | None = None):
+    def register(
+        self,
+        path: str,
+        fn,
+        order: int,
+        param_meta: dict | None = None,
+        *,
+        param_keys: list[str] | None = None,
+        beta: bool = False,
+        custom: bool = False,
+        doc_flow: str = "",
+        description: str = "",
+        debug_mode: bool = False,
+    ):
         self._tasks[path] = {
             "fn": fn,
             "order": order,
             "param_meta": param_meta or {},
+            "param_keys": list(param_keys) if param_keys else [],
+            "beta": bool(beta),
+            "custom": bool(custom),
+            "doc_flow": (doc_flow or "").strip(),
+            "description": (description or "").strip(),
+            "debug_mode": bool(debug_mode),
         }
 
     def get_fn(self, path: str):
@@ -38,6 +57,31 @@ class TaskRegistry:
     def get_param_meta(self, path: str) -> dict:
         entry = self._tasks.get(path)
         return entry.get("param_meta", {}) if entry else {}
+
+    def get_param_keys(self, path: str) -> list[str]:
+        """当前任务函数签名中的参数名（不含 * / **），用于丢弃 cfg 中已迁移的旧键。"""
+        entry = self._tasks.get(path)
+        return list(entry.get("param_keys", [])) if entry else []
+
+    def get_beta(self, path: str) -> bool:
+        entry = self._tasks.get(path)
+        return bool(entry.get("beta")) if entry else False
+
+    def get_custom(self, path: str) -> bool:
+        entry = self._tasks.get(path)
+        return bool(entry.get("custom")) if entry else False
+
+    def get_doc_flow(self, path: str) -> str:
+        entry = self._tasks.get(path)
+        return (entry.get("doc_flow") or "").strip() if entry else ""
+
+    def get_description(self, path: str) -> str:
+        entry = self._tasks.get(path)
+        return (entry.get("description") or "").strip() if entry else ""
+
+    def get_debug_mode(self, path: str) -> bool:
+        entry = self._tasks.get(path)
+        return bool(entry.get("debug_mode")) if entry else False
 
     def set_fn(self, path: str, fn):
         if path in self._tasks:

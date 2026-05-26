@@ -17,7 +17,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from AutoScriptor.utils.task_registry import task_registry
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +259,24 @@ class TestSchedulerCollectDue(unittest.TestCase):
         due = sched._collect_due(tree, "", time.time())
         self.assertEqual(due, [])
 
+    def test_human_takeover_task_not_collected(self):
+        from services.core.scheduler import Scheduler
+        sched = Scheduler()
+
+        task_registry.register("cat/human", lambda: None, order=1)
+        tree = {
+            "cat": {
+                "human": {
+                    "on": True,
+                    "next_exec_time": 0,
+                    "human_takeover_error": "需要人工确认",
+                }
+            }
+        }
+
+        due = sched._collect_due(tree, "", time.time())
+        self.assertEqual(due, [])
+
 
 # ---------------------------------------------------------------------------
 # task_manager _prepare_task 从 TaskRegistry 取 fn
@@ -299,6 +317,18 @@ class TestTaskManagerPrepare(unittest.TestCase):
         tm = TaskManager()
         with self.assertRaises(KeyError):
             tm._prepare_task("测试/幽灵")
+
+    def test_debug_task_skips_failure_recovery(self):
+        from services.core.task_manager import TaskManager
+
+        cfg._config.setdefault("app", {})["restart_on_error"] = True
+        cfg._config["tasks"] = {
+            "测试": {"调试任务": {"on": True, "next_exec_time": 0, "params": {}}}
+        }
+        task_registry.register("测试/调试任务", lambda: None, order=1, debug_mode=True)
+
+        tm = TaskManager()
+        self.assertFalse(tm._try_recover_app(0, task="测试/调试任务"))
 
 
 if __name__ == "__main__":

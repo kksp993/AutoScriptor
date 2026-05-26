@@ -91,7 +91,7 @@ def handle_notify(config_yaml: str, title: str = "", content: str = "") -> bool:
 def notify_from_config(title: str, content: str) -> bool:
     """从全局配置读取通知设置并发送"""
     try:
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         if not cfg.get("notify.enabled", False):
             return False
         config_yaml = cfg.get("notify.config_yaml", "provider: null")

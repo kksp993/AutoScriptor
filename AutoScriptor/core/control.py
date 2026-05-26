@@ -27,7 +27,7 @@ class BaseMumuControl:
         self.mumu.adb.key_event(key_code)
 
     def __getattr__(self, name):
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         return getattr(Mumu().select(cfg["emulator"]["index"]), name)
     
 class NemuIpcControl(BaseMumuControl):

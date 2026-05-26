@@ -2,7 +2,7 @@ import cv2
 from paddleocr import PaddleOCR
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.box import Box
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
 from fuzzywuzzy import fuzz
 import threading
 import paddle
@@ -106,7 +106,8 @@ def get_ocr_engine():
 # ===== 帧级 OCR 缓存 =====
 
 _frame_cache_lock = threading.Lock()
-_frame_cache = None
+_frame_cache: dict[tuple, dict] = {}
+_FRAME_CACHE_MAX = 4
 
 
 _SAMPLE_N = 7  # 7×7 = 49 均匀采样点
@@ -119,24 +120,29 @@ def _frame_fingerprint(img):
 
 
 def _raw_ocr_cached(img_for_ocr, ttl=0.5):
-    """执行 PaddleOCR 并缓存原始结果；同一帧图像在 TTL 内复用上次结果。"""
-    global _frame_cache
+    """执行 PaddleOCR 并缓存原始结果；同一帧图像在 TTL 内复用上次结果。
+    使用多条目字典缓存，避免不同 scale 图像互相踢掉对方的缓存。"""
     fp = _frame_fingerprint(img_for_ocr)
     now = time.time()
     with _frame_cache_lock:
-        if (_frame_cache is not None
-                and _frame_cache['fp'] == fp
-                and now - _frame_cache['ts'] < ttl):
-            return _frame_cache['result']
+        entry = _frame_cache.get(fp)
+        if entry is not None and now - entry['ts'] < ttl:
+            return entry['result']
     engine = get_ocr_engine()
     if engine is None:
         logger.error("OCR engine is not initialized.")
         return None
     result = engine.ocr(img_for_ocr, cls=False)
     with _frame_cache_lock:
-        _frame_cache = {'fp': fp, 'ts': now, 'result': result}
+        _frame_cache[fp] = {'ts': now, 'result': result}
+        if len(_frame_cache) > _FRAME_CACHE_MAX:
+            oldest_key = min(_frame_cache, key=lambda k: _frame_cache[k]['ts'])
+            del _frame_cache[oldest_key]
     return result
 
+
+_fallback_log_ts = 0.0
+_FALLBACK_LOG_INTERVAL = 2.0
 
 # ===== 主OCR方法（推荐） =====
 
@@ -160,6 +166,8 @@ def ocr(frame,
     返回：
         List[List[Box]]，所有匹配到的区域
         外层列表长度与target_strings相同，内层列表长度与target_strings中每个字符串匹配到的区域数量相同
+
+    当 scale 不为 1.0 且本轮未匹配到任何目标（含引擎返回 None）时，自动以 scale=1.0 再执行一次。
     """
     def _iter_substring_spans(haystack: str, needle: str):
         if not haystack or not needle:
@@ -204,8 +212,6 @@ def ocr(frame,
         else:
             img_for_ocr = img_roi
         result = _raw_ocr_cached(img_for_ocr)
-        if result is None:
-            return []
         found_boxes = [[] for _ in range(len(target_strings))]
         if result and result[0]:
             for line_idx, line_info in enumerate(result[0]):
@@ -243,7 +249,26 @@ def ocr(frame,
                             found_boxes[target_strings.index(target_string)].append(
                                 Box(final_left, final_top, final_width, final_height)
                             )
-        elif result is None:
+        if (
+            scale != 1.0
+            and len(target_strings) > 0
+            and all(len(b) == 0 for b in found_boxes)
+        ):
+            global _fallback_log_ts
+            _now = time.time()
+            if _now - _fallback_log_ts >= _FALLBACK_LOG_INTERVAL:
+                logger.debug("OCR scale=%s 未匹配任何目标，回退 scale=1.0 重试", scale)
+                _fallback_log_ts = _now
+            return ocr(
+                frame,
+                target_strings,
+                confidence,
+                preferred_box,
+                stride,
+                fuzzy_threshold,
+                scale=1.0,
+            )
+        if result is None:
             logger.warning("OCR engine returned None. This might indicate an issue with the input image or engine.")
         return found_boxes
     except Exception as e:

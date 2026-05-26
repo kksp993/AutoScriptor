@@ -6,7 +6,7 @@ function buildDisplayParams(params) {
   let count = 0;
   for (const [k, v] of Object.entries(params)) {
     if (count >= 3) break;
-    if (k === 'param_meta') continue;
+    if (k === 'param_meta' || k === 'profession') continue;
     if (typeof v === 'boolean' || Array.isArray(v) || (typeof v === 'object' && v !== null)) continue;
     const shown = k === 'method' && methodDisplay[v] ? methodDisplay[v] : v;
     if (typeof shown === 'string' && shown.length > 12) continue;
@@ -22,7 +22,7 @@ function countVariableParams(params) {
   const methodDisplay = { YAOSHI: '购买符印之匙', QILING: '购买唤灵之心' };
   let n = 0;
   for (const [k, v] of Object.entries(params)) {
-    if (k === 'param_meta') continue;
+    if (k === 'param_meta' || k === 'profession') continue;
     if (typeof v === 'boolean' || Array.isArray(v) || (typeof v === 'object' && v !== null)) continue;
     const shown = k === 'method' && methodDisplay[v] ? methodDisplay[v] : v;
     if (typeof shown === 'string' && shown.length > 12) continue;
@@ -37,7 +37,7 @@ const TaskTreeTaskRow = {
     taskKey: { type: String, required: true },
     item: { type: Object, required: true },
     taskPath: { type: String, required: true },
-    parentTree: { type: Object, required: true },
+    runTaskDisabled: { type: Boolean, default: false },
   },
   emits: ['edit-task', 'run-task'],
   data() {
@@ -47,13 +47,13 @@ const TaskTreeTaskRow = {
       statusClasses: {
         disabled: 'bg-gray-200 text-gray-600',
         pending: 'bg-yellow-200 text-yellow-600',
-        completed: 'bg-green-200 text-green-600',
+        scheduled: 'bg-green-200 text-green-600',
         error: 'bg-red-200 text-red-600',
       },
       statusLabels: {
         disabled: '未启用',
-        pending: '待完成',
-        completed: '已完成',
+        pending: '待执行',
+        scheduled: '已完成',
         error: '错误',
       },
     };
@@ -78,10 +78,18 @@ const TaskTreeTaskRow = {
     },
   },
   template: `
-<div class="task-tree-item bg-gray-50 px-3.5 py-2.5 rounded-lg border border-gray-200 hover:border-primary/40 hover:bg-gray-100 transition-colors">
-  <div class="flex items-center gap-2.5 min-w-0 w-full">
-    <span class="font-medium text-sm text-dark truncate min-w-0 max-w-[min(50%,12rem)] flex-shrink-0 cursor-pointer"
-          @click.stop="$emit('edit-task', taskKey, item, taskPath, parentTree)">{{ taskKey }}</span>
+<div class="task-tree-item bg-gray-50 px-3.5 py-2.5 rounded-lg border border-gray-200 hover:border-primary/40 hover:bg-gray-100 transition-colors flex flex-col gap-1 min-w-0 max-w-full">
+  <div class="flex items-center gap-2 min-w-0 w-full">
+    <span :class="[
+            'inline-flex items-start gap-1 min-w-0 max-w-[min(46%,11rem)] shrink',
+            runTaskDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+          ]"
+          :title="runTaskDisabled ? '执行中不能编辑任务配置' : '编辑任务配置'"
+          @click.stop="openTaskEditor">
+      <span class="font-medium text-sm text-dark truncate">{{ taskKey }}</span>
+      <span v-if="item.custom" class="task-custom-tag">自定义</span>
+      <span v-if="item.beta" class="task-beta-tag">Beta</span>
+    </span>
     <div class="relative flex-1 min-w-0 flex items-center min-h-[1.5rem]">
       <div ref="measureWrap" class="absolute left-0 top-0 z-[-1] flex items-center gap-2 opacity-0 pointer-events-none whitespace-nowrap" aria-hidden="true">
         <span v-for="(v, k) in displayParamsObj" :key="'m-' + k" class="inline-flex items-center px-2 py-0.5 rounded bg-gray-200 text-gray-600 text-sm whitespace-nowrap">{{ v }}</span>
@@ -99,11 +107,18 @@ const TaskTreeTaskRow = {
       </div>
     </div>
     <div class="flex items-center gap-2 flex-shrink-0">
-      <span :class="['text-sm px-3 py-0.5 rounded-full cursor-pointer whitespace-nowrap font-medium', statusClasses[getTaskStatus(item)]]"
-            @click.stop="toggleTask(item)">
+      <span :class="[
+              'text-sm px-3 py-0.5 rounded-full whitespace-nowrap font-medium',
+              runTaskDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+              statusClasses[getTaskStatus(item)]
+            ]"
+            :title="runTaskDisabled ? '执行中不能修改任务状态' : '点击切换启用状态'"
+            @click.stop="handleStatusClick(item)">
         {{ statusLabels[getTaskStatus(item)] }}
       </span>
-      <button class="w-7 h-7 flex items-center justify-center rounded-full bg-primary/10 hover:bg-primary/25 text-primary transition-colors flex-shrink-0"
+      <button type="button"
+              class="w-7 h-7 flex items-center justify-center rounded-full bg-primary/10 hover:bg-primary/25 text-primary transition-colors flex-shrink-0 disabled:opacity-40 disabled:pointer-events-none"
+              :disabled="runTaskDisabled"
               @click.stop="$emit('run-task', taskPath)"
               title="运行此任务">
         <i class="fa fa-play text-xs"></i>
@@ -128,12 +143,40 @@ const TaskTreeTaskRow = {
   methods: {
     getTaskStatus(taskItem) {
       if (!taskItem.on) return 'disabled';
-      if (taskItem.error) return 'error';
-      return taskItem.next_exec_time < Date.now() / 1000 ? 'pending' : 'completed';
+      if (taskItem.error || taskItem.human_takeover || taskItem.human_takeover_error) return 'error';
+      return taskItem._due ? 'pending' : 'scheduled';
+    },
+    openTaskEditor() {
+      if (this.runTaskDisabled) {
+        ElementPlus.ElMessage.warning('执行中不能编辑任务配置，请先终止当前任务');
+        return;
+      }
+      this.$emit('edit-task', this.taskKey, this.item, this.taskPath);
     },
     toggleTask(taskItem) {
+      if (this.runTaskDisabled) {
+        ElementPlus.ElMessage.warning('执行中不能修改任务状态，请先终止当前任务');
+        return;
+      }
       taskItem.on = !taskItem.on;
-      if (taskItem.on) taskItem.next_exec_time = 0;
+      if (taskItem.on) {
+        delete taskItem.human_takeover;
+        delete taskItem.human_takeover_error;
+        delete taskItem.human_takeover_at;
+        taskItem.next_exec_time = 0;
+        taskItem._due = true;
+      }
+      else { taskItem._due = false; }
+    },
+    handleStatusClick(taskItem) {
+      if (taskItem.human_takeover_error) {
+        ElementPlus.ElMessageBox.alert(taskItem.human_takeover_error, '需要人工处理', {
+          type: 'error',
+          confirmButtonText: '确定',
+        });
+        return;
+      }
+      this.toggleTask(taskItem);
     },
     setupResizeObserver() {
       this.resizeObserver = new ResizeObserver(() => this.measure());
@@ -163,6 +206,7 @@ const TaskTree = {
     treeData: { type: Object, required: true },
     basePath: { type: String, default: '' },
     depth: { type: Number, default: 0 },
+    runTaskDisabled: { type: Boolean, default: false },
   },
   emits: ['edit-task', 'expanded-change', 'run-task'],
   data() {
@@ -171,27 +215,27 @@ const TaskTree = {
       statusClasses: {
         disabled: 'bg-gray-200 text-gray-600',
         pending: 'bg-yellow-200 text-yellow-600',
-        completed: 'bg-green-200 text-green-600',
+        scheduled: 'bg-green-200 text-green-600',
         error: 'bg-red-200 text-red-600',
       },
       statusLabels: {
         disabled: '未启用',
-        pending: '待完成',
-        completed: '已完成',
+        pending: '待执行',
+        scheduled: '已完成',
         error: '错误',
       },
     };
   },
   template: `
-<div class="space-y-1">
+<div class="space-y-1 min-w-0">
   <template v-for="key in objectKeys(treeData)" :key="key">
     <!-- 叶子任务行 -->
     <task-tree-task-row v-if="isTask(treeData[key])"
       :task-key="key"
       :item="treeData[key]"
       :task-path="childBasePath(key)"
-      :parent-tree="treeData"
-      @edit-task="(childKey, item, path, parent) => $emit('edit-task', childKey, item, path, parent)"
+      :run-task-disabled="runTaskDisabled"
+      @edit-task="(childKey, item, path) => $emit('edit-task', childKey, item, path)"
       @run-task="path => $emit('run-task', path)">
     </task-tree-task-row>
     <!-- 一级分组 (depth=0) -->
@@ -212,7 +256,8 @@ const TaskTree = {
         <div v-if="expanded[key]" class="ml-3 pl-3 border-l-2 border-primary/20">
           <task-tree
             :tree-data="treeData[key]" :base-path="childBasePath(key)" :depth="depth + 1"
-            @edit-task="(childKey, item, path, parent) => $emit('edit-task', childKey, item, path, parent)"
+            :run-task-disabled="runTaskDisabled"
+            @edit-task="(childKey, item, path) => $emit('edit-task', childKey, item, path)"
             @expanded-change="$emit('expanded-change', $event)"
             @run-task="path => $emit('run-task', path)">
           </task-tree>
@@ -237,7 +282,8 @@ const TaskTree = {
         <div v-if="expanded[key]" class="ml-2 pl-2 border-l border-gray-200">
           <task-tree
             :tree-data="treeData[key]" :base-path="childBasePath(key)" :depth="depth + 1"
-            @edit-task="(childKey, item, path, parent) => $emit('edit-task', childKey, item, path, parent)"
+            :run-task-disabled="runTaskDisabled"
+            @edit-task="(childKey, item, path) => $emit('edit-task', childKey, item, path)"
             @expanded-change="$emit('expanded-change', $event)"
             @run-task="path => $emit('run-task', path)">
           </task-tree>
@@ -267,16 +313,27 @@ const TaskTree = {
       this.$emit('expanded-change', willOpen ? path : this.basePath);
     },
     toggleTask(item) {
+      if (this.runTaskDisabled) {
+        ElementPlus.ElMessage.warning('执行中不能修改任务状态，请先终止当前任务');
+        return;
+      }
       item.on = !item.on;
-      if (item.on) item.next_exec_time = 0;
+      if (item.on) {
+        delete item.human_takeover;
+        delete item.human_takeover_error;
+        delete item.human_takeover_at;
+        item.next_exec_time = 0;
+        item._due = true;
+      }
+      else { item._due = false; }
     },
     getTaskStatus(item) {
       if (!item.on) return 'disabled';
-      if (item.error) return 'error';
-      return item.next_exec_time < Date.now() / 1000 ? 'pending' : 'completed';
+      if (item.error || item.human_takeover || item.human_takeover_error) return 'error';
+      return item._due ? 'pending' : 'scheduled';
     },
     countStatus(section) {
-      const c = { disabled: 0, pending: 0, completed: 0, error: 0 };
+      const c = { disabled: 0, pending: 0, scheduled: 0, error: 0 };
       Object.values(section).forEach(item => {
         if (this.isTask(item)) {
           c[this.getTaskStatus(item)]++;

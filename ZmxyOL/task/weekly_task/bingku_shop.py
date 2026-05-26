@@ -1,5 +1,4 @@
 import traceback
-from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
@@ -8,7 +7,7 @@ def buy(item):
     item_box = locate(T(item), timeout=10)
     if item_box is None:
         raise RuntimeError(f"未找到物品: {item}，跳过购买")
-    tgt = T("购买", box=item_box + (-20, 262, 180, 44), color="青色")
+    tgt = T("购买", box=item_box + {"offset": (-20, 262), "resize": (180, 44)}, color="青色")
     if ui_T(tgt, 2):
         click(tgt)
         swipe(B(472, 415), B(800, 415))

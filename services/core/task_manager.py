@@ -12,6 +12,7 @@ import inspect
 import os
 import sys
 import traceback
+from contextlib import contextmanager
 from typing import List, Tuple
 from threading import Event, RLock
 
@@ -19,12 +20,11 @@ import dpath
 from AutoScriptor.utils.cancel import TaskCancelled, bind_cancel_event
 from AutoScriptor.utils.logger import logger
 
-from ZmxyOL import *
-from AutoScriptor import *
-import AutoScriptor.core.api as _core_api
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.core.background import bg
+from AutoScriptor.errors import TaskRequireReTry
+from AutoScriptor.utils.cancel import cancellable_sleep as sleep
+from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.task_registry import task_registry
-from AutoScriptor import TaskRequireReTry
 from AutoScriptor.utils.logger import set_current_task
 from services.core.runtime_context import runtime_ctx
 
@@ -62,7 +62,21 @@ _CATEGORY_NEXT_DATE = {
     "每日任务": NextDate.tomorrow,
     "活动任务": NextDate.tomorrow,
     "每周任务": NextDate.next_week,
+    "自定义任务": NextDate.tomorrow,
 }
+
+
+def is_task_debug_mode(task_path: str, task_data: dict | None = None) -> bool:
+    """Task-level debug run policy from registry first, config fallback second."""
+    if task_registry.get_debug_mode(task_path):
+        return True
+    if isinstance(task_data, dict):
+        return bool(task_data.get("debug_mode") or task_data.get("debug"))
+    try:
+        data = dpath.get(cfg["tasks"], task_path)
+    except Exception:
+        return False
+    return isinstance(data, dict) and bool(data.get("debug_mode") or data.get("debug"))
 
 
 def parse_sched_window_hours(task_data: dict) -> tuple[int, int] | None:
@@ -76,6 +90,28 @@ def parse_sched_window_hours(task_data: dict) -> tuple[int, int] | None:
         return None
 
 
+def parse_allowed_weekdays(task_data: dict) -> list[int] | None:
+    """解析 allowed_weekdays: [1..7] 表示周一至周日（与 cfg['weekday'] 一致）。"""
+    aw = task_data.get("allowed_weekdays")
+    if aw is None or not isinstance(aw, list) or not aw:
+        return None
+    try:
+        return [int(x) for x in aw]
+    except (TypeError, ValueError):
+        return None
+
+
+def calc_next_allowed_weekday_ts(now: datetime.datetime, allowed: list[int]) -> float:
+    """当前不在允许日时，返回「下一个允许日」本地 5:00 的时间戳（从次日开始找）。"""
+    allowed_set = set(allowed)
+    for i in range(1, 15):
+        d = now.date() + datetime.timedelta(days=i)
+        wd = d.weekday() + 1
+        if wd in allowed_set:
+            return datetime.datetime.combine(d, datetime.time(5, 0)).timestamp()
+    return (now + datetime.timedelta(days=7)).timestamp()
+
+
 def clamp_to_sched_window(ts: float, start_h: int, end_h: int) -> float:
     """将时间戳映射到最近的 [start_h, end_h) 窗口起点（本地时间）。若已在窗口内则原样返回。"""
     t = datetime.datetime.fromtimestamp(ts)
@@ -86,6 +122,22 @@ def clamp_to_sched_window(ts: float, start_h: int, end_h: int) -> float:
         return t.replace(hour=start_h, minute=0, second=0, microsecond=0).timestamp()
     next_day = t.date() + datetime.timedelta(days=1)
     return datetime.datetime.combine(next_day, datetime.time(start_h, 0)).timestamp()
+
+
+def _is_request_human_takeover(exc: Exception) -> bool:
+    cls = exc.__class__
+    return cls.__name__ == "RequestHumanTakeover" and "NemuIpc" in cls.__module__
+
+
+def _human_takeover_message(exc: Exception) -> str:
+    text = str(exc).strip()
+    return text or repr(exc)
+
+
+class RequestHumanTakeover(Exception):
+    """Lightweight placeholder; real NemuIpc exceptions are detected lazily."""
+
+    pass
 
 
 class TaskManager:
@@ -104,7 +156,29 @@ class TaskManager:
     def _reset_cancel(self):
         self._cancel_event.clear()
 
-    def execute_tasks(self, tasks: List[str]) -> Tuple[int, int]:
+    def _check_cancel_requested(self):
+        if self._cancel_event.is_set():
+            raise TaskCancelled("任务已终止")
+
+    @contextmanager
+    def config_transaction(self):
+        """Serialize config mutations that must not race with task execution."""
+        with self._cfg_lock:
+            yield
+
+    def switch_character_and_reload(self, server: str, character: str) -> None:
+        """Switch the active character and reload task registry/config atomically."""
+        with self.config_transaction():
+            cfg.switch_character(server, character)
+            self.reload_tasks()
+
+    def execute_tasks(
+        self,
+        tasks: List[str],
+        *,
+        max_attempts: int | None = None,
+        attempt_offset: int = 0,
+    ) -> Tuple[int, int]:
         """执行一组任务。返回 (成功数, 失败数)。"""
         if self._cancel_event.is_set():
             logger.info("⏹ 检测到终止请求，跳过本批任务")
@@ -115,7 +189,11 @@ class TaskManager:
             if self._cancel_event.is_set():
                 logger.info("⏹ 检测到终止请求，停止后续任务")
                 break
-            if self._execute_single_task(task):
+            if self._execute_single_task(
+                task,
+                max_attempts=max_attempts,
+                attempt_offset=attempt_offset,
+            ):
                 success += 1
             else:
                 failed += 1
@@ -125,11 +203,16 @@ class TaskManager:
         """重新加载任务和配置。"""
         with self._cfg_lock:
             try:
-                saved_game = cfg._config.get('game', {}).copy()
-                cfg.load_config(security_key)
+                cfg.reload_preserving_decrypted_credentials(security_key)
                 # 清除 ZmxyOL 子模块缓存，强制重新导入
                 for name in [m for m in sys.modules if m.startswith('ZmxyOL.')]:
                     sys.modules.pop(name, None)
+                try:
+                    from AutoScriptor.battle_character.hero import reload_battle_character_modules
+
+                    reload_battle_character_modules()
+                except Exception as e:
+                    logger.warning("职业脚本热重载失败（将使用已缓存职业）: %s", e)
                 try:
                     import ZmxyOL
                     importlib.reload(ZmxyOL)
@@ -138,10 +221,13 @@ class TaskManager:
                 # 重新发现并注册任务（不再由 import 自动触发）
                 from ZmxyOL.task import force_reload_tasks
                 force_reload_tasks()
-                if not security_key:
-                    cfg._config['game'] = saved_game
                 logger.info("✅ 任务重新加载完成")
             except Exception as e:
+                if _is_request_human_takeover(e):
+                    logger.error(f"Request requires human takeover: {task}, reason: {e}")
+                    with self._cfg_lock:
+                        self._update_next_exec_time(task)
+                    return False
                 logger.error(f"❌ 任务重新加载失败: {e}")
                 raise
             finally:
@@ -149,13 +235,27 @@ class TaskManager:
 
     # ── 核心执行 ──
 
-    def _execute_single_task(self, task: str) -> bool:
+    def _execute_single_task(
+        self,
+        task: str,
+        *,
+        max_attempts: int | None = None,
+        attempt_offset: int = 0,
+    ) -> bool:
         """执行单个任务（含重试）。返回是否成功。"""
         max_retry = cfg["app"].get("max_retry", 0)
 
-        for attempt in range(max_retry + 1):
+        if max_attempts is None:
+            attempt_numbers = range(0, max_retry + 1)
+        else:
+            start = max(0, attempt_offset)
+            stop = min(max_retry + 1, start + max(1, max_attempts))
+            attempt_numbers = range(start, stop)
+
+        for attempt in attempt_numbers:
             if self._cancel_event.is_set():
                 return False
+            has_local_retry = attempt + 1 in attempt_numbers
 
             set_current_task(task.rsplit("/", 1)[-1])
             try:
@@ -170,21 +270,24 @@ class TaskManager:
                 fn(**kwargs)
                 logger.info(f"▶️  执行成功: {task}")
                 with self._cfg_lock:
+                    self._clear_human_takeover_state(task)
                     self._update_next_exec_time(task)
                 return True
 
             except TaskRequireReTry as e:
                 if attempt < max_retry:
                     logger.info(f"🔄 任务请求重试: {task} ({attempt + 1}/{max_retry})，原因: {e}")
-                    continue
+                    if has_local_retry:
+                        continue
+                    return False
                 logger.warning(f"⚠️ 重试次数已满: {task}，原因: {e}")
                 return False
 
             except RequestHumanTakeover as e:
-                logger.error(f"❌ 需要人工操作: {task}")
-                self._archive_error(task, e)
+                logger.error(f"❌ 需要人工操作: {task}，原因: {e}")
+                # 人工接管属预期分支，不写入 logs/errors，避免与真实异常混淆
                 with self._cfg_lock:
-                    self._update_next_exec_time(task)
+                    self._mark_human_takeover(task, e)
                 return False
 
             except KeyboardInterrupt:
@@ -195,14 +298,24 @@ class TaskManager:
                 return False
 
             except Exception as e:
-                logger.error(f"❌ 执行失败: {task}，错误: {e}")
+                if _is_request_human_takeover(e):
+                    logger.error(f"❌ 需要人工操作: {task}，原因: {e}")
+                    with self._cfg_lock:
+                        self._mark_human_takeover(task, e)
+                    return False
+                logger.error("❌ 执行失败: %s，错误: %r", task, e)
                 self._archive_error(task, e)
                 traceback.print_exc()
-                if not self._try_recover_app(attempt):
+                if is_task_debug_mode(task):
+                    logger.info("🔄 debug_mode: 跳过失败恢复，不关闭/重启游戏: %s", task)
+                    return False
+                if not self._try_recover_app(attempt, task=task):
                     return False
                 if attempt < max_retry:
                     logger.info(f"🔄 重试 ({attempt + 1}/{max_retry})")
-                    continue
+                    if has_local_retry:
+                        continue
+                    return False
                 return False
 
             finally:
@@ -224,14 +337,21 @@ class TaskManager:
             return fn, self._resolve_params(task, task_data, fn)
 
     def _resolve_params(self, task_path: str, task_data: dict, fn) -> dict:
-        """解析任务参数（枚举恢复）。"""
+        """解析任务参数（枚举恢复，TableParam 重建）。"""
         raw = task_data.get('params', {})
         meta = task_registry.get_param_meta(task_path)
         sig = inspect.signature(fn)
+        has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
         params = {}
         for k, v in raw.items():
-            enum_cls = self._get_enum_class(k, meta, sig)
-            params[k] = self._coerce_enum(v, enum_cls) if enum_cls else v
+            if not has_var_kw and k not in sig.parameters:
+                continue
+            k_meta = meta.get(k)
+            if isinstance(k_meta, dict) and k_meta.get("type") == "table":
+                params[k] = self._coerce_table_param(v, k_meta)
+            else:
+                enum_cls = self._get_enum_class(k, meta, sig)
+                params[k] = self._coerce_enum(v, enum_cls) if enum_cls else v
         return params
 
     @staticmethod
@@ -263,7 +383,41 @@ class TaskManager:
             return enum_cls[value]
         return value
 
+    @staticmethod
+    def _coerce_table_param(value, meta: dict):
+        """将 JSON dict-of-dicts 还原为 TableParam（含枚举恢复）。"""
+        from AutoScriptor.utils.table_param import TableParam
+        if isinstance(value, TableParam):
+            return value
+        if not isinstance(value, dict):
+            return value
+        columns = meta.get("columns", {})
+        column_labels = meta.get("column_labels", {})
+        return TableParam.from_json_data(value, columns, column_labels)
+
     # ── 执行后更新 ──
+
+    def _clear_human_takeover_state(self, task: str) -> None:
+        """任务成功或用户重新激活后，清掉人工接管冻结标记。"""
+        try:
+            task_data = dpath.get(cfg["tasks"], task)
+        except Exception:
+            return
+        if not isinstance(task_data, dict):
+            return
+        for key in ("human_takeover", "human_takeover_error", "human_takeover_at"):
+            task_data.pop(key, None)
+
+    def _mark_human_takeover(self, task: str, exc: Exception) -> None:
+        """
+        人工接管不是普通异常：WebUI 显示红色未完成，但调度器按冻结态处理，
+        直到用户手动重新启用/直跑或任务后续成功清除该标记。
+        """
+        task_data = dpath.get(cfg["tasks"], task)
+        task_data["human_takeover"] = True
+        task_data["human_takeover_error"] = _human_takeover_message(exc)
+        task_data["human_takeover_at"] = datetime.datetime.now().timestamp()
+        self._update_next_exec_time(task)
 
     def _update_next_exec_time(self, task: str, next_date: NextDate = None, offset_hours: int = 0):
         """更新任务的 next_exec_time / on 状态。"""
@@ -301,27 +455,36 @@ class TaskManager:
 
     # ── 错误恢复 ──
 
-    def _try_recover_app(self, retry_count: int) -> bool:
+    def _try_recover_app(self, retry_count: int, task: str | None = None) -> bool:
         """尝试恢复应用到可执行状态。"""
+        if task and is_task_debug_mode(task):
+            logger.info("🔄 debug_mode: 跳过失败恢复，不关闭/重启游戏: %s", task)
+            return False
         if not cfg["app"].get("restart_on_error"):
             return False
         app_name = cfg["app"]["app_to_start"]
-        try:
-            runtime_ctx.mixctrl.app.close(app_name)
-            self._wait_app_stopped(app_name)
-            if retry_count >= 1:
-                self._restart_adb_and_wait()
-            if not self._wait_app_running(app_name):
-                return False
-            if not dismiss_floating_window(max_retries=40, debug=False):
-                logger.warning("🔄 悬浮窗关闭失败，尝试完全重启模拟器")
-                return self._full_emulator_restart(app_name)
-            sleep(5)
-            mm.set_region("登录")
-            return True
-        except Exception as e:
-            logger.error(f"🔄 应用重启失败: {e}")
+        if runtime_ctx.mixctrl is None:
+            logger.warning("🔄 mixctrl 不可用，跳过应用重启恢复")
             return False
+        from AutoScriptor.utils.perf import mumu_safe_subprocess
+        with mumu_safe_subprocess():
+            try:
+                runtime_ctx.mixctrl.app.close(app_name)
+                self._wait_app_stopped(app_name)
+                if retry_count >= 1:
+                    self._restart_adb_and_wait()
+                if not self._wait_app_running(app_name):
+                    return False
+                # if not dismiss_floating_window(max_retries=40, debug=False):
+                #     logger.warning("🔄 悬浮窗关闭失败，尝试完全重启模拟器")
+                #     return self._full_emulator_restart(app_name)
+                sleep(5)
+                from ZmxyOL.nav.map_manager import mm
+                mm.set_region("登录")
+                return True
+            except Exception as e:
+                logger.error("🔄 应用重启失败: %r", e)
+                return False
 
     def _wait_app_stopped(self, app_name: str, timeout: int = 15):
         """等待应用完全停止后再返回，防止 close 后立即 launch 被忽略。"""
@@ -359,12 +522,25 @@ class TaskManager:
         """完全重启模拟器（最后手段）。"""
         try:
             if runtime_ctx.mixctrl is not None:
-                runtime_ctx.mixctrl.app.close(app_name)
+                try:
+                    runtime_ctx.mixctrl.app.close(app_name)
+                    sleep(2)
+                except Exception as e:
+                    logger.debug("🔄 关闭应用失败(可忽略): %s", e)
+
+            runtime_ctx._release_nemu_ipc()
+
             from AutoScriptor.control.MumuAdaptor.mumu import Mumu
-            Mumu().select(cfg["emulator"]["index"]).power.shutdown()
-            sleep(10)
-            runtime_ctx.refresh()
+            mumu = Mumu().select(cfg["emulator"]["index"])
+            mumu.power.shutdown(wait=True, timeout=30)
+
+            runtime_ctx.mixctrl = None
+            runtime_ctx.mumu = None
+
+            sleep(3)
+            runtime_ctx.refresh(cancel_check=self._check_cancel_requested)
             sleep(5)
+            from ZmxyOL.nav.map_manager import mm
             mm.set_region("登录")
             return True
         except Exception as e:
@@ -375,7 +551,7 @@ class TaskManager:
         """重启 ADB 并验证连接。"""
         import subprocess
         import threading
-        import time as _time
+        from AutoScriptor.utils.cancel import join_with_cancel, sleep_with_cancel
         adb = cfg["emulator"]["adb_path"]
         addr = str(cfg["emulator"].get("adb_addr", ""))
         subprocess.run([adb, "kill-server"], capture_output=True, text=True)
@@ -393,11 +569,11 @@ class TaskManager:
                     result["error"] = e
             t = threading.Thread(target=_test, daemon=True)
             t.start()
-            t.join(5)
+            join_with_cancel(t, 5, self._check_cancel_requested)
             if not t.is_alive() and result.get("ok"):
                 logger.info("✅ ADB重启完成，点击测试成功")
                 return
-            _time.sleep(interval)
+            sleep_with_cancel(interval, self._check_cancel_requested)
         raise RuntimeError("ADB重启后仍无法控制(点击测试失败)")
 
     # ── 工具 ──
@@ -421,44 +597,3 @@ class TaskManager:
                     os.remove(fp)
                 except Exception:
                     pass
-
-
-if __name__ == "__main__":
-    from AutoScriptor.core.api import init as _init_env
-    _init_env()
-    from ZmxyOL.task import load_tasks
-    load_tasks()
-    from AutoScriptor.utils.perf import boost, unboost
-    try:
-        boost()
-        task_manager = TaskManager()
-        task_manager.execute_tasks([
-            '每日任务/天庭/地狱混沌',
-            '每日任务/天庭/天庭混沌',
-            '每日任务/天庭/组队任务',
-            '每日任务/村庄/仙宝挖掘',
-            '每日任务/村庄/仙气消耗',
-            '每日任务/村庄/仙盟建设',
-            '每日任务/村庄/取经',
-            '每日任务/村庄/天选阁',
-            '每日任务/村庄/妖兽',
-            '每日任务/村庄/宠物培养',
-            '每日任务/村庄/强化装备',
-            '每日任务/村庄/战令领取',
-            '每日任务/村庄/活跃券',
-            '每日任务/村庄/竞技场',
-            '每日任务/极北/极北地区/一键碾压',
-            '每日任务/极北/极北地区/冰窟探险',
-            '每日任务/极北/极北地区/厄难副本',
-            '每日任务/极北/极北地区/极北混沌',
-            '每日任务/极北/极北地区/梵天塔',
-            '每日任务/极北/极北地区/混沌蛋',
-            '每日任务/极北/极北村庄/仙宝炼化',
-            '每日任务/极北/极北村庄/极光天诏',
-            '每日任务/极北/极北村庄/消费点券',
-            '每日任务/极北/极寒深渊/极渊副本',
-            '每日任务/登录/登录其他角色'
-        ])
-    finally:
-        unboost()
-        bg.stop()

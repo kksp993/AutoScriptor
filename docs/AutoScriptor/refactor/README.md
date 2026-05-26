@@ -1,6 +1,6 @@
 # 重构技术文档
 
-本目录包含 AutoScriptor 全量整改各阶段的技术文档，涵盖性能优化、新增接口、部署配置和架构变更。
+本目录保留历史阶段性重构记录；当前运行约定以 `docs/AutoScriptor/runtime-lifecycle.md`、`docs/AutoScriptor/webui-api-contract.md` 和 `docs/AutoScriptor/script-authoring.md` 为准。
 
 ## 文档索引
 
@@ -24,6 +24,14 @@
 | [VLMTarget 视觉定位接口](vlm_target_api.md) | VLMTarget 类、V() 工厂函数、vlm_locate 识别函数 | `targets.py` `rec.py` `api.py` |
 | [RuntimeContext 运行时生命周期](runtime_context_api.md) | 运行时对象集中管理、初始化/刷新/关闭流程 | `runtime_context.py` `scheduler.py` |
 | [Ollama 本机 VLM 部署指南](ollama_deploy.md) | Ollama 安装、模型拉取、配置接入 | `config.json` `vlm/config.py` |
+
+### 当前基线
+
+| 文档 | 内容 | 对应模块 |
+|------|------|----------|
+| [Runtime Lifecycle](../runtime-lifecycle.md) | WebUI、调度器、设备通道、配置写入的当前生命周期 | `runtime_context.py` `scheduler.py` `device_facade.py` |
+| [WebUI API Contract](../webui-api-contract.md) | WebUI 响应格式、统一轮询、设备诊断接口 | `api_response.py` `server.py` |
+| [Script Authoring Rules](../script-authoring.md) | 任务脚本 sleep、配置、设备调用边界 | `AutoScriptor/core/api.py` |
 
 ## 测试
 

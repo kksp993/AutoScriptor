@@ -22,19 +22,24 @@ mkl>=2023.0.0
 colormath
 uiautomator2==2.16.17
 uiautomator2cache==0.3.1
-
+bsdiff4
 astor>=0.8.1
 # jax==0.4.27
 # jaxlib == 0.4.27
 fastapi
+# Form / UploadFile 必装；pip 包名 python-multipart，import 名为 multipart（另有 python_multipart；Nuitka 见 build_release --include-module）
+python-multipart>=0.0.9
+multipart
 uvicorn[standard]
 websockets
 dpath
 openai
 requests
+bsdiff4>=1.2.0
 lxml
 pyyaml
 pywebio
 inflection
 onepush>=1.3.0
 setuptools<82
+tkinter-embed>=3.10.0

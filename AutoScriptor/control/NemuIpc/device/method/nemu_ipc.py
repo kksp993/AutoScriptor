@@ -15,7 +15,7 @@ from AutoScriptor.utils.logger import logger
 from AutoScriptor.control.NemuIpc.device.method.utils import RETRY_TRIES, retry_sleep
 from AutoScriptor.control.NemuIpc.device.method.pool import WORKER_POOL
 from AutoScriptor.control.NemuIpc.config.deep import deep_get
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
 
 class RequestHumanTakeover(Exception):
     pass
@@ -120,15 +120,20 @@ class CaptureStd:
         self.stdout = b''
         self.stderr = b''
 
+    @staticmethod
+    def _flush_stream(stream):
+        try:
+            stream.flush()
+        except Exception:
+            pass
+
     def _redirect_stdout(self, to):
-        sys.stdout.close()
+        self._flush_stream(sys.stdout)
         os.dup2(to, self.fdout)
-        sys.stdout = os.fdopen(self.fdout, 'w')
 
     def _redirect_stderr(self, to):
-        sys.stderr.close()
+        self._flush_stream(sys.stderr)
         os.dup2(to, self.fderr)
-        sys.stderr = os.fdopen(self.fderr, 'w')
 
     def __enter__(self):
         self.fdout = sys.stdout.fileno()
@@ -138,17 +143,21 @@ class CaptureStd:
         self.old_stdout = os.dup(self.fdout)
         self.old_stderr = os.dup(self.fderr)
 
-        file_out = os.fdopen(self.writer_out, 'w')
-        file_err = os.fdopen(self.writer_err, 'w')
-        self._redirect_stdout(to=file_out.fileno())
-        self._redirect_stderr(to=file_err.fileno())
+        # Redirect the underlying file descriptors without closing/replacing
+        # sys.stdout/sys.stderr. Logger handlers may hold those wrappers.
+        self._redirect_stdout(to=self.writer_out)
+        self._redirect_stderr(to=self.writer_err)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        self._flush_stream(sys.stdout)
+        self._flush_stream(sys.stderr)
         self._redirect_stdout(to=self.old_stdout)
         self._redirect_stderr(to=self.old_stderr)
         os.close(self.old_stdout)
         os.close(self.old_stderr)
+        os.close(self.writer_out)
+        os.close(self.writer_err)
 
         self.stdout = self.recvall(self.reader_out)
         self.stderr = self.recvall(self.reader_err)
@@ -287,27 +296,27 @@ class NemuIpcImpl:
             # MuMuPlayer12 5.0
             os.path.abspath(os.path.join(nemu_folder, './nx_device/12.0/shell/sdk/external_renderer_ipc.dll')),
         ]
-        ipc_dll = ''
-        for ipc_dll in list_dll:
-            if not os.path.exists(ipc_dll):
+        ipc_dll_loaded = ''
+        for candidate in list_dll:
+            if not os.path.exists(candidate):
                 continue
             try:
-                self.lib = ctypes.CDLL(ipc_dll)
+                self.lib = ctypes.CDLL(candidate)
+                ipc_dll_loaded = candidate
                 break
             except OSError as e:
                 logger.error(e)
-                logger.error(f'ipc_dll={ipc_dll} exists, but cannot be loaded')
+                logger.error(f'ipc_dll={candidate} exists, but cannot be loaded')
                 continue
-        if not ipc_dll:
-            # not found
+        if not ipc_dll_loaded:
             raise NemuIpcIncompatible(
                 f'NemuIpc requires MuMu12 version >= 3.8.13, please check your version. '
-                f'None of the following path exists: {list_dll}')
+                f'Could not load external_renderer_ipc.dll from any of: {list_dll}')
         # success
         logger.info(
             f'NemuIpcImpl init, '
             f'nemu_folder={nemu_folder}, '
-            f'ipc_dll={ipc_dll}, '
+            f'ipc_dll={ipc_dll_loaded}, '
             f'instance_id={instance_id}, '
             f'display_id={display_id}'
         )

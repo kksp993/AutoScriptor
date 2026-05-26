@@ -1,9 +1,7 @@
 import traceback
 
-from fsspec.spec import reopen
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import RequestHumanTakeover
 from AutoScriptor.core.api import _locate_all
-from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
@@ -18,14 +16,16 @@ def reset_task():
     return True
 
 @register_task
-def task():
+def task(
+    battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
+):
     print(cfg["weekday"])
     if cfg["weekday"] in [1,2,3,4]:
         logger.info(f"今日{cfg['weekday']}为周一至周四，不进行天选阁任务")
         return
     ensure_in("村庄")
     click(I("导航-挑战"))
-    click(T("天选阁"),repeat=3)
+    click(T("天选阁"),repeat=1)
     if ui_T(T("没有报名"),timeout=2):
         logger.critical("没有报名天选阁，请下周再来！")
         return
@@ -65,26 +65,31 @@ def task():
         logger.info(f"准备开始第{task_idx}关")
         swipe(B(800,300,),B(200,300)) if task_idx>3 else None
         sleep(2)
+        # 第四关会卡，这造梦无敌了
+        if task_idx==4:
+            click(T("得分记录", box=Box(145,664,113,33).margin()))
+            wait_for_appear(T("得分记录", box=Box(493,29,292,73).margin()))
+            click(B(1028,39,38,45))
         click(T(f"第{task_idx}关"), offset=(120, 120), resize=(80, 80))
         if task_idx==5 and ui_F(I("加载中"),2):
             if not reset_task(): break
             not_finish = False
             continue
         wait_for_appear(I("加载中"))
-        bg.add(
-            name="天选战斗结束",
-            identifier=(T("胜利", box=Box(568,30,161,85).margin()),T("确定"),T("联赛排行"),T("回家")),
-            callback=lambda : [
-                logger.info("战斗结束"),
-                bg.set_signal("try_exit", True),
-                bg.set_signal("failed", True),
-                click(T("确定"),until=lambda:ui_F(T("确定"))),
-                h.heaven_draw_card_exit(),
-                bg.clear(),
-            ],
-            once=True
-        )
-        h.set(True,3).battle_task(crash_suddenly=True)
+        with bg.scope("天选阁") as scope:
+            scope.add(
+                name="战斗结束",
+                identifier=(T("胜利", box=Box(568,30,161,85).margin()),T("确定"),T("联赛排行"),T("回家")),
+                callback=lambda : [
+                    logger.info("战斗结束"),
+                    bg.set_signal("try_exit", True),
+                    bg.set_signal("failed", True),
+                    click(T("确定"),until=lambda:ui_F(T("确定"))),
+                    h.heaven_draw_card_exit(),
+                ],
+                once=True
+            )
+            h.set(True,3).battle_task(crash_suddenly=True)
         if ui_T(T("恭喜本次通关，请重置或等待"),timeout=3):
             click(T("确定"))
             sleep(1)

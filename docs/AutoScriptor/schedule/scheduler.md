@@ -150,6 +150,29 @@ def task(difficulty: Difficulty = Difficulty.hard):
 }
 ```
 
+### 表格参数（TableParam）
+
+多关卡任务可使用 `TableParam` 将每个关卡的配置聚合为一张表格：
+
+```python
+from AutoScriptor.utils.table_param import TableParam
+
+@register_task
+def task(
+    battle_config: TableParam = TableParam(
+        {
+            "虎神之崖": {"difficulty": Nandu.不打, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
+            "苍龙幽谷": {"difficulty": Nandu.不打, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
+        },
+        column_labels={"difficulty": "难度", "cancel_on_failed": "不用点券复活", "battle_flow": "战斗招式"},
+    ),
+):
+    for name, row in battle_config.items():
+        ...
+```
+
+前端自动渲染为可编辑表格，每行一个关卡，每列一个配置项。详见 [`docs/tasks/table-param.md`](../../tasks/table-param.md)。
+
 ### 自定义执行间隔
 
 ```python
