@@ -129,6 +129,11 @@ def _is_request_human_takeover(exc: Exception) -> bool:
     return cls.__name__ == "RequestHumanTakeover" and "NemuIpc" in cls.__module__
 
 
+def _human_takeover_message(exc: Exception) -> str:
+    text = str(exc).strip()
+    return text or repr(exc)
+
+
 class RequestHumanTakeover(Exception):
     """Lightweight placeholder; real NemuIpc exceptions are detected lazily."""
 
@@ -265,6 +270,7 @@ class TaskManager:
                 fn(**kwargs)
                 logger.info(f"▶️  执行成功: {task}")
                 with self._cfg_lock:
+                    self._clear_human_takeover_state(task)
                     self._update_next_exec_time(task)
                 return True
 
@@ -281,7 +287,7 @@ class TaskManager:
                 logger.error(f"❌ 需要人工操作: {task}，原因: {e}")
                 # 人工接管属预期分支，不写入 logs/errors，避免与真实异常混淆
                 with self._cfg_lock:
-                    self._update_next_exec_time(task)
+                    self._mark_human_takeover(task, e)
                 return False
 
             except KeyboardInterrupt:
@@ -292,6 +298,11 @@ class TaskManager:
                 return False
 
             except Exception as e:
+                if _is_request_human_takeover(e):
+                    logger.error(f"❌ 需要人工操作: {task}，原因: {e}")
+                    with self._cfg_lock:
+                        self._mark_human_takeover(task, e)
+                    return False
                 logger.error("❌ 执行失败: %s，错误: %r", task, e)
                 self._archive_error(task, e)
                 traceback.print_exc()
@@ -385,6 +396,28 @@ class TaskManager:
         return TableParam.from_json_data(value, columns, column_labels)
 
     # ── 执行后更新 ──
+
+    def _clear_human_takeover_state(self, task: str) -> None:
+        """任务成功或用户重新激活后，清掉人工接管冻结标记。"""
+        try:
+            task_data = dpath.get(cfg["tasks"], task)
+        except Exception:
+            return
+        if not isinstance(task_data, dict):
+            return
+        for key in ("human_takeover", "human_takeover_error", "human_takeover_at"):
+            task_data.pop(key, None)
+
+    def _mark_human_takeover(self, task: str, exc: Exception) -> None:
+        """
+        人工接管不是普通异常：WebUI 显示红色未完成，但调度器按冻结态处理，
+        直到用户手动重新启用/直跑或任务后续成功清除该标记。
+        """
+        task_data = dpath.get(cfg["tasks"], task)
+        task_data["human_takeover"] = True
+        task_data["human_takeover_error"] = _human_takeover_message(exc)
+        task_data["human_takeover_at"] = datetime.datetime.now().timestamp()
+        self._update_next_exec_time(task)
 
     def _update_next_exec_time(self, task: str, next_date: NextDate = None, offset_hours: int = 0):
         """更新任务的 next_exec_time / on 状态。"""

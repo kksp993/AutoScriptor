@@ -462,6 +462,14 @@ const OverviewPanel = {
   </transition>
   <el-dialog v-model="taskDetailVisible" :title="taskDetail ? taskDetail.name : ''" width="520px" destroy-on-close align-center @closed="taskDetail = null">
     <div v-if="taskDetail" class="space-y-3 text-sm">
+      <el-alert v-if="taskDetail.human_takeover_error"
+                type="error"
+                :closable="false"
+                show-icon
+                title="需要人工处理"
+                class="mb-2">
+        <div class="whitespace-pre-wrap break-words">{{ taskDetail.human_takeover_error }}</div>
+      </el-alert>
       <p v-if="taskDetail.custom" class="task-doc-custom-line">*自定义任务：任意 Python 与主程序同进程运行；请仅使用可信来源脚本，风险自负。</p>
       <p v-if="taskDetail.beta" class="task-doc-beta-line">*该任务为 Beta 实验功能：自动化流程、界面识别或参数含义可能随版本快速调整，不保证与当前游戏完全一致；请谨慎启用并及时反馈问题。</p>
       <p v-if="taskDetail.task_description" class="text-gray-700 leading-relaxed">{{ taskDetail.task_description }}</p>

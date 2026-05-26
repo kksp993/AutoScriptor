@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <!-- Vue 3 在 HTML 内联模板需运行时编译器（new Function），Electron 下若未显式允许 unsafe-eval 会导致界面停留在 {{ }} 未编译状态 -->
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; font-src 'self' data:; connect-src 'self' ws: wss: http: https:;" />
+        content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; font-src 'self' data:; connect-src 'self' ws: wss: http: https:; frame-src 'self' https://yxhhd2.5054399.com https://*.5054399.com https://*.4399.com; child-src 'self' https://yxhhd2.5054399.com https://*.5054399.com https://*.4399.com;" />
   <title>造笔 - AutoScriptor</title>
   <script src="/vendor/tailwind.css"></script>
   <link href="/vendor/font-awesome.min.css" rel="stylesheet" />
@@ -44,7 +44,7 @@
   </style>
   <link rel="stylesheet" href="/vendor/drawflow.min.css" />
   <script src="/vendor/drawflow.min.js"></script>
-  <link rel="stylesheet" href="/static/css/style.css?v=35" />
+  <link rel="stylesheet" href="/static/css/style.css?v=36" />
 </head>
 <body class="app-body overflow-hidden" style="height:100vh;">
   <div id="app" class="flex h-screen overflow-hidden">
@@ -447,7 +447,7 @@
   </div>
 
   <!-- Vue 组件 -->
-  <script src="/static/js/components/NewsPanel.js?v=3"></script>
+  <script src="/static/js/components/NewsPanel.js?v=4"></script>
   <script src="/static/js/components/AppSidebar.js?v=15"></script>
   <script src="/static/js/components/TaskTree.js?v=12"></script>
   <script src="/static/js/components/Overview.js?v=18"></script>

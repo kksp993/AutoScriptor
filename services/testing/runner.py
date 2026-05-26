@@ -161,6 +161,8 @@ class StabilityTestRunner:
         assert success == 0
         assert failed == 1
         assert new_time > old_time, "human takeover should still update next_exec_time"
+        assert cfg["tasks"]["每日任务"]["测试村庄"]["人工接管"].get("human_takeover_error"), \
+            "human takeover should be visible in WebUI"
 
     def test_06_task_with_params(self):
         """带枚举参数的任务应正确解析并执行。"""

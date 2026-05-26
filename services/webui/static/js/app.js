@@ -732,6 +732,9 @@ const app = createApp({
       const previous = slot.parent[slot.key];
       const next = { ...previous, ...payload };
       if (next.on && !previous.on) {
+        delete next.human_takeover;
+        delete next.human_takeover_error;
+        delete next.human_takeover_at;
         next.next_exec_time = 0;
         next._due = true;
       } else if (!next.on) {

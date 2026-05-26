@@ -917,14 +917,18 @@ async def scheduler_deactivate_api():
 
 
 def _build_overview_payload(now_ts: float | None = None) -> dict:
-    from services.core.scheduler import is_task_due, calc_effective_next_time
+    from services.core.scheduler import (
+        calc_effective_next_time,
+        is_human_takeover_blocked,
+        is_task_due,
+    )
 
     now_ts = now_ts or _time.time()
-    total = enabled = pending = scheduled = disabled = 0
+    total = enabled = pending = scheduled = error = disabled = 0
     upcoming = []
 
     def _walk(node, prefix=''):
-        nonlocal total, enabled, pending, scheduled, disabled
+        nonlocal total, enabled, pending, scheduled, error, disabled
         for key, val in node.items():
             if not isinstance(val, dict):
                 continue
@@ -935,22 +939,29 @@ def _build_overview_payload(now_ts: float | None = None) -> dict:
                     disabled += 1
                 else:
                     enabled += 1
-                    due = is_task_due(val, path, now_ts)
-                    if due:
+                    blocked = is_human_takeover_blocked(val) or bool(val.get("error"))
+                    due = False if blocked else is_task_due(val, path, now_ts)
+                    if blocked:
+                        error += 1
+                    elif due:
                         pending += 1
                     else:
                         scheduled += 1
+                    status = 'error' if blocked else ('pending' if due else 'scheduled')
                     upcoming.append({
                         'path': path,
                         'on': True,
                         'next_exec_time': calc_effective_next_time(val, now_ts),
-                        'status': 'pending' if due else 'scheduled',
+                        'status': status,
+                        'human_takeover_error': val.get('human_takeover_error'),
+                        'human_takeover_at': val.get('human_takeover_at'),
                     })
             else:
                 _walk(val, path)
 
     _walk(cfg._config.get('tasks', {}))
-    upcoming.sort(key=lambda x: (0 if x['status'] == 'pending' else 1, x['next_exec_time']))
+    order = {'pending': 0, 'error': 1, 'scheduled': 2}
+    upcoming.sort(key=lambda x: (order.get(x['status'], 3), x['next_exec_time']))
 
     sched = scheduler.status_dict()
     sched['next_execution'] = scheduler.get_next_execution_timestamp()
@@ -960,7 +971,7 @@ def _build_overview_payload(now_ts: float | None = None) -> dict:
         'scheduler': sched,
         'stats': {
             'total': total, 'enabled': enabled, 'pending': pending,
-            'scheduled': scheduled, 'disabled': disabled,
+            'scheduled': scheduled, 'error': error, 'disabled': disabled,
         },
         'stats_all': task_tree_service.aggregate_stats_all_characters(now_ts),
         'overall_next_execution': task_tree_service.overall_next_execution_all_characters(),

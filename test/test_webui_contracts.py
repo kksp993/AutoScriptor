@@ -173,6 +173,7 @@ class TestTaskTreeServiceContract(unittest.TestCase):
         task_registry.task_registry = FakeTaskRegistry()
         scheduler = types.ModuleType("services.core.scheduler")
         scheduler.is_task_due = lambda node, path, now_ts: bool(node.get("on"))
+        scheduler.is_human_takeover_blocked = lambda node: bool(node.get("human_takeover_error"))
         return {
             "AutoScriptor": types.ModuleType("AutoScriptor"),
             "AutoScriptor.utils": types.ModuleType("AutoScriptor.utils"),
@@ -257,6 +258,25 @@ class TestTaskTreeServiceContract(unittest.TestCase):
             flat = self.service.flatten_tasks(tasks, now_ts=100)
 
         self.assertEqual([row["path"] for row in flat], ["registered/task"])
+
+    def test_human_takeover_task_projects_as_error_with_message(self):
+        tasks = {
+            "registered": {
+                "task": {
+                    "on": True,
+                    "next_exec_time": 0,
+                    "params": {},
+                    "human_takeover_error": "验证码弹窗",
+                    "human_takeover_at": 123,
+                },
+            },
+        }
+
+        with patch.dict(sys.modules, self._task_registry_stubs({"registered/task"})):
+            flat = self.service.flatten_tasks(tasks, now_ts=100)
+
+        self.assertEqual(flat[0]["status"], "error")
+        self.assertEqual(flat[0]["human_takeover_error"], "验证码弹窗")
 
     def test_normalize_dispatch_queue_keeps_existing_unique_characters(self):
         account_data = {

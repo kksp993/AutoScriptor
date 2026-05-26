@@ -56,6 +56,8 @@ def collect_active_times_from_tasks_tree(tasks: dict) -> list[float]:
             path = f"{prefix}/{key}" if prefix else key
             if "on" in val:
                 if val.get("on") and task_registry.has_task(path):
+                    if is_human_takeover_blocked(val):
+                        continue
                     raw = float(val.get("next_exec_time", 0) or 0)
                     sw = parse_sched_window_hours(val)
                     effective = clamp_to_sched_window(max(raw, now_ts), sw[0], sw[1]) if sw else (raw or now_ts)
@@ -141,11 +143,11 @@ def is_task_due(val: dict, path: str, now_ts: float) -> bool:
 
     if not val.get("on"):
         return False
+    if is_human_takeover_blocked(val):
+        return False
     if not task_registry.has_task(path):
         return False
-    hoarding = val.get("hoarding_minutes", 0)
-    effective_now = now_ts - (hoarding * 60) if hoarding else now_ts
-    if effective_now < val.get("next_exec_time", 0):
+    if now_ts < val.get("next_exec_time", 0):
         return False
     sw = parse_sched_window_hours(val)
     if sw is not None:
@@ -175,6 +177,11 @@ def is_task_debug_mode(task_path: str, task_data: dict | None = None) -> bool:
     except Exception:
         return False
     return isinstance(data, dict) and bool(data.get("debug_mode") or data.get("debug"))
+
+
+def is_human_takeover_blocked(val: dict) -> bool:
+    """人工接管后的红色冻结态：展示为错误，但不参与自动调度。"""
+    return bool(val.get("human_takeover") or val.get("human_takeover_error"))
 
 
 def calc_effective_next_time(val: dict, now_ts: float) -> float:
@@ -500,9 +507,12 @@ class Scheduler:
                 continue
             path = f"{prefix}/{key}" if prefix else key
             if "on" in val:
-                hoarding = val.get("hoarding_minutes", 0)
-                effective_now = now_ts - (hoarding * 60) if hoarding else now_ts
-                if val.get("on") and effective_now >= val.get("next_exec_time", 0) and task_registry.has_task(path):
+                if (
+                    val.get("on")
+                    and not is_human_takeover_blocked(val)
+                    and now_ts >= val.get("next_exec_time", 0)
+                    and task_registry.has_task(path)
+                ):
                     sw = parse_sched_window_hours(val)
                     if sw is not None:
                         deferred = clamp_to_sched_window(now_ts, sw[0], sw[1])
@@ -644,6 +654,15 @@ class Scheduler:
                 return execute([task_key], max_attempts=1, attempt_offset=attempt_index)
             return execute([task_key])
 
+        def _task_is_human_takeover_blocked(task_key: str) -> bool:
+            import dpath
+
+            try:
+                node = dpath.get(cfg["tasks"], task_key)
+            except Exception:
+                return False
+            return isinstance(node, dict) and is_human_takeover_blocked(node)
+
         try:
             while True:
                 if self._task_manager._cancel_event.is_set():
@@ -742,7 +761,11 @@ class Scheduler:
                         total_success += success
                         self.record_result(success, 0)
                     elif failed:
-                        if retry_round < max_retry and not task_debug_mode:
+                        if _task_is_human_takeover_blocked(task_key):
+                            logger.info("📅 任务需要人工处理，已标记红色冻结态并跳过自动重试: %s", task_key)
+                            total_failed += failed
+                            self.record_result(1, 0)
+                        elif retry_round < max_retry and not task_debug_mode:
                             failed_next_round.append((char_key, task_key))
                             logger.info(
                                 "📅 任务失败，跳过当前任务，等待本轮其他任务完成后重试: %s (%d/%d)",
@@ -831,6 +854,8 @@ class Scheduler:
             node = dpath.get(cfg._config, f"tasks/{task_path.replace('/', '/')}")
             if isinstance(node, dict) and "on" in node:
                 node["on"] = True
+                for field in ("human_takeover", "human_takeover_error", "human_takeover_at"):
+                    node.pop(field, None)
                 node["next_exec_time"] = time.time()
                 cfg.save_config()
                 self._tasks_updated.set()

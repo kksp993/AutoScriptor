@@ -170,11 +170,11 @@ class TaskTreeService:
         return result
 
     def task_leaf_status(self, node: dict, path: str, now_ts: float) -> str:
-        from services.core.scheduler import is_task_due
+        from services.core.scheduler import is_human_takeover_blocked, is_task_due
 
         if not node.get("on"):
             return "disabled"
-        if node.get("error"):
+        if node.get("error") or is_human_takeover_blocked(node):
             return "error"
         return "pending" if is_task_due(node, path, now_ts) else "scheduled"
 
@@ -198,6 +198,9 @@ class TaskTreeService:
                     "task_description": task_registry.get_description(path),
                     "task_doc_flow": task_registry.get_doc_flow(path),
                 }
+                if val.get("human_takeover_error"):
+                    row["human_takeover_error"] = val.get("human_takeover_error")
+                    row["human_takeover_at"] = val.get("human_takeover_at")
                 if task_registry.get_custom(path):
                     row["custom"] = True
                 result.append(row)

@@ -19,6 +19,18 @@ _GLOBAL_KEYS = (
     "update", "remote_access", "accounts",
 )
 
+_TEST_TASK_PATHS = (
+    "每日任务/测试村庄/立即成功",
+    "每日任务/测试村庄/慢速成功",
+    "每日任务/测试村庄/总是失败",
+    "每日任务/测试村庄/重试后成功",
+    "每日任务/测试村庄/重试耗尽",
+    "每日任务/测试村庄/人工接管",
+    "每日任务/测试参数/带参数任务",
+    "一般任务/一次性任务",
+    "每周任务/随机结果",
+)
+
 
 def _atomic_write_json(path: Path, data: Any) -> None:
     """Write JSON via same-directory temp file then atomic replace."""
@@ -38,6 +50,52 @@ def _atomic_write_json(path: Path, data: Any) -> None:
         except Exception:
             pass
         raise
+
+
+def _has_task_path(tasks: dict[str, Any], task_path: str) -> bool:
+    node: Any = tasks
+    for part in task_path.split("/"):
+        if not isinstance(node, dict) or part not in node:
+            return False
+        node = node[part]
+    return isinstance(node, dict) and "on" in node
+
+
+def _assert_no_testing_tasks_in_production(flat: dict[str, Any]) -> None:
+    if os.environ.get("AUTOSCRIPTOR_TESTING") == "1":
+        return
+    tasks = flat.get("tasks")
+    if not isinstance(tasks, dict):
+        return
+    leaked = [path for path in _TEST_TASK_PATHS if _has_task_path(tasks, path)]
+    if leaked:
+        raise RuntimeError(
+            "Refusing to save testing task tree into a real account file: "
+            + ", ".join(leaked[:3])
+        )
+
+
+def _assert_no_testing_tasks_in_account(root: dict[str, Any]) -> None:
+    if os.environ.get("AUTOSCRIPTOR_TESTING") == "1":
+        return
+    chars = root.get("characters") if isinstance(root, dict) else None
+    if not isinstance(chars, dict):
+        return
+    leaked: list[str] = []
+    for srv_chars in chars.values():
+        if not isinstance(srv_chars, dict):
+            continue
+        for char_data in srv_chars.values():
+            if not isinstance(char_data, dict):
+                continue
+            tasks = char_data.get("tasks")
+            if isinstance(tasks, dict):
+                leaked.extend(path for path in _TEST_TASK_PATHS if _has_task_path(tasks, path))
+    if leaked:
+        raise RuntimeError(
+            "Refusing to save account data containing testing tasks: "
+            + ", ".join(leaked[:3])
+        )
 
 
 class Character:
@@ -281,6 +339,7 @@ class ConfigManager:
         return flat
 
     def save_all(self, flat: dict[str, Any]) -> None:
+        _assert_no_testing_tasks_in_production(flat)
         for k in _GLOBAL_KEYS:
             if k in flat:
                 self.global_cfg[k] = copy.deepcopy(flat[k])
@@ -291,6 +350,7 @@ class ConfigManager:
         _atomic_write_json(self.config_path, safe_cfg)
         if self.current_acc:
             self.current_acc.prepare_for_save(flat)
+            _assert_no_testing_tasks_in_account(self.current_acc.root)
             acc_dir = self.resolved_accounts_dir()
             _atomic_write_json(acc_dir / f"{self.current_acc.account_name}.json", self.current_acc.to_persist_dict())
 
@@ -298,6 +358,7 @@ class ConfigManager:
         if not self.current_acc:
             return
         self.current_acc.prepare_for_save(None)
+        _assert_no_testing_tasks_in_account(self.current_acc.root)
         acc_dir = self.resolved_accounts_dir()
         _atomic_write_json(acc_dir / f"{self.current_acc.account_name}.json", self.current_acc.to_persist_dict())
 
