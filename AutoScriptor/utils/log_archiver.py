@@ -11,6 +11,7 @@ import inspect
 from datetime import datetime
 from typing import Optional, Dict, Any, Set
 from AutoScriptor.utils.logger import logger, setup_logfile
+from AutoScriptor.utils.paths import get_logs_root
 import cv2
 import numpy as np
 
@@ -429,7 +430,7 @@ def archive_error(
         folder_name = f"{ts}_{safe_name}"
         
         # 2. 创建归档文件夹
-        err_base_dir = os.path.join(os.getcwd(), 'logs', 'errors')
+        err_base_dir = str(get_logs_root() / "errors")
         archive_dir = os.path.join(err_base_dir, folder_name)
         os.makedirs(archive_dir, exist_ok=True)
         
@@ -445,7 +446,7 @@ def archive_error(
             
             # 如果没找到，尝试从 logs/log 目录找最新的日志文件
             if not current_log_file or not os.path.exists(current_log_file):
-                log_dir = os.path.join(os.getcwd(), 'logs', 'log')
+                log_dir = str(get_logs_root() / "log")
                 if os.path.isdir(log_dir):
                     log_files = [f for f in os.listdir(log_dir) if f.endswith('.log')]
                     if log_files:
@@ -575,7 +576,7 @@ def archive_error(
         # 6. 复制调试点击截图目录下的所有截图
         if include_click_screenshots:
             try:
-                click_dir = os.path.join(os.getcwd(), 'logs', 'debug_screenshot')
+                click_dir = str(get_logs_root() / "debug_screenshot")
                 if os.path.isdir(click_dir):
                     click_screenshots_dest = os.path.join(archive_dir, 'click_screenshots')
                     os.makedirs(click_screenshots_dest, exist_ok=True)
@@ -655,7 +656,7 @@ def archive_error_with_log(
     try:
         ts = datetime.now().strftime('%y%m%d_%H%M%S')
         safe_name = error_name.replace(' -> ', '_').replace('/', '_').replace('\\', '_')
-        log_dir = os.path.join(os.getcwd(), 'logs', 'log')
+        log_dir = str(get_logs_root() / "log")
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, f"[{ts}][{safe_name}].log")
         setup_logfile(log_file)

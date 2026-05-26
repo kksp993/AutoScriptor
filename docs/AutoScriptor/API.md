@@ -113,7 +113,7 @@ python services/webui/server.py
   - `I(...)` 图片目标（ImageTarget），可设置信心阈值或颜色过滤
   - `T(...)` 文本目标（TextTarget），可选正则匹配
   - `B(...)` 区域目标（BoxTarget），直接使用坐标盒
-- **Box**：矩形区域，内置偏移/缩放操作与颜色采样。
+- **Box**：矩形区域，内置偏移/缩放操作与颜色采样（与 `click` / `b2p` 的 `offset`、`resize` 语义一致，见下）。
 - **稳定性检测**：`locate()` 支持两次检测一致性，以减少误判。
 - **后台监控**：`BackgroundMonitor` 定期探测某些目标出现并触发回调。
 
@@ -199,6 +199,35 @@ from AutoScriptor.core.api import edit_img
 # 标注/截屏辅助工具（开发期定位 UI 区域）
 edit_img()
 ```
+
+### 4.6 Box 与 `offset` / `resize`
+
+`Box` 的 `+` **仅接受 dict**，键名与 `click(..., offset=..., resize=...)`、`b2p(...)` 一致（先平移左上角，再按正数宽高替换；缺省或省略 `resize` 为 `(-1,-1)` 表示保持原宽高）。`offset`、`resize` 可整段省略，或写成 `(0, 0)` 等显式值。
+
+```python
+from AutoScriptor.utils.box import Box
+from AutoScriptor.core.targets import T
+from AutoScriptor.core.api import click
+
+base = Box(100, 200, 120, 40)
+r1 = base + {"offset": (0, 240)}                    # 仅平移
+r2 = base + {}                                     # 不变换（等价于默认 offset/resize）
+delta = {"offset": (-20, 262), "resize": (180, 44)}
+r3 = base + delta
+click(T("购买", box=base + delta))       # 通常：ROI 已在 box 上变换，则不要再对 click 传 **delta
+click(T("购买", box=base), **delta)      # 或：ROI 用 base，仅在点击阶段按 b2p 做变换（二选一，避免重复叠加）
+```
+
+**减法**：`a - b`（或 `box_sub_as_delta(a, b)`）得到与 `+` / `click` 同结构的 `dict`：被减数 `a` 相对减数 `b` 的 `offset` 与 `resize`，且恒有 `b + (a - b) == a`（在 `+` 语义下）。**返回值固定包含 `offset`、`resize` 两键**（不省略），无偏移时可为 `(0, 0)`，宽高与 `b` 一致时 `resize` 对应维为 `-1`。
+
+```python
+a, b = Box(518, 358, 133, 40), Box(494, 164, 195, 55)
+delta = a - b   # {"offset": (24, 194), "resize": (133, 40)}
+assert b + delta == a
+same = Box(1, 2, 3, 4) - Box(1, 2, 3, 4)   # {"offset": (0, 0), "resize": (-1, -1)}
+```
+
+模块级：`box_with_offset_resize`、`box_sub_as_delta`（`AutoScriptor.utils.box`）。
 
 ---
 

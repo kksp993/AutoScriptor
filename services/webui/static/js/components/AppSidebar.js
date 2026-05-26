@@ -2,6 +2,7 @@ const APP_MENU = [
   {
     group: 'CONTROL',
     items: [
+      { id: 'news',      label: '资讯',   icon: 'fa-newspaper-o' },
       { id: 'overview',  label: '总览',   icon: 'fa-dashboard' },
       { id: 'scheduler', label: '调度',   icon: 'fa-clock-o' },
     ],
@@ -12,14 +13,18 @@ const APP_MENU = [
       { id: 'daily',   label: '每日任务', icon: 'fa-sun-o' },
       { id: 'weekly',  label: '每周任务', icon: 'fa-calendar' },
       { id: 'general', label: '一般任务', icon: 'fa-tasks' },
-      { id: 'event',   label: '活动任务', icon: 'fa-star' },
+      { id: 'custom',  label: '自定义任务', icon: 'fa-code' },
     ],
   },
   {
     group: 'TOOLS',
     items: [
-      { id: 'editor',   label: '编辑器', icon: 'fa-pencil-square-o' },
-      { id: 'settings', label: '设置',   icon: 'fa-cog' },
+      { id: 'editor',   label: '编辑器',   icon: 'fa-pencil-square-o' },
+      { id: 'canvas',   label: '脚本画布', icon: 'fa-object-group' },
+      { id: 'errorArchives', label: '错误汇总', icon: 'fa-exclamation-triangle' },
+      { id: 'updater',  label: '检查更新', icon: 'fa-cloud-download' },
+      { id: 'settings', label: '设置',     icon: 'fa-cog' },
+      { id: 'about',    label: '关于',     icon: 'fa-info-circle' },
     ],
   },
 ];
@@ -34,16 +39,23 @@ const AppSidebar = {
     theme:           { type: String,  default: 'light' },
     schedulerStatus: { type: Object,  required: true },
     characterName:   { type: String,  default: '' },
+    featureScriptCanvas: { type: Boolean, default: true },
   },
   emits: ['navigate'],
   data() {
     return {
-      menu: APP_MENU,
       _particleRaf: null,
       particles: [],
     };
   },
   computed: {
+    menu() {
+      if (this.featureScriptCanvas) return APP_MENU;
+      return APP_MENU.map((g) => ({
+        ...g,
+        items: g.items.filter((it) => it.id !== 'canvas'),
+      }));
+    },
     schedDot() {
       return {
         green:  '#22c55e',
@@ -193,11 +205,24 @@ const AppSidebar = {
 
   <div class="sidebar-inner flex flex-col flex-1 min-h-0">
     <div class="sidebar-logo">
-      <i class="fa fa-bolt text-primary text-2xl sidebar-logo-icon"></i>
-      <span class="sidebar-brand-text font-bold text-xl tracking-wide ml-2">AutoScriptor</span>
+      <div class="sidebar-logo-mark">
+        <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M27 5L31.5 9.5L16 27.5L11.5 23Z" fill="white" opacity="0.95"/>
+          <path d="M16 27.5L11.5 23L8.5 33.5Z" fill="white" opacity="0.8"/>
+          <circle cx="8" cy="35" r="2" fill="white" opacity="0.9"/>
+          <line x1="8" y1="31" x2="8" y2="29.5" stroke="white" opacity="0.55" stroke-width="1.2" stroke-linecap="round"/>
+          <line x1="4" y1="35" x2="2.5" y2="35" stroke="white" opacity="0.55" stroke-width="1.2" stroke-linecap="round"/>
+          <line x1="5.2" y1="32.2" x2="4" y2="31" stroke="white" opacity="0.45" stroke-width="1.2" stroke-linecap="round"/>
+          <line x1="5.2" y1="37.8" x2="4" y2="39" stroke="white" opacity="0.45" stroke-width="1.2" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="sidebar-brand">
+        <span class="sidebar-brand-cn">造笔</span>
+        <span class="sidebar-brand-en">AutoScriptor</span>
+      </div>
     </div>
 
-    <nav class="flex-1 overflow-y-auto py-2">
+    <nav class="flex-1 overflow-y-auto pt-2 pb-1">
       <template v-for="group in menu" :key="group.group">
         <div class="sidebar-group-label">{{ group.group }}</div>
         <a v-for="item in group.items" :key="item.id"

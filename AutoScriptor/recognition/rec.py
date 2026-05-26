@@ -80,7 +80,7 @@ def locate_on_screen(haystack_frame, targets, confidence=0.8, pf_boxes=None, col
         roi = haystack_frame
     # 3. 全图或ROI识别
     if isinstance(targets[0], str):
-        from AutoScriptor.utils.constant import cfg as _cfg
+        from AutoScriptor.utils.app_config import cfg as _cfg
         try:
             _scale = float(_cfg["ocr.scale"])
         except (KeyError, TypeError, ValueError):

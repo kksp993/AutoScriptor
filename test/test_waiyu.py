@@ -42,8 +42,7 @@ hg_tasks=[
 if __name__ == "__main__":
     try:
         ensure_in("外域区域")
-        click(T("信标定位"))
-        wait_for_appear(T("定位完成"))
+        click(T("信标定位"), until=lambda: ui_T(T("定位完成")))
         click(B(630,360))
         wait_for_appear(T("总灵根值"))
         click(B(960,510,90,90))

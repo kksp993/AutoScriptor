@@ -1,5 +1,4 @@
 from re import U
-import time
 from AutoScriptor import *
 from ZmxyOL.nav import mm
 from ZmxyOL.nav import path
@@ -68,7 +67,7 @@ def way():
 def way():
     click(B(1200,30,30,30))
     sleep(1)
-    click(B(1200,30,30,30))
+    click(B(1200,30,30,30), until=lambda:ui_F(T("背包")), interval=1)
     mm.set_loc(mm.get_region()[0])
 
 @path(LOC_ENV, "背包")
@@ -85,13 +84,14 @@ def way():
     click(T("古万界"),offset=(180,0))
     wait_for_appear(T("万界穿梭"))
     mm.set_loc("荒古万界")
-    time.sleep(1)
+    sleep(1)
 
 @path("荒古万界", LOC_ENV)
 def way():
     click(B(30,30,30,30))
-    from ZmxyOL.nav.api import locate_region
-    locate_region()
+    # 如果打完荒古副本，出来返回会直接去村庄，否则返回去荒古遗境，欸，官方就是搞
+    from ZmxyOL.nav.api import ensure_in
+    ensure_in("洪荒遗境")
 
 def travel_to_dst_loc(target_env: str):
     click(T("万界穿梭"))

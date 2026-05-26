@@ -1,12 +1,13 @@
 import traceback
-from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
 
 
 @register_task
-def daily_arena_task():
+def daily_arena_task(
+    battle_flow: BattleFlowName = DEFAULT_JJC_BATTLE_FLOW,
+):
     ensure_in(["村庄","仙盟"])
     logger.info("====斗兽场====")
     click(I("导航-竞技"), delay=0.5)
@@ -28,13 +29,14 @@ def daily_arena_task():
     click(B(970,230,80,80))
     while(ui_T(I("加载中"))): sleep(0.5)
     sleep(2)
-    bg.add(
-        name="try_exit",
-        identifier=T("决斗场"),
-        callback=lambda: bg.set_signal("try_exit", True),
-    )
     from ZmxyOL.battle.character.hero import h
-    h.set(True,1).jjc_battle()
+    with bg.scope("决斗场") as scope:
+        scope.add(
+            name="try_exit",
+            identifier=T("决斗场"),
+            callback=lambda: bg.set_signal("try_exit", True),
+        )
+        h.set(True,1).jjc_battle()
     click(B(1210,20,40,40))
 
 

@@ -50,17 +50,18 @@ def register_tool(*, name: str, description: str,
     return decorator
 
 
+_TOOL_MODULES = [
+    "AutoScriptor.vlm.tools.api_tools",
+    "AutoScriptor.vlm.tools.nav_tools",
+]
+
+
 def load_toolkits() -> Dict[str, Dict[str, Any]]:
-    """Return the full tool registry (auto-imports ``*_tools.py`` siblings)."""
+    """Return the full tool registry (imports tool modules on first call)."""
     if not TOOL_REGISTRY:
         import importlib
-        import os
-
-        tools_dir = os.path.dirname(__file__)
-        for fname in os.listdir(tools_dir):
-            if fname.endswith("_tools.py"):
-                mod_name = f"{__package__}.{fname[:-3]}" if __package__ else fname[:-3]
-                importlib.import_module(mod_name)
+        for mod_name in _TOOL_MODULES:
+            importlib.import_module(mod_name)
     return TOOL_REGISTRY
 
 

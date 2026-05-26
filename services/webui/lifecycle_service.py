@@ -1,0 +1,208 @@
+"""Centralized WebUI config and task lifecycle operations.
+
+Routes should validate HTTP input and shape responses. This service owns the
+ordering of side effects: mutate config, persist, reload task registry, refresh
+server-side projections, notify scheduler, then bump the public config version.
+"""
+from __future__ import annotations
+
+from copy import deepcopy
+from typing import Any, Callable
+
+
+class WebUILifecycleService:
+    IMPORTABLE_CONFIG_KEYS = (
+        "app",
+        "emulator",
+        "ocr",
+        "llm",
+        "scheduler",
+        "tasks",
+        "deploy",
+        "notify",
+        "update",
+        "remote_access",
+    )
+
+    def __init__(
+        self,
+        cfg,
+        task_manager,
+        scheduler,
+        task_tree_service,
+        refresh_order_map: Callable[[], None],
+        mark_config_changed: Callable[[str], int],
+        apply_log_level: Callable[[], None] | None = None,
+    ):
+        self.cfg = cfg
+        self.task_manager = task_manager
+        self.scheduler = scheduler
+        self.task_tree_service = task_tree_service
+        self.refresh_order_map = refresh_order_map
+        self.mark_config_changed = mark_config_changed
+        self.apply_log_level = apply_log_level
+
+    def reload_tasks(self, security_key: str | None = None, *, reason: str = "reload tasks") -> int:
+        self.task_manager.reload_tasks(security_key)
+        self.refresh_order_map()
+        return self.mark_config_changed(reason)
+
+    def save_runtime_config(self, data: dict[str, Any]) -> int:
+        missing = [key for key in ("app", "emulator", "ocr") if key not in data]
+        if missing:
+            raise ValueError(f"missing config sections: {', '.join(missing)}")
+        with self.task_manager.config_transaction():
+            self.cfg["app"] = deepcopy(data["app"])
+            if isinstance(data.get("scheduler"), dict):
+                self.cfg["scheduler"] = deepcopy(data["scheduler"])
+            self.cfg["emulator"] = deepcopy(data["emulator"])
+            self.cfg["ocr"] = deepcopy(data["ocr"])
+            self.cfg.save_config()
+        self._apply_log_level()
+        return self.mark_config_changed("save config")
+
+    def save_tasks(self, tasks: dict[str, Any]) -> int:
+        cleaned = self.task_tree_service.strip_runtime_fields(tasks)
+        with self.task_manager.config_transaction():
+            self.cfg._config["tasks"] = cleaned
+            self.cfg.save_config()
+            self.task_manager.reload_tasks()
+        self.scheduler.wake()
+        self.refresh_order_map()
+        return self.mark_config_changed("save tasks")
+
+    def switch_character(self, server: str, character: str, *, reason: str = "switch character") -> int:
+        self.task_manager.switch_character_and_reload(server, character)
+        self.scheduler.invalidate_login()
+        self.refresh_order_map()
+        return self.mark_config_changed(reason)
+
+    def switch_account(self, name: str, security_key: str) -> int:
+        with self.task_manager.config_transaction():
+            self.cfg.switch_account(name, security_key)
+            self.task_manager.reload_tasks(security_key)
+        self.scheduler.invalidate_login()
+        self.refresh_order_map()
+        return self.mark_config_changed("switch account")
+
+    def save_dispatch_queue(self, raw_queue) -> tuple[list[dict[str, str]], int]:
+        queue = self.task_tree_service.normalize_dispatch_queue(raw_queue)
+        with self.task_manager.config_transaction():
+            self.cfg._account_data["dispatch_queue"] = queue
+            self.cfg._save_account_file()
+        version = self.mark_config_changed("save dispatch queue")
+        return queue, version
+
+    def set_character_profession(self, server: str, character: str, profession: str) -> int:
+        with self.task_manager.config_transaction():
+            self.cfg.set_character_game_profession(server, character, profession)
+        return self.mark_config_changed("change character profession")
+
+    def add_account(
+        self,
+        name: str,
+        account: str,
+        password: str,
+        server: str,
+        character_name: str,
+        security_key: str,
+    ) -> int:
+        with self.task_manager.config_transaction():
+            self.cfg.add_account(name, account, password, server, character_name, security_key)
+        return self.mark_config_changed("add account")
+
+    def delete_account(self, name: str) -> int:
+        with self.task_manager.config_transaction():
+            self.cfg.delete_account(name)
+        return self.mark_config_changed("delete account")
+
+    def add_character(self, server: str, character: str) -> int:
+        with self.task_manager.config_transaction():
+            self.cfg.add_character(server, character)
+        return self.mark_config_changed("add character")
+
+    def delete_character(self, server: str, character: str) -> int:
+        with self.task_manager.config_transaction():
+            self.cfg.delete_character(server, character)
+            queue = self.task_tree_service.normalize_dispatch_queue(
+                self.cfg._account_data.get("dispatch_queue", [])
+            )
+            self.cfg._account_data["dispatch_queue"] = queue
+            self.cfg._save_account_file()
+        return self.mark_config_changed("delete character")
+
+    def reload_verified_account(self, security_key: str) -> str:
+        self.task_manager.reload_tasks(security_key)
+        character_name = self.ensure_active_character_in_game()
+        self.refresh_order_map()
+        return character_name
+
+    def update_account_credentials(self, account: str, password: str, security_key: str) -> tuple[str, int]:
+        with self.task_manager.config_transaction():
+            self.cfg.update_current_account_credentials(account, password, security_key)
+            self.task_manager.reload_tasks(security_key)
+        self.refresh_order_map()
+        version = self.mark_config_changed("update account credentials")
+        character_name = self.cfg._config.get("game", {}).get("character_name", "")
+        return character_name, version
+
+    def import_config(self, data: dict[str, Any]) -> int:
+        incoming = deepcopy(data)
+        for key in (
+            "encryption",
+            "current_profile",
+            "current_account",
+            "profiles",
+            "game",
+            "active_character",
+            "characters_summary",
+        ):
+            incoming.pop(key, None)
+        deploy = incoming.get("deploy")
+        if isinstance(deploy, dict):
+            for secret_key in ("password", "ssl_key", "ssl_cert"):
+                deploy.pop(secret_key, None)
+
+        with self.task_manager.config_transaction():
+            for key in self.IMPORTABLE_CONFIG_KEYS:
+                if key not in incoming:
+                    continue
+                value = incoming[key]
+                if key == "tasks" and isinstance(value, dict):
+                    value = self.task_tree_service.strip_runtime_fields(value)
+                self.cfg._config[key] = value
+            self.cfg.save_config()
+            self.task_manager.reload_tasks()
+        self.refresh_order_map()
+        self._apply_log_level()
+        return self.mark_config_changed("import config")
+
+    def save_notify_settings(self, enabled: bool, config_yaml: str) -> int:
+        with self.task_manager.config_transaction():
+            self.cfg["notify.enabled"] = enabled
+            self.cfg["notify.config_yaml"] = config_yaml
+            self.cfg.save_config()
+        return self.mark_config_changed("save notify settings")
+
+    def save_deploy_sections(self, data: dict[str, Any]) -> int:
+        with self.task_manager.config_transaction():
+            for section in ("deploy", "notify", "update", "remote_access"):
+                if section in data:
+                    self.cfg._config[section] = deepcopy(data[section])
+            self.cfg.save_config()
+        self._apply_log_level()
+        return self.mark_config_changed("save deploy settings")
+
+    def ensure_active_character_in_game(self) -> str:
+        self.cfg._config.setdefault("game", {})
+        game = self.cfg._config["game"]
+        active = self.cfg.active_character()
+        if not game.get("character_name") and active.get("name"):
+            game["character_name"] = active["name"]
+        if not game.get("server_name") and active.get("server"):
+            game["server_name"] = active["server"]
+        return game.get("character_name", "")
+
+    def _apply_log_level(self) -> None:
+        if self.apply_log_level is not None:
+            self.apply_log_level()

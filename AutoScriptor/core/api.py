@@ -5,21 +5,23 @@ import time
 import traceback
 import getpass
 import cv2
+from typing import Callable
 from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
 from AutoScriptor.core.control import MixControl
-from AutoScriptor.core.targets import Target, B,I,T,V
+from AutoScriptor.core.targets import Target, B
 from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget,VLMTarget
 from AutoScriptor.core.locate_dispatch import has_handler, dispatch_locate
 from AutoScriptor.recognition.ocr_rec import ocr_for_box
 from AutoScriptor.recognition.rec import get_box_color
 from AutoScriptor.utils.box import Box, b2p
-from AutoScriptor.utils.logger import log_flush, setup_task_aware_logging
+from AutoScriptor.utils.logger import setup_task_aware_logging
 from AutoScriptor.utils.tracer import save_debug_screenshot
 from AutoScriptor.utils.logger import logger, setup_logfile
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
+from AutoScriptor.utils.app_package_resolve import resolve_app_to_start
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
 from AutoScriptor.utils.edit_img import launch_editor
-from AutoScriptor.utils.cancel import check_cancel_raise, cancellable_sleep
+from AutoScriptor.utils.cancel import check_cancel_raise, cancellable_sleep, join_with_cancel, sleep_with_cancel
 
 def ensure_all_environment_ready():
     # 初始化编排器
@@ -36,29 +38,68 @@ def ensure_all_environment_ready():
     app_to_start = cfg["app"]["app_to_start"]
     return selected_emulator_index, adb_addr, app_to_start
 
-def ensure_app_running(selected_emulator_index, adb_addr, app_to_start):
+def ensure_app_running(
+    selected_emulator_index,
+    adb_addr,
+    app_to_start,
+    *,
+    start_emulator: bool | None = None,
+    launch_app: bool | None = None,
+    cancel_check: Callable[[], None] | None = None,
+):
     """
-    确保模拟器和应用都在运行。若模拟器未启动则先启动模拟器，再启动应用。
-    
-    Args:
-        package: 应用包名，默认使用 cfg 中配置的 app_to_start
-        wait: 启动模拟器后等待就绪的秒数，默认 15s
-    
-    Returns:
-        bool: True 表示应用已在运行或已成功启动
+    确保当前配置的 MuMu 实例可控制，并按需启动游戏。
+
+    start_emulator:
+        True 表示执行链需要 MuMu，未运行时必须启动。None 兼容旧语义，
+        使用 cfg["app"]["auto_start"]。
+    launch_app:
+        True 表示启动/拉起 app_to_start。None 兼容旧语义，使用
+        cfg["app"]["auto_start"]。
+    cancel_check:
+        协作式取消检查；WebUI 停止按钮会通过它快速打断启动、解析和探测等待。
     """
+    cancel_check = cancel_check or check_cancel_raise
+    if start_emulator is None:
+        start_emulator = bool(cfg["app"].get("auto_start", True))
+    if launch_app is None:
+        launch_app = bool(cfg["app"].get("auto_start", True))
+
     mumu_manager_path = cfg["emulator"]["emu_path"]
-    print(f"selected_emulator_index: {selected_emulator_index}")
-    print(f"adb_addr: {adb_addr}")
-    print(f"app_to_start: {app_to_start}")
-    print(f"mumu_manager_path: {mumu_manager_path}")
+    logger.debug(
+        "ensure_app_running: index=%s, adb=%s, app=%s, emu=%s, start_emulator=%s, launch_app=%s",
+        selected_emulator_index, adb_addr, app_to_start, mumu_manager_path, start_emulator, launch_app,
+    )
+    # 启动模拟器前必须恢复正常进程优先级。
+    # boost() 会将 Python 设为 HIGH_PRIORITY_CLASS，subprocess 子进程默认继承，
+    # MuMu Hypervisor 在高优先级下启动会误判权限 → "安卓设备无法启动"。
+    from AutoScriptor.utils.perf import unboost as _unboost
+    _unboost()
     mumu = Mumu().select(selected_emulator_index)
-    mumu.power.start(app_to_start) if cfg["app"]["auto_start"] else None
+    cancel_check()
+
+    is_running = mumu.power.is_running()
+    if not is_running:
+        if not start_emulator:
+            raise RuntimeError("ensure_app_running: 模拟器未运行，且当前调用不允许自动启动")
+        mumu.power.start(None, cancel_check=cancel_check)
+        is_running = True
+    if not is_running:
+        raise RuntimeError("ensure_app_running: 模拟器启动失败")
+
+    # app_to_start 为空或未安装时由 resolve_app_to_start 枚举候选包并写回 config.json。
+    # 解析只在需要拉起应用时进行，避免 WebUI 初始化或纯设备探测误触 MuMuManager。
+    if launch_app:
+        cancel_check()
+        resolved = resolve_app_to_start(mumu, cancel_check=cancel_check)
+        mumu.app.launch(resolved)
+        cancel_check()
+
     logger.info("模拟器启动完成")
     mixctrl = MixControl(mumu, serial=adb_addr)
     logger.info("编排器初始化完成.")
     success = False
-    intervals = [1, 2, 3, 4, 5, 5, 5, 5]
+    intervals = [1, 2, 3, 3, 3, 3, 3, 3]
     for i, interval in enumerate(intervals, 1):
         click_result = {}
         def _click_test():
@@ -71,14 +112,14 @@ def ensure_app_running(selected_emulator_index, adb_addr, app_to_start):
         t = threading.Thread(target=_click_test)
         t.daemon = True
         t.start()
-        t.join(5)
+        join_with_cancel(t, 3, cancel_check)
         if not t.is_alive() and 'error' not in click_result:
             success = True
         if success:
             logger.info("测试点击(0,0)成功，模拟器响应正常。")
             break
         logger.error(f"测试点击(0,0)，第{i}次尝试，第{interval}秒后重试")
-        time.sleep(interval)
+        sleep_with_cancel(interval, cancel_check)
     if not success:
         logger.error("多次点击测试失败，模拟器无响应")
         raise RuntimeError("ensure_app_running: 多次点击测试失败，模拟器无响应，请检查模拟器状态")
@@ -109,7 +150,7 @@ def init():
     """
     global mixctrl, mumu
     idx, addr, app = ensure_all_environment_ready()
-    mixctrl, mumu = ensure_app_running(idx, addr, app)
+    mixctrl, mumu = ensure_app_running(idx, addr, app, start_emulator=True, launch_app=True)
     # Propagate live references to package-level namespaces so that
     # ``from AutoScriptor import mixctrl`` picks up the real object
     # when the import happens *after* init().
@@ -180,6 +221,50 @@ def stable(boxes1: list[list[Box]], boxes2: list[list[Box]])->bool:
             if not b1.sim_box(b2): return False
         if len(list1) != len(list2): return False
     return True
+
+
+def _format_match_path(path: tuple[int, ...]) -> str:
+    """嵌套索引路径格式化为 [1.0]、[2] 等（与 locate 目标树结构一致）。"""
+    if not path:
+        return "[?]"
+    return "[" + ".".join(str(p) for p in path) + "]"
+
+
+def _flatten_target_paths(target: Target|list[Target]|tuple[Target, ...]) -> list[tuple[tuple[int, ...], Target]]:
+    """将嵌套 tuple/list of Target 展平为 (从根到叶的索引路径, 叶子 Target)。
+
+    例：(A, (B, C), D) -> [((0,), A), ((1, 0), B), ((1, 1), C), ((2,), D)]，
+    对应标注 [0]、[1.0]、[1.1]、[2]。
+    """
+    if isinstance(target, Target):
+        return [((), target)]
+    if isinstance(target, (tuple, list)):
+        out: list[tuple[tuple[int, ...], Target]] = []
+        for i, child in enumerate(target):
+            if isinstance(child, Target):
+                out.append(((i,), child))
+            elif isinstance(child, (tuple, list)):
+                for subpath, t in _flatten_target_paths(child):
+                    out.append(((i,) + subpath, t))
+            else:
+                raise TypeError(f"locate 目标必须是 Target 或嵌套序列，收到 {type(child)!r}: {child!r}")
+        return out
+    raise TypeError(f"locate 目标类型不支持: {type(target)!r}")
+
+
+def _first_hit_path(boxes: list, target: Target|list[Target]|tuple[Target, ...]) -> str | None:
+    """与 first(boxes) 顺序一致：第一个有命中的槽位在 target 树中的路径（[x.x.x]）。"""
+    paths = _flatten_target_paths(target)
+    if len(paths) != len(boxes):
+        for i, b in enumerate(boxes):
+            if b and first([b]) is not None:
+                return _format_match_path((i,))
+        return None
+    for i, b in enumerate(boxes):
+        if b and first([b]) is not None:
+            return _format_match_path(paths[i][0])
+    return None
+
 
 def switch_base(base: str):
     if base == "mumu":
@@ -277,10 +362,17 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
             was_retry = _stable_retry
             _stable_retry = False
             boxes = _locate_all(target, screenshot=screenshot, image_first=_img_first)
-            if assure_stable and not stable(boxes, _locate_all(target, image_first=_img_first)):
-                if first(boxes) and not was_retry:
-                    _stable_retry = True
-                continue
+            if assure_stable:
+                boxes2 = _locate_all(target, screenshot=screenshot, image_first=_img_first)
+                if not stable(boxes, boxes2):
+                    p1 = _first_hit_path(boxes, target)
+                    p2 = _first_hit_path(boxes2, target)
+                    logger.debug(
+                        f"[locate assure_stable] {p1 or '[?]'} / {p2 or '[?]'} 两次定位不一致，重试"
+                    )
+                    if first(boxes) and not was_retry:
+                        _stable_retry = True
+                    continue
             if first(boxes): return first(boxes) if is_simplify else boxes  # 确保返回单个Box或None
             # if delta > 5 and cfg["llm"]["use_agent"]:
         # 超时未找到目标时，保存搜索失败截图
@@ -301,10 +393,17 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
             was_retry = _stable_retry
             _stable_retry = False
             boxes = _locate_all(target, screenshot=screenshot)
-            if assure_stable and not stable(boxes, _locate_all(target)):
-                if full(boxes) and not was_retry:
-                    _stable_retry = True
-                continue
+            if assure_stable:
+                boxes2 = _locate_all(target, screenshot=screenshot)
+                if not stable(boxes, boxes2):
+                    p1 = _first_hit_path(boxes, target)
+                    p2 = _first_hit_path(boxes2, target)
+                    logger.debug(
+                        f"[locate assure_stable] {p1 or '[?]'} / {p2 or '[?]'} 两次定位不一致，重试"
+                    )
+                    if full(boxes) and not was_retry:
+                        _stable_retry = True
+                    continue
             if full(boxes): return simple(boxes) if is_simplify else boxes
         # 超时未全部找到目标时，保存搜索失败截图
         if timeout >= 5:
@@ -468,7 +567,7 @@ def click(
 def swipe(
         start_target: Target, 
         end_target: Target, 
-        *,
+        *, 
         duration_s: int=1, 
         delay: float = 0,
         ensure_stable_after_swipe: bool = True,
@@ -497,14 +596,29 @@ def key_event(key_code: int):
     mixctrl.key_event(key_code)
 
 def extract_info(
-    target: BoxTarget,
+    target,
     post_process: callable = None,
     ensure_not_empty: bool = True,
     save_screenshot: bool = True,
     *,
+    digit_only: bool = False,
+    digital: bool | None = None,
     ocr_ttl: float = 0.5,
     max_retries: int = 10,
+    screenshot_frame=None,
 )->str|None:
+    """若传入 *screenshot_frame*（BGR ndarray），则在该帧上 OCR，且重试时不再刷新画面；
+    用于 Web 编辑器导入图片与模拟执行时与画布一致。未传入时仍每次重试从 mixctrl 截屏。"""
+    if digital is not None:
+        digit_only = bool(digital)
+    if digit_only:
+        from AutoScriptor.recognition.digit_rec import extract_digits
+        screenshot = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
+        res = extract_digits(screenshot, target)
+        if post_process:
+            res = post_process(res)
+        return res
+
     res = None
     last_ocr_at: float | None = None
     for _ in range(max_retries):
@@ -513,7 +627,7 @@ def extract_info(
             wait = ocr_ttl - (time.monotonic() - last_ocr_at)
             if wait > 0:
                 cancellable_sleep(wait)
-        screenshot = mixctrl.screenshot()
+        screenshot = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
         res = ocr_for_box(screenshot, target.box, ttl=ocr_ttl)
         last_ocr_at = time.monotonic()
         logger.debug(f"Extract info {target} raw_res: {res}")
@@ -526,7 +640,8 @@ def extract_info(
         if ensure_not_empty and isinstance(res, str) and len(res) == 0: continue
         if res is not None: break
     if save_screenshot and cfg["app"]["debug_mode"]:
-        save_debug_screenshot(target=target, screenshot=mixctrl.screenshot(), box=target.box, ocr_text=res, prefix="e")
+        dbg = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
+        save_debug_screenshot(target=target, screenshot=dbg, box=target.box, ocr_text=res, prefix="e")
     return res
 
 def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), resize: tuple = (-1, -1))->list[str|None]:
@@ -580,7 +695,7 @@ def detect_floating_window(debug: bool = False) -> dict:
     return _detect(screenshot, debug=debug)
 
 
-def dismiss_floating_window(max_retries: int = 3, debug: bool = False) -> bool:
+def dismiss_floating_window(max_retries: int = 1, debug: bool = False) -> bool:
     """
     检测并移除 4399 悬浮窗：检测到后将其滑动到屏幕中央触发设置面板，然后隐藏。
     
@@ -626,5 +741,5 @@ def _ensure_boosted():
     if _boosted:
         return
     _boosted = True
-    from AutoScriptor.utils.perf import boost
-    boost()                          # 提升 Python 进程自身（不提升 MuMu，避免干扰其他程序）
+    from AutoScriptor.utils.perf import ABOVE_NORMAL_PRIORITY_CLASS, boost
+    boost(process_priority=ABOVE_NORMAL_PRIORITY_CLASS)  # 温和提升 Python 自身；不提升 MuMu，避免干扰其他程序

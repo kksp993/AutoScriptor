@@ -17,7 +17,7 @@ class ConfigManager:
     def _load_config(self):
         """加载配置文件"""
         if os.path.exists(self.config_path):
-            with open(self.config_path, 'r', encoding='utf-8') as f:
+            with open(self.config_path, 'r', encoding='utf-8-sig') as f:
                 self.config = json.load(f)
         else:
             self.config = {
@@ -36,11 +36,14 @@ class ConfigManager:
             self._save_config()
 
     def _save_config(self):
-        """保存配置文件"""
-        from AutoScriptor.utils.constant import cfg
-        cfg["encryption"] = self.config["encryption"]
-        with open(self.config_path, 'w', encoding='utf-8') as f:
-            json.dump(self.config, f, ensure_ascii=False, indent=4)
+        """保存加密配置到当前账号文件"""
+        from AutoScriptor.utils.app_config import cfg
+        if cfg._account_data:
+            cfg._account_data["encryption"] = self.config["encryption"]
+            cfg._save_account_file()
+        else:
+            with open(self.config_path, 'w', encoding='utf-8') as f:
+                json.dump(self.config, f, ensure_ascii=False, indent=4)
 
     def _generate_key(self, password: str, salt: bytes) -> bytes:
         """从密码生成密钥"""
@@ -58,46 +61,9 @@ class ConfigManager:
         return h.digest()
 
     def update_game_config(self, account: str, password: str, character_name: str, security_key: str):
-        """更新游戏配置并加密敏感信息"""
-        # 生成随机盐值
-        salt = secrets.token_bytes(16)
-        # 生成随机nonce
-        nonce = secrets.token_bytes(12)
-        
-        # 生成加密密钥
-        key = self._generate_key(security_key, salt)
-        
-        # 准备要加密的数据
-        sensitive_data = {
-            "account": account,
-            "password": password,
-            "character_name": character_name
-        }
-        
-        # 序列化数据
-        data = json.dumps(sensitive_data).encode()
-        
-        # 使用AES-GCM进行加密
-        aesgcm = AESGCM(key)
-        ciphertext = aesgcm.encrypt(nonce, data, None)
-        
-        # 分离密文和认证标签
-        encrypted_data = ciphertext[:-16]
-        tag = ciphertext[-16:]
-        
-        # 生成HMAC用于数据完整性验证
-        hmac_value = self._generate_hmac(encrypted_data, key)
-        
-        # 保存加密相关信息
-        self.config["encryption"] = {
-            "version": "1.0",
-            "salt": base64.b64encode(salt).decode(),
-            "nonce": base64.b64encode(nonce).decode(),
-            "tag": base64.b64encode(tag).decode(),
-            "hmac": base64.b64encode(hmac_value).decode(),
-            "encrypted_data": base64.b64encode(encrypted_data).decode()
-        }
-        
+        """更新游戏配置并加密敏感信息（兼容旧调用，character_name 不再加密）"""
+        sensitive_data = {"account": account, "password": password}
+        self.config["encryption"] = self.encrypt_data(sensitive_data, security_key)
         self._save_config()
 
     def decrypt_config(self, security_key: str) -> dict:

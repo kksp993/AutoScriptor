@@ -17,8 +17,8 @@ except ImportError:
     _HAS_PIL = False
 
 # 调试截图目录
-CLICK_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'logs', 'debug_screenshot')
-CLICK_DIR = os.path.abspath(CLICK_DIR)
+from AutoScriptor.utils.paths import get_logs_root
+CLICK_DIR = str(get_logs_root() / 'debug_screenshot')
 os.makedirs(CLICK_DIR, exist_ok=True)
 
 

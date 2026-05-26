@@ -7,6 +7,7 @@ from AutoScriptor.core.background import bg
 # 注意：保持与现有 _order.txt 和目录/文件名兼容
 TRANSLATION_MAP = {
     # 目录
+    '自定义任务': 'custom_task',
     '一般任务': 'normal_task',
     '每日任务': 'daily_task',
     '每周任务': 'weekly_task',
@@ -45,16 +46,18 @@ TRANSLATION_MAP = {
     '极光天诏': 'jiguangtianzhao',
     '消费点券': 'dianquan_consume',
     '极渊副本': 'hyper_abyss_task',
-    '登录其他角色': 'login_other_character',
     '冰窟商店': 'bingku_shop',
     '幽冥冰窟': 'youming_bingku',
     '荣耀之战': 'rongyao_battle',
+    '狮驼岭': 'shituoling',
     '五光十色': 'wuguangshise',
-    '五行四季': 'wuxingsiji',
+    '昆仑山爬山': 'kunlunshan_task',
     '昆仑山': 'kunlunshan',
     '自动战斗': 'battle',
     '荒古万界': 'hgwj',
+    '万界副本': 'wanjiefuben',
     '荒古巨兽': 'hgjs',
+    '遗境副本': 'yijingfuben',
     '本命空间': 'bmkj',
     '腾蛇飞升': 'tengshefeisheng',
     '活动': 'huodong',
@@ -86,6 +89,18 @@ def translate_path_part(part: str) -> str:
     # 未知词原样返回
     return part
 
+
+
+def normalize_cfg_key(part: str) -> str:
+    """配置 JSON 里任务树键的规范化：英→中、已知中文保持；未知片段原样保留（不抛错）。
+
+    用于 normalize_cfg_tasks_to_cn，避免用户自定义路径段（如 example_hello）触发异常。
+    """
+    if part in TRANSLATION_MAP_REVERSE:
+        return TRANSLATION_MAP_REVERSE[part]
+    if part in TRANSLATION_MAP:
+        return part
+    return part
 
 
 def normalize_to_cn(part: str) -> str:

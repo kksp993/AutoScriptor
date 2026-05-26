@@ -76,6 +76,7 @@ _boosted = False
 _boost_lock = threading.Lock()
 _boosted_pids: list[int] = []          # 记录被提升过优先级的进程 PID（用于恢复）
 _original_affinity_mask: int | None = None  # 记录原始 CPU 亲和性掩码（用于恢复）
+_boost_options = (False, HIGH_PRIORITY_CLASS, False)
 
 
 # ==================== 核心 API ====================
@@ -94,11 +95,12 @@ def boost(
         boost_mumu:       是否同时提升 MuMu 模拟器相关进程的优先级（默认关闭，
                           避免干扰同机器上其他使用 MuMu 的程序）
     """
-    global _boosted
+    global _boosted, _boost_options
     with _boost_lock:
         if _boosted:
             return
         _boosted = True
+        _boost_options = (keep_display, process_priority, boost_mumu)
 
     with _quiet_perf_info():
         # 0) 根据配置限制 CPU 亲和性（防止程序占满所有核心导致电脑卡死）
@@ -174,6 +176,32 @@ def unboost():
     logger.info("⚡ 已恢复默认优先级与电源策略")
 
 
+@contextlib.contextmanager
+def mumu_safe_subprocess():
+    """
+    在调用 MuMu 官方 API（subprocess 拉起 MuMuManager）时临时取消 boost。
+
+    任务执行期间若已 boost，错误恢复里的 close/launch/shutdown 会继承
+    HIGH_PRIORITY_CLASS，MuMu 可能返回 errcode=-201（unknown error）或
+    导致 ADB/Nemu 连接异常；与 ensure_app_running 前的 unboost 同理。
+    """
+    with _boost_lock:
+        was_boosted = _boosted
+        options = _boost_options
+    if was_boosted:
+        unboost()
+    try:
+        yield
+    finally:
+        if was_boosted:
+            keep_display, process_priority, boost_mumu = options
+            boost(
+                keep_display=keep_display,
+                process_priority=process_priority,
+                boost_mumu=boost_mumu,
+            )
+
+
 # ==================== 底层工具函数 ====================
 
 def _apply_cpu_affinity():
@@ -189,7 +217,7 @@ def _apply_cpu_affinity():
     global _original_affinity_mask
 
     try:
-        from AutoScriptor.utils.constant import cfg
+        from AutoScriptor.utils.app_config import cfg
         cpu_cores = cfg.get("app.cpu_cores", 0)
     except Exception:
         cpu_cores = 0

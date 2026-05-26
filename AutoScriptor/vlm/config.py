@@ -1,4 +1,4 @@
-from AutoScriptor.utils.constant import cfg
+from AutoScriptor.utils.app_config import cfg
 
 
 def _get_llm_cfg(key, default=None):

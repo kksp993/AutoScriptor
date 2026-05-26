@@ -1,12 +1,11 @@
 import traceback
-from ZmxyOL.task.task_register import register_task
 from AutoScriptor import *
 from ZmxyOL import *
 
 from AutoScriptor.utils.logger import logger
 
 @register_task
-def task(battle_loop: int = 1000):
+def task(battle_loop: int = 1000, battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
     from ZmxyOL.battle.character.hero import h
     TASK_TABLE_LIST = [
         "龙宫",

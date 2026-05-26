@@ -3,10 +3,12 @@
  * Output: dist/AutoScriptor-Setup.exe (NSIS installer) + dist/AutoScriptor-Portable.exe
  */
 
+const codeSigningEnabled = process.env.AUTOSCRIPTOR_CODE_SIGN === '1';
+
 const config = {
   appId: 'com.autoscriptor.app',
-  productName: 'AutoScriptor',
-  copyright: 'AutoScriptor',
+  productName: '造笔',
+  copyright: '造笔 AutoScriptor',
 
   directories: {
     output: '../dist_electron',
@@ -57,6 +59,8 @@ const config = {
       { target: 'portable', arch: ['x64'] },
     ],
     icon: 'buildResources/icon.ico',
+    // 默认不签名，避免无证书机器下载/执行签名工具失败；正式发布机显式设 AUTOSCRIPTOR_CODE_SIGN=1。
+    signAndEditExecutable: codeSigningEnabled,
   },
 
   nsis: {
@@ -64,9 +68,10 @@ const config = {
     allowToChangeInstallationDirectory: true,
     createDesktopShortcut: true,
     createStartMenuShortcut: true,
-    shortcutName: 'AutoScriptor',
+    shortcutName: '造笔',
     installerIcon: 'buildResources/icon.ico',
     uninstallerIcon: 'buildResources/icon.ico',
+    compression: 'normal',
   },
 
   portable: {

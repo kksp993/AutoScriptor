@@ -14,8 +14,12 @@ import time
 import unittest
 import sys
 import os
+import importlib.util
+import types
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 from services.webui.security import (
     hash_deploy_password, verify_deploy_password,
@@ -23,6 +27,40 @@ from services.webui.security import (
     RateLimiter, login_limiter, verify_limiter,
     check_request_freshness,
 )
+
+
+def load_config_manager_for_test():
+    """Load ConfigManager without importing the full AutoScriptor runtime."""
+    # Preload cryptography before patch.dict(sys.modules), otherwise modules
+    # imported during the patch are removed on exit and class identity breaks.
+    from cryptography.hazmat.primitives import hashes  # noqa: F401
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: F401
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC  # noqa: F401
+
+    logger_mod = types.ModuleType("AutoScriptor.utils.logger")
+    logger_mod.logger = type("_Logger", (), {
+        "debug": staticmethod(lambda *args, **kwargs: None),
+        "info": staticmethod(lambda *args, **kwargs: None),
+        "warning": staticmethod(lambda *args, **kwargs: None),
+        "error": staticmethod(lambda *args, **kwargs: None),
+    })()
+    autoscriptor = types.ModuleType("AutoScriptor")
+    autoscriptor.__path__ = [os.path.join(ROOT, "AutoScriptor")]
+    utils = types.ModuleType("AutoScriptor.utils")
+    utils.__path__ = [os.path.join(ROOT, "AutoScriptor", "utils")]
+    spec = importlib.util.spec_from_file_location(
+        "_config_manager_under_test",
+        os.path.join(ROOT, "AutoScriptor", "crypto", "config_manager.py"),
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    with patch.dict(sys.modules, {
+        "AutoScriptor": autoscriptor,
+        "AutoScriptor.utils": utils,
+        "AutoScriptor.utils.logger": logger_mod,
+    }):
+        spec.loader.exec_module(module)
+    return module.ConfigManager
 
 
 class TestPasswordHashing(unittest.TestCase):
@@ -123,6 +161,13 @@ class TestRateLimiter(unittest.TestCase):
             self.limiter.record_failure("10.0.0.3")
         self.assertFalse(self.limiter.is_limited("10.0.0.3"))
 
+    def test_remaining_before_lockout(self):
+        self.limiter.record_failure("10.0.0.5")
+        self.assertEqual(self.limiter.remaining_before_lockout("10.0.0.5"), 2)
+        for _ in range(2):
+            self.limiter.record_failure("10.0.0.5")
+        self.assertEqual(self.limiter.remaining_before_lockout("10.0.0.5"), 0)
+
     def test_clear_resets(self):
         for _ in range(3):
             self.limiter.record_failure("10.0.0.4")
@@ -197,13 +242,7 @@ class TestProfileEncryption(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        try:
-            from AutoScriptor.crypto.config_manager import ConfigManager
-            cls.CM = ConfigManager
-        except ImportError:
-            import sys as _sys
-            mod = _sys.modules.get("AutoScriptor.crypto.config_manager")
-            cls.CM = mod.ConfigManager if mod else None
+        cls.CM = load_config_manager_for_test()
 
     def _cm(self):
         if self.CM is None:
@@ -331,7 +370,7 @@ class TestAttackScenarios(unittest.TestCase):
     def test_profile_encryption_prevents_file_theft(self):
         """config.json 被盗时，加密的档案数据无法被读取"""
         try:
-            from AutoScriptor.crypto.config_manager import ConfigManager
+            ConfigManager = load_config_manager_for_test()
         except ImportError:
             import sys as _s
             mod = _s.modules.get("AutoScriptor.crypto.config_manager")
