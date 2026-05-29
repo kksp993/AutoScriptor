@@ -3,7 +3,7 @@
 ====================================================
 与 ptlogin 登录框一致：密码经 CryptoJS.AES.encrypt(..., 'lzYW5qaXVqa') 后提交 login.do。
 优先使用主配置中的 news.account / news.password（专用于论坛资讯代理），否则回退到解密后的 game 账密。
-仅在 WebUI 已验证安全密码（credential_unlock）时使用。
+默认 news 公共通行证仅用于论坛资讯代理；其他凭据必须由调用方先完成 credential_unlock。
 """
 from __future__ import annotations
 
@@ -26,10 +26,20 @@ _LOGIN_FRAME = f"{_PTLOGIN_ORIGIN}/ptlogin/loginFrame.do?postLoginHandler=defaul
 _LOGIN_DO = f"{_PTLOGIN_ORIGIN}/ptlogin/login.do?v=1"
 _VERIFY_DO = f"{_PTLOGIN_ORIGIN}/ptlogin/verify.do"
 _AES_PASSPHRASE = "lzYW5qaXVqa"
+PUBLIC_NEWS_ACCOUNT = "85rwm3janyyc"
+PUBLIC_NEWS_PASSWORD = "123456"
 
-# credential_unlock_token -> (expiry_monotonic, requests.Session)
+# cache token -> (expiry_monotonic, requests.Session)
 _session_cache: dict[str, tuple[float, requests.Session]] = {}
 _SESSION_TTL_SEC = 3600.0
+
+
+def is_public_news_credential(account: str | None, password: str | None) -> bool:
+    """项目公开 4399 资讯通行证；只允许这一组免敏感保护。"""
+    return (
+        (account or "").strip() == PUBLIC_NEWS_ACCOUNT
+        and (password or "").strip() == PUBLIC_NEWS_PASSWORD
+    )
 
 
 def _evp_bytes_to_key_md5(password: bytes, salt: bytes, key_len: int, iv_len: int) -> tuple[bytes, bytes]:
@@ -148,9 +158,9 @@ def login_ptlogin_session(username: str, password: str) -> requests.Session | No
         return None
 
 
-def get_cached_or_login_session(unlock_token: str, username: str, password: str) -> requests.Session | None:
-    """按解锁令牌缓存 Session，减少频繁登录。"""
-    key = f"{unlock_token}:{username}"
+def get_cached_or_login_session(cache_token: str, username: str, password: str) -> requests.Session | None:
+    """按调用方提供的缓存令牌缓存 Session，减少频繁登录。"""
+    key = f"{cache_token}:{username}"
     now = time.monotonic()
     hit = _session_cache.get(key)
     if hit and hit[0] > now:
@@ -163,17 +173,19 @@ def get_cached_or_login_session(unlock_token: str, username: str, password: str)
 
 
 def get_news_4399_credentials_from_server() -> tuple[str, str] | tuple[None, None]:
-    """论坛资讯用 4399 通行证：优先 news.*，否则 game.*（与自动化相同来源）。"""
+    """论坛资讯用 4399 通行证：优先 news.*；旧配置缺少 news 段时使用公开默认号。"""
     try:
-        from services.webui import server as _server
+        from AutoScriptor.utils.app_config import cfg
 
-        n = _server.cfg._config.get("news") or {}
+        n = cfg._config.get("news") or {}
         acc = (n.get("account") or "").strip()
         pwd = (n.get("password") or "").strip()
         if acc and pwd:
             return acc, pwd
+        if "news" not in cfg._config:
+            return PUBLIC_NEWS_ACCOUNT, PUBLIC_NEWS_PASSWORD
 
-        g = _server.cfg._config.get("game") or {}
+        g = cfg._config.get("game") or {}
         acc = (g.get("account") or "").strip()
         pwd = (g.get("password") or "").strip()
         if acc and pwd:

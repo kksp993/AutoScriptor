@@ -27,7 +27,7 @@ AutoScriptor 商业发行版构建脚本
   5. (可选) electron-builder 打包（默认 portable 单 exe；--electron-nsis / --electron-zip 见 --help）
 
 用户文档（参数、产物形态、缓存、排错）:
-  docs/AutoScriptor/release-build-and-run.md
+  docs/AutoScriptor/release/build-and-run.md
 
 打包前（推荐，约数秒，避免白等 20+ 分钟 Nuitka）::
 
@@ -199,7 +199,7 @@ def clean(full: bool = False, skip_nuitka: bool = False):
 
 def warn_if_embedded_style_venv() -> None:
     """嵌入式 Python 创建的 venv 常使 base_prefix 指向 .venv\\Scripts；在此环境下 Nuitka 虽可能编译成功，
-    但 standalone 运行时易出现 encodings 缺失。见 docs/AutoScriptor/nuitka-reference.md 第六节。
+    但 standalone 运行时易出现 encodings 缺失。见 docs/AutoScriptor/release/nuitka-reference.md 第六节。
     """
     bp = Path(getattr(sys, "base_prefix", sys.prefix)).resolve()
     if os.name == "nt" and bp.name.lower() == "scripts":
@@ -215,7 +215,7 @@ def ensure_windows_python_dev_files() -> None:
     """Nuitka Scons 阶段需要在 getSystemPrefixPath() 下找到 include/Python.h 与 libs/python310.lib。
 
     嵌入式 Python 创建的 venv 常将 base_prefix 指向 .venv\\Scripts，须在该目录补齐开发文件。
-    详见 docs/AutoScriptor/nuitka-reference.md
+    详见 docs/AutoScriptor/release/nuitka-reference.md
     """
     if os.name != "nt":
         return
@@ -230,7 +230,7 @@ def ensure_windows_python_dev_files() -> None:
     print(f"  期望: {py_h}")
     print(f"  期望: {lib}")
     print("  请从 python.org 完整安装或 NuGet python 包复制 tools/include 与 tools/libs 到上述前缀，")
-    print("  或见 docs/AutoScriptor/nuitka-reference.md 中「嵌入式 Python」一节。")
+    print("  或见 docs/AutoScriptor/release/nuitka-reference.md 中「嵌入式 Python」一节。")
     sys.exit(1)
 
 
@@ -1270,7 +1270,7 @@ def maybe_reexec_with_full_python() -> None:
     """若存在 .venv-nuitka（应用完整 Python 创建的 venv），则用其重新执行本脚本。
 
     嵌入式 Python 创建的 .venv 会导致 Nuitka standalone 运行时缺少 encodings；
-    见 docs/AutoScriptor/nuitka-reference.md。构建前应执行:
+    见 docs/AutoScriptor/release/nuitka-reference.md。构建前应执行:
       <NuGet 或 python.org 完整 Python> -m venv .venv-nuitka
       .venv-nuitka\\Scripts\\pip install -r requirements.txt nuitka ordered-set zstandard
     """

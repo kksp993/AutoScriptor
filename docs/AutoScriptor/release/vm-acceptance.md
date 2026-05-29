@@ -1,6 +1,6 @@
 # Release VM Acceptance
 
-This document is the minimal Windows VM lab plan for validating a release installer.
+This document is the Windows VM lab plan for validating release artifacts. A release is not accepted until both the full installer and the same-line update package have been checked when both are produced.
 
 ## Minimal Snapshot Plan
 
@@ -47,7 +47,24 @@ Install Windows manually in the VM. After Windows setup:
 VBoxManage snapshot "AutoScriptor-Win-ReleaseLab" take clean-base
 ```
 
-## Guest Acceptance
+## Stage Release Artifacts
+
+Copy these artifacts into the host shared folder before restoring the VM snapshot:
+
+```text
+\\VBOXSVR\release\AutoScriptor_Zao_Install_x.y.z.exe
+\\VBOXSVR\release\AutoScriptor_Update_x.y.z.zip
+```
+
+If testing upgrade, also keep the previous same-line installer:
+
+```text
+\\VBOXSVR\release\AutoScriptor_Zao_Install_x.y.(z-1).exe
+```
+
+Record SHA-256 for every artifact in the release note or acceptance log.
+
+## Full Installer Acceptance
 
 Inside the VM:
 
@@ -73,6 +90,51 @@ Logs are written to:
 \\VBOXSVR\release\logs
 ```
 
+For a less manual pass, use the headless installer path:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File \\VBOXSVR\release\vm_guest_headless_install.ps1 `
+  -PackagePath \\VBOXSVR\release\AutoScriptor_Zao_Install_x.y.z.exe `
+  -InstallRoot "$env:USERPROFILE\Documents\AutoScriptor" `
+  -SkipMumuConfig
+```
+
+Then run the normal post-install acceptance:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File \\VBOXSVR\release\vm_guest_acceptance.ps1 `
+  -Mode PostInstall `
+  -InstallRoot "$env:USERPROFILE\Documents\AutoScriptor"
+```
+
+## Update Package Acceptance
+
+Use a clean VM snapshot and test the upgrade path, not only the final package:
+
+1. Install the previous same-line version, for example `x.y.(z-1)`, using the full installer acceptance flow.
+2. Launch the installed app and confirm the WebUI opens.
+3. Open the WebUI release update page and choose `AutoScriptor_Update_x.y.z.zip`.
+4. Confirm dry-run succeeds before applying. It must report the current version, target version, compatibility line, and protected user-data checks.
+5. Apply the update.
+6. Confirm the app restarts or can be relaunched.
+7. Verify:
+   - `.autoscriptor\release_version.json` under the install root reports `x.y.z`.
+   - `%APPDATA%\autoscriptor\install.json` reports `version: x.y.z`.
+   - `backend\autoscriptor-engine.exe` exists.
+   - `data\config.json` remains valid JSON.
+   - WebUI responds on `127.0.0.1:5000`.
+   - User data such as accounts, custom tasks, and battle character data was not overwritten.
+
+Local contract tests are still required, but they are not a substitute for VM upgrade acceptance:
+
+```powershell
+cd webapp
+npm run test:installer
+npm run test:release-update
+```
+
+When a release changes installer or update behavior, update this document and the scripts under `scripts/release/` together.
+
 ## What This Proves
 
 - The release EXE starts on a clean Windows machine.
@@ -81,6 +143,7 @@ Logs are written to:
 - Windows uninstall registration exists.
 - The daily launcher exists.
 - The local WebUI responds on `127.0.0.1:5000`.
+- The same-line update package can upgrade an installed previous version without losing user data.
 
 ## MuMu-Capable Acceptance
 
@@ -119,4 +182,4 @@ the run. Logs and JSON reports are written to the `-OutDir` folder.
 ## Manual Items Still Needed
 
 - MuMu real operation should be tested on a host/VM where MuMu can actually run. Nested virtualization may block MuMu inside VirtualBox.
-- Full UI automation requires an additional hidden acceptance mode in the app. Without that, the installer UI step is intentionally manual.
+- Full release-update UI automation still requires an additional hidden acceptance mode in the app. Without that, the update package step is intentionally manual in the VM.

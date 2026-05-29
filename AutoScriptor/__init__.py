@@ -41,6 +41,8 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "perf_boost": ("AutoScriptor.utils.perf", "boost"),
     "make_box_grid": ("AutoScriptor.utils.box_grid", "make_box_grid"),
     "indexof": ("AutoScriptor.utils.box_grid", "indexof"),
+    "get_task_status": ("AutoScriptor.utils.task_state", "get_task_status"),
+    "set_task_status": ("AutoScriptor.utils.task_state", "set_task_status"),
     # runtime helpers
     "bg": ("AutoScriptor.core.background", "bg"),
     "BG_SIGNALS": ("AutoScriptor.core.background", "BG_SIGNALS"),
@@ -100,6 +102,8 @@ __all__ = [
     "log_flush",
     "make_box_grid",
     "indexof",
+    "get_task_status",
+    "set_task_status",
     # api
     "init",
     "click",

@@ -1,10 +1,14 @@
 import traceback
+from threading import Thread
 from time import time
 from AutoScriptor import *
 from ZmxyOL import *
 from ZmxyOL.battle.character.hero import h, combo
 from ZmxyOL.nav.api import ensure_in
 from AutoScriptor.utils.logger import logger
+
+_ZHUQUE_EXIT_DELAY = 30.0
+_ZHUQUE_TOKEN_SIGNAL = "kunlunshan_zhuque_token"
 
 def back_to_map():
     click(I("导航-菜单"), delay=1)
@@ -69,6 +73,23 @@ def _kunlunshan_hidden_callback():
     _request_try_exit_with_confirm_guard()
     bg.set_signal("hidden", False)
 
+def _schedule_zhuque_try_exit(round_token: str, delay: float = _ZHUQUE_EXIT_DELAY):
+    if bg.signal(_ZHUQUE_TOKEN_SIGNAL) != round_token:
+        return
+    logger.info("识别到朱雀神殿，预留 %.0fs 打 boss 后尝试退出", delay)
+
+    def _worker():
+        start = time()
+        while time() - start < delay:
+            if bg.signal(_ZHUQUE_TOKEN_SIGNAL) != round_token or bg.signal("try_exit", False):
+                return
+            sleep(max(0.05, min(1.0, delay - (time() - start))))
+        if bg.signal(_ZHUQUE_TOKEN_SIGNAL) == round_token and not bg.signal("try_exit", False):
+            logger.info("朱雀神殿兜底等待结束，触发 try_exit")
+            bg.set_signal("try_exit", True)
+
+    Thread(target=_worker, daemon=True, name="KunlunshanZhuqueExit").start()
+
 def kunlunshan_battle(num: int = 5, flow_name: str | None = None, equipment: str = "诛仙剑阵"):
     if flow_name is None:
         flow_name = getattr(h, "task_context_battle_flow", None) or "昆仑山循环"
@@ -77,6 +98,8 @@ def kunlunshan_battle(num: int = 5, flow_name: str | None = None, equipment: str
         h.set(has_cd=False, speed_x=3)   
         bg.set_signal("try_exit", False)
         bg.set_signal("kunlunshan_hidden_seen", False)
+        zhuque_round_token = f"{round_idx}:{time()}"
+        bg.set_signal(_ZHUQUE_TOKEN_SIGNAL, zhuque_round_token)
         with bg.interval(0.4):
             with bg.scope("昆仑山") as scope:
                 # 「知道了」弹窗：once=False → 同一局 battle_loop 内每次识别到都会触发（可多次）。
@@ -106,6 +129,11 @@ def kunlunshan_battle(num: int = 5, flow_name: str | None = None, equipment: str
                     identifier=(I("昆仑山隐藏")),
                     callback=_kunlunshan_hidden_callback,
                 )
+                scope.add(
+                    name="朱雀神殿兜底退出",
+                    identifier=I("朱雀神殿"),
+                    callback=lambda token=zhuque_round_token: _schedule_zhuque_try_exit(token),
+                )
                 # 与「知道了」不同：once=True → 本局内首次识别到「站在这里」后回调一次即移除，避免重复 try_exit。
                 scope.add(
                     name="战斗结束",
@@ -132,6 +160,7 @@ def kunlunshan_battle(num: int = 5, flow_name: str | None = None, equipment: str
                     bg.set_signal("try_exit", False)
                     bg.set_signal("hidden", False)
                     bg.set_signal("kunlunshan_hidden_seen", False)
+                    bg.set_signal(_ZHUQUE_TOKEN_SIGNAL, None)
     back_to_map()
 
 def xumiding(equipment:str="诛仙剑阵"):
@@ -181,7 +210,8 @@ def kunlunshan_task(self, battle_loop: int = 7, equipment: str = "诛仙剑阵")
     click(T("夺回昆仑山"), delay=1)
     click(I("昆仑山任务"), delay=1)
     sleep(1)
-    click(T("领奖", box=Box(868,15,169,622).margin()), until=lambda: ui_F(T("领奖", box=Box(868,15,169,622).margin())))
-    click(B(1070,75,30,30))
-    wait_for_appear(T("夺回昆仑山"))
+    click(T("领奖", box=Box(868,15,169,622).margin()), until=lambda: ui_F(T("领奖", box=Box(868,15,169,622).margin())), if_exist=True)
+    sleep(1)
+    click(B(1076,69,27,19),until=lambda:ui_T(T("夺回昆仑山")))
+    sleep(1)
     click(B(1200,30,30,30))

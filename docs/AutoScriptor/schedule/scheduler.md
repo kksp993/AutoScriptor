@@ -1,560 +1,254 @@
-# 后台调度器（Scheduler）与任务系统
+# Scheduler 与任务执行生命周期
 
-## 📖 概述
+本文记录当前调度器、任务注册、重试、人工接管和 WebUI 状态投影的实际约定。它是维护跳表，不是旧实现说明。
 
-后台调度器是 AutoScriptor 的**自动任务执行系统**，可以在你不在电脑前时自动运行任务。
+## 组件边界
 
-### 核心能力
+| 组件 | 职责 |
+|------|------|
+| `ZmxyOL/task/task_register.py` | `@register_task` 注册任务路径，维护用户配置叶节点，并把运行时元数据写入 `TaskRegistry` |
+| `AutoScriptor/utils/task_registry.py` | 运行时注册表，保存 `fn/order/param_meta/doc/debug_mode`，不持久化 |
+| `services/core/scheduler.py` | 后台线程、动态等待、跨角色收集到期任务、调度周期 retry、状态机 |
+| `services/core/task_manager.py` | 单任务执行、参数恢复、任务内 retry、进度判定、人工接管标记、执行后时间更新 |
+| `AutoScriptor/utils/task_state.py` | 当前任务本地状态 API，例如 `progress` |
+| `services/webui/task_tree_service.py` / `server.py` | 将任务树投影为 WebUI 状态、进度、到期与错误展示 |
 
-- ⏰ **智能等待**：根据最近到期任务的时间精确 sleep，不浪费等待
-- 🚀 **逐个执行**：每次只执行一个到期任务，执行完后保存配置、重新加载、再检查下一个
-- 📊 **状态管理**：实时显示调度器状态（待运行/运行中/发生错误）
-- 🔄 **外部唤醒**：配置重载后可立即唤醒调度器重新检查到期任务
-- 📝 **任务感知日志**：执行任务时日志自动显示当前任务的中文名称
+## 任务注册与数据归属
 
----
+任务是一个被 `@register_task` 装饰的 Python 函数。内置任务来自 `ZmxyOL/task/`；自定义任务来自 `data/custom_task/`，并需要显式 `path_cn`。
 
-## 🎯 什么是"任务"
+注册数据分两层：
 
-### 任务的本质
+| 数据 | 保存位置 | 持久化 | 说明 |
+|------|----------|--------|------|
+| `on`、`next_exec_time`、`params`、`next_exec_offset_hours`、`sched_window_hours`、`allowed_weekdays` | `cfg["tasks"]` | 是 | 用户配置和调度配置 |
+| `fn`、`order`、`param_meta`、`param_keys`、`beta`、`custom`、`doc_flow`、`description`、`debug_mode` | `TaskRegistry` | 否 | 运行时元数据，重载任务时重建，WebUI 投影为 `task_doc_flow` / `task_description` 等字段 |
+| `progress` 等任务运行状态 | `cfg["status"]["tasks"][task_path]` | 是 | 跟随账号/角色配置 |
 
-任务是一个用 `@register_task` 装饰的 Python 函数，定义在 `ZmxyOL/task/` 目录下。装饰器会根据文件路径**自动注册**到全局配置 `cfg["tasks"]` 中，形成树形结构。
+首次注册一个新任务叶节点时默认 `on=False`、`next_exec_time=0`；已有任务会保留用户配置，并补齐缺失字段。WebUI 保存任务时会剥离 `fn/order/param_meta/_due` 等运行时字段。
 
-### 一个最小的任务
-
-```python
-# ZmxyOL/task/normal_task/back_to_login.py
-from ZmxyOL.task.task_register import register_task
-from ZmxyOL import *
-from AutoScriptor import *
-
-@register_task
-def task():
-    ensure_in("登录")
-```
-
-只需用 `@register_task` 装饰，系统会自动：
-1. 根据文件路径 `normal_task/back_to_login.py` → 翻译为 `一般任务/返回开始`
-2. 在 `cfg["tasks"]["一般任务"]["返回开始"]` 中注册此函数
-3. 保留用户在 `config.json` 中的 `on`、`next_exec_time` 等配置
-
-### 任务在 config.json 中的结构
-
-```json
-{
-  "tasks": {
-    "每日任务": {
-      "村庄": {
-        "混沌炼狱塔": {
-          "on": true,
-          "next_exec_time": 1771794000.0,
-          "params": {},
-          "last_buy_time": 177172757.063918
-        },
-        "天选阁": {
-          "on": true,
-          "next_exec_time": 1771794000.0,
-          "params": {}
-        }
-      }
-    },
-    "一般任务": {
-      "登录": {
-        "on": false,
-        "next_exec_time": 0,
-        "params": {}
-      }
-    }
-  }
-}
-```
-
-### 任务节点的核心字段
+## 任务叶节点字段
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `fn` | function | 任务函数引用（运行时注入，不持久化到 JSON） |
-| `on` | bool | 是否启用此任务 |
-| `next_exec_time` | float | 下次执行的 Unix 时间戳（0 = 立即可执行） |
-| `params` | dict | 任务参数（传递给 `fn(**params)`） |
-| `order` | int | 注册顺序（控制菜单显示排序） |
-| `param_meta` | dict | 枚举参数的类型元数据（用于反序列化） |
-| `next_exec_offset_hours` | int | 可选，执行后延迟 N 小时再调度 |
+| `on` | bool | 是否启用任务 |
+| `next_exec_time` | float | 下次可执行 Unix 时间戳，`0` 表示立即可执行 |
+| `params` | dict | 任务函数参数，执行前按 `param_meta` 恢复枚举和 `TableParam` |
+| `next_exec_offset_hours` | int | 可选，成功/人工接管后按 N 小时后再试 |
+| `sched_window_hours` | tuple/list | 可选，本地时间可执行窗口 `[start, end)` |
+| `allowed_weekdays` | list[int] | 可选，允许星期，`1=周一 ... 7=周日` |
+| `human_takeover` / `human_takeover_error` / `human_takeover_at` | bool/str/float | 人工接管标记；到期前显示红色，到期后可自动再试 |
 
-### 任务的四大类别
+## 执行后时间规则
 
-| 类别 | 目录 | 执行后行为 | 典型场景 |
-|------|------|-----------|---------|
-| **每日任务** | `daily_task/` | `next_exec_time` 设为明天 05:00 | 每天需要做的日常 |
-| **每周任务** | `weekly_task/` | `next_exec_time` 设为下周一 05:00 | 每周一次的任务 |
-| **活动任务** | `event_task/` | 同每日任务（明天 05:00） | 限时活动 |
-| **一般任务** | `normal_task/` | `on` 设为 `false`（执行一次即关闭） | 登录、返回等辅助操作 |
+`TaskManager._update_next_exec_time()` 负责执行后调度：
 
-> 📌 凌晨 05:00 是"日期分界线"——05:00 之前视为前一天。
+| 任务类别 | 默认执行后行为 |
+|----------|----------------|
+| `每日任务` | 下一个 05:00 |
+| `活动任务` | 下一个 05:00 |
+| `每周任务` | 下一个周一 05:00 |
+| `自定义任务` | 下一个 05:00 |
+| `一般任务` | 执行后关闭 `on=False` |
+| 设置了 `next_exec_offset_hours` | 优先按当前时间 + N 小时 |
 
-### 任务的注册流程
+如果任务设置了 `sched_window_hours`，执行后时间会被夹到可执行窗口内。到期但不在 `allowed_weekdays` 时，调度器会把 `next_exec_time` 推迟到下一允许日 05:00。
 
-```
-启动程序
-  ↓
-ZmxyOL/task/__init__.py 执行
-  ↓
-gather_py_files() → 收集所有 .py 文件
-  ↓
-sort_py_files() → 按 _order.txt 排序
-  ↓
-import_modules() → 逐一导入，触发 @register_task
-  ↓
-@register_task 根据文件路径写入 cfg["tasks"]
-  ↓
-normalize_cfg_tasks_to_cn() → 英文路径统一翻译为中文
-  ↓
-sort_tasks() → 按 order 字段排序
-  ↓
-cfg.save_config() → 持久化到 config.json
-```
+## 状态机
 
-### 带参数的任务
+调度器状态只有三种：
 
-任务函数可以接受参数，参数默认值会自动提取到 `params` 字段：
+| 状态 | 含义 | 自动执行 |
+|------|------|----------|
+| `pending` | 未激活或已手动停止 | 否 |
+| `running` | 已激活，后台线程会收集并执行到期任务 | 是 |
+| `error` | 连续错误达到阈值，调度暂停 | 否 |
 
-```python
-@register_task
-def task(battle_loop: int = 1000):
-    h.battle_tasks(task_table=TASK_TABLE, max_loops=battle_loop)
-```
+关键点：
 
-用户可在 CLI 或 `config.json` 中修改 `params.battle_loop` 的值。
+- `activate()` 只会从非错误态进入 `running`；如果当前是 `error`，直接调用 `activate()` 不会恢复。
+- 恢复错误态必须先 `reset()`，WebUI 对应 `/api/scheduler/reset` 和“恢复调度”按钮。
+- `request_stop()` 会通知 `TaskManager` cooperative cancel，并把状态切回 `pending`。
+- `wake()` 只打断等待，让后台线程重新检查；它本身不改变状态。
 
-### 带枚举参数的任务
+## 到期判定
 
-枚举参数会自动序列化为字符串，并记录类型元数据：
+一个任务会被调度收集，必须同时满足：
 
-```python
-from enum import Enum
+1. `on=True`
+2. 任务路径存在于 `TaskRegistry`
+3. 当前时间 `now >= next_exec_time`
+4. 未处于人工接管冷却期：存在 `human_takeover_error` 但 `now < next_exec_time` 时不收集
+5. 当前时间在 `sched_window_hours` 内；不在时会推迟 `next_exec_time`
+6. 当前星期在 `allowed_weekdays` 内；不在时会推迟 `next_exec_time`
+7. 没有在本次调度激活周期内耗尽 retry
 
-class Difficulty(Enum):
-    easy = "easy"
-    hard = "hard"
+人工接管标记不是永久冻结。`human_takeover_error` 存在时：
 
-@register_task
-def task(difficulty: Difficulty = Difficulty.hard):
-    ...
-```
+- `now < next_exec_time`：WebUI 显示红色，调度器跳过。
+- `now >= next_exec_time`：WebUI 显示待执行，调度器会再次收集执行。
+- 后续执行成功会清除 `human_takeover*` 字段。
+- 手动 `task_call()` 会清除 `human_takeover*` 并立即设为到期。
 
-对应 config.json：
-```json
-{
-  "params": { "difficulty": "hard" },
-  "param_meta": { "difficulty": "ZmxyOL.task.normal_task.xxx.Difficulty" }
-}
-```
+## 动态等待
 
-### 表格参数（TableParam）
-
-多关卡任务可使用 `TableParam` 将每个关卡的配置聚合为一张表格：
+后台线程用 `Event.wait(interval)` 等到最近的有效执行时间：
 
 ```python
-from AutoScriptor.utils.table_param import TableParam
-
-@register_task
-def task(
-    battle_config: TableParam = TableParam(
-        {
-            "虎神之崖": {"difficulty": Nandu.不打, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
-            "苍龙幽谷": {"difficulty": Nandu.不打, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
-        },
-        column_labels={"difficulty": "难度", "cancel_on_failed": "不用点券复活", "battle_flow": "战斗招式"},
-    ),
-):
-    for name, row in battle_config.items():
-        ...
+times = scheduler._collect_active_times()
+if not times:
+    interval = CHECK_INTERVAL  # 3600 秒
+elif any(t <= now for t in times):
+    interval = 0
+else:
+    interval = min(times) - now
 ```
 
-前端自动渲染为可编辑表格，每行一个关卡，每列一个配置项。详见 [`docs/tasks/table-param.md`](../../tasks/table-param.md)。
+有效时间会考虑 `sched_window_hours`、`allowed_weekdays` 和当前调度周期内 retry 耗尽的任务。配置文件、账号文件、自定义任务目录或职业目录变化时，`ConfigWatcher` 会触发重载；如果正在执行任务，则延迟到安全边界再重载。
 
-### 自定义执行间隔
+## 跨角色调度
+
+调度器按当前账号的 `dispatch_queue` 顺序调度角色。每轮会切换到第一个存在到期任务的角色；若队列为空，则不会执行自动调度。
+
+切换角色后会：
+
+- `TaskManager.switch_character_and_reload()`
+- `invalidate_login()`
+- 重新收集当前角色任务
+
+自动调度模式中，整轮跨角色任务执行完成后会切回 `dispatch_queue` 的第一个有效角色，并再次确认游戏内登录到该角色。这样首角色在空档期保持在线挂机，也让后续人工操作从固定角色开始。单任务直跑和纯 debug 任务不会触发这个收尾。
+
+总览页的“所有角色下次执行”也使用同一套有效时间计算，避免显示和实际调度不一致。
+
+## 执行管线
+
+调度模式和单任务模式共用 `_run_task_pipeline()`：
+
+```text
+进入 pipeline
+  ├─ 未验证角色？跳过
+  ├─ 收集到期任务或使用显式任务列表
+  ├─ 对每个任务:
+  │    ├─ 非 debug 任务先做每日重启检查
+  │    ├─ runtime_ctx.refresh() 确保设备与 App 可用
+  │    ├─ 非 debug 任务确认角色登录
+  │    ├─ TaskManager.execute_tasks([task], max_attempts=1, attempt_offset=retry_round)
+  │    ├─ 成功：累计成功，清除连续错误
+  │    ├─ 人工接管冷却：计入失败展示，但不增加连续错误
+  │    ├─ 普通失败且仍有 retry：放入下一轮 retry 队列
+  │    └─ retry 耗尽：计入失败，调度周期内跳过该任务
+  ├─ 每个任务后保存配置并重载任务，或应用延迟重载
+  └─ 有真实执行结果时先回到首个调度角色，再执行 post_execution 收尾
+```
+
+调度器不会在同一轮里反复撞同一个失败任务。失败任务会等本轮其他任务结束后进入下一 retry 轮；达到 `max_retry` 后，在本次调度激活周期内跳过，直到重新启动调度或 reset 清理 retry exhaustion。
+
+## 单任务执行语义
+
+`TaskManager._execute_single_task()` 的成功标准不是“函数返回了”这么简单：
+
+1. 执行前设置当前任务路径，任务内可用 `set_task_status()` / `get_task_status()`。
+2. 执行前清空当前任务 `progress`。
+3. 调用 `fn(**params)`。
+4. 函数返回后检查 `progress`；如果是未完成进度，例如 `"5/6"`，会转成 `TaskRequireReTry`。
+5. 只有函数返回且没有未完成进度，才算成功，并更新 `next_exec_time` / 清除人工接管标记。
+
+任务状态 API：
 
 ```python
-@register_task(default_offset_hours=10)
-def task():
-    ...  # 执行后 10 小时再调度
+from AutoScriptor import set_task_status, get_task_status
+from AutoScriptor.utils.task_state import clear_task_status
+
+set_task_status("progress", "5/6")
+progress = get_task_status("progress")
+clear_task_status("progress")
 ```
 
-### 执行排序：_order.txt
+`progress` 支持 `"5/6"`、`[5, 6]`、`{"done": 5, "total": 6}` 等可解析形态。不可解析的状态只展示，不参与“未完成”判定。
 
-每个目录下可放一个 `_order.txt`，每行一个文件/目录名（英文），控制导入和显示顺序：
+## 重试与错误状态
 
-```
-daily_task
-weekly_task
-event_task
-normal_task
-```
+项目里有两层 retry：
 
----
-
-## 📊 调度器状态
-
-调度器有三种状态，用颜色和图标标识：
-
-### 🟢 待运行（PENDING）
-
-**含义**：调度器已启动，但尚未激活自动执行
-
-**触发条件**：
-- 程序刚启动时
-- 用户退出程序时
-- 手动恢复错误状态后
-
-**行为**：不会自动执行任务，只等待用户手动执行
-
-### 🟡 运行中（RUNNING）
-
-**含义**：调度器已激活，正在后台监控并自动执行任务
-
-**触发条件**：
-- 用户按下【开始执行 R】后调用 `scheduler.activate()`
-
-**行为**：
-- ✅ 根据最近到期任务的时间精确等待（不再固定 1 小时）
-- ✅ 发现到期任务后逐个执行，每个任务完成后保存配置并重新加载
-- ✅ 可被 `scheduler.wake()` 唤醒，立即中断等待重新检查
-- ✅ 执行期间日志显示当前任务中文名称
-
-### 🔴 发生错误（ERROR）
-
-**含义**：调度器因连续失败而停止自动执行
-
-**触发条件**：
-- 连续 3 次任务执行失败
-
-**行为**：
-- ❌ 停止自动执行任务
-- ⚠️ 需要手动恢复才能继续
-
-**恢复方法**：
-- CLI：在主菜单选择【开始执行】
-- WebUI：点击【恢复调度】按钮
-
----
-
-## 🔍 工作原理（新版）
-
-### 核心循环
-
-```python
-def _loop(self):
-    while True:
-        interval = self._get_wait_interval()  # 动态计算等待时间
-        self._wake.clear()
-        self._wake.wait(interval)  # 可被 wake() 打断
-        if self._stop.is_set():
-            break
-        if self.state != SchedulerState.RUNNING:
-            continue
-        self._check_and_run()
-```
-
-**关键改进**：
-- ✅ 使用 `_wake.wait(interval)` 代替 `_stop.wait(CHECK_INTERVAL)`
-- ✅ 等待时间基于最近到期任务动态计算，不再固定 1 小时
-- ✅ 外部可通过 `wake()` 立即唤醒，适用于配置重载后的场景
-
-### 智能等待时间计算
-
-```python
-def _get_wait_interval(self):
-    # 1. 扫描所有 on=True 的任务，收集 next_exec_time
-    # 2. 如果存在已到期任务（next_exec_time <= now）→ 返回 0（立即执行）
-    # 3. 否则，等到最近的未来任务到期：min(future_times) - now
-    # 4. 没有任何启用的任务 → 默认等待 1 小时
-```
-
-### 逐个执行流程
-
-```
-_check_and_run() 开始
-  ↓
-while 循环:
-  ├── 扫描到期任务 → 没有？→ 退出循环
-  ├── 首次？→ 启动模拟器（如果未运行）
-  ├── 取第一个到期任务 task_key
-  ├── task_manager.execute_tasks([task_key])  ← 只执行一个
-  ├── cfg.save_config()       ← 保存配置
-  ├── task_manager.reload_tasks()  ← 重新加载（重新扫描 fn）
-  ├── 重新扫描到期任务 → 有下一个？→ 继续循环
-  └── 循环结束
-  ↓
-_post_execution_action()  ← 全部完成后才执行（关闭模拟器等）
-```
-
-**为什么逐个执行？**
-- 每个任务执行后可能影响其他任务的状态
-- 保存后重新加载保证 `fn` 函数引用始终最新
-- 重新扫描到期任务可以发现因配置变化而新增的到期任务
-
-### 外部唤醒机制
-
-```python
-def wake(self):
-    """中断当前等待，立即重新检查到期任务。"""
-    self._wake.set()
-```
-
-调用场景：
-- 用户按 **T（重新加载）** 后，`scheduler.wake()` 立即唤醒
-- 手动修改 `config.json` 后重载，调度器不需等到下次检查周期
-
-### 任务感知日志
-
-执行任务时，日志格式自动注入任务名称：
-
-```
-[I 返回开始 260222 17:44:49 api:200] Locate: [T('进入游戏')]
-[I 返回开始 260222 17:44:49 task_manager:236] ▶️  执行成功: 一般任务/返回开始
-```
-
-非任务时保持原始格式：
-
-```
-[I 260222 17:44:49 scheduler:211] 📅 定时执行完成: 成功 2, 失败 0
-```
-
-实现方式：
-- `set_current_task(name)` 设置线程局部变量
-- `_TaskAwareFormatter` 继承 `logzero.LogFormatter`，在 format 时注入 `task_prefix`
-- `task_manager.execute_tasks()` 在 `fn()` 前/后 设置/清除
-
----
-
-## 🔧 配置说明
-
-### 检查间隔（回退值）
-
-如果没有任何启用的任务，调度器默认回退到 1 小时检查一次：
-
-```python
-CHECK_INTERVAL = 3600  # 秒（1 小时）
-```
-
-正常情况下，等待时间根据最近到期任务精确计算。
-
-### 失败阈值
-
-连续失败 **3 次**后进入错误状态：
-
-```python
-MAX_CONSECUTIVE_ERRORS = 3
-```
-
-**计数规则**：
-- 一次执行中，只要有任务失败，就算一次失败
-- 成功执行会重置失败计数
-- 连续 3 次失败后停止自动执行
-
----
-
-## 💻 CLI 使用
-
-### 查看状态
-
-在主菜单可以看到调度器状态：
-
-```
-🚀 开始执行【R】 🟡运行中 (下次执行: 2026-02-23 05:00)
-```
-
-### 激活调度器
-
-1. 选择【开始执行 R】
-2. 调度器状态自动变为"运行中"
-3. 后台线程开始智能等待并执行到期任务
-
-### 重新加载任务（T）
-
-1. 选择【重新加载 T】
-2. 从 `config.json` 重新加载配置
-3. 调度器被唤醒，立即重新检查到期任务
-4. 如果有到期任务，后台线程立即开始执行
-
-### 恢复错误状态
-
-如果调度器进入错误状态：
-1. 选择【开始执行 R】
-2. 系统会自动重置错误计数并恢复运行
-
----
-
-## ⚙️ 执行后动作
-
-任务执行完成后，可以根据配置执行不同动作：
-
-### 配置位置
-
-`config.json` → `emulator.post_execution`
-
-### 可选值
-
-| 值 | 说明 | 行为 |
-|----|------|------|
-| `NULL` | 什么都不做（默认） | 保持模拟器和游戏运行 |
-| `CLOSE_GAME_ONLY` | 仅关闭游戏 | 关闭游戏应用，模拟器继续运行 |
-| `CLOSE_MUMU` | 关闭模拟器 | 关闭游戏 + 关闭模拟器 |
-
-### 配置示例
-
-```json
-{
-  "emulator": {
-    "index": 1,
-    "adb_addr": "127.0.0.1:16416",
-    "post_execution": "CLOSE_MUMU"
-  }
-}
-```
-
-> ⚠️ 执行后动作只在**所有到期任务全部执行完毕**后才触发一次，不是每个任务执行后都触发。
-
----
-
-## 📝 任务时间工具（time.py）
-
-`ZmxyOL/task/time.py` 提供了便捷的时间计算函数，用于设置 `next_exec_time`：
-
-| 函数 | 说明 | 示例返回 |
-|------|------|---------|
-| `next_day(5, 0)` | 下一个 05:00 时间戳 | 明天 05:00 |
-| `next_week(5, 0)` | 下一个 7 天后 05:00 | 7 天后 05:00 |
-| `next_Mon(5, 0)` | 下一个周一 05:00 | 最近的周一 05:00 |
-| `next_month(5, 0)` | 下一个月 05:00 | 下月同日 05:00 |
-
-所有函数都支持传入 `now` 参数（datetime/时间戳/None）。
-
----
-
-## 🔄 完整生命周期
-
-```
-程序启动
-  ↓
-导入任务 → @register_task 注册到 cfg["tasks"]
-  ↓
-CLI 主菜单显示 → 用户按 R
-  ↓
-scheduler.activate() → 状态: RUNNING → 后台线程启动
-  ↓
-_loop(): 计算最近到期任务时间 → sleep
-  ↓
-到期 / 被 wake() 唤醒
-  ↓
-_check_and_run():
-  ├── 启动模拟器（如果未运行）
-  ├── while 有到期任务:
-  │     ├── execute_tasks([任务A])
-  │     │     ├── set_current_task("任务A")  ← 日志显示任务名
-  │     │     ├── fn(**params)               ← 执行任务函数
-  │     │     ├── set_current_task(None)     ← 恢复日志格式
-  │     │     └── _update_task_post_execution()  ← 更新 next_exec_time
-  │     ├── cfg.save_config()
-  │     ├── task_manager.reload_tasks()
-  │     └── 重新扫描到期任务
-  └── _post_execution_action()  ← 关闭模拟器等
-  ↓
-回到 _loop() → 继续等待下一个到期任务
-```
-
----
-
-## ⚠️ 注意事项
-
-### 1. 模拟器启动
-
-调度器会自动启动模拟器（如果未运行），但需要：
-- ✅ 配置正确的 `emulator.emu_path` 和 `emulator.adb_path`
-- ✅ 模拟器安装路径正确
-- ✅ ADB 连接正常
-
-### 2. 错误处理
-
-- ✅ 单次任务失败不会停止调度器
-- ✅ 连续失败 3 次才会进入错误状态
-- ✅ `TaskRequireReTry` 异常会按 `max_retry` 重试，不计入连续失败
-- ✅ `RequestHumanTakeover` 异常会跳过任务但仍更新其配置
-
-### 3. 并发安全
-
-- 任务配置读写受 `RLock` 保护
-- 调度器后台线程通过 `_wake` + `_stop` 两个 Event 控制
-- `set_current_task()` 使用 `threading.local()`，线程安全
-
-### 4. 资源消耗
-
-调度器设计为**极低开销**：
-- ✅ 绝大部分时间在 `Event.wait()`，几乎不消耗 CPU
-- ✅ 只在检查/唤醒时才扫描任务配置
-- ✅ 不会影响系统性能
-
----
-
-## 🔍 故障排查
-
-### 问题：调度器不自动执行任务
-
-**检查清单**：
-1. ✅ 状态是否为"运行中"（🟡）？
-2. ✅ 任务是否已开启（`on=True`）？
-3. ✅ 任务的 `next_exec_time` 是否已到期（<= 当前时间戳）？
-4. ✅ 查看日志中是否有 "📅 发现 N 个到期任务" 记录
-
-### 问题：按 T 重载后调度器没有立即执行
-
-**可能原因**：
-- 调度器状态不是 RUNNING
-- 任务的 `next_exec_time` 仍在未来
-
-**排查**：查看日志中 `_get_wait_interval` 返回的等待时间
-
-### 问题：调度器进入错误状态
-
-**可能原因**：
-- 连续 3 次任务执行失败
-- 模拟器启动失败
-- ADB 连接问题
-
-**解决方法**：
-1. 检查日志，找出失败原因
-2. 修复问题后，选择【开始执行 R】恢复
-
-### 问题：日志没有显示任务名称
-
-**检查**：
-- `setup_task_aware_logging()` 是否在启动时被调用
-- `set_current_task()` 是否在 `execute_tasks()` 中正确设置/清除
-
----
-
-## 📚 相关文档
-
-- [性能优化模块（perf）](./perf.md) - 性能优化机制
-- [API 参考](../API.md) - 完整的 API 文档
-
----
-
-## 🎯 总结
-
-新版调度器的核心改进：
-
-| 特性 | 旧版 | 新版 |
+| 层级 | 位置 | 说明 |
 |------|------|------|
-| 等待策略 | 固定 1 小时 | 动态计算，精确到秒 |
-| 执行方式 | 批量执行所有到期任务 | 逐个执行，每个任务后 save+reload |
-| 外部唤醒 | 不支持 | `wake()` 立即中断等待 |
-| 日志标识 | `module:lineno` | 任务中文名 + `module:lineno` |
-| 配置同步 | 执行完统一保存 | 每个任务后立即保存并重载 |
+| 任务内 retry | `TaskManager._execute_single_task()` | 直接调用 `execute_tasks()` 且未指定 `max_attempts` 时，会按 `cfg["app"]["max_retry"]` 在函数内循环 |
+| 调度周期 retry | `Scheduler._run_task_pipeline()` | 调度器传 `max_attempts=1`，失败任务先让出队列，下一 retry 轮再试 |
 
-**核心价值**：
-- ✅ **精准**：不多等一秒，到期即执行
-- ✅ **可靠**：逐个执行 + 实时保存，中断恢复无损
-- ✅ **可观测**：日志清晰显示当前执行的任务
-- ✅ **响应快**：配置变更后立即生效
+`MAX_CONSECUTIVE_ERRORS = 3` 仍存在，但不是“任意任务失败三次立刻停止”的简单规则。
+
+会增加连续错误计数的情况：
+
+- retry 耗尽后的普通失败通过 `record_result(0, failed)` 计入。
+- 模拟器启动失败。
+- 调度管线意外崩溃。
+
+不会增加连续错误计数的情况：
+
+- 任务失败但还会进入下一 retry 轮。
+- `RequestHumanTakeover` 或进度未完成后被标记为人工接管冷却。
+- 用户手动停止导致的 cooperative cancel。
+
+连续错误达到 3 后进入 `error`，调度暂停。WebUI 必须先恢复调度；CLI 当前“开始执行”只调用 `activate()`，如果仍处于 `error`，不会自动 reset。
+
+## 人工接管与进度
+
+`RequestHumanTakeover` 或外部同名异常会写入：
+
+```json
+{
+  "human_takeover": true,
+  "human_takeover_error": "...",
+  "human_takeover_at": 1771794000.0
+}
+```
+
+同时调用 `_update_next_exec_time()`，所以红色不是永久停止，而是“到下次时间前需要人工关注”。典型进度失败生命周期：
+
+```text
+黄色待执行
+  → 执行中写入 progress=3/6
+  → 返回但 progress=5/6：视为未完成，进入 retry
+  → retry 耗尽且 progress 仍未完成：标记 human_takeover_error，显示红色 5/6
+  → next_exec_time 到期：重新变为待执行，可自动再试
+  → 后续成功：清除 progress 与 human_takeover*
+```
+
+普通失败如果没有可解析的未完成进度，不会自动变红；它只按 retry/错误计数处理。
+
+## WebUI 状态投影
+
+任务行状态由后端和前端共同投影：
+
+| 展示 | 条件 |
+|------|------|
+| disabled | `on=False` |
+| error | `error` 字段存在，或人工接管标记存在且尚未到期 |
+| pending | `on=True` 且到期 |
+| scheduled | `on=True` 且未来执行 |
+
+`progress_display` 会显示在任务状态旁，例如红色 `5/6` 或黄色 `5/6`。这只是展示层，不替代调度判定；调度判定仍以 `progress_incomplete()`、`next_exec_time` 和人工接管冷却为准。
+
+## post_execution 收尾
+
+配置位置：`config.json -> emulator.post_execution`
+
+| 值 | 行为 |
+|----|------|
+| `none` / `null` | 不额外关闭游戏或模拟器 |
+| `close_game_only` | 关闭游戏应用，模拟器保留 |
+| `close_mumu` | 关闭游戏并关闭模拟器 |
+| `goto_main` | 尝试回到主界面 |
+
+收尾只在本次 pipeline 有真实成功或失败统计时触发一次。若本轮只执行 debug 任务，则跳过 `post_execution`，方便保留现场调试。
+
+## 维护检查清单
+
+修改调度、任务状态或 WebUI 投影时，至少核对：
+
+- `is_task_due()`、`_collect_due()`、`TaskTreeService._task_status()` 是否一致。
+- `human_takeover_error` 到期前/到期后是否分别显示红色/待执行。
+- `progress` 未完成是否会把正常返回转为 retry 失败。
+- retry 耗尽是否只影响本次调度激活周期，避免永久“到期但永不执行”。
+- `cfg["tasks"]` 只保存用户配置，`TaskRegistry` 只保存运行时元数据。
+- 相关测试：`test/test_task_registry/test_decouple_cfg.py` 与 `test/test_webui_contracts.py`。

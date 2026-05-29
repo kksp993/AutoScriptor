@@ -32,6 +32,9 @@ nuitka-crash-report.xml
 /.cursor/*
 !/.cursor/rules/
 !/.cursor/rules/**
+# Agent 本机目录：共享规则放 docs/agents/，不要提交工具私有 skill/cache 目录
+/.codex/
+/.claude/
 /.playwright-mcp/
 # 忽略根目录下的 PNG 和 LOG 文件
 /*.png

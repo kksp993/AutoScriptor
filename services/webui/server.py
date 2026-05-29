@@ -939,7 +939,7 @@ def _build_overview_payload(now_ts: float | None = None) -> dict:
                     disabled += 1
                 else:
                     enabled += 1
-                    blocked = is_human_takeover_blocked(val) or bool(val.get("error"))
+                    blocked = is_human_takeover_blocked(val, now_ts) or bool(val.get("error"))
                     due = False if blocked else is_task_due(val, path, now_ts)
                     if blocked:
                         error += 1
@@ -948,11 +948,20 @@ def _build_overview_payload(now_ts: float | None = None) -> dict:
                     else:
                         scheduled += 1
                     status = 'error' if blocked else ('pending' if due else 'scheduled')
+                    task_status = ((cfg._config.get("status") or {}).get("tasks") or {}).get(path, {})
+                    progress = task_status.get("progress") if isinstance(task_status, dict) else None
+                    progress_display = None
+                    if progress is not None:
+                        from AutoScriptor.utils.task_state import progress_label
+
+                        progress_display = progress_label(progress) or str(progress)
                     upcoming.append({
                         'path': path,
                         'on': True,
                         'next_exec_time': calc_effective_next_time(val, now_ts),
                         'status': status,
+                        'progress': progress,
+                        'progress_display': progress_display,
                         'human_takeover_error': val.get('human_takeover_error'),
                         'human_takeover_at': val.get('human_takeover_at'),
                     })

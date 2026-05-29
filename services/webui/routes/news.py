@@ -26,6 +26,7 @@ from lxml import html as lxml_html
 from services.webui.routes.news_4399_session import (
     get_cached_or_login_session,
     get_news_4399_credentials_from_server,
+    is_public_news_credential,
 )
 from services.webui.security import CREDENTIAL_UNLOCK_COOKIE_NAME, validate_credential_unlock
 
@@ -323,15 +324,30 @@ _NAV_INTERCEPTOR_JS = r"""
 </script>
 """
 _cache_time: float = 0.0
+_PUBLIC_NEWS_SESSION_CACHE_TOKEN = "public-news-4399"
+
+
+def _news_credentials_for_request(request: Request) -> tuple[str | None, str | None, str | None]:
+    """
+    返回当前请求可用于 4399 论坛代拉的 (account, password, cache_token)。
+    项目公开 news 通行证可直接用于资讯代理；其他凭据仍必须先通过 credential_unlock。
+    """
+    acc, pwd = get_news_4399_credentials_from_server()
+    if not acc or not pwd:
+        return None, None, None
+    if is_public_news_credential(acc, pwd):
+        return acc, pwd, _PUBLIC_NEWS_SESSION_CACHE_TOKEN
+
+    tok = request.cookies.get(CREDENTIAL_UNLOCK_COOKIE_NAME)
+    if tok and validate_credential_unlock(tok):
+        return acc, pwd, tok
+    return None, None, None
 
 
 def _bbs_session_eligible(request: Request) -> bool:
-    """是否具备使用通行证代拉论坛页的条件（已解锁 + 配置中有 news 或 game 账密）。"""
-    tok = request.cookies.get(CREDENTIAL_UNLOCK_COOKIE_NAME)
-    if not validate_credential_unlock(tok):
-        return False
-    acc, pwd = get_news_4399_credentials_from_server()
-    return bool(acc and pwd)
+    """是否具备使用通行证代拉论坛页的条件。"""
+    acc, pwd, cache_token = _news_credentials_for_request(request)
+    return bool(acc and pwd and cache_token)
 
 
 def _is_login_wall_response(resp: requests.Response) -> bool:
@@ -369,7 +385,7 @@ def _forum_iframe_placeholder(original_url: str) -> str:
 <body>
   <h1>无法在窗口内嵌中显示全文</h1>
   <p>4399 论坛在无登录会话时会跳转到通行证/游戏吧页面。</p>
-  <p>若您已在 WebUI 验证<strong>安全密码</strong>且配置中存有<strong>news 或游戏账号密码</strong>（优先 news），本站会尝试自动登录通行证后再拉取正文；若仍失败（如需验证码），请使用<strong>「论坛原文」</strong>在浏览器中打开。</p>
+  <p>若配置中使用项目公开 news 通行证，本站会直接尝试自动登录后再拉取正文；若改为其他 news 或游戏账号密码，则必须先在 WebUI 验证<strong>安全密码</strong>。若仍失败（如需验证码），请使用<strong>「论坛原文」</strong>在浏览器中打开。</p>
   <p><a href="{safe}" target="_blank" rel="noopener noreferrer">在新标签页打开帖子</a></p>
 </body>
 </html>"""
@@ -630,19 +646,16 @@ async def proxy_page(request: Request, url: str = Query(..., description="要代
     """
     反向代理 4399 帖子页面，供前端 iframe 嵌入。
     仅允许 bbs.4399.cn / my.4399.com 域名，防止 SSRF。
-    若请求携带有效的 credential_unlock Cookie 且配置中已有 news 或 game 账密，
-    则先经 ptlogin 建立通行证会话再抓取（news 优先）。
+    项目公开 news 通行证可直接用于资讯代理；其他 news/game 凭据必须先完成 credential_unlock。
     """
     parsed = urlparse(url)
     if parsed.hostname not in _ALLOWED_DOMAINS:
         return HTMLResponse("<h3>不允许的域名</h3>", status_code=403)
 
-    tok = request.cookies.get(CREDENTIAL_UNLOCK_COOKIE_NAME)
     http_session: requests.Session | None = None
-    if validate_credential_unlock(tok):
-        acc, pwd = get_news_4399_credentials_from_server()
-        if acc and pwd and tok:
-            http_session = get_cached_or_login_session(tok, acc, pwd)
+    acc, pwd, cache_token = _news_credentials_for_request(request)
+    if acc and pwd and cache_token:
+        http_session = get_cached_or_login_session(cache_token, acc, pwd)
 
     # 提前注入到 <head> 最前面：在 4399 自身脚本运行前就把 UniLogin 拦截掉
     # 注意：<base> 必须与当前页面域名一致，否则 my.4399.com 页面会错误解析相对路径导致白屏

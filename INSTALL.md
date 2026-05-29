@@ -381,7 +381,7 @@ dist_electron\AutoScriptor_Zao_Install_1.0.0.exe
 构建脚本会执行 Nuitka 编译、收集数据、打包 `backend.zip`、Electron 打包和 pack 校验。更详细的构建说明见：
 
 ```text
-docs\AutoScriptor\release-build-and-run.md
+docs\AutoScriptor\release\build-and-run.md
 ```
 
 ### 10. 源码版常见问题

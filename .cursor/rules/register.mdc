@@ -1,9 +1,0 @@
----
-description: register-dispatch算子注册风格：@register注册+dispatch分发、转发器/处理函数两层分离。
-globs: "**/*.py"
-alwaysApply: false
----
-
-# Register-Dispatch 算子注册模式
-
-`@register` 装饰即注册，函数名即算子名，需自定义名传第二参数；消费侧统一 `dispatch('算子名', 实例, ...)` 按实例类型自动路由。调度参数放末尾带默认值。`__init__.py` 导入并加入 `__all__`。

@@ -2,7 +2,7 @@
 
 本文汇总官方文档与社区中**与 Windows / standalone / 排错**相关的入口，并记录本仓库在集成 Nuitka 时的实践结论。链接均为完整 URL，便于直接打开。
 
-**整条发行流水线**（`build_release.py`、`backend.zip`、Electron portable/NSIS、增量缓存、安装向导）见 [release-build-and-run.md](./release-build-and-run.md)；**本文**侧重 Nuitka 选项与 post 拷贝，避免与上文重复。
+**整条发行流水线**（`build_release.py`、`backend.zip`、Electron portable/NSIS、增量缓存、安装向导）见 [build-and-run.md](./build-and-run.md)；**本文**侧重 Nuitka 选项与 post 拷贝，避免与上文重复。
 
 ---
 
@@ -91,7 +91,7 @@
 
 ## 八、本仓库构建流程一览（脚本 `scripts/build_release.py`）
 
-日常运行方式（Electron、`npm start`）与构建命令的**对外备忘**见 [release-build-and-run.md](./release-build-and-run.md)；本节偏 Nuitka 与 post 拷贝细节。
+日常运行方式（Electron、`npm start`）与构建命令的**对外备忘**见 [build-and-run.md](./build-and-run.md)；本节偏 Nuitka 与 post 拷贝细节。
 
 **目录约定**：**`dist/`**（`gui.dist`、`data`、`gui.build` 等）与 **`dist_electron/`**（electron-builder 独占）为两个根；`build_release.py` 的 `clean()` 只清理前者子目录，**不删除** `dist_electron/`，避免与桌面包互相覆盖。electron-builder 仅从 `dist/` **复制**进安装包，不破坏 `dist/gui.dist`。
 
@@ -126,7 +126,13 @@
 
 ### 8.4 运行时数据目录（编译产物）
 
-- 数据根目录为 **`dist\data`**（`config.json`、`profiles/`、`assets/`、`custom_task/`、`battle_character/` 等由 **`collect_data()`** 从仓库模板拷入；**`accounts/` 仅空目录**，不打包 `data/accounts/*.json`）。
+- 数据根目录为 **`dist\data`**。当前 **`collect_data()`** 会写入：
+  - `config template.json`，并复制为发行版默认 `config.json`；
+  - 空 `accounts/`，绝不打包 `data/accounts/*.json`；
+  - `battle_character/`、`custom_task/`，忽略 `__pycache__` 和 `*.pyc/*.pyo`；
+  - `assets/config/`、`assets/pic/`；
+  - 空 `logs/` 占位。
+- `ZmxyOL/assets/profiles/*.yaml` 只保留兼容路径说明，不再由 `collect_data()` 打入发行数据根；当前战斗职业逻辑以 `data/battle_character/` 为准。
 - **`AutoScriptor.utils.paths`**：`is_compiled()` 须能识别打包环境（`__compiled__ in globals()`，并对 **`autoscriptor-engine.exe`** 名称兜底），否则误把 `gui.dist` 当成数据根。
 
 ### 8.5 与「安装包」的关系
@@ -146,3 +152,4 @@
 若第 1 步失败，以终端**完整报错**与（如有）**`nuitka-crash-report.xml`** 为准继续排错；若第 1 步通过而第 3 步失败，多为**运行时缺模块**或**数据路径**，对照第八节与 `build_release.py` 中的拷包列表。
 
 若日志出现 **`[Errno 10048]`**（Windows：仅允许每个套接字地址使用一次），表示 **WebUI 端口已被占用**（例如本机已开另一实例、或 `npm start` 占用了 5000）。关闭占用进程或修改 `gui.py` / 配置中的监听端口后再试，与 Nuitka 打包是否成功无关。
+

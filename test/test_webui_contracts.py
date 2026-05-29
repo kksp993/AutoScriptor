@@ -172,12 +172,18 @@ class TestTaskTreeServiceContract(unittest.TestCase):
         task_registry = types.ModuleType("AutoScriptor.utils.task_registry")
         task_registry.task_registry = FakeTaskRegistry()
         scheduler = types.ModuleType("services.core.scheduler")
-        scheduler.is_task_due = lambda node, path, now_ts: bool(node.get("on"))
-        scheduler.is_human_takeover_blocked = lambda node: bool(node.get("human_takeover_error"))
+        scheduler.is_task_due = lambda node, path, now_ts: bool(node.get("on")) and now_ts >= node.get("next_exec_time", 0)
+        scheduler.is_human_takeover_blocked = (
+            lambda node, now_ts=None: bool(node.get("human_takeover_error"))
+            and (now_ts is None or now_ts < node.get("next_exec_time", 0))
+        )
+        task_state = types.ModuleType("AutoScriptor.utils.task_state")
+        task_state.progress_label = lambda value: value if isinstance(value, str) else None
         return {
             "AutoScriptor": types.ModuleType("AutoScriptor"),
             "AutoScriptor.utils": types.ModuleType("AutoScriptor.utils"),
             "AutoScriptor.utils.task_registry": task_registry,
+            "AutoScriptor.utils.task_state": task_state,
             "services.core.scheduler": scheduler,
         }
 
@@ -259,7 +265,26 @@ class TestTaskTreeServiceContract(unittest.TestCase):
 
         self.assertEqual([row["path"] for row in flat], ["registered/task"])
 
-    def test_human_takeover_task_projects_as_error_with_message(self):
+    def test_human_takeover_task_projects_as_error_with_message_before_retry_time(self):
+        tasks = {
+            "registered": {
+                "task": {
+                    "on": True,
+                    "next_exec_time": 200,
+                    "params": {},
+                    "human_takeover_error": "验证码弹窗",
+                    "human_takeover_at": 123,
+                },
+            },
+        }
+
+        with patch.dict(sys.modules, self._task_registry_stubs({"registered/task"})):
+            flat = self.service.flatten_tasks(tasks, now_ts=100)
+
+        self.assertEqual(flat[0]["status"], "error")
+        self.assertEqual(flat[0]["human_takeover_error"], "验证码弹窗")
+
+    def test_human_takeover_task_projects_as_pending_after_retry_time(self):
         tasks = {
             "registered": {
                 "task": {
@@ -275,8 +300,25 @@ class TestTaskTreeServiceContract(unittest.TestCase):
         with patch.dict(sys.modules, self._task_registry_stubs({"registered/task"})):
             flat = self.service.flatten_tasks(tasks, now_ts=100)
 
-        self.assertEqual(flat[0]["status"], "error")
+        self.assertEqual(flat[0]["status"], "pending")
         self.assertEqual(flat[0]["human_takeover_error"], "验证码弹窗")
+
+    def test_task_progress_projects_from_status_tree(self):
+        tasks = {
+            "registered": {
+                "task": {"on": True, "next_exec_time": 0, "params": {}},
+            },
+        }
+        self.module.cfg._config = {
+            "status": {"tasks": {"registered/task": {"progress": "5/6"}}}
+        }
+
+        with patch.dict(sys.modules, self._task_registry_stubs({"registered/task"})):
+            self.service.inject_public_task_fields(tasks)
+            flat = self.service.flatten_tasks(tasks, now_ts=100)
+
+        self.assertEqual(tasks["registered"]["task"]["progress_display"], "5/6")
+        self.assertEqual(flat[0]["progress_display"], "5/6")
 
     def test_normalize_dispatch_queue_keeps_existing_unique_characters(self):
         account_data = {
@@ -1281,7 +1323,7 @@ class TestReleaseUpdatePanelContract(unittest.TestCase):
 
     def test_minor_update_package_generator_documents_cumulative_engine_updates(self):
         script = (ROOT / "scripts/release/create_minor_update_package.py").read_text(encoding="utf-8")
-        docs = (ROOT / "docs/AutoScriptor/release-build-and-run.md").read_text(encoding="utf-8")
+        docs = (ROOT / "docs/AutoScriptor/release/build-and-run.md").read_text(encoding="utf-8")
 
         for marker in [
             "autoscriptor_update_v1",
@@ -1389,6 +1431,37 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
             "zmxy_redeem_codes_only_detail.txt",
         ]:
             self.assertNotIn(old_name, content)
+
+    def test_gift_dialog_uses_local_redeem_codes_page(self):
+        panel = (ROOT / "services/webui/static/js/components/NewsPanel.js").read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+
+        self.assertIn("const NEWS_GIFT_CODES_PAGE_URL = '/api/news/gift_codes/page';", panel)
+        self.assertIn("giftFrameSrc: NEWS_GIFT_CODES_PAGE_URL", panel)
+        self.assertIn(':src="giftFrameSrc"', panel)
+        self.assertNotIn(':src="NEWS_REDEEM_PAGE_URL"', panel)
+
+    def test_news_public_credentials_are_explicitly_scoped(self):
+        session = (ROOT / "services/webui/routes/news_4399_session.py").read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+        route = (ROOT / "services/webui/routes/news.py").read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+
+        self.assertIn('PUBLIC_NEWS_ACCOUNT = "85rwm3janyyc"', session)
+        self.assertIn('PUBLIC_NEWS_PASSWORD = "123456"', session)
+        self.assertIn("def is_public_news_credential", session)
+        self.assertIn("from AutoScriptor.utils.app_config import cfg", session)
+        self.assertIn('if "news" not in cfg._config:', session)
+        self.assertNotIn("from services.webui import server", session)
+        self.assertIn("_news_credentials_for_request", route)
+        self.assertIn("is_public_news_credential", route)
+        self.assertIn("validate_credential_unlock", route)
 
 
 if __name__ == "__main__":

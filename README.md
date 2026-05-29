@@ -38,16 +38,16 @@ AutoScriptor 是一个基于 Python 的自动化脚本与任务编排器，专�
 
 # 使用说明与配置指南
 
-如需完整的入门到进阶与 API 参考，请查阅: [docs/AutoScriptor/API.md](docs/AutoScriptor/API.md)
+如需完整的入门到进阶与 API 参考，请查阅: [docs/AutoScriptor/reference/API.md](docs/AutoScriptor/reference/API.md)
 
 当前生命周期与接口规范:
 
-- [运行生命周期](docs/AutoScriptor/runtime-lifecycle.md)
-- [WebUI API 规范](docs/AutoScriptor/webui-api-contract.md)
-- [任务脚本编写约定](docs/AutoScriptor/script-authoring.md)
-- [WebUI 用户轨迹验收](docs/AutoScriptor/webui-user-trajectories.md)
+- [运行生命周期](docs/AutoScriptor/runtime/lifecycle.md)
+- [WebUI API 规范](docs/AutoScriptor/webui/api-contract.md)
+- [任务脚本编写约定](docs/AutoScriptor/tasks/script-authoring.md)
+- [WebUI 用户轨迹验收](docs/AutoScriptor/webui/user-trajectories.md)
 
-**发行构建与日常运行**（`build_release.py` 参数、portable/NSIS、增量缓存、安装向导、`backend.zip` 与排错）：[docs/AutoScriptor/release-build-and-run.md](docs/AutoScriptor/release-build-and-run.md)
+**发行构建与日常运行**（`build_release.py` 参数、portable/NSIS、增量缓存、安装向导、`backend.zip` 与排错）：[docs/AutoScriptor/release/build-and-run.md](docs/AutoScriptor/release/build-and-run.md)
 
 ## 安装与首次运行
 
@@ -104,7 +104,7 @@ AutoScriptor 是一个基于 Python 的自动化脚本与任务编排器，专�
    .\.venv-nuitka\Scripts\python.exe -X utf8 scripts\build_release.py
    ```
 
-详细说明见 [INSTALL.md - 源码安装](INSTALL.md#二源码安装)，发行构建细节见 [docs/AutoScriptor/release-build-and-run.md](docs/AutoScriptor/release-build-and-run.md)。
+详细说明见 [INSTALL.md - 源码安装](INSTALL.md#二源码安装)，发行构建细节见 [docs/AutoScriptor/release/build-and-run.md](docs/AutoScriptor/release/build-and-run.md)。
 
 </details>
 
@@ -166,9 +166,9 @@ AutoScriptor 是一个基于 Python 的自动化脚本与任务编排器，专�
 
 ## 任务执行失败
 
-- 查看 `logs/log/` 目录下的日志文件
-- 查看 `logs/errors/` 目录下的错误归档
-- 检查 `logs/click_screenshots/` 目录下的点击截图
+- 源码模式查看 `logs/log/`；发行版通常在安装目录 `data/logs/log/`
+- 错误归档位于 `get_logs_root()/errors/`，源码常见为 `logs/errors/`，发行版常见为 `data/logs/errors/`
+- 点击/搜索调试截图位于 `get_logs_root()/debug_screenshot/`
 - 确认游戏界面状态正常，未出现异常弹窗，可反馈
 
 ## WebUI 无法访问
@@ -208,6 +208,7 @@ AutoScriptor/
 │   ├── nav/              # 导航和环境管理
 │   └── battle/           # 战斗相关
 ├── docs/                 # 文档
-├── logs/                 # 日志和截图
+├── data/                 # 账号、自定义任务、运行态职业脚本等可编辑数据
+├── logs/                 # 源码模式日志和截图；发行版对应安装目录 data/logs
 └── config.json           # 配置文件
 ```
