@@ -1,4 +1,5 @@
 const NEWS_REDEEM_PAGE_URL = 'https://yxhhd2.5054399.com/2021/yxgjml/game.php?game_id=26444';
+const NEWS_GIFT_CODES_PAGE_URL = '/api/news/gift_codes/page';
 
 const NewsPanel = {
   name: 'NewsPanel',
@@ -15,6 +16,7 @@ const NewsPanel = {
       giftDialogVisible: false,
       giftIframeKey: 0,
       giftLoading: true,
+      giftFrameSrc: NEWS_GIFT_CODES_PAGE_URL,
     };
   },
   computed: {
@@ -105,7 +107,7 @@ const NewsPanel = {
           <i class="fa fa-newspaper-o text-primary mr-1"></i>游戏资讯
         </h2>
         <span class="text-xs text-gray-400">造梦西游OL · 官方公告</span>
-        <span v-if="bbsSessionEligible" class="text-xs text-emerald-600" title="已验证安全密码且配置中有游戏账密时，内嵌原文将尝试经通行证登录后拉取">
+        <span v-if="bbsSessionEligible" class="text-xs text-emerald-600" title="配置中有可用于资讯代理的通行证；非公开凭据需先验证安全密码">
           <i class="fa fa-unlock-alt"></i> 通行证代拉已就绪
         </span>
       </div>
@@ -205,7 +207,7 @@ const NewsPanel = {
                destroy-on-close
                class="news-dialog news-gift-dialog">
       <div class="news-gift-frame-toolbar">
-        <span class="text-xs text-slate-500">4399 礼包码查询器</span>
+        <span class="text-xs text-slate-500">本地兑换码表</span>
         <div class="flex items-center gap-2">
           <el-button size="small" @click="refreshGiftFrame">
             <i class="fa fa-refresh mr-1"></i>刷新
@@ -222,9 +224,9 @@ const NewsPanel = {
         </div>
         <iframe
           :key="giftIframeKey"
-          :src="NEWS_REDEEM_PAGE_URL"
+          :src="giftFrameSrc"
           frameborder="0"
-          title="4399礼包码查询器"
+          title="兑换码"
           class="news-gift-frame"
           allow="clipboard-read; clipboard-write"
           referrerpolicy="no-referrer-when-downgrade"

@@ -1,0 +1,14 @@
+---
+description: Shared AutoScriptor project rules. Always read this before code changes; keeps Cursor, Codex, and Claude Code aligned.
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# Shared Project Rules
+
+The single source of project agent rules is `docs/agents/project-rules.md`.
+
+Before project repair, feature work, task authoring, WebUI/backend changes, config/status work, deployment/update work, or live emulator testing, follow that shared file.
+
+For live screenshot/OCR testing, follow `docs/agents/online-screenshot-test.md`.

@@ -115,6 +115,7 @@ const TaskTreeTaskRow = {
             :title="runTaskDisabled ? '执行中不能修改任务状态' : '点击切换启用状态'"
             @click.stop="handleStatusClick(item)">
         {{ statusLabels[getTaskStatus(item)] }}
+        <span v-if="item.progress_display" class="ml-1 text-[10px] align-super">{{ item.progress_display }}</span>
       </span>
       <button type="button"
               class="w-7 h-7 flex items-center justify-center rounded-full bg-primary/10 hover:bg-primary/25 text-primary transition-colors flex-shrink-0 disabled:opacity-40 disabled:pointer-events-none"
@@ -143,7 +144,8 @@ const TaskTreeTaskRow = {
   methods: {
     getTaskStatus(taskItem) {
       if (!taskItem.on) return 'disabled';
-      if (taskItem.error || taskItem.human_takeover || taskItem.human_takeover_error) return 'error';
+      if (taskItem.error) return 'error';
+      if ((taskItem.human_takeover || taskItem.human_takeover_error) && !taskItem._due) return 'error';
       return taskItem._due ? 'pending' : 'scheduled';
     },
     openTaskEditor() {
@@ -329,7 +331,8 @@ const TaskTree = {
     },
     getTaskStatus(item) {
       if (!item.on) return 'disabled';
-      if (item.error || item.human_takeover || item.human_takeover_error) return 'error';
+      if (item.error) return 'error';
+      if ((item.human_takeover || item.human_takeover_error) && !item._due) return 'error';
       return item._due ? 'pending' : 'scheduled';
     },
     countStatus(section) {

@@ -228,7 +228,7 @@ def main() -> int:
     if sys.platform == "win32" and bp.lower().endswith("scripts"):
         print(
             "  WARN: base_prefix 指向 Scripts，疑似嵌入式 Python venv；"
-            "若 Nuitka 产物缺 encodings，请改为完整 Python 安装版，见 docs/AutoScriptor/nuitka-reference.md"
+            "若 Nuitka 产物缺 encodings，请改为完整 Python 安装版，见 docs/AutoScriptor/release/nuitka-reference.md"
         )
 
     print("[verify] 检查 Nuitka no-site 重启语义（python -S 必须生效）…")

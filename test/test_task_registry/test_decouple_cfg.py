@@ -13,6 +13,8 @@ import json
 import time
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -259,23 +261,43 @@ class TestSchedulerCollectDue(unittest.TestCase):
         due = sched._collect_due(tree, "", time.time())
         self.assertEqual(due, [])
 
-    def test_human_takeover_task_not_collected(self):
+    def test_human_takeover_task_not_collected_before_next_exec_time(self):
         from services.core.scheduler import Scheduler
         sched = Scheduler()
 
         task_registry.register("cat/human", lambda: None, order=1)
+        now = time.time()
         tree = {
             "cat": {
                 "human": {
                     "on": True,
-                    "next_exec_time": 0,
+                    "next_exec_time": now + 99999,
                     "human_takeover_error": "需要人工确认",
                 }
             }
         }
 
-        due = sched._collect_due(tree, "", time.time())
+        due = sched._collect_due(tree, "", now)
         self.assertEqual(due, [])
+
+    def test_human_takeover_task_collected_after_next_exec_time(self):
+        from services.core.scheduler import Scheduler
+        sched = Scheduler()
+
+        task_registry.register("cat/human", lambda: None, order=1)
+        now = time.time()
+        tree = {
+            "cat": {
+                "human": {
+                    "on": True,
+                    "next_exec_time": now - 1,
+                    "human_takeover_error": "需要人工确认",
+                }
+            }
+        }
+
+        due = sched._collect_due(tree, "", now)
+        self.assertEqual(due, ["cat/human"])
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +351,59 @@ class TestTaskManagerPrepare(unittest.TestCase):
 
         tm = TaskManager()
         self.assertFalse(tm._try_recover_app(0, task="测试/调试任务"))
+
+
+class TestTaskStatusProgress(unittest.TestCase):
+    def setUp(self):
+        self._cfg_backup = copy.deepcopy(cfg._config)
+        self._reg_backup = dict(task_registry._tasks)
+        task_registry.clear()
+        cfg._config = {
+            "app": {"max_retry": 0, "restart_on_error": False, "app_to_start": "com.test"},
+            "emulator": {},
+            "tasks": {"测试": {"进度任务": {"on": True, "next_exec_time": 0, "params": {}}}},
+            "status": {},
+        }
+
+    def tearDown(self):
+        cfg._config = self._cfg_backup
+        task_registry._tasks = self._reg_backup
+
+    def test_task_status_api_uses_current_task_path(self):
+        from AutoScriptor.utils.task_state import (
+            clear_task_status,
+            get_task_status,
+            set_current_task_path,
+            set_task_status,
+        )
+
+        set_current_task_path("测试/进度任务")
+        try:
+            set_task_status("progress", "5/6", save=False)
+            self.assertEqual(get_task_status("progress"), "5/6")
+            clear_task_status("progress", save=False)
+            self.assertIsNone(get_task_status("progress"))
+        finally:
+            set_current_task_path(None)
+
+    def test_normal_return_with_incomplete_progress_marks_human_takeover_after_retry_exhausted(self):
+        from AutoScriptor import set_task_status
+        from services.core import task_manager as tm_mod
+        from services.core.task_manager import TaskManager
+
+        def partial_done():
+            set_task_status("progress", "5/6", save=False)
+
+        task_registry.register("测试/进度任务", partial_done, order=1)
+        tm = TaskManager()
+        mixctrl = SimpleNamespace(release_all_keys=lambda: None)
+
+        with patch.object(tm_mod.runtime_ctx, "mixctrl", mixctrl):
+            with patch.object(tm_mod.cfg, "save_config", lambda *args, **kwargs: None):
+                self.assertFalse(tm._execute_single_task("测试/进度任务"))
+
+        node = cfg._config["tasks"]["测试"]["进度任务"]
+        self.assertIn("5/6", node.get("human_takeover_error", ""))
 
 
 if __name__ == "__main__":

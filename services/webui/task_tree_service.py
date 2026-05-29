@@ -30,6 +30,8 @@ class TaskTreeService:
         "task_doc_flow",
         "fn",
         "order",
+        "progress",
+        "progress_display",
         "_due",
     )
 
@@ -110,6 +112,16 @@ class TaskTreeService:
                     val.pop("debug_mode", None)
                 val["task_description"] = task_registry.get_description(path)
                 val["task_doc_flow"] = task_registry.get_doc_flow(path)
+                task_status = ((cfg._config.get("status") or {}).get("tasks") or {}).get(path, {})
+                progress = task_status.get("progress") if isinstance(task_status, dict) else None
+                if progress is not None:
+                    from AutoScriptor.utils.task_state import progress_label
+
+                    val["progress"] = progress
+                    val["progress_display"] = progress_label(progress) or str(progress)
+                else:
+                    val.pop("progress", None)
+                    val.pop("progress_display", None)
                 val["_due"] = is_task_due(val, path, now_ts)
             else:
                 self.inject_public_task_fields(val, path)
@@ -174,7 +186,7 @@ class TaskTreeService:
 
         if not node.get("on"):
             return "disabled"
-        if node.get("error") or is_human_takeover_blocked(node):
+        if node.get("error") or is_human_takeover_blocked(node, now_ts):
             return "error"
         return "pending" if is_task_due(node, path, now_ts) else "scheduled"
 
@@ -198,6 +210,13 @@ class TaskTreeService:
                     "task_description": task_registry.get_description(path),
                     "task_doc_flow": task_registry.get_doc_flow(path),
                 }
+                task_status = ((cfg._config.get("status") or {}).get("tasks") or {}).get(path, {})
+                progress = task_status.get("progress") if isinstance(task_status, dict) else None
+                if progress is not None:
+                    from AutoScriptor.utils.task_state import progress_label
+
+                    row["progress"] = progress
+                    row["progress_display"] = progress_label(progress) or str(progress)
                 if val.get("human_takeover_error"):
                     row["human_takeover_error"] = val.get("human_takeover_error")
                     row["human_takeover_at"] = val.get("human_takeover_at")

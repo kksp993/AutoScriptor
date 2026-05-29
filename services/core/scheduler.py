@@ -5,8 +5,8 @@ AutoScriptor 后台定时调度器
 
 状态机：
   PENDING ─── activate() ───▶ RUNNING
-  RUNNING ─── 正常完成/未验证 ──▶ PENDING
-  RUNNING ─── 连续失败 ≥3 ─────▶ ERROR
+  RUNNING ─── request_stop()/deactivate() ──▶ PENDING
+  RUNNING ─── 连续错误 ≥3 ────────────────▶ ERROR
   ERROR   ─── reset() ────────▶ PENDING
 
 安全策略：
@@ -56,8 +56,6 @@ def collect_active_times_from_tasks_tree(tasks: dict) -> list[float]:
             path = f"{prefix}/{key}" if prefix else key
             if "on" in val:
                 if val.get("on") and task_registry.has_task(path):
-                    if is_human_takeover_blocked(val):
-                        continue
                     raw = float(val.get("next_exec_time", 0) or 0)
                     sw = parse_sched_window_hours(val)
                     effective = clamp_to_sched_window(max(raw, now_ts), sw[0], sw[1]) if sw else (raw or now_ts)
@@ -143,7 +141,7 @@ def is_task_due(val: dict, path: str, now_ts: float) -> bool:
 
     if not val.get("on"):
         return False
-    if is_human_takeover_blocked(val):
+    if is_human_takeover_blocked(val, now_ts):
         return False
     if not task_registry.has_task(path):
         return False
@@ -179,9 +177,18 @@ def is_task_debug_mode(task_path: str, task_data: dict | None = None) -> bool:
     return isinstance(data, dict) and bool(data.get("debug_mode") or data.get("debug"))
 
 
-def is_human_takeover_blocked(val: dict) -> bool:
-    """人工接管后的红色冻结态：展示为错误，但不参与自动调度。"""
-    return bool(val.get("human_takeover") or val.get("human_takeover_error"))
+def is_human_takeover_blocked(val: dict, now_ts: float | None = None) -> bool:
+    """
+    人工接管后的红色冷却态。
+
+    标记存在但 next_exec_time 尚未到期时，暂不参与自动调度；一旦到期，
+    调度器会自动再试。未传 now_ts 时保留保守语义，供纯标记判断调用。
+    """
+    if not bool(val.get("human_takeover") or val.get("human_takeover_error")):
+        return False
+    if now_ts is None:
+        return True
+    return now_ts < float(val.get("next_exec_time", 0) or 0)
 
 
 def calc_effective_next_time(val: dict, now_ts: float) -> float:
@@ -509,7 +516,7 @@ class Scheduler:
             if "on" in val:
                 if (
                     val.get("on")
-                    and not is_human_takeover_blocked(val)
+                    and not is_human_takeover_blocked(val, now_ts)
                     and now_ts >= val.get("next_exec_time", 0)
                     and task_registry.has_task(path)
                 ):
@@ -599,6 +606,37 @@ class Scheduler:
                 logger.warning("📅 恢复原角色失败 %s/%s: %s", original_key[0], original_key[1], e)
         return []
 
+    def _return_to_first_dispatch_character(self) -> bool:
+        """全角色调度完成后回到 dispatch_queue 首角色，并确认游戏内也登录到该角色。"""
+        from AutoScriptor.utils.app_config import cfg
+
+        first_char = next(iter_dispatch_characters(cfg), None)
+        if first_char is None:
+            logger.info("📅 dispatch_queue 为空，跳过回到首个角色")
+            return False
+
+        server, name = first_char
+        active = cfg.active_character()
+        current = (active.get("server", ""), active.get("name", ""))
+
+        try:
+            if current != first_char:
+                logger.info("📅 全角色调度完成，切回首个角色: %s/%s", server, name)
+                if self._task_manager:
+                    self._task_manager.switch_character_and_reload(server, name)
+                else:
+                    cfg.switch_character(server, name)
+                self.invalidate_login()
+                self._tasks_updated.set()
+            else:
+                logger.info("📅 全角色调度完成，首个角色已是当前角色: %s/%s", server, name)
+
+            self._ensure_character_logged_in(cfg)
+            return True
+        except Exception as e:
+            logger.warning("📅 回到首个角色失败 %s/%s: %s", server, name, e, exc_info=True)
+            return False
+
     # ── 共用执行管线 ──
 
     def _run_task_pipeline(self, explicit_tasks: list[str] | None = None):
@@ -661,7 +699,7 @@ class Scheduler:
                 node = dpath.get(cfg["tasks"], task_key)
             except Exception:
                 return False
-            return isinstance(node, dict) and is_human_takeover_blocked(node)
+            return isinstance(node, dict) and is_human_takeover_blocked(node, time.time())
 
         try:
             while True:
@@ -762,7 +800,7 @@ class Scheduler:
                         self.record_result(success, 0)
                     elif failed:
                         if _task_is_human_takeover_blocked(task_key):
-                            logger.info("📅 任务需要人工处理，已标记红色冻结态并跳过自动重试: %s", task_key)
+                            logger.info("📅 任务需要人工处理，已标记红色冷却态并跳过本轮自动重试: %s", task_key)
                             total_failed += failed
                             self.record_result(1, 0)
                         elif retry_round < max_retry and not task_debug_mode:
@@ -820,6 +858,8 @@ class Scheduler:
             if only_debug_tasks_executed:
                 logger.info("📅 debug_mode: 跳过 post_execution 收尾动作")
             else:
+                if explicit_tasks is None and self.state == SchedulerState.RUNNING:
+                    self._return_to_first_dispatch_character()
                 self._post_execution_action()
             self._tasks_updated.set()
         elif self._reload_deferred.is_set():

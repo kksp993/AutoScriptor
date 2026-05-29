@@ -1,8 +1,9 @@
 """
 TaskRegistry: 任务运行时注册表（与 cfg 解耦）
 =============================================
-存储任务的运行时数据（fn、order、param_meta），与 cfg["tasks"] 中的
-用户配置（on、next_exec_time、params）分离。
+存储任务的运行时数据（fn、order、param_meta、param_keys、beta、
+custom、doc_flow、description、debug_mode），与 cfg["tasks"] 中的用户配置
+（on、next_exec_time、params）分离。
 
 cfg["tasks"] 仅保存可序列化的用户配置，TaskRegistry 保存不可序列化的
 运行时数据。两者通过 slash 分隔的任务路径关联。

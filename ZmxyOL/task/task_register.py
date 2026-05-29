@@ -32,8 +32,8 @@ def register_task(
     装饰器：根据函数所在文件路径（'task' 目录下的子路径）注册任务。
 
     注册数据分两处存储：
-      - cfg["tasks"]（用户配置，持久化到 JSON）：on、next_exec_time、params、next_exec_offset_hours
-      - TaskRegistry（运行时数据，不持久化）：fn、order、param_meta、beta
+      - cfg["tasks"]（用户配置，持久化到 JSON）：on、next_exec_time、params、next_exec_offset_hours 等
+      - TaskRegistry（运行时数据，不持久化）：fn、order、param_meta、param_keys、beta、custom、doc_flow、description、debug_mode
 
     支持以下可选参数（仅对指定任务生效）：
       - default_offset_hours (int): 任务执行后延迟 N 小时再调度

@@ -26,6 +26,13 @@ from AutoScriptor.utils.cancel import cancellable_sleep as sleep
 from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.task_registry import task_registry
 from AutoScriptor.utils.logger import set_current_task
+from AutoScriptor.utils.task_state import (
+    clear_task_status,
+    get_task_status,
+    progress_incomplete,
+    progress_label,
+    set_current_task_path,
+)
 from services.core.runtime_context import runtime_ctx
 
 
@@ -258,6 +265,7 @@ class TaskManager:
             has_local_retry = attempt + 1 in attempt_numbers
 
             set_current_task(task.rsplit("/", 1)[-1])
+            set_current_task_path(task)
             try:
                 try:
                     fn, kwargs = self._prepare_task(task)
@@ -267,9 +275,14 @@ class TaskManager:
 
                 assert runtime_ctx.mixctrl is not None, "mixctrl 未初始化，请先调用 runtime_ctx.init()"
                 runtime_ctx.mixctrl.release_all_keys()
+                clear_task_status("progress", task_path=task, save=False)
                 fn(**kwargs)
+                if self._task_progress_incomplete(task):
+                    label = self._task_progress_label(task)
+                    raise TaskRequireReTry(f"任务进度未完成: {label}")
                 logger.info(f"▶️  执行成功: {task}")
                 with self._cfg_lock:
+                    clear_task_status("progress", task_path=task, save=False)
                     self._clear_human_takeover_state(task)
                     self._update_next_exec_time(task)
                 return True
@@ -281,6 +294,8 @@ class TaskManager:
                         continue
                     return False
                 logger.warning(f"⚠️ 重试次数已满: {task}，原因: {e}")
+                with self._cfg_lock:
+                    self._mark_incomplete_progress_takeover(task, f"重试次数已满: {e}")
                 return False
 
             except RequestHumanTakeover as e:
@@ -310,15 +325,20 @@ class TaskManager:
                     logger.info("🔄 debug_mode: 跳过失败恢复，不关闭/重启游戏: %s", task)
                     return False
                 if not self._try_recover_app(attempt, task=task):
+                    with self._cfg_lock:
+                        self._mark_incomplete_progress_takeover(task, f"执行失败: {e}")
                     return False
                 if attempt < max_retry:
                     logger.info(f"🔄 重试 ({attempt + 1}/{max_retry})")
                     if has_local_retry:
                         continue
                     return False
+                with self._cfg_lock:
+                    self._mark_incomplete_progress_takeover(task, f"重试次数已满: {e}")
                 return False
 
             finally:
+                set_current_task_path(None)
                 set_current_task(None)
                 logger.info(f"Task [END] {task}")
 
@@ -408,10 +428,27 @@ class TaskManager:
         for key in ("human_takeover", "human_takeover_error", "human_takeover_at"):
             task_data.pop(key, None)
 
+    @staticmethod
+    def _task_progress_value(task: str):
+        return get_task_status("progress", None, task_path=task)
+
+    def _task_progress_incomplete(self, task: str) -> bool:
+        return progress_incomplete(self._task_progress_value(task))
+
+    def _task_progress_label(self, task: str) -> str:
+        return progress_label(self._task_progress_value(task)) or str(self._task_progress_value(task))
+
+    def _mark_incomplete_progress_takeover(self, task: str, reason: str) -> bool:
+        if not self._task_progress_incomplete(task):
+            return False
+        label = self._task_progress_label(task)
+        self._mark_human_takeover(task, RequestHumanTakeover(f"{reason}；进度 {label}"))
+        return True
+
     def _mark_human_takeover(self, task: str, exc: Exception) -> None:
         """
-        人工接管不是普通异常：WebUI 显示红色未完成，但调度器按冻结态处理，
-        直到用户手动重新启用/直跑或任务后续成功清除该标记。
+        人工接管不是普通异常：WebUI 显示红色未完成，调度器会等到
+        next_exec_time 到期后自动重试；任务后续成功会清除该标记。
         """
         task_data = dpath.get(cfg["tasks"], task)
         task_data["human_takeover"] = True

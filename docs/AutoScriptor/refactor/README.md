@@ -1,6 +1,6 @@
 # 重构技术文档
 
-本目录保留历史阶段性重构记录；当前运行约定以 `docs/AutoScriptor/runtime-lifecycle.md`、`docs/AutoScriptor/webui-api-contract.md` 和 `docs/AutoScriptor/script-authoring.md` 为准。
+本目录保留历史阶段性重构记录；当前运行约定以 `docs/AutoScriptor/runtime/lifecycle.md`、`docs/AutoScriptor/webui/api-contract.md` 和 `docs/AutoScriptor/tasks/script-authoring.md` 为准。
 
 ## 文档索引
 
@@ -29,9 +29,9 @@
 
 | 文档 | 内容 | 对应模块 |
 |------|------|----------|
-| [Runtime Lifecycle](../runtime-lifecycle.md) | WebUI、调度器、设备通道、配置写入的当前生命周期 | `runtime_context.py` `scheduler.py` `device_facade.py` |
-| [WebUI API Contract](../webui-api-contract.md) | WebUI 响应格式、统一轮询、设备诊断接口 | `api_response.py` `server.py` |
-| [Script Authoring Rules](../script-authoring.md) | 任务脚本 sleep、配置、设备调用边界 | `AutoScriptor/core/api.py` |
+| [Runtime Lifecycle](../runtime/lifecycle.md) | WebUI、调度器、设备通道、配置写入的当前生命周期 | `runtime_context.py` `scheduler.py` `device_facade.py` |
+| [WebUI API Contract](../webui/api-contract.md) | WebUI 响应格式、统一轮询、设备诊断接口 | `api_response.py` `server.py` |
+| [Script Authoring Rules](../tasks/script-authoring.md) | 任务脚本 sleep、配置、设备调用边界 | `AutoScriptor/core/api.py` |
 
 ## 测试
 

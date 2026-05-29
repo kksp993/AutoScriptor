@@ -48,7 +48,7 @@ cd D:\Projects\AutoScriptor
 | **`--skip-nuitka`** | 跳过 Nuitka，沿用已有 `dist/gui.dist`（适合只改 webapp/Electron）。 |
 | **`--skip-electron`** | 跳过 `backend.zip` 与 electron-builder（只产出引擎 + `dist/data`）。 |
 | **`--clean-only`** | 只执行清理后退出。 |
-| **`--electron-nsis`** | 生成 **系统 NSIS 安装程序**（`AutoScriptor_Zao_installer.exe`），**不是** HTML 向导那一屏。 |
+| **`--electron-nsis`** | 生成 **系统 NSIS 安装程序**（`AutoScriptor_Zao_installer_<version>.exe`），**不是** HTML 向导那一屏。 |
 | **`--electron-zip`** | 生成 **win-unpacked 的 zip 目录包**（调试用）；默认不启用。 |
 | **`--electron-nsis-fast-install`** | 须与 **`--electron-nsis`** 同用：NSIS 使用 `compression=store`，**安装阶段更快**，安装包体积更大。 |
 
@@ -101,12 +101,12 @@ cd D:\Projects\AutoScriptor
 | 形态 | 默认？ | 产物（示例） | 适用场景 |
 |------|--------|----------------|----------|
 | **portable 单文件** | **是** | `造笔.exe` | 对外分发 **一个 exe**；首次运行即 **HTML 安装向导**（解压引擎 → MuMu/ADB）。 |
-| **NSIS** | 否（`--electron-nsis`） | `AutoScriptor_Zao_installer.exe` | 需要「开始菜单 / 控制面板卸载」等**系统级安装**时。 |
+| **NSIS** | 否（`--electron-nsis`） | `AutoScriptor_Zao_installer_<version>.exe` | 需要「开始菜单 / 控制面板卸载」等**系统级安装**时。 |
 | **ZIP 目录包** | 否（`--electron-zip`） | `AutoScriptor_Zao_*.zip` | 解压整目录调试；**不是**默认分发形态。 |
 
 ### 6.1 系统 NSIS 安装器 vs HTML 安装向导（重要）
 
-- **NSIS 安装程序**（`AutoScriptor_Zao_installer.exe`）：Nullsoft **默认向导**（选目录 → 进度条 → 完成），负责把 Electron 壳与随包文件释放到磁盘。
+- **NSIS 安装程序**（`AutoScriptor_Zao_installer_<version>.exe`）：Nullsoft **默认向导**（选目录 → 进度条 → 完成），负责把 Electron 壳与随包文件释放到磁盘。
 - **HTML 安装向导**（`webapp/renderer/installer.html`）：**Electron 窗口**，与开发时同一套界面逻辑；负责 **解压 `backend.zip` 到用户所选目录**、**复制 data**、**MuMu/ADB 路径校验**（`install-packaged.cjs` + `mumu-detect.cjs`）。
 
 **默认 portable 流程**：用户**不经过 NSIS**；运行 `造笔.exe` 后，首次启动即进入 **HTML 向导**。大体积引擎解压发生在向导内，**不是** NSIS 那一屏。
@@ -164,7 +164,23 @@ cd D:\Projects\AutoScriptor
 - **跨 `x.y` 线的大版本**：例如 `1.0.x -> 1.1.0`，使用完整安装包。依赖库、Nuitka 运行时、backend 目录布局、Electron 壳或安装器行为变化，都应走完整安装包。
 - **本地小版本更新包**：WebUI“检查更新”页支持选择或拖入 `.zip`。Electron 主进程先 dry-run 校验 `update_manifest.json`、版本线、SHA-256、写入路径与用户数据保护；应用时停止 backend，备份旧文件，替换 `backend/autoscriptor-engine.exe` 等少量文件，失败则回滚并重启旧 backend。
 - **`backend_incremental.zip`**：仍保留为特殊兜底，由 `scripts/release/release_backend_incremental.py` 对比旧 `backend.zip` 或旧 `gui.dist` 生成。它适合维护人员处理 backend 文件级差异，不作为普通用户默认更新路径。
-- **发行版 manifest 内容更新**：WebUI 的“发行版更新”页调用 `/api/content-update/*`，按 `deploy.content_manifest_url` 拉取 HTTPS manifest、校验 hash/签名后写入允许的文件。该通道会拒绝覆盖 `config.json`、`data/config.json`、账号、`custom_task`、`battle_character`、日志和 `.autoscriptor` 状态目录。
+- **发行版 manifest 内容更新**：WebUI 的“发行版更新”页调用 `/api/content-update/*`，按 `deploy.content_manifest_url` 拉取 HTTPS manifest、校验 hash/签名后写入允许的文件。该通道会拒绝覆盖 `config.json`、`data/config.json`、账号、`custom_task`、`battle_character`、日志和 `.autoscriptor` 状态目录。manifest 最小形状如下，签名字段由 `scripts/release/sign_content_manifest.py` 生成：
+
+```json
+{
+  "content_version": "0.1.1",
+  "min_shell_version": "1.0.0",
+  "signature_ed25519": "BASE64_SIGNATURE",
+  "artifacts": [
+    {
+      "kind": "raw",
+      "relative_path": "services/webui/static/js/app.js",
+      "url": "https://updates.example/app-0.1.1.js",
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+  ]
+}
+```
 
 生成小版本更新包：
 
@@ -235,6 +251,7 @@ electron-builder **不会清空你的 `dist/`**；每次打桌面包会刷新 **
 
 - 对外分发前确认**不包含**可还原业务逻辑的 **source map**（`*.map`）等；`npm run verify-pack` 会检查 `app.asar` 入口、`backend.zip` 内 `autoscriptor-engine.exe` 以及 source map 泄漏。
 - 发行流水线对 **`webapp`** 壳层会做**混淆/压缩 HTML**（见 `prepare-release-shell`），并排除 `*.map`；敏感逻辑仍勿放客户端明文。
+- 打包前后都要扫描敏感信息。唯一允许的真实明文例外是 4399 资讯公共凭据 `news.account = "85rwm3janyyc"` / `news.password = "123456"`；除此之外，账号、密码、token、deploy 密码、SSL/SSH 私钥、个人 `config.json` 和 `data/accounts/*.json` 都不得进入公开发布物。
 - 正式对外版本建议启用代码签名：发布机配置证书后设置 `AUTOSCRIPTOR_CODE_SIGN=1`。没有证书时安装包仍可生成，但 Windows SmartScreen/杀软信任度会低于签名版本。
 
 ---
@@ -243,7 +260,7 @@ electron-builder **不会清空你的 `dist/`**；每次打桌面包会刷新 **
 
 | 现象 | 处理方向 |
 |------|----------|
-| 端口已被占用 | 结束上次 Python/Electron 进程；释放 WebUI 默认端口等见项目内 Cursor 规则 `webui.mdc`（若已配置）。 |
+| 端口已被占用 | 结束上次 Python/Electron 进程；释放 WebUI 默认端口。共享 agent 规则见 `docs/agents/project-rules.md`。 |
 | 构建失败 | 查看完整终端输出；Nuitka 见 [nuitka-reference.md](./nuitka-reference.md)。 |
 | 安装向导报找不到 `backend.zip` | 确认完整构建过 `dist/backend.zip` 并重新打 Electron；见本文第 7 节。 |
 | 修复安装失败或提示基线不匹配 | 优先重试完整安装包；若是增量包，确认它与当前已安装版本匹配。失败前旧 `backend` 会保留或回滚。 |
