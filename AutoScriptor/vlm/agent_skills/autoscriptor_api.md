@@ -6,9 +6,14 @@
 - `locate(T("文字"))`：用 OCR 找文字。
 - `locate(I("图标名"))`：用模板图找已注册图标。
 - `click(T(...))`、`click(I(...))`、`click(B(...))`：只在目标明确后点击。
+- `click((T(...), I(...)))`：多个可选目标任一出现即可点击，适合入口识别不稳定时的备选表达。
+- `click(..., if_exist=True, timeout=2)`：可选按钮，找不到就跳过。
+- `click(..., until=lambda: ui_T(...), interval=1)`：点击后等待可观察状态成立。
+- `swipe(B(...), B(...), duration_s=1)`：翻页、滑列表、横向活动页签。
 - `input("文本", target_field=...)`：先点击输入框，再输入文本。
 - `wait_for_appear(...)` / `wait_for_disappear(...)`：动作后必须验证界面变化。
 - `extract_info(B(...))`：从明确区域读取提示文案或结果。
+- `get_colors(T(...))`：判断按钮颜色或购买状态。
 
 禁止在最终脚本中输出 `V(...)`、`locate(V(...))`、`click(V(...))`。视觉模型只能在生成阶段帮助你观察截图、选择文字 ROI 或坐标；写入脚本时必须落成 `T(...)`、`I(...)`、`B(...)`、`extract_info(B(...))` 这类运行时可用表达。
 

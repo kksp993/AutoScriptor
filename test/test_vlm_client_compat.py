@@ -31,6 +31,11 @@ class VLMClientCompatTest(unittest.TestCase):
         text = load_agent_skills(None)
         self.assertIn("短流程脚本", text)
         self.assertIn("最终脚本不能包含 `V(...)`", text)
+        self.assertIn("click((T(...), I(...)))", text)
+        self.assertIn("购物/消耗先确认可买", text)
+        self.assertIn("BattleFlowName", text)
+        self.assertIn("不能留下占位符", text)
+        self.assertIn("不要生成 `if __name__ == \"__main__\"`", text)
         self.assertNotIn("兑换豪礼", text)
         self.assertNotIn("礼品兑换", text)
 
