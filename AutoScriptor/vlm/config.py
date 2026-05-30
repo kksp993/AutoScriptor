@@ -11,6 +11,8 @@ def _get_llm_cfg(key, default=None):
 VLM_CONFIG = {
     "api_url": _get_llm_cfg("url", "http://localhost:11434/v1"),
     "model_name": _get_llm_cfg("model", "hf.co/bartowski/UI-TARS-2B-SFT-GGUF"),
+    "api_format": _get_llm_cfg("api_format", "auto"),
+    "skills": _get_llm_cfg("skills", None),
     "max_tokens": 512,
     "temperature": 0.1,
     "timeout": 30,
