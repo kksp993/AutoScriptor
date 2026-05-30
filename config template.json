@@ -23,7 +23,14 @@
     "llm": {
         "use_agent": false,
         "url": "http://localhost:11434/v1",
-        "model": "hf.co/bartowski/UI-TARS-2B-SFT-GGUF"
+        "model": "hf.co/bartowski/UI-TARS-2B-SFT-GGUF",
+        "api_format": "auto",
+        "skills": [
+            "autoscriptor_api",
+            "safe_task_execution",
+            "vision_grounding_patterns",
+            "custom_task_authoring"
+        ]
     },
     "scheduler": {
         "auto_start": false

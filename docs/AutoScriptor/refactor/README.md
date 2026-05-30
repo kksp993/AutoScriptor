@@ -24,6 +24,7 @@
 | [VLMTarget 视觉定位接口](vlm_target_api.md) | VLMTarget 类、V() 工厂函数、vlm_locate 识别函数 | `targets.py` `rec.py` `api.py` |
 | [RuntimeContext 运行时生命周期](runtime_context_api.md) | 运行时对象集中管理、初始化/刷新/关闭流程 | `runtime_context.py` `scheduler.py` |
 | [Ollama 本机 VLM 部署指南](ollama_deploy.md) | Ollama 安装、模型拉取、配置接入 | `config.json` `vlm/config.py` |
+| [vLLM / OpenAI VLM 接入](vllm_openai_vlm.md) | OpenAI 图文格式、vLLM 配置、agent skills 注入 | `vlm/vlm.py` `vlm/skills.py` |
 
 ### 当前基线
 
