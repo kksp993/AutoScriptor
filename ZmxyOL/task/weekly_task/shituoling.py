@@ -33,6 +33,7 @@ def task(
     d = int(diff)
     ensure_in("村庄")
     click(T("挑战", box=Box(0,65,1280,56).margin()))
+    wait_for_appear(T("取经"), timeout=5)
     swipe(B(982,339,1,1), B(245,339,1,1))
     click(T("狮驼岭", box=Box(0,385,1280,63).margin()))
     click(T("选择难度", box=Box(1078,625,177,53).margin()))
