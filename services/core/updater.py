@@ -126,7 +126,7 @@ class Updater:
 
     def _get_remote_branch(self) -> str:
         branch = self.get_current_branch()
-        return branch if branch else "feat/launcher"
+        return branch if branch else "main"
 
     # ── 检查更新 ──
 

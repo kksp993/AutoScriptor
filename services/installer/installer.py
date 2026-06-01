@@ -919,7 +919,6 @@ def main() -> int:
                 has_git = False
             if has_git and (not no_git_update):
                 DEFAULT_UPSTREAM_REF = "origin/main"
-                DEFAULT_UPSTREAM_REF = "origin/feat/launcher"
                 upstream_ref = os.environ.get("AUTOSCRIPTOR_UPSTREAM_REF", DEFAULT_UPSTREAM_REF).strip() or DEFAULT_UPSTREAM_REF
                 git_state = git_helper.begin_deploy_update(project_root, upstream_ref=upstream_ref) or {}
     except Exception:
