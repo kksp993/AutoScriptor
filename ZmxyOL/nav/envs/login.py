@@ -266,7 +266,7 @@ def _on_password_login(ctx):
 
 @_login.page("快速登录", T("手机号登录"), T("账号登录"), clients=LoginClient.H4399)
 def _on_quick_login(ctx):
-    click(T("账号登录"))
+    click(T("账号登录"), if_exist=True)
     sleep(1)
     if ui_T(T("账号密码登录"), 5) or ui_T(T("请输入手机号或用户名"), 5):
         _fill_account_password(ctx)

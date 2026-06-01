@@ -131,7 +131,7 @@ def kunlunshan_battle(num: int = 5, flow_name: str | None = None, equipment: str
                 )
                 scope.add(
                     name="朱雀神殿兜底退出",
-                    identifier=I("朱雀神殿"),
+                    identifier=(I("朱雀神殿"),I("玉虚殿")),
                     callback=lambda token=zhuque_round_token: _schedule_zhuque_try_exit(token),
                 )
                 # 与「知道了」不同：once=True → 本局内首次识别到「站在这里」后回调一次即移除，避免重复 try_exit。
