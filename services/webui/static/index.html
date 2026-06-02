@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <!-- Vue 3 在 HTML 内联模板需运行时编译器（new Function），Electron 下若未显式允许 unsafe-eval 会导致界面停留在 {{ }} 未编译状态 -->
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; font-src 'self' data:; connect-src 'self' ws: wss: http: https:; frame-src 'self' https://yxhhd2.5054399.com https://*.5054399.com https://*.4399.com; child-src 'self' https://yxhhd2.5054399.com https://*.5054399.com https://*.4399.com;" />
+        content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; font-src 'self' data:; connect-src 'self' ws: wss: http: https:; frame-src 'self' https://*.4399.com; child-src 'self' https://*.4399.com;" />
   <title>造笔 - AutoScriptor</title>
   <script src="/vendor/tailwind.css"></script>
   <link href="/vendor/font-awesome.min.css" rel="stylesheet" />
@@ -56,7 +56,7 @@
       :scheduler-status="schedulerStatus"
       :character-name="characterName"
       :feature-script-canvas="featureScriptCanvas"
-      @navigate="activeTab=$event">
+      @navigate="navigateTo">
     </app-sidebar>
 
     <!-- 右侧主区域 -->
@@ -153,7 +153,7 @@
       <!-- 内容区 -->
       <main class="flex-1 overflow-hidden p-5 flex flex-col min-h-0">
 
-        <news-panel v-if="activeTab==='news'"></news-panel>
+        <news-panel v-if="activeTab==='news'" :refresh-key="newsRefreshKey"></news-panel>
 
         <overview-panel v-if="activeTab==='overview'"
           :overview-data="overviewData" :character-name="characterName"

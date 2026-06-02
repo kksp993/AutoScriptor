@@ -7,7 +7,7 @@
 - `launcher*.bat` / `launcher.ps1`: 用户和开发者启动入口。
 - `bootstrap-python310.ps1` / `npm-postinstall.js`: 安装和启动器依赖准备。
 - `build_release.py` / `verify_packaging_prereqs.py`: 发行构建与构建前自检。
-- `collect_zmxy_redeem_2026.py`: WebUI 资讯页使用的 4399 官方兑换码采集器。
+- `collect_zmxy_redeem_2026.py`: WebUI 资讯页使用的 4399 官方公告兑换码增量采集器。
 - `release_autoscriptor_locks.ps1`: 解除运行中进程/文件锁的维护工具，由仓库根目录 `release_locks.bat` 调用。
 
 ## 子目录

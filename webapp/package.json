@@ -1,8 +1,9 @@
 {
   "name": "autoscriptor",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "AutoScriptor Desktop App",
   "main": "main.js",
+  "author": "Kksp993",
   "private": true,
   "scripts": {
     "postinstall": "node ../scripts/npm-postinstall.js",

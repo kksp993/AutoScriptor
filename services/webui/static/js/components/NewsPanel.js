@@ -1,8 +1,10 @@
-const NEWS_REDEEM_PAGE_URL = 'https://yxhhd2.5054399.com/2021/yxgjml/game.php?game_id=26444';
 const NEWS_GIFT_CODES_PAGE_URL = '/api/news/gift_codes/page';
 
 const NewsPanel = {
   name: 'NewsPanel',
+  props: {
+    refreshKey: { type: Number, default: 0 },
+  },
   data() {
     return {
       posts: [],
@@ -31,6 +33,11 @@ const NewsPanel = {
   },
   mounted() {
     this.fetchPosts(true);
+  },
+  watch: {
+    refreshKey() {
+      this.fetchPosts(true);
+    },
   },
   methods: {
     async fetchPosts(force = false) {
@@ -68,19 +75,25 @@ const NewsPanel = {
       if (parts.length === 3) return parseInt(parts[1]) + '月' + parseInt(parts[2]) + '日';
       return dateStr;
     },
-    openGiftCodes() {
+    async refreshGiftCodes() {
       this.giftLoading = true;
+      try {
+        await fetch('/api/news/gift_codes?refresh=1', { credentials: 'same-origin' });
+      } catch (e) {
+        console.error('refresh gift codes failed:', e);
+      } finally {
+        this.giftIframeKey += 1;
+      }
+    },
+    openGiftCodes() {
       this.giftDialogVisible = true;
+      this.refreshGiftCodes();
     },
     refreshGiftFrame() {
-      this.giftLoading = true;
-      this.giftIframeKey += 1;
+      this.refreshGiftCodes();
     },
     onGiftFrameLoad() {
       this.giftLoading = false;
-    },
-    openGiftExternal() {
-      window.open(NEWS_REDEEM_PAGE_URL, '_blank', 'noopener,noreferrer');
     },
   },
   template: `
@@ -207,13 +220,10 @@ const NewsPanel = {
                destroy-on-close
                class="news-dialog news-gift-dialog">
       <div class="news-gift-frame-toolbar">
-        <span class="text-xs text-slate-500">本地兑换码表</span>
+        <span class="text-xs text-slate-500">官方公告兑换码</span>
         <div class="flex items-center gap-2">
-          <el-button size="small" @click="refreshGiftFrame">
+          <el-button size="small" :loading="giftLoading" @click="refreshGiftFrame">
             <i class="fa fa-refresh mr-1"></i>刷新
-          </el-button>
-          <el-button size="small" type="primary" @click="openGiftExternal">
-            打开原页 <i class="fa fa-external-link ml-1"></i>
           </el-button>
         </div>
       </div>

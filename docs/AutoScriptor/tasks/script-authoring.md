@@ -19,7 +19,9 @@ def task(count: int = 1):
         click(T("开始"), if_exist=True)
 ```
 
-`custom_task` 下未提供 `path_cn` 会注册失败。首段通常写 `自定义任务`。
+`custom_task` 下未提供 `path_cn` 会注册失败。首段通常写 `自定义任务`。发行版需要随升级包更新的内置流程应放在 `ZmxyOL/task/`，不要只放在受保护的用户 `data/custom_task/`。
+
+例如兑换码礼品兑换是内置一般任务，注册路径为 `一般任务/活动/兑换豪礼礼品兑换`，源码位于 `ZmxyOL/task/normal_task/huodong/redeem_gift.py`。
 
 ## register_task 元数据
 

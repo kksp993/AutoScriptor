@@ -19,6 +19,8 @@ const yauzl = require('yauzl');
 const defaultUnpacked = path.resolve(__dirname, '..', '..', 'dist_electron', 'win-unpacked');
 const unpacked = path.resolve(process.argv[2] || defaultUnpacked);
 const asarPath = path.join(unpacked, 'resources', 'app.asar');
+const allowedPackageDependencies = new Set(['tree-kill', 'yauzl']);
+const allowedNodeModulePayloads = new Set(['tree-kill', 'yauzl', 'buffer-crc32', 'pend']);
 
 function fail(message, details = []) {
   console.error('[verify-pack]', message);
@@ -175,19 +177,68 @@ function assertAsarEntry(asarFiles, expected) {
   if (!ok) fail('app.asar is missing required shell file', [wanted]);
 }
 
+function collectNodeModulePackages(relPaths) {
+  const names = new Set();
+  for (const relPath of relPaths) {
+    const parts = normPath(relPath).split('/').filter(Boolean);
+    for (let i = 0; i < parts.length - 1; i += 1) {
+      if (parts[i] !== 'node_modules') continue;
+      const first = parts[i + 1];
+      if (!first) continue;
+      if (first.startsWith('@') && parts[i + 2]) {
+        names.add(`${first}/${parts[i + 2]}`);
+      } else {
+        names.add(first);
+      }
+    }
+  }
+  return [...names].sort();
+}
+
+function normPath(p) {
+  return String(p || '').replace(/\\/g, '/').replace(/^\/+/, '');
+}
+
+function validateAsarPackageJson(pkg) {
+  if (pkg.devDependencies && Object.keys(pkg.devDependencies).length) {
+    fail('app.asar package.json must not include devDependencies', Object.keys(pkg.devDependencies).slice(0, 20));
+  }
+  if (pkg.scripts && Object.keys(pkg.scripts).length) {
+    fail('app.asar package.json must not include npm scripts', Object.keys(pkg.scripts).slice(0, 20));
+  }
+  for (const key of ['optionalDependencies', 'peerDependencies', 'bundleDependencies', 'bundledDependencies']) {
+    if (pkg[key] && (Array.isArray(pkg[key]) ? pkg[key].length : Object.keys(pkg[key]).length)) {
+      fail(`app.asar package.json must not include ${key}`, [JSON.stringify(pkg[key]).slice(0, 200)]);
+    }
+  }
+  const deps = Object.keys(pkg.dependencies || {}).sort();
+  const unexpectedDeps = deps.filter((name) => !allowedPackageDependencies.has(name));
+  if (unexpectedDeps.length) {
+    fail('app.asar package.json contains unexpected npm dependencies', unexpectedDeps);
+  }
+}
+
 async function main() {
   assertFile(asarPath, 'resources/app.asar');
 
   let pkgMain = 'main.js';
+  let pkg = {};
   try {
     const raw = extractFile(asarPath, 'package.json');
-    pkgMain = JSON.parse(raw.toString('utf8')).main || pkgMain;
+    pkg = JSON.parse(raw.toString('utf8'));
+    pkgMain = pkg.main || pkgMain;
   } catch (e) {
     fail('cannot read package.json inside app.asar', [e.message]);
   }
+  validateAsarPackageJson(pkg);
 
   const asarFiles = listPackage(asarPath);
   const norm = (f) => f.replace(/^\//, '').replace(/\\/g, '/');
+  const npmPayloadsInAsar = collectNodeModulePackages(asarFiles);
+  const unexpectedNpmPayloads = npmPayloadsInAsar.filter((name) => !allowedNodeModulePayloads.has(name));
+  if (unexpectedNpmPayloads.length) {
+    fail('app.asar contains unexpected npm packages', unexpectedNpmPayloads);
+  }
   const leakedMapsInAsar = asarFiles.map(norm).filter((f) => f.toLowerCase().endsWith('.map'));
   if (leakedMapsInAsar.length) {
     fail('app.asar contains source maps', leakedMapsInAsar.slice(0, 20));
@@ -222,6 +273,11 @@ async function main() {
     .map((f) => rel(unpacked, f));
   if (leakedMapsUnpacked.length) {
     fail('win-unpacked contains source maps', leakedMapsUnpacked.slice(0, 20));
+  }
+  const unpackedNpm = walkFiles(path.join(unpacked, 'resources', 'app.asar.unpacked', 'node_modules'))
+    .map((f) => rel(unpacked, f));
+  if (unpackedNpm.length) {
+    fail('win-unpacked contains unpacked npm payloads', unpackedNpm.slice(0, 20));
   }
 
   const dataRoot = path.join(unpacked, 'data');

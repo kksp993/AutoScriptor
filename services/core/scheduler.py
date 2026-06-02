@@ -639,7 +639,14 @@ class Scheduler:
 
     # ── 共用执行管线 ──
 
-    def _run_task_pipeline(self, explicit_tasks: list[str] | None = None):
+    def _run_task_pipeline(
+        self,
+        explicit_tasks: list[str] | None = None,
+        *,
+        force_login: bool = False,
+        param_overrides: dict[str, dict] | None = None,
+        explicit_task_runs: list[dict] | None = None,
+    ):
         """
         统一的任务执行管线，调度模式和单任务模式共用。
 
@@ -658,10 +665,17 @@ class Scheduler:
         max_retry = int(cfg["app"].get("max_retry", 0) or 0)
         retry_round = 0
         attempted_this_round: set[tuple[str, str, str]] = set()
-        retry_queue: list[tuple[tuple[str, str], str]] = []
-        failed_next_round: list[tuple[tuple[str, str], str]] = []
+        retry_queue: list[tuple[tuple[str, str], dict]] = []
+        failed_next_round: list[tuple[tuple[str, str], dict]] = []
         only_debug_tasks_executed = True
         self._pipeline_active.set()
+        scheduled_mode = explicit_tasks is None and explicit_task_runs is None
+
+        if explicit_task_runs is None and explicit_tasks is not None:
+            explicit_task_runs = [
+                {"id": f"{i}:{task}", "task": task}
+                for i, task in enumerate(explicit_tasks)
+            ]
 
         def _active_char_key() -> tuple[str, str]:
             ac = cfg.active_character()
@@ -685,12 +699,28 @@ class Scheduler:
                 logger.warning("📅 重试轮切换角色失败，跳过 %s/%s: %s", server, name, e)
                 return False
 
-        def _execute_task_attempt(task_key: str, attempt_index: int) -> tuple[int, int]:
+        def _run_id(run: dict) -> str:
+            return str(run.get("id") or run.get("task") or "")
+
+        def _run_task(run: dict) -> str:
+            return str(run.get("task") or "")
+
+        def _run_param_override(run: dict) -> dict | None:
+            params = run.get("params")
+            return params if isinstance(params, dict) else None
+
+        def _execute_task_attempt(task_key: str, attempt_index: int, param_override: dict | None = None) -> tuple[int, int]:
             execute = self._task_manager.execute_tasks
             params = inspect.signature(execute).parameters
+            kwargs = {}
             if "max_attempts" in params:
-                return execute([task_key], max_attempts=1, attempt_offset=attempt_index)
-            return execute([task_key])
+                kwargs.update(max_attempts=1, attempt_offset=attempt_index)
+            if "param_overrides" in params:
+                if param_override is not None:
+                    kwargs["param_overrides"] = {task_key: param_override}
+                elif param_overrides:
+                    kwargs["param_overrides"] = param_overrides
+            return execute([task_key], **kwargs)
 
         def _task_is_human_takeover_blocked(task_key: str) -> bool:
             import dpath
@@ -707,18 +737,18 @@ class Scheduler:
                     logger.info("⏹ 检测到取消请求，停止执行")
                     break
 
-                if explicit_tasks is None and self.state != SchedulerState.RUNNING:
+                if scheduled_mode and self.state != SchedulerState.RUNNING:
                     break
 
                 if retry_queue:
-                    char_key, task_key = retry_queue.pop(0)
+                    char_key, task_run = retry_queue.pop(0)
                     if not _switch_to_char_if_needed(char_key):
                         continue
-                    due = [task_key]
-                elif explicit_tasks is not None:
+                    due = [task_run]
+                elif explicit_task_runs is not None:
                     char_key = _active_char_key()
                     due = [] if retry_round > 0 else [
-                        t for t in explicit_tasks if (*char_key, t) not in attempted_this_round
+                        run for run in explicit_task_runs if (*char_key, _run_id(run)) not in attempted_this_round
                     ]
                 else:
                     char_key = _active_char_key()
@@ -750,14 +780,22 @@ class Scheduler:
                         continue
                     break
 
-                task_key = due[0]
+                task_run = due[0] if isinstance(due[0], dict) else {"id": str(due[0]), "task": str(due[0])}
+                task_key = _run_task(task_run)
+                run_id = _run_id(task_run)
+                param_override = _run_param_override(task_run)
                 task_debug_mode = is_task_debug_mode(task_key)
+                skip_login_for_debug = task_debug_mode and not force_login
                 if not task_debug_mode:
                     only_debug_tasks_executed = False
 
-                logger.info("📅 发现 %d 个待执行任务: %s", len(due), due)
-                if task_debug_mode:
+                logger.info("📅 发现 %d 个待执行任务: %s", len(due), [
+                    _run_task(run) if isinstance(run, dict) else run for run in due
+                ])
+                if skip_login_for_debug:
                     logger.info("📅 debug_mode: 跳过自动登录与任务前重启: %s", task_key)
+                elif task_debug_mode:
+                    logger.info("📅 debug_mode: 跳过任务前重启，但按本次请求执行自动登录: %s", task_key)
                 else:
                     self._maybe_daily_restart(cfg)
 
@@ -789,12 +827,12 @@ class Scheduler:
                     continue
                 boost(process_priority=ABOVE_NORMAL_PRIORITY_CLASS)
 
-                if not task_debug_mode:
+                if not skip_login_for_debug:
                     self._ensure_character_logged_in(cfg)
 
-                attempted_this_round.add((*char_key, task_key))
+                attempted_this_round.add((*char_key, run_id))
                 try:
-                    success, failed = _execute_task_attempt(task_key, retry_round)
+                    success, failed = _execute_task_attempt(task_key, retry_round, param_override)
                     if success:
                         total_success += success
                         self.record_result(success, 0)
@@ -804,7 +842,7 @@ class Scheduler:
                             total_failed += failed
                             self.record_result(1, 0)
                         elif retry_round < max_retry and not task_debug_mode:
-                            failed_next_round.append((char_key, task_key))
+                            failed_next_round.append((char_key, task_run))
                             logger.info(
                                 "📅 任务失败，跳过当前任务，等待本轮其他任务完成后重试: %s (%d/%d)",
                                 task_key,
@@ -812,7 +850,7 @@ class Scheduler:
                                 max_retry,
                             )
                         else:
-                            if explicit_tasks is None and not task_debug_mode:
+                            if scheduled_mode and not task_debug_mode:
                                 self._mark_retry_exhausted(char_key, task_key, max_retry)
                             total_failed += failed
                             self.record_result(0, failed)
@@ -825,9 +863,9 @@ class Scheduler:
                 except Exception as e:
                     logger.error("📅 执行异常: %s - %s", task_key, e)
                     if retry_round < max_retry and not task_debug_mode:
-                        failed_next_round.append((char_key, task_key))
+                        failed_next_round.append((char_key, task_run))
                     else:
-                        if explicit_tasks is None and not task_debug_mode:
+                        if scheduled_mode and not task_debug_mode:
                             self._mark_retry_exhausted(char_key, task_key, max_retry)
                         total_failed += 1
                         self._consecutive_errors += 1
@@ -858,7 +896,7 @@ class Scheduler:
             if only_debug_tasks_executed:
                 logger.info("📅 debug_mode: 跳过 post_execution 收尾动作")
             else:
-                if explicit_tasks is None and self.state == SchedulerState.RUNNING:
+                if scheduled_mode and self.state == SchedulerState.RUNNING:
                     self._return_to_first_dispatch_character()
                 self._post_execution_action()
             self._tasks_updated.set()
@@ -879,12 +917,37 @@ class Scheduler:
 
     # ── 单任务模式入口 ──
 
-    def run_direct(self, tasks: list[str]):
+    def run_direct(
+        self,
+        tasks: list[str],
+        *,
+        force_login: bool = False,
+        param_overrides: dict[str, dict] | None = None,
+    ):
         """单任务模式：执行外部指定的任务列表，共用管线，不激活调度器。"""
         if self._task_manager:
             self._task_manager._reset_cancel()
         self.invalidate_login()
-        self._run_task_pipeline(explicit_tasks=tasks)
+        self._run_task_pipeline(
+            explicit_tasks=tasks,
+            force_login=force_login,
+            param_overrides=param_overrides,
+        )
+
+    def run_direct_sequence(
+        self,
+        task_runs: list[dict],
+        *,
+        force_login: bool = False,
+    ):
+        """单任务模式的序列入口：允许同一任务路径携带不同一次性参数多次执行。"""
+        if self._task_manager:
+            self._task_manager._reset_cancel()
+        self.invalidate_login()
+        self._run_task_pipeline(
+            explicit_task_runs=task_runs,
+            force_login=force_login,
+        )
 
     def task_call(self, task_path: str):
         """将指定任务设为立即执行（next_exec_time=now, on=True），下一轮自动拾取。"""

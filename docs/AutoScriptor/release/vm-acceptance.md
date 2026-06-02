@@ -2,6 +2,8 @@
 
 This document is the Windows VM lab plan for validating release artifacts. A release is not accepted until both the full installer and the same-line update package have been checked when both are produced.
 
+Do not claim VM acceptance, update compatibility, or release readiness from local smoke tests alone. An interrupted build, a package that has not passed `npm run verify-pack`, or a package that has not been installed/upgraded in the VM is not an accepted release artifact.
+
 ## Minimal Snapshot Plan
 
 Do not create many snapshots at first. Use:
@@ -107,12 +109,43 @@ powershell -ExecutionPolicy Bypass -File \\VBOXSVR\release\vm_guest_acceptance.p
   -InstallRoot "$env:USERPROFILE\Documents\AutoScriptor"
 ```
 
+When launching a guest helper from Win+R or an injected `cmd.exe`, do not start a
+batch file directly with `\\VBOXSVR\release\...` as the current directory.
+`cmd.exe` prints a UNC warning and falls back to `C:\Windows`, which can make the
+acceptance pass appear idle with empty logs. Wrap the command with `pushd` first:
+
+```cmd
+cmd /c "pushd \\VBOXSVR\release && call run_full_101.cmd"
+```
+
+If the app window is already visible and WebUI responds but `PostInstall` creates
+an `acceptance_*` directory without `report.json`, inspect the diagnostics path
+before rerunning the installer. The guest script must keep WMI/CIM process
+enumeration bounded (`Get-CimInstance ... -OperationTimeoutSec 10`) so report
+writing cannot hang after the actual WebUI check has succeeded.
+
+Keep the VM result split by layer. A clean VirtualBox VM can prove installer
+hygiene and basic WebUI startup while still failing Paddle/OCR imports, for
+example `DLL initialization routine failed` for `paddle\base\libpaddle.pyd` or
+`name 'libpaddle' is not defined`. Treat that as "basic WebUI accepted, OCR/Paddle
+not accepted on this VM" and rerun the runtime smoke on an AVX-capable VM or a
+MuMu-capable Windows host before claiming OCR/task-execution readiness.
+
+Guest PowerShell scripts run by Windows PowerShell 5.1 should not rely on raw
+UTF-8 Chinese string literals for executable names. Build names such as
+`造笔.exe` with char codes (`$([char]0x9020)$([char]0x7b14).exe`) or save the
+script with a BOM; otherwise `Start-Process` / `taskkill` can fail with "file not
+found" after the install/update itself has succeeded.
+
 ## Update Package Acceptance
 
 Use a clean VM snapshot and test the upgrade path, not only the final package:
 
 1. Install the previous same-line version, for example `x.y.(z-1)`, using the full installer acceptance flow.
-2. Launch the installed app and confirm the WebUI opens.
+2. Launch the installed app and confirm the WebUI opens. Record this as a
+   baseline launcher check before applying the update. If the baseline launcher
+   cannot start WebUI under `VBoxManage guestcontrol`, keep testing the update
+   layers, but do not attribute the launcher failure to the update package.
 3. Open the WebUI release update page and choose `AutoScriptor_Update_x.y.z.zip`.
 4. Confirm dry-run succeeds before applying. It must report the current version, target version, compatibility line, and protected user-data checks.
 5. Apply the update.
@@ -134,6 +167,21 @@ npm run test:release-update
 ```
 
 When a release changes installer or update behavior, update this document and the scripts under `scripts/release/` together.
+
+Keep same-line update reports split by layer:
+
+- `Apply.Ok`, target version markers, and canary preservation prove the update
+  zip could be applied to an existing install without overwriting protected
+  user data.
+- A direct `backend\autoscriptor-engine.exe --electron` WebUI probe proves the
+  updated backend tree can run.
+- A launcher probe proves only the Electron portable launcher path used by the
+  probe. If both the pre-update baseline launcher and post-update launcher fail
+  under `guestcontrol`, the result is "launcher path not VM-proven", not
+  "update package broke the app".
+- The real WebUI "choose zip and apply" path uses Electron IPC in an already
+  running shell. It still needs manual UI validation or a dedicated hidden
+  acceptance mode; backend direct probes alone do not prove the file-picker UI.
 
 ## What This Proves
 

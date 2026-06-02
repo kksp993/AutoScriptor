@@ -176,6 +176,35 @@ async function testCumulativeUpdateDryRunAndApply(tmp) {
   assert(versionFile.version === '1.1.5', 'install root version file should be updated');
 }
 
+async function testPatch101UpdateFrom100PreservesUserData(tmp) {
+  const { installRoot, userDataPath } = createInstalled(tmp, 'patch-101', '1.0.0');
+  const engine = 'engine 1.0.1\n';
+  const app = 'app 1.0.1\n';
+  const template = '{"template":"1.0.1"}\n';
+  const zipPath = createUpdateZip(tmp, '1.0.1', manifestFor('1.0.1', { engine, app, template }), {
+    'backend/autoscriptor-engine.exe': engine,
+    'backend/services/webui/static/app.js': app,
+    'data/templates/example.json': template,
+  });
+
+  const dry = await dryRunLocalReleaseUpdate({ installRoot, userDataPath, packagePath: zipPath });
+  assert(dry.ok, `1.0.0 -> 1.0.1 dry-run should pass: ${JSON.stringify(dry.errors)}`);
+  assert(dry.currentVersion === '1.0.0', 'dry-run should report 1.0.0 current version');
+  assert(dry.targetVersion === '1.0.1', 'dry-run should report 1.0.1 target version');
+  assert(dry.compatLine === '1.0', 'dry-run should stay on the 1.0 compatibility line');
+
+  const result = await applyLocalReleaseUpdate({ installRoot, userDataPath, packagePath: zipPath, keepBackup: false });
+  assert(result.ok, '1.0.0 -> 1.0.1 apply should succeed');
+  assert(readText(path.join(installRoot, 'backend', 'autoscriptor-engine.exe')) === engine, 'engine should be updated to 1.0.1');
+  assert(readText(path.join(installRoot, 'data', 'accounts', 'default.json')).includes('kept'), 'accounts must be preserved on 1.0.1 update');
+  assert(readText(path.join(installRoot, 'data', 'custom_task', 'user.py')).includes('# user'), 'custom tasks must be preserved on 1.0.1 update');
+  assert(readText(path.join(installRoot, 'data', 'battle_character', 'role.py')).includes('# role'), 'battle character data must be preserved on 1.0.1 update');
+  const marker = JSON.parse(readText(path.join(userDataPath, 'install.json')));
+  assert(marker.version === '1.0.1', 'install marker version should be 1.0.1');
+  const versionFile = JSON.parse(readText(path.join(installRoot, '.autoscriptor', 'release_version.json')));
+  assert(versionFile.version === '1.0.1', 'install root version file should be 1.0.1');
+}
+
 async function testRejectsUnsafeVersionsAndPaths(tmp) {
   const base = createInstalled(tmp, 'reject', '1.0.9');
   const engine = 'new engine\n';
@@ -272,6 +301,7 @@ async function main() {
   const keep = !!process.env.KEEP_INSTALLER_TESTS;
   try {
     await testCumulativeUpdateDryRunAndApply(tmp);
+    await testPatch101UpdateFrom100PreservesUserData(tmp);
     await testRejectsUnsafeVersionsAndPaths(tmp);
     await testRollbackWhenLaterFileFails(tmp);
     await testRejectsInvalidConfigBeforeDefaultsMerge(tmp);

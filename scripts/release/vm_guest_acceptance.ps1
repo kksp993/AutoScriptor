@@ -77,7 +77,7 @@ function Wait-WebUi($Uri, [int]$TimeoutSeconds = 90) {
 function Export-Diagnostics($LogRoot, $InstallRoot) {
   try {
     $escapedRoot = [regex]::Escape($InstallRoot)
-    Get-CimInstance Win32_Process |
+    Get-CimInstance Win32_Process -OperationTimeoutSec 10 |
       Where-Object {
         ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($InstallRoot, [System.StringComparison]::OrdinalIgnoreCase)) -or
         ($_.CommandLine -and ($_.CommandLine -match $escapedRoot -or $_.CommandLine -match "autoscriptor|AutoScriptor|造笔"))

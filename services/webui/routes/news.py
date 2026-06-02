@@ -25,6 +25,7 @@ from lxml import html as lxml_html
 
 from services.webui.routes.news_4399_session import (
     get_cached_or_login_session,
+    get_cached_session,
     get_news_4399_credentials_from_server,
     is_public_news_credential,
 )
@@ -363,6 +364,45 @@ def _is_login_wall_response(resp: requests.Response) -> bool:
     return False
 
 
+def _fetch_proxy_upstream(
+    url: str,
+    http_session: requests.Session | None = None,
+) -> requests.Response:
+    """拉取论坛代理上游；Session 为空时按匿名请求。"""
+    if http_session is not None:
+        return http_session.get(url, headers=_BROWSER_HEADERS, timeout=20)
+    return requests.get(url, headers=_BROWSER_HEADERS, timeout=20)
+
+
+def _fetch_proxy_with_adaptive_login(
+    url: str,
+    account: str | None,
+    password: str | None,
+    cache_token: str | None,
+) -> requests.Response:
+    """
+    先用匿名或已有缓存会话拉取；若上游转到 4399 登录墙，再立即登录并重试一次。
+    这样普通公告不消耗登录请求，受保护页面或失效 Cookie 则能自动补救。
+    """
+    http_session: requests.Session | None = None
+    if account and cache_token:
+        http_session = get_cached_session(cache_token, account)
+
+    resp = _fetch_proxy_upstream(url, http_session)
+    if not _is_login_wall_response(resp) or not (account and password and cache_token):
+        return resp
+
+    retry_session = get_cached_or_login_session(
+        cache_token,
+        account,
+        password,
+        force=http_session is not None,
+    )
+    if retry_session is None:
+        return resp
+    return _fetch_proxy_upstream(url, retry_session)
+
+
 def _forum_iframe_placeholder(original_url: str) -> str:
     """iframe 内展示的占位页：说明需浏览器登录后查看，并提供与弹层一致的原文链接。"""
     from html import escape
@@ -573,7 +613,7 @@ def get_gift_codes(refresh: int = Query(0, description="传 1 时先执行采集
 
 @router.get("/gift_codes/page", response_class=HTMLResponse)
 def get_gift_codes_page():
-    """独立 HTML 页（仅读本地 JSON，不跑采集）；表格列 标题 | 口令 | 到期时间 | 类型 | 复制。"""
+    """独立 HTML 页（仅读本地 JSON，不跑采集）；表格列 序号 | 兑换码 | 到期时间 | 来源链接 | 操作。"""
     p = _load_redeem_codes_payload()
     rows = p.get("rows") or []
     gen = escape(str(p.get("generated_at") or "-"))
@@ -581,50 +621,95 @@ def get_gift_codes_page():
         "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"/>",
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>",
         "<style>",
-        "body{font-family:system-ui,sans-serif;margin:0;padding:12px 14px;background:#f8fafc;color:#0f172a;font-size:14px;}",
-        "h1{font-size:15px;margin:0 0 10px;font-weight:600;}",
-        ".hint{color:#64748b;font-size:12px;margin-bottom:12px;}",
-        "table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06);}",
-        "th,td{text-align:left;padding:10px 12px;border-bottom:1px solid #e2e8f0;vertical-align:top;}",
-        "th{background:#f1f5f9;font-weight:600;font-size:12px;color:#475569;}",
+        "*{box-sizing:border-box;}",
+        "body{font-family:system-ui,sans-serif;margin:0;padding:24px 28px;background:#f8fafc;color:#0f172a;font-size:28px;line-height:1.45;}",
+        "h1{font-size:30px;margin:0 0 20px;font-weight:600;}",
+        ".hint{color:#64748b;font-size:24px;margin-bottom:24px;}",
+        ".toolbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 20px;}",
+        ".selected-count{font-size:24px;color:#64748b;}",
+        ".page-status{font-size:24px;margin:0 0 20px;color:#2563eb;min-height:34px;}",
+        ".page-status.error{color:#dc2626;}",
+        ".table-wrap{width:100%;overflow:auto;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.06);}",
+        "table{width:100%;min-width:980px;border-collapse:collapse;background:#fff;}",
+        "th,td{text-align:left;padding:20px 24px;border-bottom:1px solid #e2e8f0;vertical-align:middle;}",
+        "th{background:#f1f5f9;font-weight:600;font-size:24px;color:#475569;white-space:nowrap;}",
         "tbody tr:last-child td{border-bottom:none;}",
+        "tr.row-working{background:#eff6ff;}",
+        ".index{width:140px;color:#64748b;}",
+        ".select-cell{display:flex;align-items:center;gap:14px;}",
+        ".row-check{width:24px;height:24px;accent-color:#2563eb;}",
         ".code{font-family:ui-monospace,Menlo,monospace;word-break:break-all;}",
+        ".actions{display:flex;gap:12px;align-items:center;white-space:nowrap;}",
         "a.link{color:#2563eb;text-decoration:none;}",
         "a.link:hover{text-decoration:underline;}",
-        ".btn-copy{cursor:pointer;border:none;background:#22c55e;color:#fff;padding:6px 12px;border-radius:6px;font-size:12px;}",
+        ".btn{cursor:pointer;border:1px solid transparent;color:#fff;padding:12px 22px;border-radius:6px;font-size:24px;line-height:1.2;}",
+        ".btn:disabled{cursor:not-allowed;opacity:.55;}",
+        ".btn-secondary{background:#fff;color:#334155;border-color:#cbd5e1;}",
+        ".btn-secondary:hover{background:#f8fafc;}",
+        ".btn-copy{background:#22c55e;}",
         ".btn-copy:hover{background:#16a34a;}",
-        "td.empty{text-align:center;color:#94a3b8;padding:28px 12px;}",
+        ".btn-redeem{background:#2563eb;}",
+        ".btn-redeem:hover{background:#1d4ed8;}",
+        ".btn-cancel{background:#fff;color:#334155;border-color:#cbd5e1;}",
+        ".btn-cancel:hover{background:#f8fafc;}",
+        "td.empty{text-align:center;color:#94a3b8;padding:56px 24px;}",
+        ".modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.48);display:none;align-items:center;justify-content:center;padding:28px;z-index:20;}",
+        ".modal-backdrop.open{display:flex;}",
+        ".modal{width:min(760px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:8px;box-shadow:0 18px 45px rgba(15,23,42,.22);padding:28px;}",
+        ".modal h2{font-size:30px;margin:0 0 24px;font-weight:650;}",
+        ".field{margin-bottom:20px;}",
+        ".field label{display:block;font-size:24px;color:#475569;margin-bottom:8px;}",
+        ".field select,.field input{width:100%;font-size:28px;line-height:1.25;padding:14px 16px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f172a;}",
+        ".modal-status{min-height:34px;font-size:24px;color:#64748b;margin:4px 0 24px;}",
+        ".modal-status.error{color:#dc2626;}",
+        ".modal-actions{display:flex;gap:12px;justify-content:flex-start;}",
+        "@media(max-width:720px){body{padding:18px 16px;font-size:24px;}h1{font-size:28px}.hint,.modal-status,.field label,th{font-size:22px}.field select,.field input{font-size:24px}.btn{font-size:22px;padding:11px 18px}.modal{padding:22px}.modal-actions{flex-wrap:wrap}}",
         "</style></head><body>",
         f"<h1>兑换码</h1><p class=\"hint\">更新时间：{gen}</p>",
-        "<table><thead><tr><th>标题</th><th>口令</th><th>到期时间</th><th>类型</th><th>复制</th></tr></thead><tbody>",
+        '<div class="toolbar"><button type="button" class="btn btn-secondary" id="batchRedeem" disabled>兑换选中</button>'
+        '<span class="selected-count" id="selectedCount">已选 0 个</span></div>',
+        '<div id="pageStatus" class="page-status"></div>',
+        "<div class=\"table-wrap\"><table><thead><tr><th>序号</th><th>兑换码</th><th>到期时间</th><th>来源链接</th><th>操作</th></tr></thead><tbody>",
     ]
     if not rows:
         parts.append('<tr><td colspan="5" class="empty">暂无当前仍有效的兑换码</td></tr>')
     else:
-        for r in rows:
+        for idx, r in enumerate(rows, start=1):
             title = escape(str(r.get("title") or ""))
             code = escape(str(r.get("code") or ""))
             exp = escape(str(r.get("expires_at") or ""))
-            kind = str(r.get("kind") or "")
-            note = escape(str(r.get("note") or ""))
-            kind_label = {"public_code": "通用口令", "conditional_code": "有限制", "box_gift": "礼包"}.get(kind, kind)
-            kind_cell = escape(kind_label)
-            if note:
-                kind_cell += f'<div class="hint">{note}</div>'
             url = str(r.get("url") or "")
             url_esc = escape(url, quote=True)
-            title_cell = (
-                f'<a class="link" href="{url_esc}" target="_blank" rel="noopener noreferrer">{title}</a>'
+            source_cell = (
+                f'<a class="link" href="{url_esc}" target="_blank" rel="noopener noreferrer" title="{title}">原帖</a>'
                 if url
-                else title
+                else "-"
             )
             code_attr = escape(str(r.get("code") or ""), quote=True)
             parts.append(
-                f"<tr><td>{title_cell}</td><td class=\"code\">{code}</td><td>{exp}</td><td>{kind_cell}</td>"
-                f'<td><button type="button" class="btn-copy" data-code="{code_attr}" '
-                f'onclick="copyCode(this)">复制</button></td></tr>'
+                f'<tr data-code="{code_attr}"><td class="index"><label class="select-cell">'
+                f'<input type="checkbox" class="row-check" data-code="{code_attr}" onclick="setChecked(this,event)"/>'
+                f"<span>{idx}</span></label></td><td class=\"code\">{code}</td><td>{exp}</td><td>{source_cell}</td>"
+                f'<td><div class="actions"><button type="button" class="btn btn-copy" data-code="{code_attr}" '
+                f'onclick="copyCode(this)">复制</button>'
+                f'<button type="button" class="btn btn-redeem" data-code="{code_attr}" '
+                f'onclick="openRedeem(this)">前往兑换</button></div></td></tr>'
             )
-    parts.append("</tbody></table>")
+    parts.append("</tbody></table></div>")
+    parts.append(
+        '<div id="redeemBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="redeemTitle">'
+        '<div class="modal">'
+        '<h2 id="redeemTitle">前往兑换</h2>'
+        '<div class="field"><label for="redeemAccount">账号</label><select id="redeemAccount"></select></div>'
+        '<div class="field"><label for="redeemRole">角色</label><select id="redeemRole"></select></div>'
+        '<div class="field" id="securityField" hidden><label for="securityKey">安全密码</label>'
+        '<input id="securityKey" type="password" autocomplete="current-password"/></div>'
+        '<div id="modalStatus" class="modal-status"></div>'
+        '<div class="modal-actions">'
+        '<button type="button" class="btn btn-redeem" id="confirmRedeem">确认</button>'
+        '<button type="button" class="btn btn-cancel" id="cancelRedeem">取消</button>'
+        '</div></div></div>'
+    )
     parts.append(
         "<script>"
         "function copyCode(btn){var t=btn.getAttribute('data-code')||'';"
@@ -636,6 +721,42 @@ def get_gift_codes_page():
         "document.body.appendChild(ta);ta.select();try{document.execCommand('copy');}catch(e){}"
         "document.body.removeChild(ta);btn.textContent='已复制';"
         "setTimeout(function(){btn.textContent='复制';},1200);}}"
+        "var redeemTargets=null,currentCodes=[],checkedCodes={},lastCheckedCode='';"
+        "var backdrop=document.getElementById('redeemBackdrop');"
+        "var accountSel=document.getElementById('redeemAccount');"
+        "var roleSel=document.getElementById('redeemRole');"
+        "var securityField=document.getElementById('securityField');"
+        "var securityInput=document.getElementById('securityKey');"
+        "var modalStatus=document.getElementById('modalStatus');"
+        "var confirmBtn=document.getElementById('confirmRedeem');"
+        "var batchBtn=document.getElementById('batchRedeem');"
+        "var selectedCount=document.getElementById('selectedCount');"
+        "var pageStatus=document.getElementById('pageStatus');"
+        "function setStatus(text,isError){modalStatus.textContent=text||'';modalStatus.className='modal-status'+(isError?' error':'');}"
+        "function setPageStatus(text,isError){pageStatus.textContent=text||'';pageStatus.className='page-status'+(isError?' error':'');}"
+        "function allCodeValues(){return Array.prototype.map.call(document.querySelectorAll('.row-check'),function(cb){return cb.getAttribute('data-code')||'';}).filter(Boolean);}"
+        "function selectedCodes(){var out=[],seen={};allCodeValues().forEach(function(c){if(checkedCodes[c]&&!seen[c]){seen[c]=true;out.push(c);}});return out;}"
+        "function renderChecked(){document.querySelectorAll('.row-check').forEach(function(cb){cb.checked=!!checkedCodes[cb.getAttribute('data-code')];});var codes=selectedCodes();selectedCount.textContent='已选 '+codes.length+' 个';batchBtn.disabled=!codes.length;}"
+        "function setChecked(cb,ev){var code=cb.getAttribute('data-code')||'';var on=!!cb.checked;var next=Object.assign({},checkedCodes);next[code]=on;if(ev.shiftKey&&lastCheckedCode&&lastCheckedCode!==code){var codes=allCodeValues();var start=codes.indexOf(lastCheckedCode);var end=codes.indexOf(code);if(start>=0&&end>=0){var lo=Math.min(start,end),hi=Math.max(start,end);codes.slice(lo,hi+1).forEach(function(c){next[c]=on;});}}checkedCodes=next;lastCheckedCode=code;renderChecked();}"
+        "function markWorking(codes){var set={};(codes||[]).forEach(function(c){set[c]=true;});document.querySelectorAll('tr[data-code]').forEach(function(tr){tr.classList.toggle('row-working',!!set[tr.getAttribute('data-code')]);});}"
+        "function selectedAccount(){return accountSel.value||'';}"
+        "function accountInfo(){var n=selectedAccount();return (redeemTargets&&redeemTargets.accounts||[]).find(function(a){return a.name===n;})||null;}"
+        "function updateRoleOptions(){var a=accountInfo();roleSel.innerHTML='';(a&&a.roles||[]).forEach(function(r){var o=document.createElement('option');o.value=r.server+'\\n'+r.name;o.textContent=r.label;roleSel.appendChild(o);});updateSecurityField();}"
+        "function updateSecurityField(){var need=!redeemTargets||selectedAccount()!==redeemTargets.current_account||!redeemTargets.credential_unlocked;securityField.hidden=!need;if(need)setTimeout(function(){securityInput.focus();},0);}"
+        "function renderTargets(data){redeemTargets=data||{};accountSel.innerHTML='';(redeemTargets.accounts||[]).forEach(function(a){var o=document.createElement('option');o.value=a.name;o.textContent=a.name;accountSel.appendChild(o);});if(redeemTargets.current_account)accountSel.value=redeemTargets.current_account;if(!accountSel.value&&accountSel.options.length)accountSel.selectedIndex=0;updateRoleOptions();}"
+        "function redeemCountText(){var n=currentCodes.length;return n>1?'已选择 '+n+' 个兑换码':'已选择 1 个兑换码';}"
+        "async function loadTargets(){setStatus('正在加载账号与角色...',false);var r=await fetch('/api/news/redeem_targets',{credentials:'same-origin'});var d=await r.json().catch(function(){return {};});if(!r.ok){throw new Error(d.message||d.error||'加载失败');}renderTargets(d);setStatus(redeemCountText(),false);}"
+        "async function openRedeem(btn){currentCodes=[btn.getAttribute('data-code')||''].filter(Boolean);securityInput.value='';confirmBtn.disabled=false;backdrop.classList.add('open');try{await loadTargets();}catch(e){setStatus(e.message||String(e),true);}}"
+        "async function openBatchRedeem(){var codes=selectedCodes();if(!codes.length)return;currentCodes=codes;securityInput.value='';confirmBtn.disabled=false;backdrop.classList.add('open');try{await loadTargets();}catch(e){setStatus(e.message||String(e),true);}}"
+        "function closeRedeem(){backdrop.classList.remove('open');currentCodes=[];}"
+        "accountSel.addEventListener('change',updateRoleOptions);"
+        "batchBtn.addEventListener('click',openBatchRedeem);"
+        "document.getElementById('cancelRedeem').addEventListener('click',closeRedeem);"
+        "backdrop.addEventListener('click',function(e){if(e.target===backdrop)closeRedeem();});"
+        "document.addEventListener('keydown',function(e){if(e.key==='Escape'&&backdrop.classList.contains('open'))closeRedeem();});"
+        "confirmBtn.addEventListener('click',async function(){var rv=roleSel.value||'';var parts=rv.split('\\n');var codes=currentCodes.slice();var payload={redeem_codes:codes,account:selectedAccount(),server:parts[0]||'',character:parts[1]||'',security_key:securityInput.value||'',_timestamp:Date.now()/1000};"
+        "confirmBtn.disabled=true;setStatus('正在启动兑换任务...',false);try{var r=await fetch('/api/news/gift_codes/redeem',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});var d=await r.json().catch(function(){return {};});if(!r.ok){if(d.need_security_key||d.need_credential_unlock){securityField.hidden=false;securityInput.focus();}throw new Error(d.message||d.error||'启动失败');}if(redeemTargets)redeemTargets.credential_unlocked=true;markWorking(codes);closeRedeem();setPageStatus((codes.length>1?codes.length+' 个兑换码':'兑换码')+'正在兑换中',false);}catch(e){confirmBtn.disabled=false;setStatus(e.message||String(e),true);}});"
+        "renderChecked();"
         "</script></body></html>"
     )
     return HTMLResponse("".join(parts))
@@ -652,10 +773,7 @@ async def proxy_page(request: Request, url: str = Query(..., description="要代
     if parsed.hostname not in _ALLOWED_DOMAINS:
         return HTMLResponse("<h3>不允许的域名</h3>", status_code=403)
 
-    http_session: requests.Session | None = None
     acc, pwd, cache_token = _news_credentials_for_request(request)
-    if acc and pwd and cache_token:
-        http_session = get_cached_or_login_session(cache_token, acc, pwd)
 
     # 提前注入到 <head> 最前面：在 4399 自身脚本运行前就把 UniLogin 拦截掉
     # 注意：<base> 必须与当前页面域名一致，否则 my.4399.com 页面会错误解析相对路径导致白屏
@@ -677,10 +795,7 @@ async def proxy_page(request: Request, url: str = Query(..., description="要代
     )
 
     try:
-        if http_session is not None:
-            resp = http_session.get(url, headers=_BROWSER_HEADERS, timeout=20)
-        else:
-            resp = requests.get(url, headers=_BROWSER_HEADERS, timeout=20)
+        resp = _fetch_proxy_with_adaptive_login(url, acc, pwd, cache_token)
         resp.encoding = "utf-8"
         if _is_login_wall_response(resp):
             return HTMLResponse(_forum_iframe_placeholder(url))

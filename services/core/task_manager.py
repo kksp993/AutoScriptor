@@ -13,7 +13,7 @@ import os
 import sys
 import traceback
 from contextlib import contextmanager
-from typing import List, Tuple
+from typing import Any, List, Tuple
 from threading import Event, RLock
 
 import dpath
@@ -185,6 +185,7 @@ class TaskManager:
         *,
         max_attempts: int | None = None,
         attempt_offset: int = 0,
+        param_overrides: dict[str, dict[str, Any]] | None = None,
     ) -> Tuple[int, int]:
         """执行一组任务。返回 (成功数, 失败数)。"""
         if self._cancel_event.is_set():
@@ -200,6 +201,7 @@ class TaskManager:
                 task,
                 max_attempts=max_attempts,
                 attempt_offset=attempt_offset,
+                param_override=(param_overrides or {}).get(task),
             ):
                 success += 1
             else:
@@ -248,6 +250,7 @@ class TaskManager:
         *,
         max_attempts: int | None = None,
         attempt_offset: int = 0,
+        param_override: dict[str, Any] | None = None,
     ) -> bool:
         """执行单个任务（含重试）。返回是否成功。"""
         max_retry = cfg["app"].get("max_retry", 0)
@@ -268,7 +271,7 @@ class TaskManager:
             set_current_task_path(task)
             try:
                 try:
-                    fn, kwargs = self._prepare_task(task)
+                    fn, kwargs = self._prepare_task(task, param_override=param_override)
                 except KeyError:
                     logger.error(f"❌ 任务函数未注册: {task}，跳过")
                     return False
@@ -346,7 +349,7 @@ class TaskManager:
 
     # ── 任务准备 ──
 
-    def _prepare_task(self, task: str):
+    def _prepare_task(self, task: str, *, param_override: dict[str, Any] | None = None):
         """读取任务函数和参数快照（锁内）。"""
         with self._cfg_lock:
             task_data = dpath.get(cfg["tasks"], task)
@@ -354,11 +357,20 @@ class TaskManager:
             fn = task_registry.get_fn(task)
             if fn is None:
                 raise KeyError("fn")
-            return fn, self._resolve_params(task, task_data, fn)
+            return fn, self._resolve_params(task, task_data, fn, param_override=param_override)
 
-    def _resolve_params(self, task_path: str, task_data: dict, fn) -> dict:
+    def _resolve_params(
+        self,
+        task_path: str,
+        task_data: dict,
+        fn,
+        *,
+        param_override: dict[str, Any] | None = None,
+    ) -> dict:
         """解析任务参数（枚举恢复，TableParam 重建）。"""
-        raw = task_data.get('params', {})
+        raw = dict(task_data.get('params', {}) or {})
+        if param_override:
+            raw.update(param_override)
         meta = task_registry.get_param_meta(task_path)
         sig = inspect.signature(fn)
         has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())

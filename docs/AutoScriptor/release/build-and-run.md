@@ -4,6 +4,64 @@
 
 ---
 
+## 0. 每次构建前的强制梳理
+
+发行构建前必须先完成一次完整梳理，即使这次代码改动看起来很小。不要直接复用上一次构建判断。
+
+1. **读取规则和 skill**：`docs/agents/project-rules.md`、本文件、[nuitka-reference.md](./nuitka-reference.md)、[vm-acceptance.md](./vm-acceptance.md)，并使用 Codex 的 `autoscriptor-install-deployment-release`、`autoscriptor-packaging-content-config`、`windows-powershell-command-hygiene` skills。
+2. **确认版本与产物状态**：检查 `git status --short`、`webapp/package.json`、`AboutPanel.js`、`dist/`、`dist_electron/`、`release_snapshots/`。
+   - `dist_electron/` 不会被 `build_release.py` 自动清空。构建前必须辨认并清理遗留的手工安装目录或旧解包目录（例如包含 `data/accounts/*.json`、日志或本机运行数据的目录），只保留明确要复用/对照的历史发行包与 `release_snapshots/`。
+3. **归类变更面**：
+   - Python 后端、任务、调度、runtime bootstrap：完整 Nuitka 构建；同一 `x.y` 线还要生成累计小版本更新包。
+   - WebUI 静态文件或 Electron 壳：若 `dist/gui.dist` 已由同一代码基线验证通过，可 `--skip-nuitka`；但更新包仍要显式包含需要落到 backend 的静态文件。
+   - 后端运行时外置资源：例如 WebUI static/vendor、collector 脚本、JSON 数据、docs 中被运行时读取的文件，必须确认 `gui.dist`、`backend.zip`、小版本更新包三处都能覆盖。
+   - Nuitka 运行时、stdlib/importlib bootstrap、依赖、安装器或更新契约：完整包是必需；是否提升 `minor` 需按版本规则向用户确认。
+4. **本地预检**：
+
+```powershell
+$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+$env:PYTHONIOENCODING='utf-8'
+git status --short
+.\.venv-nuitka\Scripts\python.exe -X utf8 scripts\verify_packaging_prereqs.py
+cd webapp
+npm run test:installer
+npm run test:release-update
+cd ..
+```
+
+5. **敏感信息扫描**：PowerShell 不要写裸 `config*`，用明确路径，并排除第三方参考代码、vendored/minified 前端库和 `node_modules` 噪音。不要为了扫描把真实账号值打印出来；必要时先打码，再逐条分类。
+
+```powershell
+rg -n "password|account|token|secret|private_key|ssl_key|credential|BEGIN .*PRIVATE KEY" `
+  "config.json" "config template.json" docs/AutoScriptor docs/agents services scripts webapp test `
+  -g "!docs/refs/**" `
+  -g "!docs/AutoScriptor/3rdparties/**" `
+  -g "!services/webui/vendor/**" `
+  -g "!webapp/node_modules/**"
+rg -n "password|account|token|secret|private_key|ssl_key|credential|BEGIN .*PRIVATE KEY" `
+  dist dist_electron -g "*" 2>$null
+Get-ChildItem -Recurse -File -Filter "*.map" -ErrorAction SilentlyContinue dist,dist_electron
+```
+
+逐条分类。唯一允许的真实明文例外是 4399 资讯公共凭据 `85rwm3janyyc` / `123456`。
+
+生成小版本更新包后必须复核 `update_manifest.json`。如果当前 diff 含 WebUI static、collector 脚本、运行时 JSON/docs 等外置 backend 资产，但 manifest 只有 `backend/autoscriptor-engine.exe`（脚本输出类似 `替换文件: 1`），该升级包不完整，必须用 `--include-backend` 逐项纳入这些文件后重建。
+
+6. **失败处理纪律**：如果构建或 packaged runtime smoke 出现新失败，先把根因、复现命令、修复规则写入本文件、[nuitka-reference.md](./nuitka-reference.md) 或 `docs/agents/skill-references/`，并同步本地 Codex skill；然后再重试构建。中断的构建和 smoke 失败的构建都不是可发布产物。
+   - `importlib`/stdlib bootstrap 修复不能只看源码 direct probe。普通 Python 里通过，不代表 compiled Nuitka 启动早期的 `dist/gui.dist/importlib` 解析顺序也通过；必须等待 `autoscriptor-engine.exe --runtime-import-smoke` 通过。
+   - packaged smoke 若出现 `importlib.readers`、`multiprocessing.Manager` 或 Starlette `Protocols can only inherit from other protocols`，归类为 copied stdlib 启动期组合问题：先同步经验，再补 importlib resources 子模块、真实 `multiprocessing` package 载入或 `typing` allowlist 修复。
+   - `multiprocessing.Manager` 的修复只应让 `gui.py` 启动期加载 copied stdlib package，并由 post-copy 保证 `multiprocessing/` 存在；不要把 `multiprocessing` 加进 `--nofollow-import-to`，否则 Nuitka 可能在最后阶段报 `multiprocessing: Conflict between user and plugin decision`。
+   - 若产物里已有 `encodings/idna.py` 或 `multiprocessing/context.py`，但 smoke 仍报 `No module named 'encodings.idna'` 或 `cannot import name 'context' from 'multiprocessing'`，不要继续补拷文件；这是 compiled runtime 的 package 壳/`sys.modules` 状态未修复，应在 `gui.py` 启动期挂载 copied package 搜索路径并清理半初始化子模块。
+   - 若 direct probe 可加载 copied `multiprocessing`，但 compiled smoke 仍报 `cannot import name 'context' from 'multiprocessing'`、`No module named 'multiprocessing.util'` 或启动期 stderr 报 `cannot import name 'process' from 'multiprocessing'`，不要把 source-mode 结果当通过。Nuitka 会把 `multiprocessing` 编成 namespace package 并带 `multiprocessing` plugin post-load；修复必须先预载并挂载 copied `multiprocessing.process` 与 `multiprocessing.util`，再加载 copied `context` 并在加载子模块时预置父包属性，稳定 `context/reduction` 循环导入后，从 `context._default_context` 导出 `Manager` / `Process` 等 API。
+   - 若 `--runtime-import-smoke` 已通过，但后续 `engine --electron` 启动在 `Event()` 报 `No module named 'multiprocessing.synchronize'`，说明实际 WebUI worker 生命周期触发了 `context._default_context.Event()` 的懒加载。启动修复必须在 engine 创建 `Event` 前预载并挂载 copied `multiprocessing.synchronize`，单元测试也要实际调用 `Event()`，不要只检查父包上有同名属性。
+   - 若 `Event()` 已通过但 `Process.start()` 报 `No module named 'multiprocessing.popen_spawn_win32'`，说明 Windows spawn 启动路径还未覆盖。启动修复应在导出 `context._default_context` API 到父包后，再预载 `multiprocessing.reduction`、`multiprocessing.spawn` 和 `multiprocessing.popen_spawn_win32`；`spawn.py` 会从父包导入 `get_start_method` / `set_start_method`，顺序反了会在 direct probe 中失败。测试要模拟 `Process.start()` 导入 `_Popen`，不要只构造 `Process` 对象。
+   - 若 `--runtime-import-smoke` 通过、但 `engine --electron` 报 `program tried to call itself with '-c' argument`，说明 Windows multiprocessing spawn 已进入真实自执行路径，而 Nuitka 的 self-execution deployment guard 拦截了当前 exe。发行构建必须保留 `--no-deployment-flag=self-execution`；不要把它当成缺模块或端口占用问题。
+   - 若保留 self-execution flag 后 `engine --electron` 不 ready、stdout/stderr 为空，同时进程列表出现大量 `autoscriptor-engine.exe` 且命令线为 `dist\gui.dist\python.exe -S -s -c "from multiprocessing.spawn import spawn_main..."`，这是 Windows spawn 走了非 frozen `-c` 路径并递归重进主程序。先用 `taskkill /IM autoscriptor-engine.exe /F /T` 清理本轮进程风暴；修复必须让 packaged runtime 在 single-instance 之前设置 `sys.frozen`、恢复真实当前 exe 到 `sys.executable`，并先执行 `multiprocessing.freeze_support()`，不要继续补模块或单纯延长 timeout。
+   - 若 worker 已进入 `_webui_worker`，但 `uvicorn._subprocess` 调 `multiprocessing.allow_connection_pickling()` 时报 `cannot import name 'connection' from 'multiprocessing'`，说明 copied `multiprocessing/connection.py` 已存在但未被启动期父包挂载。应在导出 `context._default_context` API 后预载并 attach `multiprocessing.connection`，覆盖 Uvicorn supervisor/subprocess 导入路径。
+   - VM 验收要分层报告。VirtualBox 干净机可能完成安装并让基础 WebUI 返回 200，但 `--runtime-import-smoke` 在 Paddle/OCR 导入处因 `paddle\base\libpaddle.pyd` 初始化失败或 `name 'libpaddle' is not defined` 失败。此时只能说安装器/基础 WebUI 通过，不能宣称 OCR、MuMu 或任务执行通过；需要在支持 AVX 的 VM 或真实 MuMu 机器上补跑 runtime/device acceptance。
+
+---
+
 ## 1. 桌面客户端是什么
 
 「桌面客户端」指 **Electron 壳 + 本机后端服务**：窗口里加载同一套 Web 界面，与在仓库里 **`webapp` 目录执行 `npm start`** 的交互方式一致（**不是**单独开一个浏览器页当作产品主入口）。
@@ -60,6 +118,7 @@ cd D:\Projects\AutoScriptor
 | `AUTOSCRIPTOR_ELECTRON_ZIP=1` | 等价于 `--electron-zip`。 |
 | `AUTOSCRIPTOR_NSIS_FAST_INSTALL=1` | NSIS 使用 store 压缩（安装更快）。 |
 | `AUTOSCRIPTOR_CODE_SIGN=1` | 启用 Windows 代码签名。正式发布机需同时配置 electron-builder 支持的 `CSC_*` 证书环境变量或本机证书存储；无证书机器默认关闭签名，避免打包失败。 |
+| `AUTOSCRIPTOR_STDLIB_SOURCE` | 可手动指定同版本 CPython `Lib` 源码目录；构建脚本只从中生成 `collections/_collections_abc` 源码 overlay，避免嵌入式 `python310.zip` 生成 namespace 空壳。 |
 | `NUITKA_CACHE_DIR` | 脚本默认设为项目下 **`.nuitka-cache/`**（dll 等缓存）。 |
 
 ---
@@ -71,7 +130,7 @@ cd D:\Projects\AutoScriptor
 | 步骤名 | 含义 |
 |--------|------|
 | 清理 (clean) | 删除旧 `gui.dist` / `data` / `license` 等（保留 `gui.build` 除非 `--clean`）。 |
-| Nuitka 编译 (subprocess) | `python -m nuitka` 子进程。 |
+| Nuitka 编译 (subprocess) | 通过 `.nuitka-cache/run_nuitka_with_source_stdlib.py` 启动 Nuitka，使只含 `collections/_collections_abc` 的源码 overlay 优先参与定位。 |
 | Nuitka 后处理 (拷包/补文件) | `copy_nofollow_*`、distutils、wave、pypinyin 等。 |
 | 收集数据 (collect_data) | 生成 `dist/data/`。 |
 | 打包 backend.zip | 将 `gui.dist` 打成 zip。 |
@@ -160,7 +219,9 @@ cd D:\Projects\AutoScriptor
 
 最终用户不应为了少量代码变更反复下载完整安装包。版本线按 `major.minor` 划分：
 
-- **同一 `x.y` 线的小版本**：例如 `1.1.0 -> 1.1.5`，使用累计小版本更新包 `AutoScriptor_Update_1.1.5.zip`。更新包必须包含从 `1.1.0` 到目标版本所需的全部 engine/少量附属文件变动，允许用户从 `1.1.0 / 1.1.1 / 1.1.3` 直接跳到 `1.1.5`。
+- **同一 `x.y` 线的小版本**：例如 `1.0.0 -> 1.0.1` 或 `1.1.0 -> 1.1.5`，使用累计小版本更新包 `AutoScriptor_Update_x.y.z.zip`。更新包必须包含从 `x.y.0` 到目标版本所需的全部 engine/少量附属文件变动，允许用户从同一 `x.y` 线任意更低小版本直接跳到目标版本。
+- 小版本更新包不是底库，也不是完整安装包；它只适用于已经安装同一 `x.y` 线版本的目录。空机器或无旧安装树时必须先运行完整安装包。
+- 若本次改动包含随 backend 读取的外置文件（例如 `services/webui/static/**`、`scripts/collect_zmxy_redeem_2026.py`、`docs/zmxy_redeem_codes.json`），同线更新包不能只替换 exe；这些文件必须通过 `--include-backend` 进入 `replace` 清单。
 - **跨 `x.y` 线的大版本**：例如 `1.0.x -> 1.1.0`，使用完整安装包。依赖库、Nuitka 运行时、backend 目录布局、Electron 壳或安装器行为变化，都应走完整安装包。
 - **本地小版本更新包**：WebUI“检查更新”页支持选择或拖入 `.zip`。Electron 主进程先 dry-run 校验 `update_manifest.json`、版本线、SHA-256、写入路径与用户数据保护；应用时停止 backend，备份旧文件，替换 `backend/autoscriptor-engine.exe` 等少量文件，失败则回滚并重启旧 backend。
 - **`backend_incremental.zip`**：仍保留为特殊兜底，由 `scripts/release/release_backend_incremental.py` 对比旧 `backend.zip` 或旧 `gui.dist` 生成。它适合维护人员处理 backend 文件级差异，不作为普通用户默认更新路径。
@@ -236,6 +297,8 @@ npm run test:installer
 
 electron-builder **不会清空你的 `dist/`**；每次打桌面包会刷新 **`dist_electron/`** 内内容。
 
+不要把整个 `dist_electron/` 当作可分发目录。该目录可能残留历史 `win-unpacked`、手工解包/安装目录、日志或用户 `data`。发布时只取本轮生成并通过扫描的具体文件（例如 `AutoScriptor_Zao_Install_x.y.z.exe`、`AutoScriptor_Zao_x.y.z.zip`）和需要验证的当前 `win-unpacked`。
+
 ---
 
 ## 11. 本地调试的两种用法（与发行包无关）
@@ -249,9 +312,10 @@ electron-builder **不会清空你的 `dist/`**；每次打桌面包会刷新 **
 
 ## 12. 安全与发布物
 
-- 对外分发前确认**不包含**可还原业务逻辑的 **source map**（`*.map`）等；`npm run verify-pack` 会检查 `app.asar` 入口、`backend.zip` 内 `autoscriptor-engine.exe` 以及 source map 泄漏。
+- 对外分发前确认**不包含**可还原业务逻辑的 **source map**（`*.map`）等；`npm run verify-pack` 会检查 `app.asar` 入口、`backend.zip` 内 `autoscriptor-engine.exe`、source map 泄漏、asar `package.json` 是否误带 `devDependencies`/npm scripts，以及是否把非白名单 npm 包打入公开产物。
 - 发行流水线对 **`webapp`** 壳层会做**混淆/压缩 HTML**（见 `prepare-release-shell`），并排除 `*.map`；敏感逻辑仍勿放客户端明文。
-- 打包前后都要扫描敏感信息。唯一允许的真实明文例外是 4399 资讯公共凭据 `news.account = "85rwm3janyyc"` / `news.password = "123456"`；除此之外，账号、密码、token、deploy 密码、SSL/SSH 私钥、个人 `config.json` 和 `data/accounts/*.json` 都不得进入公开发布物。
+- 打包前后都要扫描敏感信息。源码扫描排除 vendored/minified 第三方代码与三方参考文档，避免把第三方压缩包噪音当作本项目泄露；发布物扫描仍要覆盖 `dist` / `dist_electron` 并确认没有 source map、账号 JSON、私钥或非公开凭据。唯一允许的真实明文例外是 4399 资讯公共凭据 `news.account = "85rwm3janyyc"` / `news.password = "123456"`；这对凭据是项目资讯/论坛代理的公开运行依赖，必须保留明文，不得作为“泄露”清除。除此之外，账号、密码、token、deploy 密码、SSL/SSH 私钥、个人 `config.json` 和 `data/accounts/*.json` 都不得进入公开发布物。
+- 第三方加密库源码里可能含 `BEGIN ... PRIVATE KEY` 的解析标记字符串；这不是项目秘密。第三方测试夹具若包含公开 PEM 示例（例如 `Crypto/SelfTest`），发行后处理应剪掉，避免发布扫描噪音和不必要体积。
 - 正式对外版本建议启用代码签名：发布机配置证书后设置 `AUTOSCRIPTOR_CODE_SIGN=1`。没有证书时安装包仍可生成，但 Windows SmartScreen/杀软信任度会低于签名版本。
 
 ---
@@ -281,7 +345,7 @@ electron-builder **不会清空你的 `dist/`**；每次打桌面包会刷新 **
 
 ## 15. Current Packaging Checks
 
-- `build_release.py` 会在 electron-builder 后自动运行 `npm run verify-pack`，校验 Electron `app.asar` 入口、source map 泄漏和 backend payload。它会在 `backend.zip` 缺失或 zip 内不含 `autoscriptor-engine.exe` 时失败。
+- `build_release.py` 会在 electron-builder 后自动运行 `npm run verify-pack`，校验 Electron `app.asar` 入口、source map 泄漏、npm payload 白名单和 backend payload。它会在 `backend.zip` 缺失、zip 内不含 `autoscriptor-engine.exe`、asar 带 dev npm 元数据或非白名单 npm 包时失败。
 - The installer treats a failing `MuMuManager version` command as a warning when ADB is usable. This matches runtime behavior: MuMuManager is useful for official lifecycle commands, while ADB is the stable fallback for app/package/input checks.
 - In the installer UI, this case is displayed as a yellow warning instead of a red blocking error. Users can finish installation, then use WebUI `启动诊断` to inspect MuMuManager, ADB, App, NemuIpc, OCR and UI Map layers separately.
 - `verify_packaging_prereqs.py` and `npm run verify-pack` also check the VC++ runtime DLLs used by native wheels (`msvcp140.dll`, `vcruntime140.dll`, `vcruntime140_1.dll`, `concrt140.dll`). `build_release.py` copies them into `backend.zip` when they are present in the Windows runtime directory.

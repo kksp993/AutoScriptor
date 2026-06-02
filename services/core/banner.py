@@ -56,7 +56,7 @@ def _print_banner(small_banner: bool = False, banner_only: bool = False):
     if small_banner:
         print("------------------------------"*4)
         print("   ╭──────╮              ╭╮╭╮╭╮╭╮   ")
-        print("   │  AutoScriptor  │    KKsp993     ")
+        print("   │  AutoScriptor  │    Kksp993     ")
         print("   ╰──────╯    https://github.com/kksp993/AutoScriptor")
         print("------------------------------"*4)
         return

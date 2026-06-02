@@ -156,5 +156,5 @@ class CLIApp:
         has_unsaved = self._ui_tasks != cfg["tasks"]
         path_display = " -> ".join(self._nav) or "主菜单"
         marker = " *" if has_unsaved else ""
-        print("【AutoScriptor】 Designed by KKsp993 | Repo: https://github.com/kksp993/AutoScriptor")
+        print("【AutoScriptor】 Author: Kksp993 | Repo: https://github.com/kksp993/AutoScriptor")
         logger.info(f" 当前位置: {path_display}{marker}\n")
