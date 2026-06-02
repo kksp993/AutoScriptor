@@ -61,6 +61,7 @@ TRANSLATION_MAP = {
     '本命空间': 'bmkj',
     '腾蛇飞升': 'tengshefeisheng',
     '活动': 'huodong',
+    '兑换豪礼礼品兑换': 'redeem_gift',
     '联盟悬赏': 'lianmengxuanshang',
     '混沌炼狱塔': 'hundunlianyaota',
     '联盟任务': 'lianmengrenwu',

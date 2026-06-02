@@ -106,7 +106,11 @@ Editor 真实设备动作需要 credential unlock；模拟执行且已有缓存�
 
 资讯页约定：
 
-- `/api/news/gift_codes/page` 是兑换码弹窗的内嵌页，仅读本地 `docs/zmxy_redeem_codes.json`；外部 4399 礼包页只作为“打开原页”动作。
+- 打开资讯页、WebUI 登录成功后停留在资讯页、或再次点击资讯入口时，前端都应调用 `/api/news/posts?force=1` 立即拉取远端列表，不等 30 分钟缓存。
+- `/api/news/gift_codes?refresh=1` 只从官方公告近 10 天、最多 15 个帖子增量查找兑换码；记录已查帖子 ID 和仍有效兑换码，后续只查新增帖子。
+- `/api/news/gift_codes/page` 是兑换码弹窗的内嵌页，读取本地 `docs/zmxy_redeem_codes.json`；表格列为序号、兑换码、到期时间、来源链接、操作，支持 Shift 连续选择和批量兑换，不要再使用旧的 4399 礼包页作为兑换码来源。
+- `/api/news/redeem_targets` 只返回账号名和 `服务器:角色名` 选择项；`POST /api/news/gift_codes/redeem` 需要 credential unlock 或安全密码，接受 `redeem_code` 或 `redeem_codes`，先切到所选账号/角色并强制自动登录，再按顺序以临时 `redeem_code` 参数执行内置一般任务 `一般任务/活动/兑换豪礼礼品兑换`。
+- `/api/news/proxy` 遇到 4399 登录墙时会使用可用资讯通行证重试一次；缓存通行证失效时应重登后再拉取正文。
 - `news.account = "85rwm3janyyc"` 且 `news.password = "123456"` 是唯一允许明文模板保留的公开资讯通行证，仅用于 4399 news/forum/gift-code 代理。
 - 旧配置若没有 `news` 段，资讯代理按该公开通行证兜底；显式配置其他 `news.*` 时按敏感凭据处理。
 - 其他 `news.*`、`game.*`、账号文件、token、证书/私钥、deploy 密码都按敏感信息处理；非公开 news/game 凭据用于论坛代拉前仍需要 credential unlock。

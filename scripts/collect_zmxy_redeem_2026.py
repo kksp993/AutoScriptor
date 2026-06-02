@@ -1,9 +1,8 @@
-"""Collect live ZMXY OL redeem codes from the official 4399 forum.
+"""Collect active ZMXY OL redeem codes from recent official 4399 posts.
 
-The official forum requires a logged-in browser session for complete post
-content, so this collector uses Playwright and the shared 4399 account.
-
-Output is intentionally a single authoritative file:
+The WebUI news list already pulls the official announcement stream. This
+collector uses the same source, inspects at most the newest posts from the last
+few days, and persists checked post ids in the single authoritative file:
 
     docs/zmxy_redeem_codes.json
 
@@ -17,29 +16,39 @@ import os
 import re
 import sys
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
-from playwright.sync_api import BrowserContext, TimeoutError as PlaywrightTimeoutError, sync_playwright
+from lxml import html as lxml_html
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TZ_CN = timezone(timedelta(hours=8))
-FORUM_URL = "https://bbs.4399.cn/forums-kind-id-1493"
-LOGIN_URL = (
-    "https://ptlogin.4399.com/ptlogin/loginFrame.do"
-    "?postLoginHandler=refreshParent&redirectUrl=&appId=my&mainDivId=popup_login_div"
-    "&includeFcmInfo=false&level=0&regLevel=4&loginLevel=0&loginMode=login"
-)
-DEFAULT_OUTPUT = Path("docs/zmxy_redeem_codes.json")
-DEFAULT_USERNAME = "85rwm3janyyc"
-DEFAULT_PASSWORD = "123456"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-POST_KEYWORDS = ("福利码", "兑换码", "兑换口令", "礼品兑换", "礼包")
-CODE_CONTEXT_KEYWORDS = ("兑换码", "兑换口令", "福利码", "礼品兑换", "祝福奖励", "通用福利码")
+from services.webui.routes.news import (  # noqa: E402
+    _fetch_proxy_with_adaptive_login,
+    _is_login_wall_response,
+    _scrape_posts,
+)
+from services.webui.routes.news_4399_session import (  # noqa: E402
+    PUBLIC_NEWS_ACCOUNT,
+    PUBLIC_NEWS_PASSWORD,
+)
+
+
+TZ_CN = timezone(timedelta(hours=8))
+FORUM_URL = "https://bbs.4399.cn/forums-kind-id-1493-order-dl"
+DEFAULT_OUTPUT = Path("docs/zmxy_redeem_codes.json")
+DEFAULT_USERNAME = PUBLIC_NEWS_ACCOUNT
+DEFAULT_PASSWORD = PUBLIC_NEWS_PASSWORD
+DEFAULT_MAX_AGE_DAYS = 10
+DEFAULT_MAX_POSTS = 15
+
+CODE_CONTEXT_KEYWORDS = ("兑换码", "兑换口令", "福利码", "福利口令", "礼品兑换", "祝福奖励", "通用福利码")
 FORUM_SOURCE = "4399官方论坛"
-SKIP_TITLE_KEYWORDS = ("概率公示", "兑换详情", "礼包概率")
 
 
 @dataclass
@@ -70,9 +79,12 @@ def now_cn() -> datetime:
 
 def parse_dt(value: str) -> datetime | None:
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except Exception:
         return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=TZ_CN)
+    return dt.astimezone(TZ_CN)
 
 
 def load_credentials(config_path: Path) -> tuple[str, str]:
@@ -156,7 +168,7 @@ def _expiry_windows(text: str) -> list[str]:
 
 def _dates_in_text(text: str, fallback_year: int | None) -> list[tuple[datetime, bool, int]]:
     matches: list[tuple[int, datetime, bool]] = []
-    now = now_cn()
+    current = now_cn()
 
     full = re.compile(
         r"(?P<year>20\d{2})年(?P<month>\d{1,2})月(?P<day>\d{1,2})日\s*"
@@ -186,7 +198,7 @@ def _dates_in_text(text: str, fallback_year: int | None) -> list[tuple[datetime,
         previous_full_year = None
         for fm in full.finditer(text[: m.start()]):
             previous_full_year = int(fm.group("year"))
-        year = infer_year(int(m.group("month")), previous_full_year or fallback_year, now)
+        year = infer_year(int(m.group("month")), previous_full_year or fallback_year, current)
         minute = int(m.group("minute") or 0)
         try:
             dt = datetime(
@@ -202,7 +214,6 @@ def _dates_in_text(text: str, fallback_year: int | None) -> list[tuple[datetime,
             continue
         matches.append((m.start(), dt, False))
 
-    # Keep source order. Range expressions on the forum put the end time last.
     return [(dt, explicit, pos) for pos, dt, explicit in sorted(matches, key=lambda item: item[0])]
 
 
@@ -279,122 +290,100 @@ def safe_title_from_url(url: str) -> str:
     return path or url
 
 
-def login(context: BrowserContext, username: str, password: str) -> None:
-    page = context.new_page()
-    page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
-    page.fill("#username", username)
-    page.fill("#j-password", password)
-    page.click("#j-login-submit-btn")
-    for _ in range(30):
-        cookies = {c["name"] for c in context.cookies()}
-        if {"Pauth", "Uauth"} & cookies:
-            page.close()
-            return
-        page.wait_for_timeout(300)
-    page.close()
-    raise RuntimeError("4399 登录失败，未获取到通行证 cookie")
-
-
-def _forum_page_url(page_no: int) -> str:
-    return FORUM_URL if page_no == 1 else f"{FORUM_URL}-page-{page_no}"
-
-
-def collect_forum_posts(context: BrowserContext, max_pages: int, max_posts: int) -> list[dict[str, object]]:
-    page = context.new_page()
-    posts: list[dict[str, object]] = []
-    seen: set[str] = set()
-
-    for page_no in range(1, max_pages + 1):
-        page.goto(_forum_page_url(page_no), wait_until="domcontentloaded", timeout=60_000)
-        try:
-            page.wait_for_selector("a.thread_link", timeout=15_000)
-        except PlaywrightTimeoutError:
-            break
-        page.wait_for_timeout(500)
-
-        rows = page.evaluate(
-            """
-            () => {
-              const clean = s => (s || '').replace(/\\s+/g, ' ').trim();
-              let nodes = Array.from(document.querySelectorAll('li.item[data-id]'));
-              if (!nodes.length) nodes = Array.from(document.querySelectorAll('a.thread_link'));
-              return nodes.map(node => {
-                const link = node.matches && node.matches('a.thread_link')
-                  ? node
-                  : node.querySelector('a.thread_link');
-                if (!link || !link.href) return null;
-                const titleEl = node.querySelector && node.querySelector('.title_name');
-                const summaryEl = node.querySelector && node.querySelector('p.text');
-                const rawTitle = clean((titleEl || link).innerText);
-                const title = rawTitle.split(/\\n|\\[游戏\\]|\\[活动\\]/)[0].trim() || rawTitle;
-                const text = clean((summaryEl && summaryEl.innerText) || node.innerText || link.innerText);
-                const dateMatch = text.match(/(20\\d{2}-\\d{1,2}-\\d{1,2}|\\d+\\s*(?:分钟前|小时前|天前)|昨天|前天)/);
-                return {
-                  title,
-                  text,
-                  url: link.href,
-                  post_id: node.getAttribute ? (node.getAttribute('data-id') || '') : '',
-                  date_text: dateMatch ? dateMatch[1] : '',
-                };
-              }).filter(Boolean);
-            }
-            """
-        )
-
-        if not rows:
-            break
-
-        for row in rows:
-            href = str(row.get("url") or "")
-            text = normalize_space(str(row.get("text") or ""))
-            title = normalize_space(str(row.get("title") or ""))
-            if not href or href in seen or "forums-mythread" in href:
-                continue
-            if any(k in title for k in SKIP_TITLE_KEYWORDS):
-                continue
-            if not any(k in f"{title}\n{text}" for k in POST_KEYWORDS):
-                continue
-            seen.add(href)
-            posts.append(
-                {
-                    "title": title or safe_title_from_url(href),
-                    "text": text,
-                    "url": href,
-                    "post_id": str(row.get("post_id") or ""),
-                    "date_text": str(row.get("date_text") or ""),
-                    "published_year": _parse_forum_year(text),
-                }
-            )
-            if len(posts) >= max_posts:
-                page.close()
-                return posts
-
-    page.close()
-    return posts
-
-
-def collect_thread(context: BrowserContext, post: dict[str, object]) -> tuple[str, str, int | None]:
-    page = context.new_page()
-    page.goto(str(post["url"]), wait_until="domcontentloaded", timeout=60_000)
+def _parse_post_date(post: dict[str, Any]) -> date | None:
+    raw = str(post.get("date") or "").strip()
     try:
-        page.wait_for_selector(".thread_content, body", timeout=12_000)
-    except PlaywrightTimeoutError:
-        pass
-    page.wait_for_timeout(500)
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError:
+        return None
 
-    title = str(post.get("title") or page.title() or safe_title_from_url(str(post["url"])))
+
+def recent_posts_from_list(
+    posts: list[dict[str, Any]],
+    *,
+    current: datetime | None = None,
+    max_age_days: int = DEFAULT_MAX_AGE_DAYS,
+    max_posts: int = DEFAULT_MAX_POSTS,
+) -> list[dict[str, Any]]:
+    current = current or now_cn()
+    cutoff = current.date() - timedelta(days=max(0, max_age_days))
+    out: list[dict[str, Any]] = []
+    for post in posts:
+        published = _parse_post_date(post)
+        if published is None or published < cutoff or published > current.date():
+            continue
+        out.append(post)
+        if len(out) >= max(1, max_posts):
+            break
+    return out
+
+
+def collect_recent_posts(max_age_days: int, max_posts: int, current: datetime | None = None) -> list[dict[str, Any]]:
+    return recent_posts_from_list(
+        _scrape_posts(),
+        current=current,
+        max_age_days=max_age_days,
+        max_posts=max_posts,
+    )
+
+
+def _thread_text_from_html(html_text: str, fallback_title: str) -> tuple[str, str]:
+    tree = lxml_html.fromstring(html_text)
+    title = "".join(tree.xpath("//title/text()")).strip() or fallback_title
     title = normalize_space(re.sub(r"_官方公告.*$", "", title))
+
+    text = ""
+    xpaths = [
+        '//*[contains(concat(" ", normalize-space(@class), " "), " thread_content ")]',
+        '//*[contains(concat(" ", normalize-space(@class), " "), " post_content ")]',
+        '//*[contains(concat(" ", normalize-space(@class), " "), " content ")]',
+    ]
+    for xp in xpaths:
+        nodes = tree.xpath(xp)
+        if nodes:
+            text = nodes[0].text_content()
+            break
+    if not text:
+        body = tree.xpath("//body")
+        text = body[0].text_content() if body else tree.text_content()
+    return title, normalize_space(text)
+
+
+def collect_thread(
+    post: dict[str, Any],
+    username: str,
+    password: str,
+    cache_token: str = "redeem-collector",
+) -> tuple[str, str, int | None, bool, str]:
+    url = str(post.get("url") or "")
+    title = str(post.get("title") or safe_title_from_url(url))
+    if not url:
+        return title, str(post.get("summary") or ""), None, False, "missing_url"
     try:
-        text = page.locator(".thread_content").first.inner_text(timeout=5000)
-    except PlaywrightTimeoutError:
-        text = page.locator("body").inner_text(timeout=8000)
-    page_text = page.locator("body").inner_text(timeout=8000)
-    year = _parse_forum_year(page_text)
-    page.close()
-    return title, normalize_space(text), year
+        resp = _fetch_proxy_with_adaptive_login(url, username, password, cache_token)
+        resp.encoding = "utf-8"
+        if resp.status_code >= 400:
+            return title, str(post.get("summary") or ""), None, False, f"http_{resp.status_code}"
+        if _is_login_wall_response(resp):
+            return title, str(post.get("summary") or ""), None, False, "login_wall"
+        title, text = _thread_text_from_html(resp.text, title)
+        year = _parse_forum_year(text) or _parse_forum_year(title)
+        if year is None:
+            published = _parse_post_date(post)
+            year = published.year if published else None
+        return title, text, year, True, ""
+    except Exception as exc:
+        return title, str(post.get("summary") or ""), None, False, type(exc).__name__
 
 
-def _entry_rows_from_text(post: dict[str, object], title: str, text: str, year: int | None) -> tuple[list[RedeemEntry], ExpiryResult | None, list[str]]:
+def _entry_rows_from_text(
+    post: dict[str, Any],
+    title: str,
+    text: str,
+    year: int | None,
+    *,
+    current: datetime | None = None,
+) -> tuple[list[RedeemEntry], ExpiryResult | None, list[str]]:
     whole = f"{title}\n{text}"
     if not any(k in whole for k in CODE_CONTEXT_KEYWORDS):
         return [], None, []
@@ -407,7 +396,7 @@ def _entry_rows_from_text(post: dict[str, object], title: str, text: str, year: 
         return [], expiry, codes
 
     exp_dt = expiry.dt
-    if exp_dt is None or exp_dt <= now_cn():
+    if exp_dt is None or exp_dt <= (current or now_cn()):
         return [], expiry, codes
 
     kind, note = classify_entry(title, text)
@@ -425,47 +414,132 @@ def _entry_rows_from_text(post: dict[str, object], title: str, text: str, year: 
     ], expiry, codes
 
 
-def _should_open_thread(post: dict[str, object], expiry: ExpiryResult | None, codes: list[str]) -> bool:
-    if expiry and expiry.dt and expiry.dt <= now_cn():
-        return False
-    if expiry and codes and not expiry.explicit_year and not post.get("published_year"):
-        return True
-    text = str(post.get("text") or "")
-    return not expiry or not codes or "..." in text or "…" in text
+def _post_id(post: dict[str, Any]) -> str:
+    return str(post.get("post_id") or "").strip()
 
 
-def build_entries(posts: list[dict[str, object]], context: BrowserContext) -> tuple[list[RedeemEntry], list[dict[str, object]]]:
+def _post_url(post: dict[str, Any]) -> str:
+    return str(post.get("url") or "").strip()
+
+
+def _checked_sets(payload: dict[str, Any]) -> tuple[set[str], set[str]]:
+    ids = {str(x).strip() for x in payload.get("checked_post_ids") or [] if str(x).strip()}
+    urls = {str(x).strip() for x in payload.get("checked_post_urls") or [] if str(x).strip()}
+    for item in payload.get("inspected_posts") or []:
+        if not isinstance(item, dict):
+            continue
+        pid = str(item.get("post_id") or "").strip()
+        url = str(item.get("url") or "").strip()
+        if pid:
+            ids.add(pid)
+        if url:
+            urls.add(url)
+    for row in payload.get("rows") or []:
+        if isinstance(row, dict) and row.get("url"):
+            urls.add(str(row.get("url")).strip())
+    return ids, urls
+
+
+def _post_is_checked(post: dict[str, Any], checked_ids: set[str], checked_urls: set[str]) -> bool:
+    pid = _post_id(post)
+    url = _post_url(post)
+    return bool((pid and pid in checked_ids) or (url and url in checked_urls))
+
+
+def build_entries(
+    posts: list[dict[str, Any]],
+    username: str,
+    password: str,
+    *,
+    checked_ids: set[str] | None = None,
+    checked_urls: set[str] | None = None,
+    force: bool = False,
+    current: datetime | None = None,
+) -> tuple[list[RedeemEntry], list[dict[str, Any]], set[str], set[str]]:
+    current = current or now_cn()
     entries: list[RedeemEntry] = []
-    inspected: list[dict[str, object]] = []
+    inspected: list[dict[str, Any]] = []
+    new_checked_ids: set[str] = set()
+    new_checked_urls: set[str] = set()
+    checked_ids = checked_ids or set()
+    checked_urls = checked_urls or set()
 
     for post in posts:
-        title = str(post.get("title") or safe_title_from_url(str(post["url"])))
-        text = str(post.get("text") or "")
-        year = post.get("published_year")
-        year_int = int(year) if isinstance(year, int) else None
+        if not force and _post_is_checked(post, checked_ids, checked_urls):
+            continue
 
-        rows, expiry, codes = _entry_rows_from_text(post, title, text, year_int)
-        opened_thread = False
-        needs_year_confirmation = bool(rows and expiry and not expiry.explicit_year and year_int is None)
-        if needs_year_confirmation or (not rows and _should_open_thread(post, expiry, codes)):
-            title, text, thread_year = collect_thread(context, post)
-            year_int = thread_year or year_int
-            rows, expiry, codes = _entry_rows_from_text(post, title, text, year_int)
-            opened_thread = True
+        title = str(post.get("title") or safe_title_from_url(_post_url(post)))
+        text = str(post.get("summary") or "")
+        year = _parse_forum_year(text)
+        published = _parse_post_date(post)
+        if year is None and published:
+            year = published.year
+
+        fetched_title, fetched_text, fetched_year, fetch_ok, error = collect_thread(post, username, password)
+        if fetched_text:
+            title = fetched_title or title
+            text = fetched_text
+        if fetched_year:
+            year = fetched_year
+
+        rows, expiry, codes = _entry_rows_from_text(post, title, text, year, current=current)
+        can_mark_checked = fetch_ok or bool(rows)
+        if can_mark_checked:
+            pid = _post_id(post)
+            url = _post_url(post)
+            if pid:
+                new_checked_ids.add(pid)
+            if url:
+                new_checked_urls.add(url)
 
         inspected.append(
             {
+                "post_id": _post_id(post),
                 "title": title,
-                "url": post["url"],
-                "opened_thread": opened_thread,
+                "url": _post_url(post),
+                "date": str(post.get("date") or ""),
+                "checked_at": current.strftime("%Y-%m-%d %H:%M:%S"),
+                "opened_thread": fetch_ok,
                 "codes": codes,
                 "expires_at": expiry.value if expiry else "",
                 "active": bool(rows),
+                "error": "" if fetch_ok else error,
             }
         )
         entries.extend(rows)
 
-    return dedupe_entries(entries), inspected
+    return dedupe_entries(entries), inspected, new_checked_ids, new_checked_urls
+
+
+def _row_to_entry(row: dict[str, Any]) -> RedeemEntry | None:
+    try:
+        return RedeemEntry(
+            title=str(row.get("title") or ""),
+            code=str(row.get("code") or ""),
+            expires_at=str(row.get("expires_at") or ""),
+            url=str(row.get("url") or ""),
+            source=str(row.get("source") or FORUM_SOURCE),
+            kind=str(row.get("kind") or "public_code"),
+            status=str(row.get("status") or "active"),
+            note=str(row.get("note") or ""),
+        )
+    except Exception:
+        return None
+
+
+def active_entries_from_payload(payload: dict[str, Any], current: datetime | None = None) -> list[RedeemEntry]:
+    current = current or now_cn()
+    out: list[RedeemEntry] = []
+    for row in payload.get("rows") or []:
+        if not isinstance(row, dict):
+            continue
+        entry = _row_to_entry(row)
+        if entry is None:
+            continue
+        exp = parse_dt(entry.expires_at)
+        if exp and exp > current and entry.code:
+            out.append(entry)
+    return dedupe_entries(out)
 
 
 def dedupe_entries(entries: list[RedeemEntry]) -> list[RedeemEntry]:
@@ -482,54 +556,139 @@ def dedupe_entries(entries: list[RedeemEntry]) -> list[RedeemEntry]:
     return sorted(by_code.values(), key=lambda e: (parse_dt(e.expires_at) or datetime.max.replace(tzinfo=TZ_CN), e.code))
 
 
-def write_payload(path: Path, entries: list[RedeemEntry], inspected: list[dict[str, object]]) -> None:
-    generated = now_cn()
+def load_payload(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    payload.setdefault("rows", [])
+    payload.setdefault("inspected_posts", [])
+    return payload
+
+
+def _inspected_key(item: dict[str, Any]) -> str:
+    return str(item.get("post_id") or item.get("url") or "").strip()
+
+
+def merge_inspected_posts(
+    existing: list[Any],
+    new: list[dict[str, Any]],
+    *,
+    keep_ids: set[str],
+    keep_urls: set[str],
+    active_urls: set[str],
+) -> list[dict[str, Any]]:
+    by_key: dict[str, dict[str, Any]] = {}
+    for item in existing:
+        if not isinstance(item, dict):
+            continue
+        pid = str(item.get("post_id") or "").strip()
+        url = str(item.get("url") or "").strip()
+        if not ((pid and pid in keep_ids) or (url and (url in keep_urls or url in active_urls)) or item.get("active")):
+            continue
+        key = _inspected_key(item)
+        if key:
+            by_key[key] = item
+    for item in new:
+        key = _inspected_key(item)
+        if key:
+            by_key[key] = item
+    return list(by_key.values())
+
+
+def collect_incremental(
+    output: Path,
+    *,
+    config_path: Path,
+    username: str = "",
+    password: str = "",
+    max_age_days: int = DEFAULT_MAX_AGE_DAYS,
+    max_posts: int = DEFAULT_MAX_POSTS,
+    force: bool = False,
+    current: datetime | None = None,
+) -> dict[str, Any]:
+    current = current or now_cn()
+    username_from_cfg, password_from_cfg = load_credentials(config_path)
+    username = username or username_from_cfg
+    password = password or password_from_cfg
+    existing_payload = load_payload(output)
+    checked_ids, checked_urls = _checked_sets(existing_payload)
+    candidates = collect_recent_posts(max_age_days=max_age_days, max_posts=max_posts, current=current)
+
+    existing_active = active_entries_from_payload(existing_payload, current=current)
+    active_urls = {entry.url for entry in existing_active if entry.url}
+    checked_urls.update(active_urls)
+
+    new_entries, new_inspected, new_checked_ids, new_checked_urls = build_entries(
+        candidates,
+        username,
+        password,
+        checked_ids=checked_ids,
+        checked_urls=checked_urls,
+        force=force,
+        current=current,
+    )
+    entries = dedupe_entries(existing_active + new_entries)
+
+    candidate_ids = {_post_id(post) for post in candidates if _post_id(post)}
+    candidate_urls = {_post_url(post) for post in candidates if _post_url(post)}
+    out_checked_ids = (checked_ids & candidate_ids) | new_checked_ids
+    out_checked_urls = (checked_urls & candidate_urls) | new_checked_urls | active_urls
+    inspected = merge_inspected_posts(
+        existing_payload.get("inspected_posts") or [],
+        new_inspected,
+        keep_ids=candidate_ids,
+        keep_urls=candidate_urls,
+        active_urls=active_urls,
+    )
+
     payload = {
-        "generated_at": generated.strftime("%Y-%m-%d %H:%M:%S"),
+        "generated_at": current.strftime("%Y-%m-%d %H:%M:%S"),
         "timezone": "Asia/Shanghai",
         "source": FORUM_URL,
+        "window_days": max_age_days,
+        "max_posts": max_posts,
         "rows": [asdict(e) for e in entries],
+        "checked_post_ids": sorted(out_checked_ids),
+        "checked_post_urls": sorted(out_checked_urls),
         "inspected_posts": inspected,
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return payload
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="从 4399 官方论坛采集仍有效的造梦西游 OL 兑换码")
+    parser = argparse.ArgumentParser(description="从 4399 官方论坛近 10 天公告增量采集仍有效的造梦西游 OL 兑换码")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="唯一输出 JSON 文件")
     parser.add_argument("--config", type=Path, default=ROOT / "config.json", help="读取 news.account/news.password")
     parser.add_argument("--username", default="", help="覆盖 4399 账号")
     parser.add_argument("--password", default="", help="覆盖 4399 密码")
-    parser.add_argument("--pages", type=int, default=18, help="最多扫描官方公告页数")
-    parser.add_argument("--max-posts", type=int, default=120, help="最多处理的候选帖子数")
-    parser.add_argument("--headed", action="store_true", help="显示浏览器，便于调试登录问题")
+    parser.add_argument("--max-age-days", type=int, default=DEFAULT_MAX_AGE_DAYS, help="只检查发布于最近 N 天的帖子")
+    parser.add_argument("--max-posts", type=int, default=DEFAULT_MAX_POSTS, help="最多检查的近期帖子数")
+    parser.add_argument("--force", action="store_true", help="忽略已查询帖子记录，强制重新检查近期帖子")
+    parser.add_argument("--pages", type=int, default=0, help=argparse.SUPPRESS)
+    parser.add_argument("--headed", action="store_true", help=argparse.SUPPRESS)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
-    username, password = load_credentials(args.config)
-    username = args.username or username
-    password = args.password or password
-    if not username or not password:
-        print("缺少 4399 账号密码", file=sys.stderr)
-        return 2
-
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=not args.headed)
-        context = browser.new_context(locale="zh-CN")
-        try:
-            login(context, username, password)
-            posts = collect_forum_posts(context, max_pages=max(1, args.pages), max_posts=max(1, args.max_posts))
-            entries, inspected = build_entries(posts, context)
-            write_payload(args.output, entries, inspected)
-        finally:
-            browser.close()
+    payload = collect_incremental(
+        args.output,
+        config_path=args.config,
+        username=args.username,
+        password=args.password,
+        max_age_days=max(1, args.max_age_days),
+        max_posts=max(1, args.max_posts),
+        force=args.force,
+    )
 
     print(args.output)
-    print(f"active entries: {len(entries)}")
-    print(f"inspected posts: {len(inspected)}")
+    print(f"active entries: {len(payload.get('rows') or [])}")
+    print(f"checked posts: {len(payload.get('inspected_posts') or [])}")
     return 0
 
 

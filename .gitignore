@@ -20,6 +20,7 @@
 /.venv-nuitka/
 # electron-builder 输出（与 **/dist 的「dist」目录名不同，需单独忽略）
 /dist_electron/
+/release_snapshots/
 # Nuitka 崩溃报告（本地排错）
 nuitka-crash-report.xml
 # Playwright / 调试截图（脚本目录）
@@ -39,6 +40,7 @@ nuitka-crash-report.xml
 # 忽略根目录下的 PNG 和 LOG 文件
 /*.png
 /*.log
+/main.js
 
 /output/
 /errors/

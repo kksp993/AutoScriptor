@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import json
 import os
 import re
 import shutil
@@ -67,6 +68,16 @@ LICENSE_DIR = DIST_DIR / "license"
 DIST_ELECTRON_DIR = PROJECT_ROOT / "dist_electron"
 # 项目内 Nuitka 总缓存根（dll 依赖分析、字节码等；与 gui.build 内 C 增量不同，二者都保留可显著提速）
 NUITKA_USER_CACHE = PROJECT_ROOT / ".nuitka-cache"
+
+
+def get_release_version() -> str:
+    package_json = PROJECT_ROOT / "webapp" / "package.json"
+    try:
+        with package_json.open(encoding="utf-8") as f:
+            version = str(json.load(f).get("version") or "").strip()
+    except (OSError, json.JSONDecodeError):
+        version = ""
+    return version or "0.0.0"
 
 
 def _format_duration(seconds: float) -> str:
@@ -283,7 +294,6 @@ _NUITKA_NOFOLLOW = [
     "onnxruntime",
     "matplotlib",
     "pandas",
-    "playwright",
     "requests",
     "urllib3",
     "charset_normalizer",
@@ -322,6 +332,40 @@ _NUITKA_NOFOLLOW_ONLY = [
     "rich",
     "pygments",
     "prompt_toolkit",
+]
+
+_STDLIB_RUNTIME_NOFOLLOW = [
+    "argparse",
+    "asyncio",
+    "ast",
+    "concurrent",
+    "contextlib",
+    "email",
+    "html",
+    "http",
+    "inspect",
+    "json",
+    "logging",
+    "pydoc",
+    "pydoc_data",
+    "unittest",
+    "urllib",
+    "wave",
+    "wsgiref",
+    "xml",
+    "xmlrpc",
+]
+
+_STDLIB_RUNTIME_POST_COPY_ONLY = [
+    # Nuitka's multiprocessing plugin can make its own follow decision; passing
+    # --nofollow-import-to=multiprocessing causes a user/plugin conflict.
+    "multiprocessing",
+]
+
+_STDLIB_COMPILE_WITH_SOURCE = [
+    "_collections_abc",
+    "collections",
+    "ctypes",
 ]
 
 # nofollow 大包旁路：paddle 的 pip/httpx 依赖、skimage 的 pip 依赖等，须拷入 gui.dist。
@@ -402,6 +446,15 @@ def _copy_site_glob(sp: Path, dst_root: Path, pattern: str) -> None:
             matched = True
     if not matched:
         print(f"[post] 跳过（不存在）: {sp / pattern}")
+
+
+def prune_release_only_test_fixtures(dst_root: Path) -> None:
+    """Remove third-party self-test fixtures that are not needed at runtime."""
+    for rel in (Path("Crypto") / "SelfTest",):
+        target = dst_root / rel
+        if target.is_dir():
+            _rmtree_robust(target)
+            print(f"[post] 已移除发行版测试夹具: {rel.as_posix()}/")
 
 
 def runtime_site_packages_root() -> Path | None:
@@ -487,12 +540,13 @@ def copy_nofollow_runtime_packages() -> None:
     # cffi keeps the actual extension module at site-packages root.
     _copy_site_glob(sp, dst_root, "_cffi_backend*.pyd")
     _copy_site_entry(sp, dst_root, "_yaml")
+    prune_release_only_test_fixtures(dst_root)
 
     # 部分库的 importlib.metadata 依赖 .dist-info
     needles = (
         "numpy", "opencv", "pillow", "paddle", "scipy", "pandas", "matplotlib",
         "torch", "tensorflow", "sklearn", "skimage", "shapely", "pyclipper",
-        "lmdb", "openvino", "onnx", "playwright", "rich", "protobuf", "setuptools",
+        "lmdb", "openvino", "onnx", "rich", "protobuf", "setuptools",
         "pytz", "python-dateutil", "dateutil",
         "opt_einsum", "opt-einsum", "astor", "httpx", "httpcore", "anyio", "certifi",
         "h11", "idna", "sniffio", "networkx", "decorator", "typing_extensions",
@@ -565,9 +619,175 @@ def _python_home_version(home: Path) -> tuple[int, int] | None:
         return None
 
 
+def _stdlib_cache_dir_for_zip(zip_path: Path) -> Path:
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(zip_path.resolve()))
+    return NUITKA_USER_CACHE / "stdlib" / safe_name
+
+
+def _extract_embedded_stdlib_zip(zip_path: Path) -> Path | None:
+    """Extract an embedded Python stdlib zip for post-copy use.
+
+    The project-local Python 3.10 runtime can be embeddable-style: ``Lib``
+    exists for site-packages, while stdlib modules live in ``python310.zip`` as
+    sourceless ``.pyc`` files. Nuitka can compile with that layout, but the
+    post-copy step still needs a directory-like stdlib surface.
+    """
+    try:
+        stat_info = zip_path.stat()
+    except OSError:
+        return None
+
+    cache_dir = _stdlib_cache_dir_for_zip(zip_path)
+    marker = cache_dir / ".autoscriptor-stdlib-source.json"
+    expected = {
+        "zip": str(zip_path.resolve()),
+        "size": stat_info.st_size,
+        "mtime_ns": stat_info.st_mtime_ns,
+    }
+    try:
+        if marker.is_file():
+            current = json.loads(marker.read_text(encoding="utf-8"))
+            if current == expected:
+                return cache_dir
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    try:
+        if cache_dir.exists():
+            shutil.rmtree(cache_dir)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        root = cache_dir.resolve()
+        with zipfile.ZipFile(zip_path) as zf:
+            for member in zf.infolist():
+                dest = (cache_dir / member.filename).resolve()
+                if root != dest and root not in dest.parents:
+                    raise ValueError(f"unsafe stdlib zip member path: {member.filename}")
+                if member.is_dir():
+                    dest.mkdir(parents=True, exist_ok=True)
+                    continue
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(zf.read(member))
+        marker.write_text(json.dumps(expected, ensure_ascii=False), encoding="utf-8")
+        return cache_dir
+    except (OSError, zipfile.BadZipFile, ValueError) as e:
+        print(f"[post] 读取 {zip_path} 失败: {e}")
+        return None
+
+
+def _stdlib_entry_exists(stdlib: Path, name: str) -> bool:
+    entry = stdlib / name
+    if entry.exists():
+        return True
+    if entry.suffix == ".py":
+        return entry.with_suffix(".pyc").exists()
+    return False
+
+
+def _stdlib_source_entry_exists(stdlib: Path, name: str) -> bool:
+    entry = stdlib / name
+    if entry.is_file():
+        return True
+    if entry.is_dir():
+        return (entry / "__init__.py").is_file()
+    return False
+
+
+def _stdlib_version_from_path(path: Path) -> tuple[int, int] | None:
+    match = re.search(r"python[-_]?(\d)(?:\.?)(\d{2})", str(path).lower())
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _stdlib_source_candidates() -> list[tuple[Path, tuple[int, int] | None, str]]:
+    candidates: list[tuple[Path, tuple[int, int] | None, str]] = []
+    seen: set[Path] = set()
+
+    def add_lib(path: Path, version: tuple[int, int] | None, label: str) -> None:
+        try:
+            resolved = path.resolve()
+        except OSError:
+            resolved = path
+        if resolved in seen:
+            return
+        seen.add(resolved)
+        if not (path / "collections" / "__init__.py").is_file():
+            return
+        candidates.append((path, version or _stdlib_version_from_path(path), label))
+
+    explicit = os.environ.get("AUTOSCRIPTOR_STDLIB_SOURCE", "").strip()
+    if explicit:
+        add_lib(Path(explicit), None, "AUTOSCRIPTOR_STDLIB_SOURCE")
+
+    add_lib(PROJECT_ROOT / ".python310-source" / "Lib", (3, 10), "project .python310-source")
+    add_lib(PROJECT_ROOT / ".python310" / "Lib", (3, 10), "project .python310 Lib")
+
+    lab_cache = Path(os.environ.get("AUTOSCRIPTOR_RELEASE_LAB_CACHE", r"C:\AutoScriptorReleaseLab\cache"))
+    if lab_cache.is_dir():
+        for lib in sorted(lab_cache.glob("python310-nuget-*/tools/Lib"), reverse=True):
+            version = _python_home_version(lib.parent) or _stdlib_version_from_path(lib)
+            add_lib(lib, version, "release lab python nuget cache")
+
+    return candidates
+
+
+def resolve_compile_stdlib_source() -> Path | None:
+    """Find a source stdlib so Nuitka does not build pyc-only package shells."""
+    target = (sys.version_info.major, sys.version_info.minor)
+    required = ("collections/__init__.py", "_collections_abc.py", "contextlib.py", "inspect.py")
+    skipped: list[str] = []
+    for stdlib, version, label in _stdlib_source_candidates():
+        missing = [name for name in required if not _stdlib_source_entry_exists(stdlib, name)]
+        if missing:
+            skipped.append(f"{label}: missing {', '.join(missing)} at {stdlib}")
+            continue
+        if version is not None and version != target:
+            skipped.append(f"{label}: Python {version[0]}.{version[1]} != target {target[0]}.{target[1]} at {stdlib}")
+            continue
+        return stdlib
+    if skipped:
+        print("[nuitka] 未使用源码 stdlib:")
+        for item in skipped:
+            print(f"  - {item}")
+    return None
+
+
+def write_nuitka_source_stdlib_runner(stdlib: Path) -> Path:
+    """Create a tiny Nuitka launcher with source stdlib modules that must not become pyc namespace shells."""
+    NUITKA_USER_CACHE.mkdir(parents=True, exist_ok=True)
+    overlay = NUITKA_USER_CACHE / "source-stdlib-overlay"
+    if overlay.exists():
+        shutil.rmtree(overlay)
+    overlay.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(stdlib / "collections", overlay / "collections")
+    shutil.copytree(stdlib / "ctypes", overlay / "ctypes")
+    shutil.copy2(stdlib / "_collections_abc.py", overlay / "_collections_abc.py")
+
+    runner = NUITKA_USER_CACHE / "run_nuitka_with_source_stdlib.py"
+    source_path = str(overlay.resolve())
+    runner.write_text(
+        "\n".join(
+            [
+                "import runpy",
+                "import sys",
+                f"_overlay = {source_path!r}",
+                "if _overlay not in sys.path:",
+                "    sys.path.insert(0, _overlay)",
+                "for _name in ('collections', '_collections_abc', 'ctypes'):",
+                "    sys.modules.pop(_name, None)",
+                "runpy.run_module('nuitka', run_name='__main__')",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return runner
+
+
 def _stdlib_candidates() -> list[tuple[Path, tuple[int, int] | None, str]]:
     candidates: list[tuple[Path, tuple[int, int] | None, str]] = []
     seen: set[Path] = set()
+    zip_bases: list[tuple[Path, tuple[int, int] | None, str]] = []
 
     def add(path: Path, version: tuple[int, int] | None, label: str) -> None:
         try:
@@ -579,15 +799,36 @@ def _stdlib_candidates() -> list[tuple[Path, tuple[int, int] | None, str]]:
         seen.add(resolved)
         candidates.append((path, version, label))
 
+    def add_zip_base(path: Path, version: tuple[int, int] | None, label: str) -> None:
+        if not path.exists():
+            return
+        zip_bases.append((path, version, label))
+
+    for source_stdlib, version, label in _stdlib_source_candidates():
+        add(source_stdlib, version, label)
+
     current_stdlib = Path(sysconfig.get_path("stdlib"))
     add(current_stdlib, (sys.version_info.major, sys.version_info.minor), "current interpreter")
+    add_zip_base(Path(sys.executable).resolve().parent, (sys.version_info.major, sys.version_info.minor), "current interpreter")
 
     home = _venv_home_from_cfg()
     if home is not None:
-        add(home / "Lib", _python_home_version(home), ".venv-nuitka home")
+        home_version = _python_home_version(home)
+        add(home / "Lib", home_version, ".venv-nuitka home")
+        add_zip_base(home, home_version, ".venv-nuitka home")
 
     base_prefix = Path(sys.base_prefix)
     add(base_prefix / "Lib", (sys.version_info.major, sys.version_info.minor), "sys.base_prefix")
+    add_zip_base(base_prefix, (sys.version_info.major, sys.version_info.minor), "sys.base_prefix")
+
+    for base, version, label in zip_bases:
+        major, minor = version or (sys.version_info.major, sys.version_info.minor)
+        embedded_zip = base / f"python{major}{minor}.zip"
+        if not embedded_zip.is_file():
+            continue
+        extracted = _extract_embedded_stdlib_zip(embedded_zip)
+        if extracted is not None:
+            add(extracted, version, f"{label} python zip")
     return candidates
 
 
@@ -602,7 +843,7 @@ def resolve_runtime_stdlib(required: tuple[str, ...]) -> Path:
     target = _nuitka_output_python_version() or (sys.version_info.major, sys.version_info.minor)
     skipped: list[str] = []
     for stdlib, version, label in _stdlib_candidates():
-        missing = [name for name in required if not (stdlib / name).exists()]
+        missing = [name for name in required if not _stdlib_entry_exists(stdlib, name)]
         if missing:
             skipped.append(f"{label}: missing {', '.join(missing)} at {stdlib}")
             continue
@@ -648,6 +889,11 @@ def copy_stdlib_wave() -> None:
         shutil.copy2(src, dst_root / "wave.py")
         print("[post] wave.py (stdlib) -> gui.dist/")
         return
+    src_pyc = stdlib / "wave.pyc"
+    if src_pyc.is_file():
+        shutil.copy2(src_pyc, dst_root / "wave.pyc")
+        print("[post] wave.pyc (stdlib) -> gui.dist/")
+        return
 
     embedded_zip = Path(sys.executable).resolve().parent / f"python{sys.version_info.major}{sys.version_info.minor}.zip"
     if embedded_zip.is_file():
@@ -663,7 +909,7 @@ def copy_stdlib_wave() -> None:
 
 
 def copy_stdlib_runtime_helpers() -> None:
-    """Copy stdlib modules imported by nofollowed source packages at runtime.
+    """Copy stdlib modules imported by copied source packages at runtime.
 
     Several large packages are copied as source instead of compiled by Nuitka
     (Paddle/PaddleOCR/scipy/skimage/requests). They perform optional imports
@@ -685,6 +931,7 @@ def copy_stdlib_runtime_helpers() -> None:
         "venv",
     }
     excluded_files = {"__phello__.foo.py", "antigravity.py", "this.py"}
+    excluded_stems = {"antigravity", "this"}
     copied_dirs = 0
     copied_files = 0
     for child in sorted(stdlib.iterdir(), key=lambda item: item.name.lower()):
@@ -693,9 +940,18 @@ def copy_stdlib_runtime_helpers() -> None:
                 continue
             shutil.copytree(child, dst_root / child.name, dirs_exist_ok=True)
             copied_dirs += 1
-        elif child.is_file() and child.suffix == ".py" and child.name not in excluded_files:
+        elif (
+            child.is_file()
+            and child.suffix in {".py", ".pyc"}
+            and child.name not in excluded_files
+            and child.stem not in excluded_stems
+        ):
             shutil.copy2(child, dst_root / child.name)
             copied_files += 1
+    missing_copy_only = [name for name in _STDLIB_RUNTIME_POST_COPY_ONLY if not _stdlib_entry_exists(dst_root, name)]
+    if missing_copy_only:
+        print(f"[post] 错误: stdlib post-copy-only 缺失: {', '.join(missing_copy_only)}")
+        sys.exit(1)
     print(f"[post] stdlib runtime helpers -> gui.dist/ ({copied_dirs} dirs, {copied_files} files)")
 
 
@@ -730,12 +986,64 @@ def copy_pypinyin_package_data() -> None:
             print(f"[post] pypinyin/{name} -> gui.dist/pypinyin/")
 
 
+def copy_gift_code_runtime_assets() -> None:
+    """Copy assets required by the WebUI gift-code refresh endpoint."""
+    NUITKA_OUT.mkdir(parents=True, exist_ok=True)
+    required_files = [
+        (
+            PROJECT_ROOT / "scripts" / "collect_zmxy_redeem_2026.py",
+            NUITKA_OUT / "scripts" / "collect_zmxy_redeem_2026.py",
+        ),
+        (
+            PROJECT_ROOT / "docs" / "zmxy_redeem_codes.json",
+            NUITKA_OUT / "docs" / "zmxy_redeem_codes.json",
+        ),
+    ]
+    for src, dst in required_files:
+        if not src.is_file():
+            print(f"[post] 错误: 缺少兑换码运行时文件: {src}")
+            sys.exit(1)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        print(f"[post] {src.relative_to(PROJECT_ROOT).as_posix()} -> gui.dist/{dst.relative_to(NUITKA_OUT).as_posix()}")
+
+
 VC_RUNTIME_DLLS = (
     "msvcp140.dll",
     "vcruntime140.dll",
     "vcruntime140_1.dll",
     "concrt140.dll",
     "vcomp140.dll",
+)
+
+STDLIB_WINDOWS_EXTENSION_FILES = (
+    "pyexpat.pyd",
+    "select.pyd",
+    "_asyncio.pyd",
+    "_bz2.pyd",
+    "_ctypes.pyd",
+    "_decimal.pyd",
+    "_elementtree.pyd",
+    "_hashlib.pyd",
+    "_lzma.pyd",
+    "_msi.pyd",
+    "_multiprocessing.pyd",
+    "_overlapped.pyd",
+    "_queue.pyd",
+    "_socket.pyd",
+    "_sqlite3.pyd",
+    "_ssl.pyd",
+    "_uuid.pyd",
+    "_zoneinfo.pyd",
+    "unicodedata.pyd",
+    "winsound.pyd",
+)
+
+STDLIB_WINDOWS_DLL_FILES = (
+    "libffi-7.dll",
+    "libcrypto-1_1.dll",
+    "libssl-1_1.dll",
+    "sqlite3.dll",
 )
 
 
@@ -804,6 +1112,50 @@ def ensure_python_stable_abi_dlls() -> None:
             print(f"[post] 警告: 未找到 {name}，abi3 扩展 wheel 可能无法加载")
 
 
+def copy_stdlib_extension_modules() -> None:
+    """Bundle Windows stdlib extension modules used by copied stdlib source."""
+    if os.name != "nt":
+        return
+    NUITKA_OUT.mkdir(parents=True, exist_ok=True)
+    candidates: list[Path] = []
+    home = _venv_home_from_cfg()
+    if home is not None:
+        candidates.append(home)
+    candidates.extend(
+        [
+            PROJECT_ROOT / ".python310",
+            Path(getattr(sys, "base_prefix", sys.prefix)).resolve(),
+            Path(sys.executable).resolve().parent,
+        ]
+    )
+
+    seen: set[str] = set()
+    unique_candidates: list[Path] = []
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            resolved = candidate
+        key = str(resolved).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_candidates.append(resolved)
+
+    for name in (*STDLIB_WINDOWS_EXTENSION_FILES, *STDLIB_WINDOWS_DLL_FILES):
+        dst = NUITKA_OUT / name
+        if dst.is_file():
+            continue
+        for base in unique_candidates:
+            src = base / name
+            if src.is_file():
+                shutil.copy2(src, dst)
+                print(f"[post] {name} -> gui.dist/")
+                break
+        else:
+            print(f"[post] 警告: 未找到 {name}，相关 stdlib 模块可能无法导入")
+
+
 def post_process_nuitka_output(timings: list[tuple[str, float]] | None = None) -> None:
     """Copy runtime packages and DLLs into gui.dist after compile or reuse."""
     t_post = time.perf_counter()
@@ -813,8 +1165,10 @@ def post_process_nuitka_output(timings: list[tuple[str, float]] | None = None) -
     copy_stdlib_wave()
     copy_stdlib_runtime_helpers()
     copy_pypinyin_package_data()
+    copy_gift_code_runtime_assets()
     ensure_vc_runtime_dlls()
     ensure_python_stable_abi_dlls()
+    copy_stdlib_extension_modules()
     if timings is not None:
         timings.append(("Nuitka 后处理 (拷包/补文件)", time.perf_counter() - t_post))
 
@@ -827,13 +1181,20 @@ def run_nuitka(timings: list[tuple[str, float]] | None = None, jobs: int | None 
     warn_if_embedded_style_venv()
     ensure_windows_python_dev_files()
     ensure_python_minus_s_disables_site()
+    compile_stdlib = resolve_compile_stdlib_source()
+    if compile_stdlib is None:
+        print("[nuitka] 错误: 未找到源码 stdlib，无法安全编译 collections/_collections_abc/ctypes。")
+        print("[nuitka] 可设置 AUTOSCRIPTOR_STDLIB_SOURCE 指向同版本 CPython Lib 目录后重试。")
+        sys.exit(1)
 
     cmd = [
         sys.executable,
-        "-m",
-        "nuitka",
+        "-X",
+        "utf8",
+        str(write_nuitka_source_stdlib_runner(compile_stdlib)),
         "--standalone",
         "--no-deployment-flag=excluded-module-usage",
+        "--no-deployment-flag=self-execution",
         f"--output-dir={DIST_DIR}",
         "--output-filename=autoscriptor-engine.exe",
         "--follow-import-to=AutoScriptor",
@@ -846,27 +1207,21 @@ def run_nuitka(timings: list[tuple[str, float]] | None = None, jobs: int | None 
         "--include-module=services.single_instance",
         # setuptools 依赖；仅复制 setuptools 目录时，冻结环境需能解析该子模块
         "--include-package=_distutils_hack",
+        # Embedded Python exposes stdlib as python310.zip/*.pyc. If Nuitka sees
+        # that while force-including selected stdlib modules, it can emit a
+        # namespace shell that wins before the copied Lib package.
+        # The source-stdlib runner above exposes an overlay containing only
+        # these real CPython source modules; larger stdlib surfaces remain nofollow+post-copy
+        # or pyc/zip based so importlib/encodings are not
+        # pulled into Nuitka's C backend as source modules.
+        "--include-package=collections",
+        "--include-module=_collections_abc",
+        "--include-package=ctypes",
+        "--include-module=_ctypes",
+        "--include-module=select",
         # 不可 --include-package=distutils：与 setuptools._distutils 同编会 Nuitka duplicate locals（见 crash report）
         # 运行时由 copy_stdlib_distutils() 从 Lib/distutils 拷入 gui.dist，并 nofollow 避免编译 stdlib distutils
         "--nofollow-import-to=distutils",
-        # paddle.audio 等会 import wave；nofollow paddle 时静态分析易漏，显式纳入 standalone
-        "--include-module=wave",
-        # nofollowed runtime packages (requests/httpx/etc.) import these stdlib
-        # packages dynamically; compiling the parent package avoids shadowing a
-        # copied stdlib directory with a non-package frozen module.
-        "--include-package=http",
-        "--include-package=email",
-        "--include-package=html",
-        "--include-package=urllib",
-        "--include-package=xml",
-        "--include-package=xmlrpc",
-        "--include-package=logging",
-        "--include-package=asyncio",
-        "--include-package=concurrent",
-        "--include-package=json",
-        "--include-package=unittest",
-        "--include-package=pydoc_data",
-        "--include-package=wsgiref",
         # FastAPI Form/UploadFile 依赖 python-multipart（import 名 multipart；另有顶层 python_multipart）。
         # 勿用 --include-package=multipart：Nuitka 4.x 在部分环境下 locateModule finding≠absolute 会 FATAL。
         # --follow-import-to 在判为 unused 时仍不打包；须 --include-module 强制纳入 standalone。
@@ -880,13 +1235,13 @@ def run_nuitka(timings: list[tuple[str, float]] | None = None, jobs: int | None 
         "--assume-yes-for-downloads",
         "--company-name=AutoScriptor",
         "--product-name=ZaoBi",
-        "--file-version=1.0.0",
-        "--product-version=1.0.0",
+        f"--file-version={get_release_version()}",
+        f"--product-version={get_release_version()}",
         "--show-progress",
         "--show-memory",
         str(PROJECT_ROOT / "gui.py"),
     ]
-    for name in [*_NUITKA_NOFOLLOW, *_NUITKA_NOFOLLOW_ONLY]:
+    for name in [*_NUITKA_NOFOLLOW, *_NUITKA_NOFOLLOW_ONLY, *_STDLIB_RUNTIME_NOFOLLOW]:
         cmd.insert(-1, f"--nofollow-import-to={name}")
 
     icon = PROJECT_ROOT / "webapp" / "buildResources" / "icon.ico"
@@ -901,6 +1256,10 @@ def run_nuitka(timings: list[tuple[str, float]] | None = None, jobs: int | None 
     env["NUITKA_CACHE_DIR"] = str(NUITKA_USER_CACHE.resolve())
     print("[nuitka] 开始编译 (大型依赖为 nofollow+拷包；增量时仅重编变更模块)...")
     print(f"[nuitka] NUITKA_CACHE_DIR={env['NUITKA_CACHE_DIR']}")
+    print(
+        f"[nuitka] 源码 stdlib: {compile_stdlib}"
+        "（用于编译 collections/_collections_abc/ctypes；其余 stdlib 仍主要 post-copy）"
+    )
     if jobs is not None:
         print(f"[nuitka] 并行编译: --jobs={jobs}")
     if prev and prev != env["NUITKA_CACHE_DIR"]:
@@ -1011,6 +1370,7 @@ def zip_backend_tree() -> None:
     copy_stdlib_encodings()
     copy_stdlib_wave()
     copy_stdlib_runtime_helpers()
+    copy_gift_code_runtime_assets()
     ensure_vc_runtime_dlls()
     ensure_python_stable_abi_dlls()
     zip_path = DIST_DIR / "backend.zip"

@@ -113,16 +113,54 @@
 
 ### 8.3 大依赖与 post 拷贝
 
-- **`--nofollow-import-to`**：numpy、paddle、cv2、playwright 等大块依赖**不整库编译**，编完后由 **`copy_nofollow_runtime_packages()`** 从当前 venv 的 `Lib\site-packages` 拷入 `dist/gui.dist/`。
+- **`--nofollow-import-to`**：numpy、paddle、cv2 等大块依赖**不整库编译**，编完后由 **`copy_nofollow_runtime_packages()`** 从当前 venv 的 `Lib\site-packages` 拷入 `dist/gui.dist/`。
 - **带 `*.libs` 的 wheel（Windows DLL）**：与 **`numpy.libs`** 同理，须同时拷 **`scipy.libs`、`shapely.libs`、`pandas.libs`**，否则 `.pyd` 导入报「找不到指定模块」类错误。
 - **pandas 旁路依赖**：除 **`pandas`、`pandas.libs`** 外，还须 **`pytz`、`dateutil`**（`python-dateutil` 的安装目录名）。
 - **protobuf / setuptools 等**：同样通过拷包 + 可选 `.dist-info` 满足 `importlib.metadata`。
 - **paddle 附属包（目录 + 顶层 .py）**：`paddlepaddle` 在 pip 中声明 **`astor`、`decorator`、`httpx`、`networkx`、`opt-einsum`、`typing-extensions`** 等；另有 **`httpx` 的传递依赖**（`httpcore`、`anyio`、`certifi`、`h11`、`idna` 等）。这些均不在 `paddle/` 目录内，nofollow 后须由 **`_PADDLE_SATELLITE` / `_PADDLE_SATELLITE_FILES`** 拷入 `gui.dist`（`decorator`、`typing_extensions`、`six` 常为单文件 wheel）。
 - **scikit-image**：`lazy_loader`、`imageio`、`packaging`、`tifffile`、`pywt` 等须与 **`skimage`** 一并 post 拷贝（见脚本中 `_PADDLE_SATELLITE`）。
 - **paddleocr（pip 声明）**：如 **`imgaug`、`tqdm`、`bs4`、`lxml`、`fitz`（PyMuPDF）、`docx`、`pdf2docx`** 等，已并入同一套 post 列表；升级 `paddleocr` 后若遇新 `ModuleNotFoundError`，对照 **`pip show paddleocr`** 补目录名。
-- **标准库 `wave`**：构建命令含 **`--include-module=wave`**，post 阶段 **`copy_stdlib_wave()`** 可再补拷 **`Lib/wave.py`**（与增量未重编时兼容）。
+- **标准库 runtime helpers**：`collections`、`_collections_abc`、`ctypes` 是源码 overlay 例外，必须通过源码 stdlib runner 编译，并显式 `--include-package=collections` / `--include-module=_collections_abc` / `--include-package=ctypes`；否则嵌入式 `python310.zip/*.pyc` 会让 Nuitka 生成 namespace 空壳，抢占真实 `Lib` 目录，导致 `from collections import deque` 或 `ctypes.c_longlong` 失败。`contextlib`、`inspect`、`json`、`wave` 等较大 stdlib 面仍保持 **`--nofollow-import-to` + post 拷贝**，但 `multiprocessing` 是 post-copy-only：它需要 copied package 供 `Manager` / `Process` 使用，但不能加入 `--nofollow-import-to`，否则会和 Nuitka 的 multiprocessing 插件决策冲突。Windows stdlib `.pyd`（如 `pyexpat.pyd`、`_ssl.pyd`、`_overlapped.pyd`）和伴随 DLL（如 `libssl-1_1.dll`、`libcrypto-1_1.dll`、`libffi-7.dll`、`sqlite3.dll`）必须由 post 阶段成组补拷；`gui.py` 启动期会修正 `importlib` search locations、预载 `importlib._abc` / `importlib._common`，并清理 broken `multiprocessing` shell，避免 copied stdlib 被 Nuitka namespace 抢占。
 - **pypinyin 数据文件**：构建含 **`--include-package-data=pypinyin`**，post 阶段 **`copy_pypinyin_package_data()`** 将 **`pinyin_dict.json`、`phrases_dict.json`** 拷至 **`gui.dist/pypinyin/`**（运行时按包路径读取）。
 - **`distutils`**：**不要** `--include-package=distutils`（会与 `setuptools._distutils` 同编触发 Nuitka `duplicate locals`）。使用 **`--nofollow-import-to=distutils`**，编完后 **`copy_stdlib_distutils()`** 从 **`sysconfig.get_path('stdlib')/distutils`**（即与 `base_prefix` 对齐的标准库，**不是** venv 的 `Scripts\..\Lib`）拷入 `gui.dist`；若误用 venv 的 `Lib\distutils`，会因目录不存在而跳过，运行时报 `No module named 'distutils'`。
+
+### 8.3.1 `importlib.metadata` bootstrap 经验
+
+`importlib.metadata` 是 packaged runtime 的高风险点：`urllib3`、`pydantic`、`setuptools`、`paddle` 等都会间接依赖 `version()`、`distributions()`、`EntryPoints`。
+
+- 不要用 `ModuleSpec(loader=None)` 加手动 `compile/exec` 载入 copied stdlib package。Nuitka 编译运行时下，这会让 `from . import _adapters` 等包内相对导入落到半初始化 package，最终出现 `cannot import name 'version' from importlib.metadata`、`module 'importlib.metadata' has no attribute 'distributions'` 或 `EntryPoints`。
+- `gui.py` 的 copied stdlib 载入必须使用 `importlib.util.spec_from_file_location()`、`module_from_spec()`、`spec.loader.exec_module(module)`，并为 package 传入 `submodule_search_locations`。
+- `importlib` 包修复期间不要再现场导入 `importlib.util`。如果先把 copied `importlib/` 加进 `importlib.__path__`，再 `from importlib.util import ...`，会加载 copied `util.py`；而 `util.py` 需要 `importlib._abc`，会形成启动期循环，表现为 `No module named 'importlib._abc'`，随后 `importlib.metadata` 半初始化。应在修改 `importlib.__path__` 前缓存 `spec_from_file_location` / `module_from_spec`。
+- 普通解释器 direct probe 不能证明 Nuitka 编译入口的顶部缓存也成功。`dist/gui.dist/importlib` 会在 compiled runtime 启动早期参与解析，可能让顶部 `importlib.util` 缓存失败；`gui.py` 必须保留不依赖 `importlib.util` 的 `SourceFileLoader`/`ModuleSpec` 兜底来预载 `importlib._abc`，再加载 `importlib.metadata`。测试应覆盖把 cached helper 置空后的兜底路径。
+- `importlib.metadata` 的 `__init__.py` 会立即执行 `from . import _adapters, _meta` 以及后续 helper 导入。compiled runtime 中包内相对导入可能仍撞上 Nuitka namespace/半初始化对象，所以载入 `importlib.metadata` 包前要按依赖顺序预载 `metadata` helper 子模块（`_functools`、`_text`、`_adapters`、`_collections`、`_itertools`、`_meta`）。
+- `importlib.resources` 也不是单文件依赖。`resources.py` 会经 `_common.py` 调到 `importlib.readers`；若只预载 `resources.py`，`certifi.where()` / `requests` 在 smoke 中会报 `No module named 'importlib.readers'`。启动修复必须把 `importlib.readers` 与 `importlib.resources` 同组预载，并在失败时清理半初始化子模块。
+- `encodings` 在 standalone 启动时可能已有一个可用但搜索路径不完整的 package；即使 `gui.dist/encodings/idna.py` 存在，`requests.models` 仍可能报 `No module named 'encodings.idna'`。启动修复要把 copied `encodings/` 挂到 `encodings.__path__` 和 `__spec__.submodule_search_locations`，并预载 `encodings.idna`。
+- `multiprocessing` 若被 Nuitka 留成无 `__file__`/`__path__` 的 namespace shell，只删除壳还不够；`paddle` 会执行 `from multiprocessing import Manager, Process`，因此 compiled 启动期要把 copied stdlib `multiprocessing/__init__.py` 载成真实 package。不要为此添加 `--nofollow-import-to=multiprocessing`：Nuitka 可能报 `Conflict between user and plugin decision for module 'multiprocessing'`。若产物里已有 `multiprocessing/context.py` 但 smoke 仍报 `cannot import name 'context' from 'multiprocessing'`，说明 compiled runtime 留下了半初始化 `multiprocessing*` 状态；启动修复要先清理整棵 `sys.modules`，再优先用 frozen `SourceFileLoader` 载入 package。
+- source-mode direct probe 能加载 copied `multiprocessing` 不代表 compiled smoke 会通过。Nuitka 4.x 会把 `multiprocessing` 本体编成只含 `__path__` 的 namespace package，并启用 `multiprocessing-preLoad` / `multiprocessing-postLoad` 插件钩子；直接执行 copied `__init__.py` 可能在 `context -> process/reduction -> context` 窗口失败。启动修复应先建立 copied 父包壳，预载并挂载 copied `multiprocessing.process` 与 `multiprocessing.util`，再加载 copied `context`；加载每个子模块时都要先挂到父包属性，最后从 `multiprocessing.context._default_context` 导出 `Manager`、`Process`、`Event` 等 API，避免依赖 copied `__init__.py` 的整包执行顺序。若 stderr 报 `cannot import name 'process' from 'multiprocessing'` 或 smoke 报 `No module named 'multiprocessing.util'`，优先检查这个预载顺序，而不是继续追加 copy 规则。
+- `--runtime-import-smoke` 只覆盖导入面，`engine --electron` 启动还会创建 `multiprocessing.Event()` 和 `Process()`。`Event()` 会经 `context._default_context.Event()` 懒加载 `multiprocessing.synchronize`；若启动报 `No module named 'multiprocessing.synchronize'`，应在 engine 创建 `Event` 前预载并挂载 copied `synchronize`，并让测试实际调用 `Event()`。
+- Windows 上 `Process.start()` 会沿 `context.SpawnProcess._Popen()` 懒加载 `multiprocessing.popen_spawn_win32`，并依赖 `reduction` / `spawn`。若 `engine --electron` 启动报 `No module named 'multiprocessing.popen_spawn_win32'`，应在导出默认上下文 API 到父包后，预载并挂载 copied `multiprocessing.reduction`、`multiprocessing.spawn`、`multiprocessing.popen_spawn_win32`；`spawn.py` 会从父包导入 `get_start_method` / `set_start_method`，不能在父包 API 导出前加载。测试要覆盖启动路径而不是只检查 `Process` 属性。
+- 当上述 Windows spawn 路径开始工作后，packaged `engine --electron` 会让 `multiprocessing` 用当前 `autoscriptor-engine.exe -c ... --multiprocessing-fork` 启动子进程；Nuitka 默认的 self-execution deployment guard 会报 `program tried to call itself with '-c' argument` 并导致 WebUI smoke 超时。`scripts/build_release.py` 必须保留 `--no-deployment-flag=self-execution`，这是 WebUI worker 生命周期需求，不是隐私、端口或缺拷贝文件问题。
+- 解除 self-execution guard 后还要确认 spawn 命令线形态。若任务管理器/WMI 显示大量 `autoscriptor-engine.exe`，但命令线是 `dist\gui.dist\python.exe -S -s -c "from multiprocessing.spawn import spawn_main..."`，说明 compiled runtime 没被 `multiprocessing` 识别为 frozen，子进程没有进入 `freeze_support()`，而是递归执行 `gui.py` 主循环。`gui.py` 必须在 `ensure_single_instance()` 之前设置 packaged `sys.frozen = True`、用 `GetModuleFileNameW(NULL)` 恢复真实 exe 到 `sys.executable`，并立即调用 `multiprocessing.freeze_support()`；验证前先清理递归进程，不能靠增加 smoke timeout。
+- WebUI worker 真正进入 Uvicorn 后还会走 `uvicorn._subprocess -> multiprocessing.allow_connection_pickling()`。若此时出现 `cannot import name 'connection' from 'multiprocessing'`，不要继续检查 `connection.py` 是否拷贝；它通常已经在 `gui.dist/multiprocessing/`。应在 packaged multiprocessing bootstrap 导出默认上下文 API 后预载 `multiprocessing.connection`，因为 `connection.py` 需要父包上的 `AuthenticationError` / `BufferTooShort` 和 `context.reduction`。
+- `typing.py` 与 copied `_collections_abc` 的组合可能让 Starlette 的 `Protocol` 基类检查失败，表现为 `Protocols can only inherit from other protocols, got <class '_collections_abc.Awaitable'>`。这是 packaged-only stdlib 组合问题，应在启动期确认 `typing._PROTO_ALLOWLIST["collections.abc"]` 和 `typing._PROTO_ALLOWLIST["_collections_abc"]` 至少允许 `Awaitable`、`AsyncIterator`、`AsyncIterable`、`Coroutine`、`Generator`、`Iterable`、`Iterator`、`Reversible`、`Sized`、`Container`、`Collection`、`Callable`、`ContextManager`、`AsyncContextManager`。
+- exec 失败时要同时清理 `sys.modules[name]`、`name.*` 子模块以及父模块上的属性，避免下一次 import 复用半初始化对象。
+- 修复后先跑便宜验证，再跑长构建：
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m py_compile gui.py test\test_webui_contracts.py
+.\.venv\Scripts\python.exe -X utf8 -m unittest `
+  test.test_webui_contracts.TestInstallerContract.test_release_build_accepts_embedded_python_pyc_stdlib `
+  test.test_webui_contracts.TestInstallerContract.test_release_build_prefers_source_stdlib_for_nuitka_collections `
+  test.test_webui_contracts.TestInstallerContract.test_release_packaging_has_verification_and_optional_signing
+```
+
+已存在 `dist/gui.dist/importlib` 时，可先做 direct probe，但它不能替代完整 Nuitka rebuild 和 packaged runtime smoke：
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -c "import os, sys, gui; exe=os.path.abspath('dist/gui.dist'); [sys.modules.pop(k, None) for k in list(sys.modules) if k == 'importlib.metadata' or k.startswith('importlib.metadata.')]; gui._bootstrap_packaged_importlib(exe); import importlib.metadata as m; print(hasattr(m,'version'), hasattr(m,'distributions'), hasattr(m,'EntryPoints'))"
+```
+
+完整发布构建仍必须看到 `autoscriptor-engine.exe --runtime-import-smoke` 通过，才能继续打 Electron 和更新包。
 
 ### 8.4 运行时数据目录（编译产物）
 
@@ -146,8 +184,9 @@
 
 1. **构建阶段**：`scripts/build_release.py` **进程退出码为 0**；日志中出现 **`[nuitka] 编译完成!`**、post 拷贝与 **`[data] 数据收集完成!`**。
 2. **产物存在**：`dist/gui.dist/autoscriptor-engine.exe` 与 `dist/data/` 下有所需配置与资源。
-3. **运行阶段**：在资源管理器中进入 `dist/gui.dist` 双击 exe，或命令行启动；能拉起服务并在浏览器打开 **`http://127.0.0.1:<端口>`**（默认多为 5000），无启动即崩溃。
-4. **（可选）安装包**：仅当需要安装程序时，再验证 Electron 构建产物；失败时先独立排查 **引擎 exe**。
+3. **packaged runtime smoke**：`build_release.py` 自动运行 `autoscriptor-engine.exe --runtime-import-smoke`；必须通过，尤其要覆盖 `importlib.metadata`、`collections`、`ctypes`、`multiprocessing`、WebUI routes、NemuIpc 和 OCR 入口。
+4. **运行阶段**：在资源管理器中进入 `dist/gui.dist` 双击 exe，或命令行启动；能拉起服务并在浏览器打开 **`http://127.0.0.1:<端口>`**（默认多为 5000），无启动即崩溃。
+5. **（可选）安装包**：仅当需要安装程序时，再验证 Electron 构建产物；失败时先独立排查 **引擎 exe**。
 
 若第 1 步失败，以终端**完整报错**与（如有）**`nuitka-crash-report.xml`** 为准继续排错；若第 1 步通过而第 3 步失败，多为**运行时缺模块**或**数据路径**，对照第八节与 `build_release.py` 中的拷包列表。
 

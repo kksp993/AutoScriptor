@@ -13,6 +13,7 @@ import json
 import time
 import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -93,15 +94,68 @@ class TestCfgSaveClean(unittest.TestCase):
         self._cfg_backup = copy.deepcopy(cfg._config)
         self._reg_backup = dict(task_registry._tasks)
         self._orig_path = cfg.CONFIG_PATH
+        self._orig_accounts_dir = cfg.ACCOUNTS_DIR
+        self._orig_mgr_config_path = cfg._mgr.config_path
+        self._orig_mgr_default_accounts_dir = cfg._mgr.default_accounts_dir
+        self._orig_mgr_global_cfg = copy.deepcopy(cfg._mgr.global_cfg)
+        self._orig_mgr_current_acc = cfg._mgr.current_acc
         self._tmp = tempfile.mkdtemp(prefix="test_cfg_save_")
         cfg.CONFIG_PATH = os.path.join(self._tmp, "config.json")
+        cfg.ACCOUNTS_DIR = os.path.join(self._tmp, "accounts")
+        os.makedirs(cfg.ACCOUNTS_DIR, exist_ok=True)
+
+        from AutoScriptor.utils.app_config import Account
+
+        cfg._mgr.config_path = Path(cfg.CONFIG_PATH)
+        cfg._mgr.default_accounts_dir = Path(cfg.ACCOUNTS_DIR)
+        cfg._mgr.global_cfg = {
+            "app": {},
+            "ocr": {},
+            "emulator": {},
+            "llm": {},
+            "scheduler": {},
+            "deploy": {},
+            "notify": {},
+            "update": {},
+            "remote_access": {},
+            "accounts": {"dir": cfg.ACCOUNTS_DIR},
+            "current_account": "test",
+        }
+        cfg._mgr.current_acc = Account(
+            "test",
+            {
+                "encryption": {},
+                "active_character": {"server": "s1", "name": "c1"},
+                "characters": {
+                    "s1": {
+                        "c1": {
+                            "tasks": {},
+                            "status": {},
+                            "game_profession": "悟空",
+                        }
+                    }
+                },
+            },
+        )
+        cfg._refresh_flat_config()
 
     def tearDown(self):
         cfg._config = self._cfg_backup
         task_registry._tasks = self._reg_backup
         cfg.CONFIG_PATH = self._orig_path
+        cfg.ACCOUNTS_DIR = self._orig_accounts_dir
+        cfg._mgr.config_path = self._orig_mgr_config_path
+        cfg._mgr.default_accounts_dir = self._orig_mgr_default_accounts_dir
+        cfg._mgr.global_cfg = self._orig_mgr_global_cfg
+        cfg._mgr.current_acc = self._orig_mgr_current_acc
         import shutil
         shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _saved_active_character_tasks(self):
+        account_path = os.path.join(cfg.ACCOUNTS_DIR, "test.json")
+        with open(account_path, "r", encoding="utf-8") as f:
+            saved = json.load(f)
+        return saved["characters"]["s1"]["c1"]["tasks"]
 
     def test_saved_json_has_no_fn_or_order(self):
         cfg._config["tasks"] = {
@@ -110,9 +164,7 @@ class TestCfgSaveClean(unittest.TestCase):
             }
         }
         cfg.save_config()
-        with open(cfg.CONFIG_PATH, "r", encoding="utf-8") as f:
-            saved = json.load(f)
-        node = saved["tasks"]["测试"]["子任务"]
+        node = self._saved_active_character_tasks()["测试"]["子任务"]
         self.assertNotIn("fn", node)
         self.assertNotIn("order", node)
 
@@ -128,9 +180,7 @@ class TestCfgSaveClean(unittest.TestCase):
             }
         }
         cfg.save_config()
-        with open(cfg.CONFIG_PATH, "r", encoding="utf-8") as f:
-            saved = json.load(f)
-        node = saved["tasks"]["测试"]["子任务"]
+        node = self._saved_active_character_tasks()["测试"]["子任务"]
         self.assertFalse(node["on"])
         self.assertEqual(node["next_exec_time"], 12345.0)
         self.assertEqual(node["params"]["speed"], 3)
@@ -328,6 +378,26 @@ class TestTaskManagerPrepare(unittest.TestCase):
         tm = TaskManager()
         got_fn, got_kwargs = tm._prepare_task("测试/任务")
         self.assertIs(got_fn, fn)
+
+    def test_prepare_applies_one_time_param_override(self):
+        from services.core.task_manager import TaskManager
+
+        def fn(redeem_code="1111"):
+            return redeem_code
+
+        cfg._config["tasks"] = {
+            "测试": {"任务": {"on": True, "next_exec_time": 0, "params": {"redeem_code": "1111"}}}
+        }
+        task_registry.register("测试/任务", fn, order=1)
+
+        tm = TaskManager()
+        _got_fn, got_kwargs = tm._prepare_task(
+            "测试/任务",
+            param_override={"redeem_code": "临时代码"},
+        )
+
+        self.assertEqual(got_kwargs, {"redeem_code": "临时代码"})
+        self.assertEqual(cfg._config["tasks"]["测试"]["任务"]["params"]["redeem_code"], "1111")
 
     def test_prepare_raises_if_not_registered(self):
         from services.core.task_manager import TaskManager

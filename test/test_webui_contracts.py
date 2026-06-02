@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import os
 import time
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -1161,8 +1162,16 @@ class TestInstallerContract(unittest.TestCase):
         staging = (ROOT / "webapp/electron-builder.staging.config.js").read_text(encoding="utf-8")
         release = (ROOT / "webapp/electron-builder.release.config.js").read_text(encoding="utf-8")
         build = (ROOT / "scripts/build_release.py").read_text(encoding="utf-8")
+        gui = (ROOT / "gui.py").read_text(encoding="utf-8")
         prereq = (ROOT / "scripts/verify_packaging_prereqs.py").read_text(encoding="utf-8")
         verify = (ROOT / "webapp/scripts/verify-pack.cjs").read_text(encoding="utf-8")
+        spec = importlib.util.spec_from_file_location(
+            "build_release_contract",
+            ROOT / "scripts/build_release.py",
+        )
+        build_module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(build_module)
 
         for content in [staging, release]:
             self.assertIn("AUTOSCRIPTOR_CODE_SIGN", content)
@@ -1171,20 +1180,586 @@ class TestInstallerContract(unittest.TestCase):
         self.assertIn('env.get("AUTOSCRIPTOR_CODE_SIGN") == "1"', build)
         self.assertIn("validate_engine_runtime", build)
         self.assertIn("--runtime-import-smoke", build)
+        self.assertIn("--no-deployment-flag=self-execution", build)
         self.assertIn("--skip-engine-smoke", build)
         self.assertIn("resolve_runtime_stdlib", build)
+        self.assertIn("def get_release_version()", build)
+        self.assertIn('f"--file-version={get_release_version()}"', build)
+        self.assertIn("write_nuitka_source_stdlib_runner", build)
+        self.assertIn("run_nuitka_with_source_stdlib.py", build)
+        self.assertIn("source-stdlib-overlay", build)
+        self.assertIn("shutil.copytree(stdlib / \"collections\"", build)
+        self.assertIn("shutil.copytree(stdlib / \"ctypes\"", build)
+        self.assertIn("shutil.copy2(stdlib / \"_collections_abc.py\"", build)
+        for stdlib_shell in [
+            '"--include-module=_collections"',
+            '"--include-module=wave"',
+            '"--include-package=http"',
+            '"--include-package=email"',
+            '"--include-package=html"',
+            '"--include-package=urllib"',
+            '"--include-package=xml"',
+            '"--include-package=xmlrpc"',
+            '"--include-package=logging"',
+            '"--include-package=asyncio"',
+            '"--include-package=concurrent"',
+            '"--include-package=json"',
+            '"--include-package=unittest"',
+            '"--include-package=pydoc_data"',
+            '"--include-package=wsgiref"',
+        ]:
+            self.assertNotIn(stdlib_shell, build)
+        self.assertIn("_STDLIB_RUNTIME_NOFOLLOW", build)
+        self.assertNotIn("collections", build_module._STDLIB_RUNTIME_NOFOLLOW)
+        self.assertNotIn("collections.abc", build_module._STDLIB_RUNTIME_NOFOLLOW)
+        self.assertNotIn("_collections_abc", build_module._STDLIB_RUNTIME_NOFOLLOW)
+        self.assertNotIn("ctypes", build_module._STDLIB_RUNTIME_NOFOLLOW)
+        self.assertNotIn("multiprocessing", build_module._STDLIB_RUNTIME_NOFOLLOW)
+        self.assertIn("_STDLIB_RUNTIME_POST_COPY_ONLY", build)
+        self.assertIn("multiprocessing", build_module._STDLIB_RUNTIME_POST_COPY_ONLY)
+        self.assertIn("_STDLIB_COMPILE_WITH_SOURCE", build)
+        self.assertIn("collections", build_module._STDLIB_COMPILE_WITH_SOURCE)
+        self.assertIn("_collections_abc", build_module._STDLIB_COMPILE_WITH_SOURCE)
+        self.assertIn("ctypes", build_module._STDLIB_COMPILE_WITH_SOURCE)
+        self.assertIn("resolve_compile_stdlib_source", build)
+        self.assertIn("AUTOSCRIPTOR_STDLIB_SOURCE", build)
+        self.assertIn('"--include-package=collections"', build)
+        self.assertIn('"--include-module=_collections_abc"', build)
+        self.assertIn('"--include-package=ctypes"', build)
+        self.assertIn('"--include-module=_ctypes"', build)
+        self.assertIn('"--include-module=select"', build)
+        self.assertIn("copy_stdlib_extension_modules", build)
+        self.assertIn("select.pyd", build)
+        self.assertIn("_ctypes.pyd", build)
+        self.assertIn("_overlapped.pyd", build)
+        self.assertIn("_ssl.pyd", build)
+        self.assertIn("pyexpat.pyd", build)
+        self.assertIn("libssl-1_1.dll", build)
+        self.assertIn("libcrypto-1_1.dll", build)
+        self.assertIn("libffi-7.dll", build)
+        self.assertIn("sqlite3.dll", build)
+        self.assertIn("source-stdlib runner", build)
+        self.assertIn("larger stdlib surfaces remain nofollow+post-copy", build)
+        for stdlib_name in [
+            "contextlib",
+            "inspect",
+            "ast",
+            "argparse",
+            "json",
+            "logging",
+            "asyncio",
+            "concurrent",
+            "email",
+            "html",
+            "http",
+            "urllib",
+            "xml",
+            "xmlrpc",
+            "unittest",
+            "pydoc",
+            "pydoc_data",
+            "wave",
+            "wsgiref",
+        ]:
+            self.assertIn(f'"{stdlib_name}"', build)
+        self.assertIn('"multiprocessing"', build)
+        self.assertIn("copy_stdlib_runtime_helpers", build)
+        self.assertIn("real CPython source", build)
+        self.assertIn("_bootstrap_packaged_stdlib", gui)
+        self.assertIn("_bootstrap_packaged_importlib", gui)
+        self.assertIn("_bootstrap_packaged_encodings", gui)
+        self.assertIn("_bootstrap_packaged_multiprocessing", gui)
+        self.assertIn("_patch_packaged_typing_protocol_allowlist", gui)
+        self.assertIn("importlib._abc", gui)
+        self.assertIn("importlib._common", gui)
+        self.assertIn("importlib.readers", gui)
+        self.assertIn("importlib.metadata._adapters", gui)
+        self.assertIn("importlib.metadata._collections", gui)
+        self.assertIn("_PACKAGED_STDLIB_SPEC_FROM_FILE_LOCATION", gui)
+        self.assertIn("_PACKAGED_STDLIB_MODULE_FROM_SPEC", gui)
+        self.assertIn("_PACKAGED_STDLIB_SOURCE_FILE_LOADER", gui)
+        self.assertIn("_PACKAGED_STDLIB_MODULE_SPEC", gui)
+        self.assertIn("_frozen_importlib_external", gui)
+        self.assertIn("_packaged_stdlib_module_from_source_loader", gui)
+        self.assertIn("_preload_packaged_importlib_metadata_helpers", gui)
+        self.assertIn("_PACKAGED_IMPORTLIB_METADATA_HELPERS", gui)
+        self.assertIn("\"_functools\"", gui)
+        self.assertIn("\"_adapters\"", gui)
+        self.assertIn("\"_meta\"", gui)
+        self.assertIn("spec_from_file_location", gui)
+        self.assertIn("module_from_spec", gui)
+        self.assertIn("submodule_search_locations", gui)
+        self.assertIn("loader.exec_module(module)", gui)
+        load_helper = gui[
+            gui.index("def _load_packaged_stdlib_module"):
+            gui.index("def _drop_broken_package_shell")
+        ]
+        self.assertNotIn("from importlib.util import", load_helper)
+        self.assertIn("[package_dir, *spec_paths]", gui)
+        self.assertIn("sys.modules.pop(name, None)", gui)
+        self.assertIn("delattr(parent, child_name)", gui)
+        self.assertIn("_drop_broken_package_shell", gui)
+        self.assertIn("multiprocessing", gui)
+        self.assertIn("_load_packaged_stdlib_module", gui)
+        self.assertIn("collections_deque", gui)
         self.assertIn('"verify-pack"', build)
         self.assertIn("打包自检失败", build)
         self.assertIn("leakedMaps", verify)
+        self.assertIn("allowedNodeModulePayloads", verify)
+        self.assertIn("app.asar package.json must not include devDependencies", verify)
+        self.assertIn("app.asar contains unexpected npm packages", verify)
+        self.assertIn("win-unpacked contains unpacked npm payloads", verify)
         self.assertIn("release-update.cjs", verify)
         self.assertIn("assertAsarEntry", verify)
         self.assertIn("validateDataRoot(dataRoot)", verify)
         self.assertIn("packaged data must not contain user account JSON files", verify)
         self.assertIn("backend.zip is missing required runtime files", verify)
+        self.assertIn("prune_release_only_test_fixtures", build)
+        self.assertIn("Crypto\") / \"SelfTest", build)
         self.assertIn("app.app_to_start", verify)
         self.assertIn("must be generated from config template.json", verify)
+        self.assertIn("_extract_embedded_stdlib_zip", build)
+        self.assertIn("python zip", build)
+        self.assertIn("wave.pyc", build)
         self.assertIn("_check_config_template", prereq)
         self.assertIn("_check_generated_code_templates", prereq)
+
+    def test_packaged_importlib_bootstrap_falls_back_when_util_helpers_are_missing(self):
+        import importlib
+        import shutil
+
+        module_name = "gui_importlib_bootstrap_under_test"
+        spec = importlib.util.spec_from_file_location(module_name, ROOT / "gui.py")
+        module = importlib.util.module_from_spec(spec)
+        old_argv = sys.argv[:]
+        sys.argv = [str(ROOT / "gui.py")]
+        try:
+            assert spec.loader is not None
+            spec.loader.exec_module(module)
+        finally:
+            sys.argv = old_argv
+
+        importlib_candidates = [
+            Path(os.environ.get("AUTOSCRIPTOR_STDLIB_SOURCE", "")) / "importlib",
+            ROOT / ".python310-source" / "Lib" / "importlib",
+            ROOT / ".python310" / "Lib" / "importlib",
+            Path(sys.base_prefix) / "Lib" / "importlib",
+        ]
+        lab_cache = Path(os.environ.get("AUTOSCRIPTOR_RELEASE_LAB_CACHE", r"C:\AutoScriptorReleaseLab\cache"))
+        if lab_cache.is_dir():
+            importlib_candidates.extend(
+                lib / "importlib"
+                for lib in sorted(lab_cache.glob("python310-nuget-*/tools/Lib"), reverse=True)
+            )
+        required_importlib_files = ["_abc.py", "abc.py", "_adapters.py", "_common.py", "readers.py", "resources.py"]
+        importlib_dir = next(
+            (
+                candidate
+                for candidate in importlib_candidates
+                if candidate.is_dir()
+                and all((candidate / filename).is_file() for filename in required_importlib_files)
+                and (candidate / "metadata" / "__init__.py").is_file()
+            ),
+            None,
+        )
+        self.assertIsNotNone(importlib_dir)
+        names_to_restore = {
+            "importlib._abc",
+            "importlib.abc",
+            "importlib._adapters",
+            "importlib._common",
+            "importlib.readers",
+            "importlib.resources",
+            "importlib.metadata",
+            "importlib.metadata._adapters",
+            "importlib.metadata._collections",
+            "importlib.metadata._functools",
+            "importlib.metadata._itertools",
+            "importlib.metadata._meta",
+            "importlib.metadata._text",
+        }
+        sentinel = object()
+        saved_modules = {name: sys.modules.get(name, sentinel) for name in names_to_restore}
+        saved_attrs = {name.rpartition(".")[2]: getattr(importlib, name.rpartition(".")[2], sentinel) for name in names_to_restore}
+        saved_path = list(getattr(importlib, "__path__", []) or [])
+        saved_locations = list(getattr(importlib.__spec__, "submodule_search_locations", []) or [])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            package_dir = Path(tmp) / "importlib"
+            package_dir.mkdir()
+            for filename in required_importlib_files:
+                shutil.copy2(importlib_dir / filename, package_dir / filename)
+            shutil.copytree(importlib_dir / "metadata", package_dir / "metadata")
+
+            try:
+                module._PACKAGED_STDLIB_MODULE_FROM_SPEC = None
+                module._PACKAGED_STDLIB_SPEC_FROM_FILE_LOCATION = None
+                for name in names_to_restore:
+                    sys.modules.pop(name, None)
+                for attr in saved_attrs:
+                    if hasattr(importlib, attr):
+                        try:
+                            delattr(importlib, attr)
+                        except Exception:
+                            pass
+
+                module._bootstrap_packaged_importlib(tmp)
+
+                self.assertIn("importlib._abc", sys.modules)
+                self.assertIn("importlib.readers", sys.modules)
+                metadata = sys.modules.get("importlib.metadata")
+                self.assertIsNotNone(metadata)
+                for helper in module._PACKAGED_IMPORTLIB_METADATA_HELPERS:
+                    self.assertIn(f"importlib.metadata.{helper}", sys.modules)
+                self.assertTrue(hasattr(metadata, "version"))
+                self.assertTrue(hasattr(metadata, "distributions"))
+                self.assertTrue(hasattr(metadata, "EntryPoints"))
+            finally:
+                for name in [key for key in sys.modules if key.startswith("importlib.metadata")]:
+                    sys.modules.pop(name, None)
+                for name in names_to_restore:
+                    saved = saved_modules[name]
+                    if saved is sentinel:
+                        sys.modules.pop(name, None)
+                    else:
+                        sys.modules[name] = saved
+                for attr, saved in saved_attrs.items():
+                    if saved is sentinel:
+                        if hasattr(importlib, attr):
+                            try:
+                                delattr(importlib, attr)
+                            except Exception:
+                                pass
+                    else:
+                        setattr(importlib, attr, saved)
+                importlib.__path__ = saved_path
+                importlib.__spec__.submodule_search_locations = saved_locations
+
+    def test_packaged_bootstrap_loads_copied_multiprocessing_package(self):
+        module_name = "gui_multiprocessing_bootstrap_under_test"
+        spec = importlib.util.spec_from_file_location(module_name, ROOT / "gui.py")
+        module = importlib.util.module_from_spec(spec)
+        old_argv = sys.argv[:]
+        sys.argv = [str(ROOT / "gui.py")]
+        try:
+            assert spec.loader is not None
+            spec.loader.exec_module(module)
+        finally:
+            sys.argv = old_argv
+
+        saved_modules = {
+            name: value
+            for name, value in sys.modules.items()
+            if name == "multiprocessing" or name.startswith("multiprocessing.")
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            package_dir = Path(tmp) / "multiprocessing"
+            package_dir.mkdir()
+            (package_dir / "__init__.py").write_text(
+                "INIT_EXECUTED = True\nraise RuntimeError('init should not execute during bootstrap')\n",
+                encoding="utf-8",
+            )
+            (package_dir / "context.py").write_text(
+                "IN_PROGRESS = True\n"
+                "from . import process\n"
+                "from . import reduction\n"
+                "class SpawnProcess(process.Process):\n"
+                "    @staticmethod\n"
+                "    def _Popen(process_obj):\n"
+                "        from .popen_spawn_win32 import Popen\n"
+                "        return Popen(process_obj)\n"
+                "class DefaultContext:\n"
+                "    Process = SpawnProcess\n"
+                "    def Event(self):\n"
+                "        from . import synchronize\n"
+                "        return synchronize.Event()\n"
+                "    def Manager(self):\n"
+                "        return 'manager'\n"
+                "    def freeze_support(self):\n"
+                "        return 'freeze'\n"
+                "    def allow_connection_pickling(self):\n"
+                "        from . import connection\n"
+                "        return connection.READY\n"
+                "    AuthenticationError = RuntimeError\n"
+                "    BufferTooShort = BufferError\n"
+                "_default_context = DefaultContext()\n",
+                encoding="utf-8",
+            )
+            (package_dir / "process.py").write_text(
+                "class Process:\n"
+                "    def start(self):\n"
+                "        self._popen = self._Popen(self)\n"
+                "        return self._popen\n"
+                "class Event: pass\n",
+                encoding="utf-8",
+            )
+            (package_dir / "util.py").write_text(
+                "from . import process\nSAW_PROCESS = process.Process\n"
+                "def register_after_fork(*args):\n"
+                "    return 'registered'\n",
+                encoding="utf-8",
+            )
+            (package_dir / "reduction.py").write_text(
+                "from . import context\nSAW_CONTEXT = context.IN_PROGRESS\n",
+                encoding="utf-8",
+            )
+            (package_dir / "connection.py").write_text(
+                "from . import util, AuthenticationError, BufferTooShort\n"
+                "from .context import reduction\n"
+                "READY = bool(util.SAW_PROCESS and AuthenticationError and BufferTooShort and reduction.SAW_CONTEXT)\n",
+                encoding="utf-8",
+            )
+            (package_dir / "synchronize.py").write_text(
+                "from . import context, process, util\n"
+                "class Event:\n"
+                "    def __init__(self):\n"
+                "        self.ready = context.IN_PROGRESS and process.Process and util.SAW_PROCESS\n",
+                encoding="utf-8",
+            )
+            (package_dir / "spawn.py").write_text(
+                "from . import util\nSAW_UTIL = util.SAW_PROCESS\n",
+                encoding="utf-8",
+            )
+            (package_dir / "popen_spawn_win32.py").write_text(
+                "from . import reduction, spawn, util\n"
+                "class Popen:\n"
+                "    def __init__(self, process_obj):\n"
+                "        self.ready = reduction.SAW_CONTEXT and spawn.SAW_UTIL and util.SAW_PROCESS\n",
+                encoding="utf-8",
+            )
+            class BlockAutomaticProcessImport:
+                def find_spec(self, fullname, path=None, target=None):
+                    blocked = {
+                        "multiprocessing.connection",
+                        "multiprocessing.popen_spawn_win32",
+                        "multiprocessing.process",
+                        "multiprocessing.spawn",
+                        "multiprocessing.synchronize",
+                        "multiprocessing.util",
+                    }
+                    if fullname in blocked and fullname not in sys.modules:
+                        raise ImportError(f"compiled runtime did not resolve {fullname} automatically")
+                    return None
+
+            blocker = BlockAutomaticProcessImport()
+            try:
+                for name in list(sys.modules):
+                    if name == "multiprocessing" or name.startswith("multiprocessing."):
+                        sys.modules.pop(name, None)
+                stale_pkg = types.ModuleType("multiprocessing")
+                stale_pkg.__file__ = "stale"
+                stale_context = types.ModuleType("multiprocessing.context")
+                sys.modules["multiprocessing"] = stale_pkg
+                sys.modules["multiprocessing.context"] = stale_context
+                sys.meta_path.insert(0, blocker)
+
+                module._bootstrap_packaged_multiprocessing(tmp)
+
+                loaded = sys.modules.get("multiprocessing")
+                self.assertIsNotNone(loaded)
+                self.assertEqual(Path(loaded.__file__).name, "__init__.py")
+                self.assertTrue(hasattr(loaded, "Manager"))
+                self.assertTrue(hasattr(loaded, "Process"))
+                self.assertTrue(hasattr(loaded, "Event"))
+                self.assertFalse(hasattr(loaded, "INIT_EXECUTED"))
+                self.assertEqual(loaded.Manager(), "manager")
+                self.assertEqual(loaded.freeze_support(), "freeze")
+                self.assertIs(sys.modules.get("multiprocessing.process"), loaded.process)
+                self.assertIs(sys.modules.get("multiprocessing.spawn"), loaded.spawn)
+                self.assertIs(sys.modules.get("multiprocessing.synchronize"), loaded.synchronize)
+                self.assertIs(sys.modules.get("multiprocessing.connection"), loaded.connection)
+                self.assertIs(sys.modules.get("multiprocessing.util"), loaded.util)
+                self.assertTrue(loaded.Event().ready)
+                self.assertTrue(loaded.Process().start().ready)
+                self.assertTrue(loaded.allow_connection_pickling())
+                from multiprocessing.util import register_after_fork
+
+                self.assertEqual(register_after_fork(), "registered")
+                self.assertIsNot(sys.modules.get("multiprocessing.context"), stale_context)
+                self.assertIs(sys.modules.get("multiprocessing.context"), loaded.context)
+                self.assertIs(sys.modules.get("multiprocessing.popen_spawn_win32"), loaded.popen_spawn_win32)
+                reduction = sys.modules.get("multiprocessing.reduction")
+                self.assertIsNotNone(reduction)
+                self.assertTrue(getattr(reduction, "SAW_CONTEXT", False))
+            finally:
+                if blocker in sys.meta_path:
+                    sys.meta_path.remove(blocker)
+                for name in list(sys.modules):
+                    if name == "multiprocessing" or name.startswith("multiprocessing."):
+                        sys.modules.pop(name, None)
+                sys.modules.update(saved_modules)
+
+    def test_packaged_bootstrap_mounts_copied_encodings_idna(self):
+        module_name = "gui_encodings_bootstrap_under_test"
+        spec = importlib.util.spec_from_file_location(module_name, ROOT / "gui.py")
+        module = importlib.util.module_from_spec(spec)
+        old_argv = sys.argv[:]
+        sys.argv = [str(ROOT / "gui.py")]
+        try:
+            assert spec.loader is not None
+            spec.loader.exec_module(module)
+        finally:
+            sys.argv = old_argv
+
+        import encodings
+
+        saved_idna = sys.modules.get("encodings.idna")
+        saved_path = list(getattr(encodings, "__path__", []) or [])
+        saved_locations = list(getattr(encodings.__spec__, "submodule_search_locations", []) or [])
+        with tempfile.TemporaryDirectory() as tmp:
+            package_dir = Path(tmp) / "encodings"
+            package_dir.mkdir()
+            (package_dir / "idna.py").write_text("COPIED_IDNA = True\n", encoding="utf-8")
+            try:
+                sys.modules.pop("encodings.idna", None)
+                encodings.__path__ = []
+                encodings.__spec__.submodule_search_locations = []
+
+                module._bootstrap_packaged_encodings(tmp)
+                import encodings.idna as idna
+
+                self.assertTrue(idna.COPIED_IDNA)
+                self.assertIn(str(package_dir), list(encodings.__path__))
+            finally:
+                sys.modules.pop("encodings.idna", None)
+                if saved_idna is not None:
+                    sys.modules["encodings.idna"] = saved_idna
+                    setattr(encodings, "idna", saved_idna)
+                elif hasattr(encodings, "idna"):
+                    delattr(encodings, "idna")
+                encodings.__path__ = saved_path
+                encodings.__spec__.submodule_search_locations = saved_locations
+
+    def test_packaged_typing_allowlist_accepts_collections_abc_source_names(self):
+        import typing
+
+        module_name = "gui_typing_bootstrap_under_test"
+        spec = importlib.util.spec_from_file_location(module_name, ROOT / "gui.py")
+        module = importlib.util.module_from_spec(spec)
+        old_argv = sys.argv[:]
+        sys.argv = [str(ROOT / "gui.py")]
+        try:
+            assert spec.loader is not None
+            spec.loader.exec_module(module)
+        finally:
+            sys.argv = old_argv
+
+        allowlist = typing._PROTO_ALLOWLIST
+        saved_collections = list(allowlist.get("collections.abc", []))
+        saved_private = allowlist.get("_collections_abc")
+        try:
+            allowlist["collections.abc"] = []
+            allowlist.pop("_collections_abc", None)
+
+            module._patch_packaged_typing_protocol_allowlist()
+
+            for module_key in ("collections.abc", "_collections_abc"):
+                with self.subTest(module_key=module_key):
+                    self.assertIn("Awaitable", allowlist[module_key])
+                    self.assertIn("AsyncContextManager", allowlist[module_key])
+        finally:
+            allowlist["collections.abc"] = saved_collections
+            if saved_private is None:
+                allowlist.pop("_collections_abc", None)
+            else:
+                allowlist["_collections_abc"] = saved_private
+
+    def test_release_build_accepts_embedded_python_pyc_stdlib(self):
+        spec = importlib.util.spec_from_file_location(
+            "build_release_under_test",
+            ROOT / "scripts/build_release.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            fake_home = tmp_root / "python-home"
+            fake_home.mkdir()
+            for name in [*module.STDLIB_WINDOWS_EXTENSION_FILES, *module.STDLIB_WINDOWS_DLL_FILES]:
+                (fake_home / name).write_bytes(name.encode("ascii"))
+            with zipfile.ZipFile(fake_home / "python310.zip", "w") as zf:
+                for name in [
+                    "collections/__init__.pyc",
+                    "distutils/__init__.pyc",
+                    "encodings/__init__.pyc",
+                    "_collections_abc.pyc",
+                    "contextlib.pyc",
+                    "site.pyc",
+                    "pydoc.pyc",
+                    "unittest/__init__.pyc",
+                    "multiprocessing/__init__.pyc",
+                    "wave.pyc",
+                ]:
+                    zf.writestr(name, b"\0\0\0\0")
+
+            out_dir = tmp_root / "dist" / "gui.dist"
+            out_dir.mkdir(parents=True)
+            (out_dir / "python310.dll").write_bytes(b"")
+
+            with patch.object(module, "PROJECT_ROOT", tmp_root), \
+                    patch.object(module, "NUITKA_OUT", out_dir), \
+                    patch.object(module, "NUITKA_USER_CACHE", tmp_root / ".nuitka-cache"), \
+                    patch.object(module, "_stdlib_source_candidates", lambda: []), \
+                    patch.object(module, "_venv_home_from_cfg", lambda: fake_home), \
+                    patch.object(module, "_python_home_version", lambda _home: (3, 10)), \
+                    patch.object(module.sysconfig, "get_path", lambda _name: str(tmp_root / "missing-lib")), \
+                    patch.object(module.sys, "base_prefix", str(tmp_root / "missing-base")), \
+                    patch.object(module.sys, "executable", str(tmp_root / "Scripts" / "python.exe")):
+                stdlib = module.resolve_runtime_stdlib(("distutils", "site.py", "pydoc.py", "unittest", "wave.py"))
+                self.assertTrue((stdlib / "site.pyc").is_file())
+                self.assertTrue(module._stdlib_entry_exists(stdlib, "wave.py"))
+
+                module.copy_stdlib_distutils()
+                module.copy_stdlib_wave()
+                module.copy_stdlib_runtime_helpers()
+                module.copy_stdlib_extension_modules()
+
+            self.assertTrue((out_dir / "distutils" / "__init__.pyc").is_file())
+            self.assertTrue((out_dir / "collections" / "__init__.pyc").is_file())
+            self.assertTrue((out_dir / "_collections_abc.pyc").is_file())
+            self.assertTrue((out_dir / "contextlib.pyc").is_file())
+            self.assertTrue((out_dir / "multiprocessing" / "__init__.pyc").is_file())
+            self.assertTrue((out_dir / "wave.pyc").is_file())
+            self.assertTrue((out_dir / "site.pyc").is_file())
+            if os.name == "nt":
+                for name in [*module.STDLIB_WINDOWS_EXTENSION_FILES, *module.STDLIB_WINDOWS_DLL_FILES]:
+                    self.assertTrue((out_dir / name).is_file())
+
+    def test_release_build_prefers_source_stdlib_for_nuitka_collections(self):
+        spec = importlib.util.spec_from_file_location(
+            "build_release_source_stdlib_test",
+            ROOT / "scripts/build_release.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            source_lib = tmp_root / "python-source" / "Lib"
+            (source_lib / "collections").mkdir(parents=True)
+            (source_lib / "collections" / "__init__.py").write_text("# collections\n", encoding="utf-8")
+            (source_lib / "ctypes").mkdir()
+            (source_lib / "ctypes" / "__init__.py").write_text("# ctypes\n", encoding="utf-8")
+            for name in ["_collections_abc.py", "contextlib.py", "inspect.py", "site.py", "pydoc.py", "wave.py"]:
+                (source_lib / name).write_text("# stdlib\n", encoding="utf-8")
+            (source_lib / "distutils").mkdir()
+            (source_lib / "distutils" / "__init__.py").write_text("# distutils\n", encoding="utf-8")
+            (source_lib / "unittest").mkdir()
+            (source_lib / "unittest" / "__init__.py").write_text("# unittest\n", encoding="utf-8")
+
+            with patch.dict(
+                os.environ,
+                {
+                    "AUTOSCRIPTOR_STDLIB_SOURCE": str(source_lib),
+                    "AUTOSCRIPTOR_RELEASE_LAB_CACHE": str(tmp_root / "missing-cache"),
+                },
+            ), patch.object(module, "_python_home_version", lambda _home: (3, 10)):
+                self.assertEqual(module.resolve_compile_stdlib_source(), source_lib)
+                stdlib = module.resolve_runtime_stdlib(("collections/__init__.py", "contextlib.py"))
+                self.assertEqual(stdlib, source_lib)
 
     def test_mumu_acceptance_checks_packaged_runtime_webui_and_device(self):
         script = (ROOT / "scripts/release/mumu_device_acceptance.ps1").read_text(encoding="utf-8")
@@ -1222,6 +1797,42 @@ class TestInstallerContract(unittest.TestCase):
         self.assertIn("params.set('require_app', 'false')", panel)
         self.assertIn("device_overall", panel)
         self.assertIn("task_overall", panel)
+
+    def test_packaged_windows_multiprocessing_uses_frozen_executable_before_single_instance(self):
+        spec = importlib.util.spec_from_file_location(
+            "gui_multiprocessing_spawn_test",
+            ROOT / "gui.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        original_executable = sys.executable
+        had_frozen = hasattr(sys, "frozen")
+        original_frozen = getattr(sys, "frozen", None)
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                engine = Path(tmp) / "autoscriptor-engine.exe"
+                engine.write_bytes(b"")
+                with patch.object(module, "_COMPILED", True), patch.object(module.os, "name", "nt"), patch.object(
+                    module,
+                    "_windows_current_executable_path",
+                    lambda: str(engine),
+                ):
+                    module._configure_packaged_multiprocessing_spawn()
+                    self.assertTrue(getattr(sys, "frozen", False))
+                    self.assertEqual(sys.executable, str(engine))
+        finally:
+            sys.executable = original_executable
+            if had_frozen:
+                setattr(sys, "frozen", original_frozen)
+            elif hasattr(sys, "frozen"):
+                delattr(sys, "frozen")
+
+        main = (ROOT / "gui.py").read_text(encoding="utf-8").split("if __name__ == '__main__':", 1)[1]
+        self.assertLess(main.index("_configure_packaged_multiprocessing_spawn()"), main.index("ensure_single_instance()"))
+        self.assertLess(main.index("multiprocessing.freeze_support()"), main.index("ensure_single_instance()"))
+        self.assertIn("multiprocessing.set_executable(sys.executable)", main)
 
     def test_packaged_installer_has_dry_run_and_lifecycle_tests(self):
         installer = (ROOT / "webapp/install-packaged.cjs").read_text(encoding="utf-8")
@@ -1338,6 +1949,18 @@ class TestReleaseUpdatePanelContract(unittest.TestCase):
         self.assertIn("1.1.0 -> 1.1.5", docs)
         self.assertIn("AutoScriptor_Update_1.1.5.zip", docs)
 
+    def test_release_build_bundles_gift_code_runtime_assets(self):
+        script = (ROOT / "scripts/build_release.py").read_text(encoding="utf-8")
+
+        for marker in [
+            "copy_gift_code_runtime_assets",
+            "collect_zmxy_redeem_2026.py",
+            "zmxy_redeem_codes.json",
+            "copy_gift_code_runtime_assets()",
+        ]:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, script)
+
 
 class TestUpdaterGitCommandContract(unittest.TestCase):
     def test_git_command_includes_safe_directory_for_repo_root(self):
@@ -1412,6 +2035,106 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
             ["谁言寸草心", "金炉驱寒气", "但愿长闲有诗酒，一溪风月共清明", "小小插曲"],
         )
 
+    def test_recent_posts_are_limited_to_ten_days_and_fifteen_posts(self):
+        current = self.collector.datetime(2026, 6, 1, 12, 0, tzinfo=self.collector.TZ_CN)
+        posts = [
+            {"post_id": str(i), "date": f"2026-05-{31 - i:02d}", "url": f"https://bbs.4399.cn/thread-tid-{i}"}
+            for i in range(20)
+        ]
+
+        recent = self.collector.recent_posts_from_list(
+            posts,
+            current=current,
+            max_age_days=10,
+            max_posts=15,
+        )
+
+        self.assertLessEqual(len(recent), 15)
+        self.assertEqual(recent[0]["post_id"], "0")
+        self.assertTrue(all(p["date"] >= "2026-05-22" for p in recent))
+
+    def test_incremental_collector_skips_checked_posts_and_keeps_active_rows(self):
+        current = self.collector.datetime(2026, 6, 1, 12, 0, tzinfo=self.collector.TZ_CN)
+        posts = [
+            {
+                "post_id": "old-post",
+                "title": "[福利码]已查",
+                "summary": "",
+                "url": "https://bbs.4399.cn/thread-tid-old",
+                "date": "2026-06-01",
+            },
+            {
+                "post_id": "new-post",
+                "title": "[福利码]新增",
+                "summary": "",
+                "url": "https://bbs.4399.cn/thread-tid-new",
+                "date": "2026-05-30",
+            },
+            {
+                "post_id": "too-old",
+                "title": "[福利码]过旧",
+                "summary": "",
+                "url": "https://bbs.4399.cn/thread-tid-too-old",
+                "date": "2026-05-10",
+            },
+        ]
+        existing = {
+            "rows": [
+                {
+                    "title": "[福利码]已查",
+                    "code": "旧码仍有效",
+                    "expires_at": "2026-06-05T05:00:00+08:00",
+                    "url": "https://bbs.4399.cn/thread-tid-old",
+                    "source": "4399官方论坛",
+                    "kind": "public_code",
+                    "status": "active",
+                    "note": "",
+                }
+            ],
+            "checked_post_ids": ["old-post"],
+            "checked_post_urls": ["https://bbs.4399.cn/thread-tid-old"],
+            "inspected_posts": [
+                {
+                    "post_id": "old-post",
+                    "title": "[福利码]已查",
+                    "url": "https://bbs.4399.cn/thread-tid-old",
+                    "date": "2026-06-01",
+                    "active": True,
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "codes.json"
+            output.write_text(json.dumps(existing, ensure_ascii=False), encoding="utf-8")
+            with patch.object(self.collector, "_scrape_posts", return_value=posts), patch.object(
+                self.collector,
+                "collect_thread",
+                return_value=(
+                    "[福利码]新增",
+                    "福利码：新码内含：祝福礼包*5\n兑换码有效时间至6月8日05:00",
+                    2026,
+                    True,
+                    "",
+                ),
+            ) as collect_thread:
+                payload = self.collector.collect_incremental(
+                    output,
+                    config_path=Path(tmp) / "missing.json",
+                    username="u",
+                    password="p",
+                    max_age_days=10,
+                    max_posts=15,
+                    current=current,
+                )
+
+        self.assertEqual(collect_thread.call_count, 1)
+        self.assertEqual(collect_thread.call_args.args[0]["post_id"], "new-post")
+        self.assertEqual([row["code"] for row in payload["rows"]], ["旧码仍有效", "新码"])
+        self.assertIn("old-post", payload["checked_post_ids"])
+        self.assertIn("new-post", payload["checked_post_ids"])
+        self.assertNotIn("too-old", payload["checked_post_ids"])
+
     def test_redeem_codes_use_single_authoritative_file(self):
         content = "\n".join(
             path.read_text(encoding="utf-8", errors="ignore")
@@ -1437,11 +2160,113 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
             encoding="utf-8",
             errors="ignore",
         )
+        index = (ROOT / "services/webui/static/index.html").read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
 
         self.assertIn("const NEWS_GIFT_CODES_PAGE_URL = '/api/news/gift_codes/page';", panel)
         self.assertIn("giftFrameSrc: NEWS_GIFT_CODES_PAGE_URL", panel)
         self.assertIn(':src="giftFrameSrc"', panel)
-        self.assertNotIn(':src="NEWS_REDEEM_PAGE_URL"', panel)
+        self.assertIn("/api/news/gift_codes?refresh=1", panel)
+        self.assertNotIn("NEWS_REDEEM_PAGE_URL", panel)
+        self.assertNotIn("5054399.com", panel)
+        self.assertNotIn("5054399.com", index)
+        self.assertNotIn("openGiftExternal", panel)
+
+    def test_gift_codes_page_supports_direct_redeem_flow(self):
+        route = (ROOT / "services/webui/routes/news.py").read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+        server = (ROOT / "services/webui/server.py").read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+        scheduler = (ROOT / "services/core/scheduler.py").read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+        task_manager = (ROOT / "services/core/task_manager.py").read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+
+        for marker in [
+            "font-size:28px",
+            "<th>序号</th><th>兑换码</th><th>到期时间</th><th>来源链接</th><th>操作</th>",
+            ">复制</button>",
+            ">前往兑换</button>",
+            '<label for="redeemAccount">账号</label>',
+            '<label for="redeemRole">角色</label>',
+            '<button type="button" class="btn btn-redeem" id="confirmRedeem">确认</button>',
+            '<button type="button" class="btn btn-cancel" id="cancelRedeem">取消</button>',
+            '<button type="button" class="btn btn-secondary" id="batchRedeem" disabled>兑换选中</button>',
+            "function setChecked(cb,ev)",
+            "ev.shiftKey&&lastCheckedCode",
+            "function openBatchRedeem()",
+            "setPageStatus((codes.length>1?codes.length+' 个兑换码':'兑换码')+'正在兑换中',false)",
+            "closeRedeem();",
+            "redeem_codes:codes",
+            "/api/news/redeem_targets",
+            "/api/news/gift_codes/redeem",
+        ]:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, route)
+
+        self.assertNotIn("<th>类型</th>", route)
+        self.assertIn('label": f"{server}:{char_name}"', server)
+        redeem_task = (ROOT / "ZmxyOL/task/normal_task/huodong/redeem_gift.py").read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+        manifest = (ROOT / "ZmxyOL/task/_manifest.py").read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+        translations = (ROOT / "ZmxyOL/task/translations.py").read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+
+        self.assertIn('_GIFT_REDEEM_TASK_PATH = "一般任务/活动/兑换豪礼礼品兑换"', server)
+        self.assertIn("未找到兑换码任务，请确认一般任务已加载", server)
+        self.assertIn("ZmxyOL.task.normal_task.huodong.redeem_gift", manifest)
+        self.assertIn("'兑换豪礼礼品兑换': 'redeem_gift'", translations)
+        self.assertIn("def task(redeem_code: str | list[str] = \"1111\")", redeem_task)
+        self.assertFalse((ROOT / "data/custom_task/zmxy_activity_redeem.py").exists())
+        self.assertIn('task_runs = [', server)
+        self.assertIn('"id": "redeem:batch"', server)
+        self.assertIn('"params": {"redeem_code": redeem_codes if len(redeem_codes) > 1 else redeem_codes[0]}', server)
+        self.assertIn("scheduler.run_direct_sequence(runs, force_login=True)", server)
+        self.assertIn("force_login: bool = False", scheduler)
+        self.assertIn("explicit_task_runs: list[dict] | None = None", scheduler)
+        self.assertIn("def run_direct_sequence(", scheduler)
+        self.assertIn("param_overrides: dict[str, dict] | None = None", scheduler)
+        self.assertIn("param_override: dict[str, Any] | None = None", task_manager)
+
+    def test_news_page_refreshes_immediately_after_auth_or_reopen(self):
+        panel = (ROOT / "services/webui/static/js/components/NewsPanel.js").read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+        app = (ROOT / "services/webui/static/js/app.js").read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+        index = (ROOT / "services/webui/static/index.html").read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+
+        self.assertIn("refreshKey: { type: Number, default: 0 }", panel)
+        self.assertIn("refreshKey()", panel)
+        self.assertIn("this.fetchPosts(true);", panel)
+        self.assertIn("const newsRefreshKey = ref(0);", app)
+        self.assertIn("function refreshNewsImmediately()", app)
+        self.assertIn("if (activeTab.value === 'news') refreshNewsImmediately();", app)
+        self.assertIn('@navigate="navigateTo"', index)
+        self.assertIn(':refresh-key="newsRefreshKey"', index)
 
     def test_news_public_credentials_are_explicitly_scoped(self):
         session = (ROOT / "services/webui/routes/news_4399_session.py").read_text(

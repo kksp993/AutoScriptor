@@ -3,10 +3,12 @@
 import sys
 import os
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from services.webui.routes.news import (
+    _fetch_proxy_with_adaptive_login,
     _forum_iframe_placeholder,
     _is_login_wall_response,
     _strip_document_domain_assignments,
@@ -61,6 +63,61 @@ class TestNewsLoginWall(unittest.TestCase):
         out = _strip_document_domain_assignments(s)
         self.assertNotIn('["domain"]', out)
         self.assertIn("bar();", out)
+
+    def test_adaptive_login_retries_login_wall(self):
+        login_wall = _FakeResp(
+            "http://my.4399.com/account/login?refer=http%3A%2F%2Fbbs.4399.cn%2Fthread-tid-1"
+        )
+        ok = _FakeResp("https://bbs.4399.cn/thread-tid-1")
+        session = object()
+
+        with patch("services.webui.routes.news.get_cached_session", return_value=None), patch(
+            "services.webui.routes.news.get_cached_or_login_session", return_value=session
+        ) as login, patch(
+            "services.webui.routes.news._fetch_proxy_upstream",
+            side_effect=[login_wall, ok],
+        ) as fetch:
+            out = _fetch_proxy_with_adaptive_login(
+                "https://bbs.4399.cn/thread-tid-1",
+                "account",
+                "password",
+                "token",
+            )
+
+        self.assertIs(out, ok)
+        login.assert_called_once_with("token", "account", "password", force=False)
+        self.assertIsNone(fetch.call_args_list[0].args[1])
+        self.assertIs(fetch.call_args_list[1].args[1], session)
+
+    def test_adaptive_login_refreshes_stale_cached_session(self):
+        login_wall = _FakeResp(
+            "http://my.4399.com/account/login?refer=http%3A%2F%2Fbbs.4399.cn%2Fthread-tid-1"
+        )
+        ok = _FakeResp("https://bbs.4399.cn/thread-tid-1")
+        stale_session = object()
+        fresh_session = object()
+
+        with patch(
+            "services.webui.routes.news.get_cached_session",
+            return_value=stale_session,
+        ), patch(
+            "services.webui.routes.news.get_cached_or_login_session",
+            return_value=fresh_session,
+        ) as login, patch(
+            "services.webui.routes.news._fetch_proxy_upstream",
+            side_effect=[login_wall, ok],
+        ) as fetch:
+            out = _fetch_proxy_with_adaptive_login(
+                "https://bbs.4399.cn/thread-tid-1",
+                "account",
+                "password",
+                "token",
+            )
+
+        self.assertIs(out, ok)
+        login.assert_called_once_with("token", "account", "password", force=True)
+        self.assertIs(fetch.call_args_list[0].args[1], stale_session)
+        self.assertIs(fetch.call_args_list[1].args[1], fresh_session)
 
 
 if __name__ == "__main__":

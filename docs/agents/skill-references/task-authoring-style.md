@@ -14,6 +14,7 @@ Read this when changing task scripts, task APIs, operator dispatch patterns, or 
 - Prefer `TaskRequireReTry` for transient recoverable failures.
 - Incomplete progress after retry exhaustion is expected to become `human_takeover_error`; do not treat "function finished" as success if progress remains `5/6`.
 - When adding custom tasks under `data/custom_task/`, register them with explicit `@register_task(path_cn="自定义任务/...")`.
+- Release-owned tasks that must change through same-line update packages should live in `ZmxyOL/task/` rather than only `data/custom_task/`, because release updates protect user editable custom scripts.
 - Use `task_doc`, `description`, `beta`, and `debug_mode` metadata instead of persisting UI-only fields into config.
 
 Useful docs:

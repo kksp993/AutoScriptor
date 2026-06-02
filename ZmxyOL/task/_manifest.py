@@ -75,4 +75,5 @@ TASK_MODULES = [
     "ZmxyOL.task.normal_task.battle",
     "ZmxyOL.task.normal_task.back_to_login",
     "ZmxyOL.task.normal_task.brahma_tower",
+    "ZmxyOL.task.normal_task.huodong.redeem_gift",
 ]

@@ -8,6 +8,7 @@ const app = createApp({
   setup() {
     const configData = reactive({});
     const activeTab = ref('news');
+    const newsRefreshKey = ref(0);
     const logs = ref([]);
     const characterName = ref('');
     const schedulerStatus = reactive({ state: 'pending', label: '待运行', color: 'green', consecutive_errors: 0 });
@@ -416,6 +417,15 @@ const app = createApp({
 
     function schedulerViewActive() {
       return activeTab.value === 'overview' || activeTab.value === 'scheduler';
+    }
+
+    function refreshNewsImmediately() {
+      newsRefreshKey.value += 1;
+    }
+
+    function navigateTo(tab) {
+      if (tab === 'news') refreshNewsImmediately();
+      activeTab.value = tab;
     }
 
     function ensureRunReady(message = '当前仍有任务在运行或停止中，请先终止或稍候再试') {
@@ -858,6 +868,7 @@ const app = createApp({
           ElementPlus.ElMessage.success('登录成功');
           await refreshConfig(true);
           await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
+          if (activeTab.value === 'news') refreshNewsImmediately();
           setupWebSocket();
         } else {
           const data = await res.json().catch(() => ({}));
@@ -1111,7 +1122,7 @@ const app = createApp({
     }
 
     return {
-      configData, activeTab, logs, characterName, filteredConfig, currentTasks,
+      configData, activeTab, newsRefreshKey, logs, characterName, filteredConfig, currentTasks,
       schedulerStatus, overviewData, activeGroupPath, pageTitle,
       editModalVisible, editTaskData, editTaskPath, paramEnumOptions, paramLabel,
       addDialogVisible, addForm,
@@ -1134,7 +1145,7 @@ const app = createApp({
       isTableParam, getTableRows, getTableColumns, getTableColumnLabel, getTableEnumOptions, tableRowsCache,
       saveTasks, saveSettings, clearLogs, reloadTasks,
       submitAddAccount,
-      isElectron, minimizeToTray,
+      isElectron, minimizeToTray, navigateTo,
       pendingEditorImportUrl, goToEditorWithImage, onEditorImported,
       featureScriptCanvas: FEATURE_SCRIPT_CANVAS,
       init,

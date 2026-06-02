@@ -7,7 +7,7 @@ execution; this controller only composes its state with direct execution.
 from __future__ import annotations
 
 from threading import Lock, Thread, current_thread
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 
 from AutoScriptor.utils.logger import logger
 from services.core.scheduler import Scheduler, SchedulerState
@@ -86,8 +86,8 @@ class RuntimeController:
 
     def start_direct(
         self,
-        target: Callable[[list[str]], None],
-        tasks: list[str],
+        target: Callable[[list[Any]], None],
+        tasks: list[Any],
         set_high_priority: Callable[[Thread], None] | None = None,
     ) -> Thread:
         if self.direct_run_alive():

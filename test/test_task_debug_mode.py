@@ -99,6 +99,95 @@ class TestTaskDebugMode(unittest.TestCase):
         ensure_login.assert_not_called()
         post_action.assert_not_called()
 
+    def test_scheduler_can_force_login_for_debug_task_with_param_override(self):
+        from services.core.scheduler import Scheduler
+
+        self._install_task_config(debug_mode=True)
+
+        class FakeTaskManager:
+            def __init__(self):
+                self._cancel_event = Event()
+                self.calls = []
+
+            def execute_tasks(self, tasks, *, param_overrides=None):
+                self.calls.append((list(tasks), param_overrides))
+                return 1, 0
+
+            def reload_tasks(self):
+                return None
+
+            def _reset_cancel(self):
+                self._cancel_event.clear()
+
+        tm = FakeTaskManager()
+        sched = Scheduler()
+        sched.set_task_manager(tm)
+        overrides = {"测试/任务": {"redeem_code": "临时代码"}}
+
+        with patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}):
+            with patch.object(cfg, "save_config"):
+                with patch("services.core.scheduler.runtime_ctx.refresh"):
+                    with patch("AutoScriptor.utils.perf.boost"):
+                        with patch("AutoScriptor.utils.perf.unboost"):
+                            with patch("services.core.scheduler.notify_from_config"):
+                                with patch.object(sched, "_maybe_daily_restart") as daily_restart:
+                                    with patch.object(sched, "_ensure_character_logged_in") as ensure_login:
+                                        with patch.object(sched, "_post_execution_action") as post_action:
+                                            sched._run_task_pipeline(
+                                                explicit_tasks=["测试/任务"],
+                                                force_login=True,
+                                                param_overrides=overrides,
+                                            )
+
+        self.assertEqual(tm.calls, [(["测试/任务"], overrides)])
+        daily_restart.assert_not_called()
+        ensure_login.assert_called_once()
+        post_action.assert_not_called()
+
+    def test_scheduler_runs_same_debug_task_with_distinct_param_overrides(self):
+        from services.core.scheduler import Scheduler
+
+        self._install_task_config(debug_mode=True)
+
+        class FakeTaskManager:
+            def __init__(self):
+                self._cancel_event = Event()
+                self.calls = []
+
+            def execute_tasks(self, tasks, *, param_overrides=None):
+                self.calls.append((list(tasks), param_overrides))
+                return 1, 0
+
+            def reload_tasks(self):
+                return None
+
+            def _reset_cancel(self):
+                self._cancel_event.clear()
+
+        tm = FakeTaskManager()
+        sched = Scheduler()
+        sched.set_task_manager(tm)
+        runs = [
+            {"id": "code-1", "task": "测试/任务", "params": {"redeem_code": "A"}},
+            {"id": "code-2", "task": "测试/任务", "params": {"redeem_code": "B"}},
+        ]
+
+        with patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}):
+            with patch.object(cfg, "save_config"):
+                with patch("services.core.scheduler.runtime_ctx.refresh"):
+                    with patch("AutoScriptor.utils.perf.boost"):
+                        with patch("AutoScriptor.utils.perf.unboost"):
+                            with patch("services.core.scheduler.notify_from_config"):
+                                with patch.object(sched, "_maybe_daily_restart"):
+                                    with patch.object(sched, "_ensure_character_logged_in"):
+                                        with patch.object(sched, "_post_execution_action"):
+                                            sched.run_direct_sequence(runs, force_login=True)
+
+        self.assertEqual(tm.calls, [
+            (["测试/任务"], {"测试/任务": {"redeem_code": "A"}}),
+            (["测试/任务"], {"测试/任务": {"redeem_code": "B"}}),
+        ])
+
 
 if __name__ == "__main__":
     unittest.main()

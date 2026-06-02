@@ -52,14 +52,63 @@ def _electron_force_utf8_stdio() -> None:
 
 _electron_force_utf8_stdio()
 
-import argparse
-import json
 import os
+
+
+def _windows_current_executable_path() -> str:
+    if os.name != "nt":
+        return ""
+    try:
+        import ctypes
+
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = ctypes.windll.kernel32.GetModuleFileNameW(None, buffer, len(buffer))
+        if length:
+            return buffer.value
+    except Exception:
+        return ""
+    return ""
+
+
+def _configure_packaged_multiprocessing_spawn() -> None:
+    if not _COMPILED or os.name != "nt":
+        return
+    try:
+        setattr(sys, "frozen", True)
+    except Exception:
+        pass
+
+    executable = _windows_current_executable_path()
+    if executable and executable.lower().endswith(".exe"):
+        sys.executable = executable
+
+
+try:
+    from importlib.util import module_from_spec as _PACKAGED_STDLIB_MODULE_FROM_SPEC
+    from importlib.util import spec_from_file_location as _PACKAGED_STDLIB_SPEC_FROM_FILE_LOCATION
+except Exception:
+    _PACKAGED_STDLIB_MODULE_FROM_SPEC = None
+    _PACKAGED_STDLIB_SPEC_FROM_FILE_LOCATION = None
+
+try:
+    import _frozen_importlib as _PACKAGED_STDLIB_BOOTSTRAP
+    import _frozen_importlib_external as _PACKAGED_STDLIB_BOOTSTRAP_EXTERNAL
+
+    _PACKAGED_STDLIB_MODULE_SPEC = getattr(_PACKAGED_STDLIB_BOOTSTRAP, "ModuleSpec", None)
+    _PACKAGED_STDLIB_SOURCE_FILE_LOADER = getattr(
+        _PACKAGED_STDLIB_BOOTSTRAP_EXTERNAL,
+        "SourceFileLoader",
+        None,
+    )
+except Exception:
+    _PACKAGED_STDLIB_MODULE_SPEC = None
+    _PACKAGED_STDLIB_SOURCE_FILE_LOADER = None
 
 # Nuitka 编译后 sys.path 由编译器自动管理，无需手动插入；
 # 开发模式下仍需将项目根加入 sys.path 以支持 import AutoScriptor / ZmxyOL
 _COMPILED = "__compiled__" in dir()
 if _COMPILED:
+    _configure_packaged_multiprocessing_spawn()
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(sys.executable)))
     # Keep a stable user base without importing site; site pulls pip/ensurepip into Nuitka.
     _exe_dir = os.path.dirname(os.path.abspath(sys.executable))
@@ -73,6 +122,443 @@ else:
     ROOT = os.path.dirname(os.path.abspath(__file__))
     if ROOT not in sys.path:
         sys.path.insert(0, ROOT)
+
+
+def _packaged_stdlib_module_from_source_loader(
+    name: str,
+    path: str,
+    *,
+    package_dir: str | None = None,
+):
+    """Build a module with frozen importlib loader primitives."""
+    if _PACKAGED_STDLIB_SOURCE_FILE_LOADER is None:
+        return None
+    try:
+        loader = _PACKAGED_STDLIB_SOURCE_FILE_LOADER(name, path)
+    except Exception:
+        return None
+
+    spec = None
+    if _PACKAGED_STDLIB_MODULE_SPEC is not None:
+        try:
+            spec = _PACKAGED_STDLIB_MODULE_SPEC(
+                name,
+                loader,
+                origin=path,
+                is_package=package_dir is not None,
+            )
+        except TypeError:
+            try:
+                spec = _PACKAGED_STDLIB_MODULE_SPEC(name, loader)
+            except Exception:
+                spec = None
+        except Exception:
+            spec = None
+        if spec is not None and package_dir is not None:
+            try:
+                spec.submodule_search_locations = [package_dir]
+            except Exception:
+                pass
+
+    module = type(sys)(name)
+    module.__loader__ = loader
+    module.__file__ = path
+    module.__package__ = name if package_dir is not None else name.rpartition(".")[0]
+    if spec is not None:
+        module.__spec__ = spec
+    if package_dir is not None:
+        module.__path__ = [package_dir]
+    return module, loader
+
+
+_PACKAGED_IMPORTLIB_METADATA_HELPERS = (
+    "_functools",
+    "_text",
+    "_adapters",
+    "_collections",
+    "_itertools",
+    "_meta",
+)
+
+
+def _preload_packaged_importlib_metadata_helpers(name: str, package_dir: str | None) -> None:
+    if name != "importlib.metadata" or package_dir is None:
+        return
+    for helper in _PACKAGED_IMPORTLIB_METADATA_HELPERS:
+        submodule_name = f"{name}.{helper}"
+        existing = sys.modules.get(submodule_name)
+        has_location = bool(getattr(existing, "__file__", None)) if existing is not None else False
+        if has_location:
+            continue
+        sys.modules.pop(submodule_name, None)
+        path = os.path.join(package_dir, f"{helper}.py")
+        loaded = _load_packaged_stdlib_module(submodule_name, path)
+        if not loaded:
+            loaded = _load_packaged_stdlib_module(submodule_name, path + "c")
+        if not loaded:
+            raise ImportError(f"cannot preload {submodule_name}")
+
+
+def _load_packaged_stdlib_module(
+    name: str,
+    path: str,
+    *,
+    package_dir: str | None = None,
+    prefer_source_loader: bool = False,
+) -> bool:
+    """Load a copied CPython stdlib module before a Nuitka namespace shell wins."""
+    if not os.path.isfile(path):
+        return False
+    module = None
+    loader = None
+    if prefer_source_loader:
+        fallback = _packaged_stdlib_module_from_source_loader(name, path, package_dir=package_dir)
+        if fallback is not None:
+            module, loader = fallback
+    if _PACKAGED_STDLIB_MODULE_FROM_SPEC is not None and _PACKAGED_STDLIB_SPEC_FROM_FILE_LOCATION is not None:
+        if module is None or loader is None:
+            try:
+                spec = _PACKAGED_STDLIB_SPEC_FROM_FILE_LOCATION(
+                    name,
+                    path,
+                    submodule_search_locations=([package_dir] if package_dir is not None else None),
+                )
+                if spec is not None and spec.loader is not None:
+                    module = _PACKAGED_STDLIB_MODULE_FROM_SPEC(spec)
+                    loader = spec.loader
+            except Exception:
+                module = None
+                loader = None
+    if module is None or loader is None:
+        fallback = _packaged_stdlib_module_from_source_loader(name, path, package_dir=package_dir)
+        if fallback is None:
+            return False
+        module, loader = fallback
+    sys.modules[name] = module
+    parent_name, _, child_name = name.rpartition(".")
+    parent = sys.modules.get(parent_name) if parent_name else None
+    if parent is not None:
+        try:
+            setattr(parent, child_name, module)
+        except Exception:
+            pass
+    try:
+        _preload_packaged_importlib_metadata_helpers(name, package_dir)
+        loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        if package_dir is not None:
+            for mod_name in [key for key in sys.modules if key.startswith(name + ".")]:
+                sys.modules.pop(mod_name, None)
+        if parent is not None and getattr(parent, child_name, None) is module:
+            try:
+                delattr(parent, child_name)
+            except Exception:
+                pass
+        raise
+    return True
+
+
+def _prepend_package_search_path(module, package_dir: str) -> None:
+    paths = list(getattr(module, "__path__", []) or [])
+    if package_dir not in paths:
+        try:
+            module.__path__ = [package_dir, *paths]
+        except Exception:
+            pass
+    spec = getattr(module, "__spec__", None)
+    if spec is None:
+        return
+    try:
+        locations = getattr(spec, "submodule_search_locations", None)
+        if locations is None:
+            spec.submodule_search_locations = [package_dir]
+        else:
+            spec_paths = list(locations)
+            if package_dir not in spec_paths:
+                spec.submodule_search_locations = [package_dir, *spec_paths]
+    except Exception:
+        pass
+
+
+def _drop_module_tree(name: str) -> None:
+    for mod_name in [key for key in sys.modules if key == name or key.startswith(name + ".")]:
+        sys.modules.pop(mod_name, None)
+
+
+def _drop_broken_package_shell(name: str) -> None:
+    """Remove a Nuitka namespace shell when copied stdlib source should load."""
+    module = sys.modules.get(name)
+    if module is None:
+        return
+    has_location = bool(getattr(module, "__file__", None) or getattr(module, "__path__", None))
+    if has_location:
+        return
+    _drop_module_tree(name)
+
+
+def _create_packaged_package_shell(name: str, package_dir: str, init_path: str):
+    """Create a package object without executing its copied __init__.py."""
+    fallback = _packaged_stdlib_module_from_source_loader(name, init_path, package_dir=package_dir)
+    if fallback is not None:
+        module, _loader = fallback
+    else:
+        module = type(sys)(name)
+        module.__file__ = init_path
+        module.__package__ = name
+        module.__path__ = [package_dir]
+    sys.modules[name] = module
+    parent_name, _, child_name = name.rpartition(".")
+    parent = sys.modules.get(parent_name) if parent_name else None
+    if parent is not None:
+        try:
+            setattr(parent, child_name, module)
+        except Exception:
+            pass
+    _prepend_package_search_path(module, package_dir)
+    return module
+
+
+def _export_multiprocessing_context_api(package, context_module) -> None:
+    default_context = getattr(context_module, "_default_context", None)
+    if default_context is None:
+        raise ImportError("multiprocessing.context has no _default_context")
+    exported = [name for name in dir(default_context) if not name.startswith("_")]
+    package.__all__ = exported
+    for name in exported:
+        setattr(package, name, getattr(default_context, name))
+    package.SUBDEBUG = 5
+    package.SUBWARNING = 25
+    if "__main__" in sys.modules:
+        sys.modules["__mp_main__"] = sys.modules["__main__"]
+
+
+def _load_packaged_multiprocessing_child(package_dir: str, child: str) -> bool:
+    module_name = f"multiprocessing.{child}"
+    source_path = os.path.join(package_dir, f"{child}.py")
+    bytecode_path = source_path + "c"
+    return _load_packaged_stdlib_module(
+        module_name,
+        source_path,
+        prefer_source_loader=True,
+    ) or _load_packaged_stdlib_module(
+        module_name,
+        bytecode_path,
+        prefer_source_loader=True,
+    )
+
+
+def _bootstrap_packaged_multiprocessing(exe_dir: str) -> None:
+    package_dir = os.path.join(exe_dir, "multiprocessing")
+    if not os.path.isdir(package_dir):
+        return
+    existing = sys.modules.get("multiprocessing")
+    if existing is not None and getattr(existing, "__file__", None) and hasattr(existing, "Manager"):
+        return
+    _drop_module_tree("multiprocessing")
+    parent = _create_packaged_package_shell(
+        "multiprocessing",
+        package_dir,
+        os.path.join(package_dir, "__init__.py"),
+    )
+    if not _load_packaged_multiprocessing_child(package_dir, "process"):
+        raise ImportError("cannot preload multiprocessing.process")
+    if not _load_packaged_multiprocessing_child(package_dir, "util"):
+        raise ImportError("cannot preload multiprocessing.util")
+    if not _load_packaged_multiprocessing_child(package_dir, "context"):
+        raise ImportError("cannot preload multiprocessing.context")
+    context_module = sys.modules.get("multiprocessing.context")
+    if context_module is None:
+        raise ImportError("multiprocessing.context was not registered")
+    try:
+        setattr(parent, "context", context_module)
+    except Exception:
+        pass
+    _export_multiprocessing_context_api(parent, context_module)
+    if not _load_packaged_multiprocessing_child(package_dir, "reduction"):
+        raise ImportError("cannot preload multiprocessing.reduction")
+    if not _load_packaged_multiprocessing_child(package_dir, "connection"):
+        raise ImportError("cannot preload multiprocessing.connection")
+    if not _load_packaged_multiprocessing_child(package_dir, "synchronize"):
+        raise ImportError("cannot preload multiprocessing.synchronize")
+    if not _load_packaged_multiprocessing_child(package_dir, "spawn"):
+        raise ImportError("cannot preload multiprocessing.spawn")
+    if not _load_packaged_multiprocessing_child(package_dir, "popen_spawn_win32"):
+        raise ImportError("cannot preload multiprocessing.popen_spawn_win32")
+
+
+def _bootstrap_packaged_encodings(exe_dir: str) -> None:
+    package_dir = os.path.join(exe_dir, "encodings")
+    if not os.path.isdir(package_dir):
+        return
+    parent = sys.modules.get("encodings")
+    if parent is not None:
+        _prepend_package_search_path(parent, package_dir)
+    else:
+        _load_packaged_stdlib_module(
+            "encodings",
+            os.path.join(package_dir, "__init__.py"),
+            package_dir=package_dir,
+        ) or _load_packaged_stdlib_module(
+            "encodings",
+            os.path.join(package_dir, "__init__.pyc"),
+            package_dir=package_dir,
+        )
+    idna_path = os.path.join(package_dir, "idna.py")
+    existing = sys.modules.get("encodings.idna")
+    existing_file = getattr(existing, "__file__", "") if existing is not None else ""
+    if existing_file and os.path.abspath(existing_file).startswith(os.path.abspath(package_dir)):
+        return
+    sys.modules.pop("encodings.idna", None)
+    _load_packaged_stdlib_module("encodings.idna", idna_path) or _load_packaged_stdlib_module(
+        "encodings.idna",
+        idna_path + "c",
+    )
+
+
+def _patch_packaged_typing_protocol_allowlist() -> None:
+    try:
+        import typing
+    except Exception:
+        return
+    allowlist = getattr(typing, "_PROTO_ALLOWLIST", None)
+    if not isinstance(allowlist, dict):
+        return
+    names = (
+        "Awaitable",
+        "AsyncIterator",
+        "AsyncIterable",
+        "Coroutine",
+        "Generator",
+        "Iterable",
+        "Iterator",
+        "Reversible",
+        "Sized",
+        "Container",
+        "Collection",
+        "Callable",
+        "ContextManager",
+        "AsyncContextManager",
+        "Hashable",
+    )
+    for module_name in ("collections.abc", "_collections_abc"):
+        existing = allowlist.get(module_name)
+        if isinstance(existing, set):
+            existing.update(names)
+        elif isinstance(existing, list):
+            for name in names:
+                if name not in existing:
+                    existing.append(name)
+        elif isinstance(existing, tuple):
+            allowlist[module_name] = tuple(dict.fromkeys([*existing, *names]))
+        else:
+            allowlist[module_name] = list(names)
+
+
+def _bootstrap_packaged_importlib(exe_dir: str) -> None:
+    package_dir = os.path.join(exe_dir, "importlib")
+    if not os.path.isdir(package_dir):
+        return
+    parent = sys.modules.get("importlib")
+    if parent is not None:
+        _prepend_package_search_path(parent, package_dir)
+    for submodule in (
+        "importlib.abc",
+        "importlib.resources",
+        "importlib.readers",
+        "importlib.metadata",
+        "importlib._adapters",
+        "importlib._common",
+        "importlib.metadata._adapters",
+        "importlib.metadata._collections",
+        "importlib.metadata._functools",
+        "importlib.metadata._itertools",
+        "importlib.metadata._meta",
+        "importlib.metadata._text",
+    ):
+        _drop_broken_package_shell(submodule)
+    if "importlib._abc" not in sys.modules:
+        _load_packaged_stdlib_module(
+            "importlib._abc",
+            os.path.join(package_dir, "_abc.py"),
+        ) or _load_packaged_stdlib_module(
+            "importlib._abc",
+            os.path.join(package_dir, "_abc.pyc"),
+        )
+    for name, rel_path, package_path in (
+        ("importlib.abc", "abc.py", None),
+        ("importlib._adapters", "_adapters.py", None),
+        ("importlib._common", "_common.py", None),
+        ("importlib.readers", "readers.py", None),
+        ("importlib.resources", "resources.py", None),
+        ("importlib.metadata", os.path.join("metadata", "__init__.py"), os.path.join(package_dir, "metadata")),
+    ):
+        if name in sys.modules:
+            continue
+        _load_packaged_stdlib_module(
+            name,
+            os.path.join(package_dir, rel_path),
+            package_dir=package_path,
+        ) or _load_packaged_stdlib_module(
+            name,
+            os.path.join(package_dir, rel_path + "c"),
+            package_dir=package_path,
+        )
+
+
+def _bootstrap_packaged_stdlib() -> None:
+    if not _COMPILED:
+        return
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    try:
+        _bootstrap_packaged_importlib(exe_dir)
+    except Exception as exc:
+        print(f"[bootstrap] packaged stdlib importlib repair failed: {exc}", file=sys.stderr)
+    try:
+        _bootstrap_packaged_encodings(exe_dir)
+    except Exception as exc:
+        print(f"[bootstrap] packaged stdlib encodings repair failed: {exc}", file=sys.stderr)
+    try:
+        _bootstrap_packaged_multiprocessing(exe_dir)
+    except Exception as exc:
+        print(f"[bootstrap] packaged stdlib multiprocessing repair failed: {exc}", file=sys.stderr)
+    try:
+        collections_mod = sys.modules.get("collections")
+        if collections_mod is not None and hasattr(collections_mod, "deque"):
+            _patch_packaged_typing_protocol_allowlist()
+            return
+        sys.modules.pop("collections", None)
+        abc_loaded = _load_packaged_stdlib_module(
+            "_collections_abc",
+            os.path.join(exe_dir, "_collections_abc.py"),
+        ) or _load_packaged_stdlib_module(
+            "_collections_abc",
+            os.path.join(exe_dir, "_collections_abc.pyc"),
+        )
+        package_dir = os.path.join(exe_dir, "collections")
+        loaded = _load_packaged_stdlib_module(
+            "collections",
+            os.path.join(package_dir, "__init__.py"),
+            package_dir=package_dir,
+        ) or _load_packaged_stdlib_module(
+            "collections",
+            os.path.join(package_dir, "__init__.pyc"),
+            package_dir=package_dir,
+        )
+        if loaded and abc_loaded:
+            collections_mod = sys.modules.get("collections")
+            if collections_mod is not None and hasattr(collections_mod, "deque"):
+                _patch_packaged_typing_protocol_allowlist()
+                return
+    except Exception as exc:
+        print(f"[bootstrap] packaged stdlib collections repair failed: {exc}", file=sys.stderr)
+    _patch_packaged_typing_protocol_allowlist()
+
+
+_bootstrap_packaged_stdlib()
+
+import argparse
+import json
 
 parser = argparse.ArgumentParser(description='AutoScriptor web service')
 parser.add_argument('--host', default='127.0.0.1')
@@ -206,6 +692,7 @@ def _run_runtime_import_smoke(out_path: str = "") -> bool:
             report["errors"].append(f"{name}: {exc}")
 
     try:
+        from collections import defaultdict, deque
         from AutoScriptor.core.control import MixControl
         from AutoScriptor.core.api import ensure_app_running, extract_info
         from AutoScriptor.core.targets import B
@@ -223,6 +710,8 @@ def _run_runtime_import_smoke(out_path: str = "") -> bool:
         )
 
         report["symbol_checks"] = {
+            "collections_deque": deque.__name__,
+            "collections_defaultdict": defaultdict.__name__,
             "MixControl": MixControl.__name__,
             "ensure_app_running": ensure_app_running.__name__,
             "extract_info": extract_info.__name__,
@@ -407,14 +896,19 @@ if __name__ == '__main__':
     if args.mumu_runtime_probe:
         sys.exit(0 if _run_mumu_runtime_probe(args) else 1)
 
-    from services.single_instance import ensure_single_instance
-
-    ensure_single_instance()
-
     import multiprocessing
     import signal
 
+    _configure_packaged_multiprocessing_spawn()
+    try:
+        multiprocessing.set_executable(sys.executable)
+    except Exception:
+        pass
     multiprocessing.freeze_support()
+
+    from services.single_instance import ensure_single_instance
+
+    ensure_single_instance()
 
     if args.electron:
         os.environ['UVICORN_LOG_LEVEL'] = 'info'

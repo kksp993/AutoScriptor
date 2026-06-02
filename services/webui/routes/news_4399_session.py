@@ -158,13 +158,36 @@ def login_ptlogin_session(username: str, password: str) -> requests.Session | No
         return None
 
 
-def get_cached_or_login_session(cache_token: str, username: str, password: str) -> requests.Session | None:
-    """按调用方提供的缓存令牌缓存 Session，减少频繁登录。"""
+def get_cached_session(cache_token: str, username: str) -> requests.Session | None:
+    """仅读取仍在 TTL 内的 Session；不触发远端登录。"""
     key = f"{cache_token}:{username}"
     now = time.monotonic()
     hit = _session_cache.get(key)
     if hit and hit[0] > now:
         return hit[1]
+    if hit:
+        _session_cache.pop(key, None)
+    return None
+
+
+def get_cached_or_login_session(
+    cache_token: str,
+    username: str,
+    password: str,
+    *,
+    force: bool = False,
+) -> requests.Session | None:
+    """按调用方提供的缓存令牌缓存 Session，减少频繁登录。"""
+    key = f"{cache_token}:{username}"
+    now = time.monotonic()
+    if not force:
+        hit = _session_cache.get(key)
+        if hit and hit[0] > now:
+            return hit[1]
+        if hit:
+            _session_cache.pop(key, None)
+    else:
+        _session_cache.pop(key, None)
 
     sess = login_ptlogin_session(username, password)
     if sess is not None:

@@ -18,7 +18,7 @@ import traceback
 import urllib.request
 import webbrowser
 from queue import Queue, Empty
-from typing import Set
+from typing import Any, Set
 
 from AutoScriptor.utils.logger import logger, _TaskFilter as _LogTaskFilter
 
@@ -321,6 +321,8 @@ lifecycle_service = WebUILifecycleService(
     _mark_config_changed,
     _apply_webui_log_level_from_config,
 )
+
+_GIFT_REDEEM_TASK_PATH = "一般任务/活动/兑换豪礼礼品兑换"
 
 
 # ── FastAPI 应用 ──
@@ -695,6 +697,185 @@ async def run_tasks_api(request: Request):
 async def run_status_api():
     """轻量运行状态接口；统一前端状态以 /api/runtime/snapshot 为准。"""
     return {"running": runtime_controller.direct_run_alive(), "runtime": runtime_controller.status()}
+
+
+def _gift_redeem_character_options() -> list[dict[str, Any]]:
+    """Return account/character choices without exposing credentials, encryption, tasks, or status."""
+    accounts: list[dict[str, Any]] = []
+    current = cfg.current_account()
+    for name in cfg.list_accounts():
+        characters: dict[str, Any] = {}
+        if name == current:
+            characters = cfg.list_characters()
+        else:
+            path = os.path.join(cfg.ACCOUNTS_DIR, f"{name}.json")
+            try:
+                with open(path, "r", encoding="utf-8-sig") as f:
+                    payload = json.load(f)
+                raw_chars = payload.get("characters") or {}
+                if isinstance(raw_chars, dict):
+                    characters = raw_chars
+            except Exception:
+                characters = {}
+
+        roles: list[dict[str, str]] = []
+        for server, server_chars in characters.items():
+            if not isinstance(server_chars, dict):
+                continue
+            for char_name in server_chars.keys():
+                roles.append({
+                    "server": str(server),
+                    "name": str(char_name),
+                    "label": f"{server}:{char_name}",
+                })
+        accounts.append({
+            "name": name,
+            "current": name == current,
+            "roles": roles,
+        })
+    return accounts
+
+
+@app.get("/api/news/redeem_targets")
+async def news_redeem_targets_api():
+    return api_ok(
+        current_account=cfg.current_account(),
+        active_character=cfg.active_character(),
+        credential_unlocked=cfg.has_decrypted_credentials(),
+        accounts=_gift_redeem_character_options(),
+        runtime=runtime_controller.status(),
+    )
+
+
+def _credential_locked_response(message: str) -> JSONResponse:
+    return api_error(
+        403,
+        message,
+        code="credential_locked",
+        need_credential_unlock=True,
+        need_security_key=True,
+    )
+
+
+def _gift_redeem_codes_from_payload(data: dict[str, Any]) -> list[str]:
+    raw_codes = data.get("redeem_codes")
+    if isinstance(raw_codes, list):
+        candidates = raw_codes
+    else:
+        candidates = [data.get("redeem_code")]
+    codes: list[str] = []
+    seen: set[str] = set()
+    for raw in candidates:
+        code = str(raw or "").strip()
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        codes.append(code)
+    return codes
+
+
+@app.post("/api/news/gift_codes/redeem")
+async def news_gift_code_redeem_api(request: Request):
+    data = await request.json()
+    if not isinstance(data, dict):
+        return api_error(400, "invalid redeem payload", code="invalid_payload")
+    if not _check_request_freshness(data):
+        return api_error(400, "请求已过期，请重试", code="stale_request")
+    if runtime_controller.is_busy():
+        return runtime_controller.busy_response("redeem gift code")
+
+    redeem_codes = _gift_redeem_codes_from_payload(data)
+    account = str(data.get("account") or "").strip()
+    server = str(data.get("server") or "").strip()
+    character = str(data.get("character") or "").strip()
+    security_key = str(data.get("security_key") or "").strip()
+
+    if not redeem_codes:
+        return api_error(400, "兑换码不能为空", code="invalid_payload")
+    if len(redeem_codes) > 30:
+        return api_error(400, "一次最多兑换 30 个兑换码", code="invalid_payload")
+    if not account:
+        return api_error(400, "请选择账号", code="invalid_payload")
+    if not server or not character:
+        return api_error(400, "请选择角色", code="invalid_payload")
+
+    client_ip = request.client.host if request.client else "unknown"
+    if security_key and _is_verify_rate_limited(client_ip):
+        return api_error(429, "验证尝试过多，请5分钟后再试", code="rate_limited")
+    credential_granted = False
+
+    try:
+        if account != cfg.current_account():
+            if not security_key:
+                return _credential_locked_response("切换账号需要输入安全密码")
+            if not cfg.verify_account_security_key(account, security_key):
+                _record_verify_failure(client_ip)
+                return api_error(401, "安全密码错误", code="invalid_security_key", need_security_key=True)
+            lifecycle_service.switch_account(account, security_key)
+            credential_granted = True
+        elif not cfg.has_decrypted_credentials():
+            if cfg.has_encrypted_credentials():
+                if not security_key:
+                    return _credential_locked_response("请先输入安全密码以验证账号")
+                if not cfg.verify_account_security_key(account, security_key):
+                    _record_verify_failure(client_ip)
+                    return api_error(401, "安全密码错误", code="invalid_security_key", need_security_key=True)
+                lifecycle_service.reload_verified_account(security_key)
+                _mark_config_changed("redeem credential unlock")
+                credential_granted = True
+            else:
+                return _credential_locked_response("当前账号未配置游戏账号密码")
+
+        if not cfg.has_decrypted_credentials():
+            return _credential_locked_response("请先验证账号密码后再兑换")
+
+        lifecycle_service.switch_character(server, character, reason="redeem code select character")
+
+        from AutoScriptor.utils.task_registry import task_registry
+
+        if not task_registry.has_task(_GIFT_REDEEM_TASK_PATH):
+            lifecycle_service.reload_tasks(reason="reload redeem task")
+        if not task_registry.has_task(_GIFT_REDEEM_TASK_PATH):
+            return api_error(
+                404,
+                "未找到兑换码任务，请确认一般任务已加载",
+                code="redeem_task_missing",
+            )
+    except (KeyError, ValueError) as e:
+        return api_error(400, str(e), code="invalid_payload")
+    except Exception as e:
+        logger.error("gift code redeem prepare failed: %s", e, exc_info=True)
+        return api_error(500, "启动兑换任务失败", code="redeem_start_failed")
+
+    task_runs = [
+        {
+            "id": "redeem:batch",
+            "task": _GIFT_REDEEM_TASK_PATH,
+            "params": {"redeem_code": redeem_codes if len(redeem_codes) > 1 else redeem_codes[0]},
+        }
+    ]
+
+    def _run(runs):
+        scheduler.run_direct_sequence(runs, force_login=True)
+        logger.info("========== 兑换码任务执行完成，共 %d 个 ==========", len(redeem_codes))
+
+    runtime_controller.start_direct(_run, task_runs, _set_thread_high_priority)
+    resp = JSONResponse(content=api_ok(
+        status="ok",
+        mode="direct",
+        task=_GIFT_REDEEM_TASK_PATH,
+        redeem_codes=redeem_codes,
+        redeem_count=len(redeem_codes),
+        account=cfg.current_account(),
+        active_character=cfg.active_character(),
+        config_version=current_version(),
+    ))
+    if credential_granted:
+        old_tok = _credential_unlock_from_request(request)
+        _revoke_credential_unlock(old_tok)
+        tok = _grant_credential_unlock()
+        return _attach_credential_unlock_cookie(resp, tok)
+    return resp
 
 
 @app.post("/api/stop")

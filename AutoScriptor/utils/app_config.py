@@ -412,6 +412,7 @@ class AutoConfig:
 
     def save_config(self, *, quiet: bool = False) -> None:
         os.makedirs(os.path.dirname(self.CONFIG_PATH), exist_ok=True)
+        self._mgr.config_path = Path(self.CONFIG_PATH)
         try:
             self._mgr.save_all(self._config)
         except OSError as e:
@@ -436,6 +437,25 @@ class AutoConfig:
     def has_decrypted_credentials(self) -> bool:
         game = self._config.get("game") or {}
         return bool(game.get("account") and game.get("password"))
+
+    def verify_account_security_key(self, name: str, security_key: str) -> bool:
+        """Return whether the security key can decrypt the named account credentials."""
+        name = (name or "").strip()
+        security_key = (security_key or "").strip()
+        if not name or not security_key:
+            return False
+        path = Path(self._account_path(name))
+        if not path.exists():
+            return False
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+            enc = data.get("encryption") or {}
+            if not enc.get("encrypted_data"):
+                return True
+            dec = CryptoConfigManager.decrypt_data(enc, security_key)
+            return bool(dec.get("account") and dec.get("password"))
+        except Exception:
+            return False
 
     def __setitem__(self, key, value):
         if isinstance(key, str) and "." in key:
