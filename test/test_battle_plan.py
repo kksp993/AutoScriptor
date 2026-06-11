@@ -168,6 +168,86 @@ class TestBattlePlan(unittest.TestCase):
 
         self.assertEqual(hero.actions, [("huashen", 4), ("zhenwu",)])
 
+    def test_huashen_long_clicks_juechang_target(self):
+        from AutoScriptor.battle_character import hero as hero_mod
+
+        calls = []
+
+        def fake_click(target, *args, **kwargs):
+            calls.append((repr(target), args, kwargs))
+            return True
+
+        with patch.object(hero_mod, "click", side_effect=fake_click):
+            Hero().huashen_long(1)
+
+        self.assertEqual(len(calls), 1)
+        self.assertIn("I(化身-绝唱)", calls[0][0])
+        self.assertEqual(calls[0][1], ())
+        self.assertEqual(calls[0][2], {"if_exist": True})
+
+    def test_builtin_bao_uses_bao_target_and_fast_throttle(self):
+        from AutoScriptor.battle_character import hero as hero_mod
+
+        class Registry:
+            def __init__(self):
+                self.items = {}
+
+            def add(self, name, identifier, callback, **kwargs):
+                self.items[name] = {
+                    "identifier": identifier,
+                    "callback": callback,
+                    "kwargs": kwargs,
+                }
+
+        registry = Registry()
+        Hero()._setup_builtin_triggers(registry)
+        bao = registry.items["_builtin_bao"]
+
+        self.assertIn("I(爆)", repr(bao["identifier"]))
+        self.assertNotIn("28,296,447,403", repr(bao["identifier"]))
+        self.assertEqual(bao["kwargs"]["allow_concurrent"], True)
+        self.assertLessEqual(bao["kwargs"]["throttle"], 1.0)
+
+        calls = []
+
+        def fake_click(target, *args, **kwargs):
+            calls.append((repr(target), args, kwargs))
+            return True
+
+        with patch.object(hero_mod, "click", side_effect=fake_click):
+            bao["callback"]()
+
+        self.assertEqual(len(calls), 1)
+        self.assertIn("B(473,621,81,82)", calls[0][0])
+
+    def test_brahma_tower_flow_times_zhenwu_and_pause_windows(self):
+        hero = FakeHero()
+        hero.sleep = lambda seconds: hero.actions.append(("sleep", seconds)) or hero
+        flow_method = Hero._flows[("梵天塔循环", None)]
+
+        hero.battle_elapsed = 2
+        flow_method(hero)
+        hero.battle_elapsed = 12
+        flow_method(hero)
+        hero.battle_elapsed = 22
+        flow_method(hero)
+        hero.battle_elapsed = 32
+        flow_method(hero)
+        hero.battle_elapsed = 42
+        flow_method(hero)
+
+        self.assertEqual(
+            hero.actions,
+            [
+                ("zhenwu",),
+                ("battle", None, None),
+                ("sleep", 0.5),
+                ("battle", None, None),
+                ("sleep", 0.5),
+                ("battle", None, None),
+            ],
+        )
+
     def test_battle_profile_uses_configured_game_profession(self):
         from ZmxyOL.task import battle_task_params
 
@@ -320,10 +400,11 @@ class TestBattlePlan(unittest.TestCase):
         fake_bg = FakeBg()
         hero = PausedHero()
         fake_bg.set_signal(hero_mod.BG_SIGNALS.PAUSE_BATTLE, True)
+        hero._resolve_flow = lambda flow_name, task=None: (lambda _self: None)
 
         with patch.object(hero_mod, "bg", fake_bg), patch.object(hero_mod, "switch_base"):
             with self.assertRaisesRegex(RuntimeError, "battle_loop 超时"):
-                hero.battle_loop(max_duration=0.5)
+                hero.battle_loop(flow_name="empty", max_duration=0.5)
 
     def test_builtin_advance_is_not_ignored_by_default(self):
         from AutoScriptor.battle_character import hero as hero_mod

@@ -2,6 +2,32 @@ from AutoScriptor import *
 from ZmxyOL.battle.character.hero import *
 
 
+def _collect_bonus_rewards(expected: int):
+    expected = max(0, int(bg.signal("bonus_x", expected)))
+    if expected <= 1:
+        return
+
+    collected = 0
+    max_attempts = expected + 3
+    for _ in range(max_attempts):
+        if click(T("确定"), timeout=2, if_exist=True):
+            collected += 1
+            sleep(0.5)
+            continue
+
+        if click(I("极北-关卡奖励"), timeout=2, delay=1, if_exist=True):
+            sleep(1)
+            if click(T("确定"), timeout=5, if_exist=True):
+                collected += 1
+            sleep(0.5)
+            continue
+
+        if collected < expected:
+            logger.warning("关卡奖励入口/确认弹窗未出现，已领取 %s/%s，结束奖励处理", collected, expected)
+        break
+
+    click(B(1050, 60, 10, 10))
+
 
 @combo
 def battle_task(
@@ -52,14 +78,7 @@ def battle_task(
             flow_name = getattr(self, "task_context_battle_flow", None) or "战斗循环"
         self.battle_loop(flow_name=flow_name)
     # bonus=0 不执行
-    if bg.signal("bonus_x", bonus_x) > 1:
-        _ = 0
-        while _ < bg.signal("bonus_x", bonus_x) or ui_T(I("极北-关卡奖励")):
-            _ += 1
-            click(I("极北-关卡奖励"), delay=1)
-            sleep(1)
-            click(T("确定"))
-        click(B(1050, 60, 10, 10))
+    _collect_bonus_rewards(bonus_x)
     switch_base("mumu")
     # 失败不执行
     if not bg.signal("failed", False):

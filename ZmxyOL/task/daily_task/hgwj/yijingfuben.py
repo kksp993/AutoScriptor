@@ -43,7 +43,8 @@ def task(
     _ = kwargs
     for name, row in battle_config.items():
         nandu = row["difficulty"]
-        if nandu == YijingNandu.不打:
+        nandu_value = getattr(nandu, "value", nandu)
+        if nandu_value == YijingNandu.不打.value:
             logger.info(f"{name} 不打")
             continue
         cancel_on_failed = row.get("cancel_on_failed", True)
@@ -57,9 +58,18 @@ def task(
             if remains == 0:
                 break
 
-            diff = extract_info(B(220, 474, 230, 62), post_process=lambda s: s.strip().replace("灾尼","灾厄"), ensure_not_empty=True)
-            diff_repeat = (_DIFF_ORDER[nandu.value] - _DIFF_ORDER[diff]) % 3
-            click(B(401, 494, 31, 29), repeat=diff_repeat)
+            diff_text = extract_info(B(220, 474, 230, 62), post_process=lambda s: (s or "").strip().replace("灾尼", "灾厄"), ensure_not_empty=True)
+            diff = next((item for item in _DIFF_ORDER if item in diff_text), None)
+            if diff is None:
+                raise RuntimeError(f"{name} 遗境难度识别失败: {diff_text!r}")
+            diff_repeat = (_DIFF_ORDER[nandu_value] - _DIFF_ORDER[diff]) % 3
+            click(B(401, 494, 31, 29), repeat=diff_repeat, interval=0.5)
+            if diff_repeat:
+                sleep(1)
+                diff_text = extract_info(B(220, 474, 230, 62), post_process=lambda s: (s or "").strip().replace("灾尼", "灾厄"), ensure_not_empty=True)
+                diff = next((item for item in _DIFF_ORDER if item in diff_text), None)
+                if diff != nandu_value:
+                    raise RuntimeError(f"{name} 遗境难度选择失败: 期望 {nandu_value}，当前 {diff_text!r}")
 
             bonus_x = extract_info(B(241, 592, 103, 53), post_process=lambda s: 1 if s.strip() == "普通" else int(s.strip()[-1]), ensure_not_empty=True)
             bonus_repeat = (remains - bonus_x) % 3

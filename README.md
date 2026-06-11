@@ -117,7 +117,7 @@ AutoScriptor 是一个基于 Python 的自动化脚本与任务编排器，专�
 
 2. **技能键位设定**：按要求修改游戏内技能键位配置
 
-   ![image-20250906210648638.png](https://cdn.nlark.com/yuque/0/2025/png/39311747/1757165540832-c46387e3-c580-4705-ba97-7d3c1bd63104.png?x-oss-process=image%2Fformat%2Cwebp)
+   ![image-20250906210648638.png](https://cdn.nlark.com/yuque/0/2026/png/39311747/1781185484774-9f6e87f7-7084-4ef5-ae67-496e8c98d118.png?x-oss-process=image%2Fformat%2Cwebp)
 
 3. **性能优化**：建议关闭游戏内"飘字"功能
    - 进入【九重天】-【设置】，找到"飘字"并关闭，可有效提升自动化处理性能

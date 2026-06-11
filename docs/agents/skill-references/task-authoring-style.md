@@ -12,6 +12,7 @@ Read this when changing task scripts, task APIs, operator dispatch patterns, or 
 - Import `clear_task_status` from `AutoScriptor.utils.task_state`; it is not currently exported by `from AutoScriptor import *`.
 - Prefer `RequestHumanTakeover` for conditions that require user attention or game-state intervention.
 - Prefer `TaskRequireReTry` for transient recoverable failures.
+- Wrap multiple recognition targets in tuple/list for `locate`, `ui_T`, `wait_for_appear`, and `click`; a second positional argument is usually a timeout or click option, not another target.
 - Incomplete progress after retry exhaustion is expected to become `human_takeover_error`; do not treat "function finished" as success if progress remains `5/6`.
 - When adding custom tasks under `data/custom_task/`, register them with explicit `@register_task(path_cn="自定义任务/...")`.
 - Release-owned tasks that must change through same-line update packages should live in `ZmxyOL/task/` rather than only `data/custom_task/`, because release updates protect user editable custom scripts.

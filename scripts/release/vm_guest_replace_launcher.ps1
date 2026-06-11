@@ -1,6 +1,6 @@
 param(
   [string]$InstallRoot = "$env:USERPROFILE\Documents\AutoScriptorUpdateTest",
-  [string]$NewLauncherPath = "\\VBOXSVR\release\AutoScriptor_Zao_Install_1.0.1.exe"
+  [string]$NewLauncherPath = "\\VBOXSVR\release\AutoScriptor_Zao_Install_1.0.2.exe"
 )
 
 $ErrorActionPreference = "Stop"

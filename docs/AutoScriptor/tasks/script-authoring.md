@@ -136,6 +136,7 @@ progress = get_task_status("progress")
 - 普通任务只调用 `click/locate/swipe/input/key_event/extract_info/get_colors`。
 - 不直接调用 MuMuManager subprocess；设备会话由调度器、WebUI 或 runtime context 管。
 - 纯坐标点击用 `B(x, y, w, h)`；OCR 语义和业务语义分开处理。
+- 多个识别目标必须包成 tuple/list：`(T("A"), T("B"))` 表示任一命中，`[T("A"), T("B")]` 表示全部命中；不要写 `wait_for_appear(T("A"), T("B"))`，第二个位置参数是 `timeout`。
 - 在线截图测试应固定同一帧，传 `screenshot` 或 `screenshot_frame`。
 
 ## 后台监听

@@ -23,6 +23,12 @@ TASK_MODULES = [
     "ZmxyOL.task.daily_task.village.xianbao_dig",
     "ZmxyOL.task.daily_task.village.lianmengxuanshang",
 
+    # ── daily_task / heaven ──
+    "ZmxyOL.task.daily_task.heaven.kunlunshan",
+    "ZmxyOL.task.daily_task.heaven.team_task",
+    "ZmxyOL.task.daily_task.heaven.heaven_chaos",
+    "ZmxyOL.task.daily_task.heaven.hell_chaos",
+
     # ── daily_task / hyper / hyperborea ──
     "ZmxyOL.task.daily_task.hyper.hyperborea.hyper_chaos",
     "ZmxyOL.task.daily_task.hyper.hyperborea.brahma_tower",
@@ -40,18 +46,12 @@ TASK_MODULES = [
     "ZmxyOL.task.daily_task.hyper.polar_abyss.hyper_abyss_task",
 
     # ── daily_task / hgwj ──
-    "ZmxyOL.task.daily_task.hgwj.yijingfuben",
     "ZmxyOL.task.daily_task.hgwj.wanjiefuben",
+    "ZmxyOL.task.daily_task.hgwj.yijingfuben",
     "ZmxyOL.task.daily_task.hgwj.hgjs",
 
     # ── daily_task / bmkj ──
     "ZmxyOL.task.daily_task.bmkj.bmkj",
-
-    # ── daily_task / heaven ──
-    "ZmxyOL.task.daily_task.heaven.kunlunshan",
-    "ZmxyOL.task.daily_task.heaven.team_task",
-    "ZmxyOL.task.daily_task.heaven.heaven_chaos",
-    "ZmxyOL.task.daily_task.heaven.hell_chaos",
 
     # ── weekly_task ──
     "ZmxyOL.task.weekly_task.rongyao_battle",

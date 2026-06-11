@@ -154,7 +154,7 @@ class Hero:
         return self
 
     def huashen_long(self, duration: float = 1):
-        click(B("战斗-化身"), duration)
+        click(I("化身-绝唱"), if_exist=True)
         return self
 
     def jump(self, times: int = 1):
@@ -353,6 +353,16 @@ class Hero:
         .every(60, "huashen") \
         .combo("kunlunshan")
 
+    @flow("梵天塔循环")
+    def brahma_tower_flow(self):
+        if self.once_at(2, key="brahma_tower_zhenwu"):
+            self.zhenwu()
+        if 12 <= self.battle_elapsed < 22 or 32 <= self.battle_elapsed < 42:
+            self.sleep(0.5)
+            return self
+        self.battle()
+        return self
+
     # ═══════════════ battle_loop 外壳 ═══════════════
 
     def battle_loop(
@@ -445,14 +455,11 @@ class Hero:
             once=False, allow_concurrent=False, throttle=5,
             priority=BG_PRIORITY_BUILTIN_ADVANCE,
         )
-        _bao = Box(28, 296, 447, 403)
         registry.add(
             name="_builtin_bao",
-            identifier=_I("爆", box=_bao),
-            callback=lambda: click(
-                B(_bao.left + _bao.width // 2, _bao.top + _bao.height // 2),
-            ),
-            once=False, allow_concurrent=True, throttle=2.5,
+            identifier=_I("爆"),
+            callback=lambda: click(B("爆")),
+            once=False, allow_concurrent=True, throttle=0.8,
         )
 
     def _check_advance(self, grace_sec: float) -> bool:
