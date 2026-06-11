@@ -63,6 +63,7 @@ const app = createApp({
       ZhangWang: '獐王星宫',
       AnShen: '犴神星宫',
       TuShen: '兔神星宫',
+      ZhuWang: '猪王星宫',
       cancel_on_failed: '不用点券复活',
       claim_past: '是否解锁过去',
     };

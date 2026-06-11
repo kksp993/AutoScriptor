@@ -161,7 +161,18 @@ def init():
     _core_pkg.mixctrl = mixctrl
 
 
+def _validate_timeout(timeout, caller: str) -> None:
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+        hint = ""
+        if isinstance(timeout, Target):
+            hint = "；多个目标请用 tuple/list 包起来，例如 wait_for_appear((T(...), T(...)))"
+        raise TypeError(
+            f"{caller} 的 timeout 必须是数字秒数，收到 {type(timeout).__name__}: {timeout!r}{hint}"
+        )
+
+
 def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->int:
+    _validate_timeout(timeout, "ui_idx")
     target = [t for t in target]
     boxes = locate(target, timeout, assure_stable=False)
     if not first(boxes): return -1
@@ -169,6 +180,7 @@ def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->in
 
 
 def ui_T(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, *, screenshot=None)->bool:
+    _validate_timeout(timeout, "ui_T")
     boxes = locate(target, timeout, assure_stable=False, screenshot=screenshot)
     if isinstance(target, list):
         return full(boxes)
@@ -344,6 +356,7 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
         timeout: 超时时间
         assure_stable: 是否保证稳定,如果为True，则每次定位都会保证稳定，直到找到目标或超时
     """
+    _validate_timeout(timeout, "locate")
     _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     check_cancel_raise()
     first_attempt = True
@@ -421,12 +434,14 @@ def wait_for_appear(target: Target|tuple[Target, ...], timeout: float=30) -> Box
     """等待目标出现并返回 Box。超时抛 TimeoutError（与 wait_for_disappear 对称）。"""
     if not isinstance(target, (Target, tuple, list)):
         raise TypeError(f"wait_for_appear 期望 Target/tuple/list，收到 {type(target).__name__!r}: {target!r}")
+    _validate_timeout(timeout, "wait_for_appear")
     result = locate(target, timeout, assure_stable=False)
     if result is None:
         raise TimeoutError(f"wait_for_appear({target}) 超时 ({timeout}s)")
     return result
 
 def wait_for_disappear(target: Target|tuple[Target, ...], timeout: float=30)->bool:
+    _validate_timeout(timeout, "wait_for_disappear")
     locate(target, timeout=5, assure_stable=False)
     t = time.time()
     while locate(target, timeout=0, assure_stable=False) is not None:

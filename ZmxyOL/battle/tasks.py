@@ -37,6 +37,7 @@ TASK_TABLE = {
     "獐王星宫":{"location":("极寒深渊",0),"target":T("獐王星宫", box=Box(537,611,159,53).margin()),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
     "犴神星宫":{"location":("极寒深渊",1),"target":B(970,610,30,30),"idx":0, "exit_loc":230-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":True},
     "兔神星宫":{"location":("极寒深渊",0),"target":T("兔神星宫", box=Box(0,136,1280,28).margin()),"idx":0, "exit_loc":230-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
+    "猪王星宫":{"location":("极寒深渊",0),"target":T("猪王星宫", box=Box(1001,439,142,46).margin()),"idx":0, "exit_loc":230-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
 }
 
 TASK_TABLE_LIST = [
@@ -80,7 +81,6 @@ JIBEI_CHAOS_TABLE=[
     "猴王星宫",
 ]
 
-# 顺序与各关卡任务参数（YanHao、QuanShen…TuShen）一致，见 polar_abyss/hyper_abyss_task.py
 JHSY_CHAOS_TABLE=[
     "岩貉星宫",
     "犬神星宫",
@@ -88,7 +88,8 @@ JHSY_CHAOS_TABLE=[
     "虎王星宫",
     "獐王星宫",
     "犴神星宫",
-    "兔神星宫"    #打不过，能打过的自己解开注释
+    "兔神星宫",    #打不过，能打过的自己解开注释
+    "猪王星宫",
 ]
 
 

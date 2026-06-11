@@ -1,6 +1,6 @@
 param(
   [string]$OldPackagePath = "\\VBOXSVR\release\AutoScriptor_Zao_Install_1.0.0.exe",
-  [string]$UpdatePackagePath = "\\VBOXSVR\release\AutoScriptor_Update_1.0.1.zip",
+  [string]$UpdatePackagePath = "\\VBOXSVR\release\AutoScriptor_Update_1.0.2.zip",
   [string]$InstallRoot = "$env:USERPROFILE\Documents\AutoScriptorUpdateTest",
   [string]$OutDir = "\\VBOXSVR\release\logs",
   [int]$InstallTimeoutSeconds = 900,
@@ -158,7 +158,7 @@ function Apply-ReleaseUpdateZip([string]$PackagePath, [string]$Root, [string]$Us
     if ($manifest.format -ne "autoscriptor_update_v1") {
       throw "Unsupported update format: $($manifest.format)"
     }
-    if ($manifest.compat_line -ne "1.0" -or $manifest.target_version -ne "1.0.1") {
+    if ($manifest.compat_line -ne "1.0" -or $manifest.target_version -ne "1.0.2") {
       throw "Unexpected update target: compat=$($manifest.compat_line) target=$($manifest.target_version)"
     }
 
@@ -281,7 +281,7 @@ try {
   $localDir = Join-Path $env:USERPROFILE "Downloads"
   New-Item -ItemType Directory -Force -Path $localDir | Out-Null
   $localOld = Join-Path $localDir "AutoScriptor_Zao_Install_1.0.0.exe"
-  $localUpdate = Join-Path $localDir "AutoScriptor_Update_1.0.1.zip"
+  $localUpdate = Join-Path $localDir "AutoScriptor_Update_1.0.2.zip"
   Copy-Item -LiteralPath $OldPackagePath -Destination $localOld -Force
   Copy-Item -LiteralPath $UpdatePackagePath -Destination $localUpdate -Force
   $report.Checks.OldPackageSha256 = (Get-FileHash -LiteralPath $localOld -Algorithm SHA256).Hash
@@ -332,8 +332,8 @@ try {
   $versionFile = Get-Content -LiteralPath (Join-Path $InstallRoot ".autoscriptor\release_version.json") -Raw -Encoding UTF8 | ConvertFrom-Json
   $report.Checks.InstallMarkerVersion = $marker.version
   $report.Checks.ReleaseVersion = $versionFile.version
-  if ($marker.version -ne "1.0.1") { Add-Error ([ref]$errors) "install.json version is not 1.0.1: $($marker.version)" }
-  if ($versionFile.version -ne "1.0.1") { Add-Error ([ref]$errors) "release_version.json version is not 1.0.1: $($versionFile.version)" }
+  if ($marker.version -ne "1.0.2") { Add-Error ([ref]$errors) "install.json version is not 1.0.2: $($marker.version)" }
+  if ($versionFile.version -ne "1.0.2") { Add-Error ([ref]$errors) "release_version.json version is not 1.0.2: $($versionFile.version)" }
 
   $report.Checks.AccountCanaryPreserved = (Get-Content -LiteralPath (Join-Path $accountsDir "default.json") -Raw -Encoding UTF8).Contains("account-kept")
   $report.Checks.CustomTaskCanaryPreserved = Test-Path -LiteralPath (Join-Path $customDir "vm_update_canary.py")
