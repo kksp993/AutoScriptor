@@ -47,7 +47,7 @@ Get-ChildItem -Recurse -File -Filter "*.map" -ErrorAction SilentlyContinue dist,
 
 生成小版本更新包后必须复核 `update_manifest.json`。如果当前 diff 含 WebUI static、collector 脚本、运行时 JSON/docs 等外置 backend 资产，但 manifest 只有 `backend/autoscriptor-engine.exe`（脚本输出类似 `替换文件: 1`），该升级包不完整，必须用 `--include-backend` 逐项纳入这些文件后重建。
 
-如果更新会把 `install.json` / `.autoscriptor/release_version.json` 提升到新小版本，也要确认更新包替换安装目录下的日常启动器 `造笔.exe`。旧 launcher 可能只打开旧安装向导，不会启动更新后的 backend；用 `--include-file dist_electron\AutoScriptor_Zao_Install_x.y.z.exe=造笔.exe` 纳入当前 launcher。
+如果更新会把 `install.json` / `.autoscriptor/release_version.json` 提升到新小版本，默认仍应保持小版本更新包轻量：先在 VM 中验证旧安装目录下的日常启动器 `造笔.exe` 能否在更新后启动新版 backend。只有 post-update launcher 探针证明旧 shell 会打开旧向导或无法拉起 backend 时，才考虑用 `--include-file dist_electron\AutoScriptor_Zao_Install_x.y.z.exe=造笔.exe` 纳入当前 launcher。若因此让 update zip 超过 100 MB，应明确记录原因；否则本版本应改为只发布完整安装包或先拆出轻量 launcher。
 
 6. **VM 验收是发布门禁**：完整安装包和同线更新包（如有）必须先在干净 VM 中验收并产出报告，才能推 GitHub、推 tag、发布 artifacts 或对外说“发布完成”。如果 VM 没跑完，只能记录为“产物已生成，尚未发布/验收”；不得把本地 smoke、`verify-pack` 或 update dry-run 当作替代。
 
@@ -228,7 +228,7 @@ cd D:\Projects\AutoScriptor
 - **同一 `x.y` 线的小版本**：例如 `1.0.0 -> 1.0.1` 或 `1.1.0 -> 1.1.5`，使用累计小版本更新包 `AutoScriptor_Update_x.y.z.zip`。更新包必须包含从 `x.y.0` 到目标版本所需的全部 engine/少量附属文件变动，允许用户从同一 `x.y` 线任意更低小版本直接跳到目标版本。
 - 小版本更新包不是底库，也不是完整安装包；它只适用于已经安装同一 `x.y` 线版本的目录。空机器或无旧安装树时必须先运行完整安装包。
 - 若本次改动包含随 backend 读取的外置文件（例如 `services/webui/static/**`、`scripts/collect_zmxy_redeem_2026.py`、`docs/zmxy_redeem_codes.json`），同线更新包不能只替换 exe；这些文件必须通过 `--include-backend` 进入 `replace` 清单。
-- 若更新后 `install.json` / `.autoscriptor/release_version.json` 会提升到新小版本，更新包也必须替换安装目录下的日常启动器 `造笔.exe`（用 `--include-file dist_electron\AutoScriptor_Zao_Install_x.y.z.exe=造笔.exe`）。否则旧 launcher 可能只打开旧安装向导，不会启动更新后的 backend。
+- 若更新后 `install.json` / `.autoscriptor/release_version.json` 会提升到新小版本，不要默认把完整 portable 安装器塞进更新包。先跑 VM 旧版安装器 -> 新版 update -> post-update launcher 探针；旧 `造笔.exe` 能启动新版 backend 时，更新包只包含 engine 与必要外置资源。只有旧 launcher 实测失败时，才通过 `--include-file dist_electron\AutoScriptor_Zao_Install_x.y.z.exe=造笔.exe` 或更理想的轻量 launcher 方案替换它。update zip 超过 100 MB 时必须作为发布决策单独说明，不能静默上传。
 - **跨 `x.y` 线的大版本**：例如 `1.0.x -> 1.1.0`，使用完整安装包。依赖库、Nuitka 运行时、backend 目录布局、Electron 壳或安装器行为变化，都应走完整安装包。
 - **本地小版本更新包**：WebUI“检查更新”页支持选择或拖入 `.zip`。Electron 主进程先 dry-run 校验 `update_manifest.json`、版本线、SHA-256、写入路径与用户数据保护；应用时停止 backend，备份旧文件，替换 `backend/autoscriptor-engine.exe` 等少量文件，失败则回滚并重启旧 backend。
 - **`backend_incremental.zip`**：仍保留为特殊兜底，由 `scripts/release/release_backend_incremental.py` 对比旧 `backend.zip` 或旧 `gui.dist` 生成。它适合维护人员处理 backend 文件级差异，不作为普通用户默认更新路径。
@@ -266,7 +266,6 @@ python scripts/release/create_minor_update_package.py `
   --new-backend dist/gui.dist `
   --target-version 1.1.5 `
   --out dist/AutoScriptor_Update_1.1.5.zip `
-  --include-file dist_electron\AutoScriptor_Zao_Install_1.1.5.exe=造笔.exe `
   --include-backend services/webui/static/js/components/UpdatePanel.js `
   --mkdir data/assets/cache `
   --copy-if-missing docs/template.json=data/templates/template.json
