@@ -134,6 +134,17 @@ function resolveCurrentVersion(opts) {
   return '';
 }
 
+function resolveRuntimeDataRoot(installRoot, userDataPath) {
+  const userData = String(userDataPath || '').trim();
+  if (userData) {
+    const marker = readJsonIfExists(path.join(userData, 'install.json'));
+    if (marker && typeof marker.dataRoot === 'string' && marker.dataRoot.trim()) {
+      return path.resolve(marker.dataRoot);
+    }
+  }
+  return path.join(path.resolve(installRoot), 'data');
+}
+
 function addCheck(report, id, ok, message, detail) {
   report.checks.push({ id, ok, message, ...(detail ? { detail } : {}) });
   if (ok === false) report.errors.push(message);
@@ -295,6 +306,7 @@ async function inspectUpdatePackage(opts) {
       addCheck(report, 'installRoot', false, '安装目录不存在: ' + report.installRoot);
       return finishReport(report);
     }
+    report.dataRoot = resolveRuntimeDataRoot(report.installRoot, opts && opts.userDataPath);
     addCheck(report, 'installRoot', true, '安装目录存在');
 
     if (!packagePath || !fs.existsSync(packagePath)) {
@@ -400,7 +412,7 @@ async function inspectUpdatePackage(opts) {
 
     const configDefaults = manifest.config_defaults;
     if (configDefaults && typeof configDefaults === 'object' && !Array.isArray(configDefaults)) {
-      const cfgPath = path.join(report.installRoot, 'data', 'config.json');
+      const cfgPath = path.join(report.dataRoot, 'config.json');
       const cfgRead = readJsonObjectIfExists(cfgPath);
       if (cfgRead.exists && !cfgRead.ok) {
         addCheck(
@@ -469,6 +481,7 @@ async function applyLocalReleaseUpdate(opts) {
   }
 
   const installRoot = dry.installRoot;
+  const dataRoot = dry.dataRoot || resolveRuntimeDataRoot(installRoot, opts && opts.userDataPath);
   const packagePath = dry.packagePath;
   const keepBackup = (opts && opts.keepBackup) !== false;
   const send = opts && typeof opts.send === 'function' ? opts.send : () => {};
@@ -553,7 +566,7 @@ async function applyLocalReleaseUpdate(opts) {
     }
 
     if (manifest.config_defaults && typeof manifest.config_defaults === 'object' && !Array.isArray(manifest.config_defaults)) {
-      const cfgPath = path.join(installRoot, 'data', 'config.json');
+      const cfgPath = path.join(dataRoot, 'config.json');
       const cfgRead = readJsonObjectIfExists(cfgPath);
       if (cfgRead.exists && !cfgRead.ok) {
         throw new Error(`data/config.json is invalid; refusing to merge config_defaults: ${cfgRead.error}`);
@@ -583,6 +596,7 @@ async function applyLocalReleaseUpdate(opts) {
       const markerPath = path.join(userDataPath, 'install.json');
       const marker = readJsonIfExists(markerPath) || {};
       marker.installRoot = installRoot;
+      marker.dataRoot = dataRoot;
       marker.version = dry.targetVersion;
       fs.mkdirSync(userDataPath, { recursive: true });
       fs.writeFileSync(markerPath, JSON.stringify(marker, null, 2), 'utf8');

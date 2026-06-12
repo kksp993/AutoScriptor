@@ -9,6 +9,27 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Callable
 
+MUMU_ADB_BASE_PORT = 16384
+MUMU_ADB_PORT_STEP = 32
+
+
+def default_mumu_adb_addr(index: Any) -> str:
+    try:
+        n = int(index)
+    except (TypeError, ValueError):
+        n = 0
+    if n < 0:
+        n = 0
+    return f"127.0.0.1:{MUMU_ADB_BASE_PORT + n * MUMU_ADB_PORT_STEP}"
+
+
+def normalize_emulator_config(emulator: dict[str, Any]) -> dict[str, Any]:
+    data = deepcopy(emulator)
+    adb_addr = str(data.get("adb_addr", "") or "").strip()
+    if not adb_addr or adb_addr.startswith("YOUR_") or adb_addr.endswith(":0"):
+        data["adb_addr"] = default_mumu_adb_addr(data.get("index", 0))
+    return data
+
 
 class WebUILifecycleService:
     IMPORTABLE_CONFIG_KEYS = (
@@ -55,7 +76,7 @@ class WebUILifecycleService:
             self.cfg["app"] = deepcopy(data["app"])
             if isinstance(data.get("scheduler"), dict):
                 self.cfg["scheduler"] = deepcopy(data["scheduler"])
-            self.cfg["emulator"] = deepcopy(data["emulator"])
+            self.cfg["emulator"] = normalize_emulator_config(data["emulator"])
             self.cfg["ocr"] = deepcopy(data["ocr"])
             self.cfg.save_config()
         self._apply_log_level()

@@ -47,7 +47,11 @@ Get-ChildItem -Recurse -File -Filter "*.map" -ErrorAction SilentlyContinue dist,
 
 生成小版本更新包后必须复核 `update_manifest.json`。如果当前 diff 含 WebUI static、collector 脚本、运行时 JSON/docs 等外置 backend 资产，但 manifest 只有 `backend/autoscriptor-engine.exe`（脚本输出类似 `替换文件: 1`），该升级包不完整，必须用 `--include-backend` 逐项纳入这些文件后重建。
 
-6. **失败处理纪律**：如果构建或 packaged runtime smoke 出现新失败，先把根因、复现命令、修复规则写入本文件、[nuitka-reference.md](./nuitka-reference.md) 或 `docs/agents/skill-references/`，并同步本地 Codex skill；然后再重试构建。中断的构建和 smoke 失败的构建都不是可发布产物。
+如果更新会把 `install.json` / `.autoscriptor/release_version.json` 提升到新小版本，也要确认更新包替换安装目录下的日常启动器 `造笔.exe`。旧 launcher 可能只打开旧安装向导，不会启动更新后的 backend；用 `--include-file dist_electron\AutoScriptor_Zao_Install_x.y.z.exe=造笔.exe` 纳入当前 launcher。
+
+6. **VM 验收是发布门禁**：完整安装包和同线更新包（如有）必须先在干净 VM 中验收并产出报告，才能推 GitHub、推 tag、发布 artifacts 或对外说“发布完成”。如果 VM 没跑完，只能记录为“产物已生成，尚未发布/验收”；不得把本地 smoke、`verify-pack` 或 update dry-run 当作替代。
+
+7. **失败处理纪律**：如果构建或 packaged runtime smoke 出现新失败，先把根因、复现命令、修复规则写入本文件、[nuitka-reference.md](./nuitka-reference.md) 或 `docs/agents/skill-references/`，并同步本地 Codex skill；然后再重试构建。中断的构建、smoke 失败的构建、未完成 VM 验收的构建都不是可发布产物。
    - `importlib`/stdlib bootstrap 修复不能只看源码 direct probe。普通 Python 里通过，不代表 compiled Nuitka 启动早期的 `dist/gui.dist/importlib` 解析顺序也通过；必须等待 `autoscriptor-engine.exe --runtime-import-smoke` 通过。
    - packaged smoke 若出现 `importlib.readers`、`multiprocessing.Manager` 或 Starlette `Protocols can only inherit from other protocols`，归类为 copied stdlib 启动期组合问题：先同步经验，再补 importlib resources 子模块、真实 `multiprocessing` package 载入或 `typing` allowlist 修复。
    - `multiprocessing.Manager` 的修复只应让 `gui.py` 启动期加载 copied stdlib package，并由 post-copy 保证 `multiprocessing/` 存在；不要把 `multiprocessing` 加进 `--nofollow-import-to`，否则 Nuitka 可能在最后阶段报 `multiprocessing: Conflict between user and plugin decision`。
@@ -58,6 +62,8 @@ Get-ChildItem -Recurse -File -Filter "*.map" -ErrorAction SilentlyContinue dist,
    - 若 `--runtime-import-smoke` 通过、但 `engine --electron` 报 `program tried to call itself with '-c' argument`，说明 Windows multiprocessing spawn 已进入真实自执行路径，而 Nuitka 的 self-execution deployment guard 拦截了当前 exe。发行构建必须保留 `--no-deployment-flag=self-execution`；不要把它当成缺模块或端口占用问题。
    - 若保留 self-execution flag 后 `engine --electron` 不 ready、stdout/stderr 为空，同时进程列表出现大量 `autoscriptor-engine.exe` 且命令线为 `dist\gui.dist\python.exe -S -s -c "from multiprocessing.spawn import spawn_main..."`，这是 Windows spawn 走了非 frozen `-c` 路径并递归重进主程序。先用 `taskkill /IM autoscriptor-engine.exe /F /T` 清理本轮进程风暴；修复必须让 packaged runtime 在 single-instance 之前设置 `sys.frozen`、恢复真实当前 exe 到 `sys.executable`，并先执行 `multiprocessing.freeze_support()`，不要继续补模块或单纯延长 timeout。
    - 若 worker 已进入 `_webui_worker`，但 `uvicorn._subprocess` 调 `multiprocessing.allow_connection_pickling()` 时报 `cannot import name 'connection' from 'multiprocessing'`，说明 copied `multiprocessing/connection.py` 已存在但未被启动期父包挂载。应在导出 `context._default_context` API 后预载并 attach `multiprocessing.connection`，覆盖 Uvicorn supervisor/subprocess 导入路径。
+   - VM headless install 若在 `tar.exe 解压完成` 后报 `backend 校验失败：缺少 autoscriptor-engine.exe`，说明不能只信任 Windows `tar.exe` 的退出码。安装器必须在 native tar 后校验 staging backend；校验失败要删除 staging 并回退 JS 解压，再重打 Electron 包验收。
+   - VM 更新脚本若要写 `install.json` 或 `.autoscriptor/release_version.json` 这类给 Electron/Node 读取的 JSON marker，必须用 UTF-8 no BOM。Windows PowerShell 5.1 的 `Set-Content -Encoding UTF8` 会写 BOM，可能让 `JSON.parse(fs.readFileSync(path, "utf8"))` 失败，导致 launcher 误判安装根目录并打开旧向导/不拉起 backend。
    - VM 验收要分层报告。VirtualBox 干净机可能完成安装并让基础 WebUI 返回 200，但 `--runtime-import-smoke` 在 Paddle/OCR 导入处因 `paddle\base\libpaddle.pyd` 初始化失败或 `name 'libpaddle' is not defined` 失败。此时只能说安装器/基础 WebUI 通过，不能宣称 OCR、MuMu 或任务执行通过；需要在支持 AVX 的 VM 或真实 MuMu 机器上补跑 runtime/device acceptance。
 
 ---
@@ -203,17 +209,17 @@ cd D:\Projects\AutoScriptor
 
 ## 9. 发行版安装流程（最终用户）
 
-1. 运行 **`AutoScriptor_Zao_Install.exe`**（portable 会自解压到临时目录再启动，**用户数据**仍通过 `install.json` 指向正式安装根目录）。
-2. **HTML 向导**：选择安装根目录 → 预检磁盘空间与 `backend.zip` 完整性 → 解压到 `.backend.new.*` 临时目录 → 校验 `autoscriptor-engine.exe` → 事务切换 `backend` → 合并 `data`（保留用户账号/脚本/角色数据）→ 自动写入/探测 **MuMu**（`applyMumuConfig`）→ **环境验证页**确认 **MuMu 目录 / 模拟器 exe / adb** 路径。
+1. 运行 **`AutoScriptor_Zao_Install.exe`**（portable 会自解压到临时目录再启动，**用户数据**通过 `install.json.dataRoot` 指向 Electron `userData/data`，不写入受保护的安装目录）。
+2. **HTML 向导**：选择安装根目录 → 预检磁盘空间与 `backend.zip` 完整性 → 解压到 `.backend.new.*` 临时目录 → 校验 `autoscriptor-engine.exe` → 事务切换 `backend` → 合并 `data` 到用户可写数据目录（保留用户账号/脚本/角色数据）→ 自动写入/探测 **MuMu**（`applyMumuConfig`）→ **环境验证页**确认 **MuMu 目录 / 模拟器 exe / adb** 路径。
 3. 完成后启动主程序（`installer:launch` → 正常窗口 + 托盘）。
 
 ### 9.1 修复安装 / 更新 / 卸载策略
 
 - **修复安装**：允许选择已有造笔安装目录，不要求空目录；旧 `backend` 会先备份为 `.bak.*`，新引擎校验成功后再切换，失败时回滚旧引擎。
 - **增量更新**：`backend_incremental.zip` 会先复制当前 `backend` 到 `.backend.incremental.*`，按清单校验旧文件 SHA-256，再替换并校验新文件 SHA-256；基线不匹配时会中止，不破坏旧引擎。
-- **用户数据**：默认保留 `data/config.json`、`data/accounts/*.json`、`data/custom_task/`、`data/battle_character/`，随包基础数据只做合并更新。
+- **用户数据**：默认保留 `dataRoot/config.json`、`dataRoot/accounts/*.json`、`dataRoot/custom_task/`、`dataRoot/battle_character/`，随包基础数据只合并到 `install.json.dataRoot`。旧安装若仍指向安装目录下 `data` 且运行时不可写，Electron 启动会把缺失数据复制到 `userData/data` 并更新 `install.json`。
 - **进程占用**：安装前只结束安装目录内的后端进程，并且只清理属于造笔安装目录的 5000 端口监听，避免误杀其他本地服务。
-- **卸载**：安装目录写入 `卸载造笔.bat` 与 `彻底卸载造笔.bat`。控制面板/默认卸载保留 `data`；彻底卸载才移除整个安装目录。
+- **卸载**：安装目录写入 `卸载造笔.bat` 与 `彻底卸载造笔.bat`。控制面板/默认卸载保留 `dataRoot`；彻底卸载才移除安装目录和外置用户数据目录。
 
 ### 9.2 发行版更新通道
 
@@ -222,6 +228,7 @@ cd D:\Projects\AutoScriptor
 - **同一 `x.y` 线的小版本**：例如 `1.0.0 -> 1.0.1` 或 `1.1.0 -> 1.1.5`，使用累计小版本更新包 `AutoScriptor_Update_x.y.z.zip`。更新包必须包含从 `x.y.0` 到目标版本所需的全部 engine/少量附属文件变动，允许用户从同一 `x.y` 线任意更低小版本直接跳到目标版本。
 - 小版本更新包不是底库，也不是完整安装包；它只适用于已经安装同一 `x.y` 线版本的目录。空机器或无旧安装树时必须先运行完整安装包。
 - 若本次改动包含随 backend 读取的外置文件（例如 `services/webui/static/**`、`scripts/collect_zmxy_redeem_2026.py`、`docs/zmxy_redeem_codes.json`），同线更新包不能只替换 exe；这些文件必须通过 `--include-backend` 进入 `replace` 清单。
+- 若更新后 `install.json` / `.autoscriptor/release_version.json` 会提升到新小版本，更新包也必须替换安装目录下的日常启动器 `造笔.exe`（用 `--include-file dist_electron\AutoScriptor_Zao_Install_x.y.z.exe=造笔.exe`）。否则旧 launcher 可能只打开旧安装向导，不会启动更新后的 backend。
 - **跨 `x.y` 线的大版本**：例如 `1.0.x -> 1.1.0`，使用完整安装包。依赖库、Nuitka 运行时、backend 目录布局、Electron 壳或安装器行为变化，都应走完整安装包。
 - **本地小版本更新包**：WebUI“检查更新”页支持选择或拖入 `.zip`。Electron 主进程先 dry-run 校验 `update_manifest.json`、版本线、SHA-256、写入路径与用户数据保护；应用时停止 backend，备份旧文件，替换 `backend/autoscriptor-engine.exe` 等少量文件，失败则回滚并重启旧 backend。
 - **`backend_incremental.zip`**：仍保留为特殊兜底，由 `scripts/release/release_backend_incremental.py` 对比旧 `backend.zip` 或旧 `gui.dist` 生成。它适合维护人员处理 backend 文件级差异，不作为普通用户默认更新路径。
@@ -259,6 +266,7 @@ python scripts/release/create_minor_update_package.py `
   --new-backend dist/gui.dist `
   --target-version 1.1.5 `
   --out dist/AutoScriptor_Update_1.1.5.zip `
+  --include-file dist_electron\AutoScriptor_Zao_Install_1.1.5.exe=造笔.exe `
   --include-backend services/webui/static/js/components/UpdatePanel.js `
   --mkdir data/assets/cache `
   --copy-if-missing docs/template.json=data/templates/template.json

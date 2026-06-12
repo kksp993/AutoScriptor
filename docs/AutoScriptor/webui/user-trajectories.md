@@ -90,5 +90,5 @@
 1. 首次运行 HTML 安装向导。
 2. dry run 只读取 `backend.zip`、目标目录、磁盘和 data 计划，不写入安装目录。
 3. 安装解压到临时 `.backend.new.*`，校验后事务切换。
-4. 修复安装保留 `data/config.json`、账号、自定义任务和 `battle_character`。
+4. 修复安装保留 `install.json.dataRoot/config.json`、账号、自定义任务和 `battle_character`。
 5. MuMuManager `version` 失败但 ADB 可用时不阻断安装，显示 warning。

@@ -80,7 +80,7 @@ function validPackagedConfig(name) {
     ocr: { use_gpu: false },
     emulator: {
       index: 0,
-      adb_addr: 'YOUR_ADB_ADDR, e.g.127.0.0.1:16384',
+      adb_addr: '127.0.0.1:16384',
       mumu_folder: 'YOUR_MUMU_FOLDER, e.g.C:/Program Files/Netease/MuMu',
       emu_path: 'YOUR_EMU_PATH, e.g.C:/Program Files/Netease/MuMu/nx_main/MuMuManager.exe',
       adb_path: 'YOUR_ADB_PATH, e.g.C:/Program Files/Netease/MuMu/nx_main/adb.exe',
@@ -334,10 +334,12 @@ async function testInstallRepairAndUninstallScript(tmp) {
   assert(fs.existsSync(path.join(installRoot, '卸载造笔.bat')), 'keep-data uninstall bat should be written');
   assert(fs.existsSync(path.join(installRoot, '彻底卸载造笔.bat')), 'remove-all uninstall bat should be written');
   const marker = JSON.parse(readText(path.join(userDataPath, 'install.json')));
+  const runtimeDataRoot = path.join(path.resolve(userDataPath), 'data');
   assert(marker.installRoot === path.resolve(installRoot), 'install marker should contain installRoot');
-  assert(marker.dataRoot === path.join(path.resolve(installRoot), 'data'), 'install marker should contain dataRoot');
+  assert(marker.dataRoot === runtimeDataRoot, 'install marker should contain writable user dataRoot');
   parsePowerShellScript(path.join(installRoot, 'Uninstall.ps1'));
   assertIncludes(readText(path.join(installRoot, 'Uninstall.ps1')), 'ProcessId -ne $PID', 'uninstaller must not kill its own PowerShell process');
+  assertIncludes(readText(path.join(__dirname, '..', 'install-packaged.cjs')), '$dataRoot', 'remove-all uninstaller should know external dataRoot');
   assertIncludes(readText(path.join(installRoot, 'Uninstall.ps1')), 'Split-Path -Leaf $_.ExecutablePath', 'uninstaller should stop temporary portable app processes by executable name');
   assertIncludes(readText(path.join(installRoot, '彻底卸载造笔.bat')), '-RemoveUserData', 'remove-all bat should request user data removal');
 
@@ -346,10 +348,10 @@ async function testInstallRepairAndUninstallScript(tmp) {
   userCfg.accounts.dir = path.join(tmp, 'external-accounts');
   delete userCfg.deploy;
   delete userCfg.update;
-  writeText(path.join(installRoot, 'data', 'config.json'), '\ufeff' + JSON.stringify(userCfg, null, 2));
-  writeText(path.join(installRoot, 'data', 'accounts', 'default.json'), JSON.stringify({ userAccount: 'kept' }, null, 2));
-  writeText(path.join(installRoot, 'data', 'custom_task', 'packaged.py'), '# user custom kept\n');
-  writeText(path.join(installRoot, 'data', 'battle_character', 'packaged.json'), JSON.stringify({ userBattle: 'kept' }, null, 2));
+  writeText(path.join(runtimeDataRoot, 'config.json'), '\ufeff' + JSON.stringify(userCfg, null, 2));
+  writeText(path.join(runtimeDataRoot, 'accounts', 'default.json'), JSON.stringify({ userAccount: 'kept' }, null, 2));
+  writeText(path.join(runtimeDataRoot, 'custom_task', 'packaged.py'), '# user custom kept\n');
+  writeText(path.join(runtimeDataRoot, 'battle_character', 'packaged.json'), JSON.stringify({ userBattle: 'kept' }, null, 2));
 
   const repairDryRun = await dryRunPackagedInstall({
     installRoot,
@@ -386,15 +388,15 @@ async function testInstallRepairAndUninstallScript(tmp) {
   assertIncludes(readText(path.join(installRoot, 'backend', 'lib', 'version.txt')), 'v2', 'repair install should replace backend');
   assert(fs.existsSync(path.join(installRoot, 'backend', 'lib', 'new-full.txt')), 'repair install should install new backend files');
   assert(!fs.existsSync(path.join(installRoot, 'backend', 'old-only.txt')), 'repair install should remove stale backend files');
-  const repairedConfig = JSON.parse(readText(path.join(installRoot, 'data', 'config.json')));
+  const repairedConfig = JSON.parse(readText(path.join(runtimeDataRoot, 'config.json')));
   assert(repairedConfig.user_marker === 'kept', 'config user values should be preserved');
   assert(repairedConfig.accounts.dir === userCfg.accounts.dir, 'absolute external accounts dir should be preserved for existing user config');
   assert(repairedConfig.deploy && repairedConfig.deploy.theme === 'dark', 'missing deploy defaults should be added from packaged template');
   assert(repairedConfig.update && repairedConfig.update.auto_check === true, 'missing update defaults should be added from packaged template');
-  assertIncludes(readText(path.join(installRoot, 'data', 'accounts', 'default.json')), 'userAccount', 'account json should be preserved');
-  assertIncludes(readText(path.join(installRoot, 'data', 'custom_task', 'packaged.py')), 'user custom', 'custom task should be preserved');
-  assertIncludes(readText(path.join(installRoot, 'data', 'battle_character', 'packaged.json')), 'userBattle', 'battle character data should be preserved');
-  assertIncludes(readText(path.join(installRoot, 'data', 'common', 'packaged.txt')), 'v2', 'unprotected packaged data should update');
+  assertIncludes(readText(path.join(runtimeDataRoot, 'accounts', 'default.json')), 'userAccount', 'account json should be preserved');
+  assertIncludes(readText(path.join(runtimeDataRoot, 'custom_task', 'packaged.py')), 'user custom', 'custom task should be preserved');
+  assertIncludes(readText(path.join(runtimeDataRoot, 'battle_character', 'packaged.json')), 'userBattle', 'battle character data should be preserved');
+  assertIncludes(readText(path.join(runtimeDataRoot, 'common', 'packaged.txt')), 'v2', 'unprotected packaged data should update');
   assertNoBackendStaging(installRoot);
 }
 

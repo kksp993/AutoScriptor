@@ -26,6 +26,10 @@
 
   function errorMessage(data, fallback) {
     if (data && (data.message || data.error)) return data.message || data.error;
+    if (data && data.detail) {
+      if (typeof data.detail === 'string') return data.detail;
+      try { return JSON.stringify(data.detail); } catch { /* ignore */ }
+    }
     return fallback || '操作失败';
   }
 

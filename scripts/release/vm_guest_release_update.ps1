@@ -12,7 +12,9 @@ $ErrorActionPreference = "Stop"
 $DailyLauncherName = "$([char]0x9020)$([char]0x7b14).exe"
 
 function Write-Json($Path, $Object) {
-  $Object | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Path -Encoding UTF8
+  $json = $Object | ConvertTo-Json -Depth 12
+  $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+  [System.IO.File]::WriteAllText($Path, $json, $utf8NoBom)
 }
 
 function Add-Error([ref]$Errors, [string]$Message) {
@@ -27,9 +29,59 @@ function Assert-SafeInstallRoot([string]$Path) {
   }
 }
 
-function Stop-AutoScriptorProcesses() {
+function Stop-ProcessTreeById([int]$ProcessId) {
+  if ($ProcessId -le 0 -or $ProcessId -eq $PID) { return }
+  try { & "$env:SystemRoot\System32\taskkill.exe" /PID $ProcessId /T /F 2>$null | Out-Null } catch {}
+}
+
+function Stop-AutoScriptorProcesses {
+  param(
+    [string[]]$Roots = @(),
+    [int[]]$ProcessIds = @()
+  )
+
+  foreach ($processId in $ProcessIds) {
+    Stop-ProcessTreeById $processId
+  }
+
   foreach ($name in @($script:DailyLauncherName, "autoscriptor-engine.exe")) {
     try { & "$env:SystemRoot\System32\taskkill.exe" /IM $name /T /F 2>$null | Out-Null } catch {}
+  }
+
+  $rootPrefixes = @()
+  foreach ($root in $Roots) {
+    if (-not $root) { continue }
+    try {
+      $resolved = [System.IO.Path]::GetFullPath($root)
+      if (-not $resolved.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+        $resolved += [System.IO.Path]::DirectorySeparatorChar
+      }
+      $rootPrefixes += $resolved
+    } catch {}
+  }
+  if (-not $rootPrefixes.Count) { return }
+
+  try {
+    $processes = Get-CimInstance Win32_Process -OperationTimeoutSec 10
+  } catch {
+    return
+  }
+
+  foreach ($proc in $processes) {
+    $procId = [int]$proc.ProcessId
+    if ($procId -le 0 -or $procId -eq $PID) { continue }
+
+    $exe = [string]$proc.ExecutablePath
+    $cmd = [string]$proc.CommandLine
+    foreach ($rootPrefix in $rootPrefixes) {
+      if (
+        ($exe -and $exe.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) -or
+        ($cmd -and $cmd.IndexOf($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)
+      ) {
+        Stop-ProcessTreeById $procId
+        break
+      }
+    }
   }
 }
 
@@ -269,7 +321,7 @@ try {
   if (-not (Test-Path -LiteralPath $OldPackagePath -PathType Leaf)) { throw "Missing old package: $OldPackagePath" }
   if (-not (Test-Path -LiteralPath $UpdatePackagePath -PathType Leaf)) { throw "Missing update package: $UpdatePackagePath" }
 
-  Stop-AutoScriptorProcesses
+  Stop-AutoScriptorProcesses -Roots @($InstallRoot)
   if (Test-Path -LiteralPath $InstallRoot) {
     Remove-Item -LiteralPath $InstallRoot -Recurse -Force
   }
@@ -310,7 +362,7 @@ try {
   if (-not $baselineWeb.Ok) {
     Add-Error ([ref]$errors) "Baseline 1.0.0 launcher WebUI did not respond: $($baselineWeb.LastError)"
   }
-  Stop-AutoScriptorProcesses
+  Stop-AutoScriptorProcesses -Roots @($InstallRoot) -ProcessIds @($baselineLaunch.Id)
 
   $accountsDir = Join-Path $InstallRoot "data\accounts"
   $customDir = Join-Path $InstallRoot "data\custom_task"
@@ -321,7 +373,7 @@ try {
   Set-Content -LiteralPath (Join-Path $battleDir "vm_update_canary.py") -Encoding UTF8 -Value "# vm battle character canary"
   $report.Checks.CanariesWritten = $true
 
-  Stop-AutoScriptorProcesses
+  Stop-AutoScriptorProcesses -Roots @($InstallRoot) -ProcessIds @($baselineLaunch.Id)
   $apply = Apply-ReleaseUpdateZip $localUpdate $InstallRoot $userDataPath {
     param($event)
     $script:events += $event
@@ -358,7 +410,7 @@ try {
     Add-Error ([ref]$errors) "WebUI did not respond after update: $($web.LastError)"
   }
 
-  Stop-AutoScriptorProcesses
+  Stop-AutoScriptorProcesses -Roots @($InstallRoot) -ProcessIds @($launch.Id)
   $direct = Start-BackendAndWait-WebUi $InstallRoot $WebUiTimeoutSeconds
   $report.Checks.BackendDirect = $direct
   if (-not $direct.WebUi.Ok) {

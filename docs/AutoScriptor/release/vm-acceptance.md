@@ -4,6 +4,12 @@ This document is the Windows VM lab plan for validating release artifacts. A rel
 
 Do not claim VM acceptance, update compatibility, or release readiness from local smoke tests alone. An interrupted build, a package that has not passed `npm run verify-pack`, or a package that has not been installed/upgraded in the VM is not an accepted release artifact.
 
+VM acceptance is the final release gate. Do not push the release commit/tag to
+GitHub, upload or publish artifacts, or tell users a version is released until
+the required VM reports have been collected and reviewed. If the VM pass is
+blocked or pending, the correct status is "artifacts built, release not
+published/accepted".
+
 ## Minimal Snapshot Plan
 
 Do not create many snapshots at first. Use:
@@ -67,6 +73,35 @@ If testing upgrade, also keep the previous same-line installer:
 Record SHA-256 for every artifact in the release note or acceptance log.
 
 ## Full Installer Acceptance
+
+When the release needs to prove the real user-facing installer, run the
+portable exe by GUI interaction instead of the headless PowerShell path:
+
+1. Restore `clean-base`.
+2. Open `\\VBOXSVR\release` in Explorer and start
+   `AutoScriptor_Zao_Install_x.y.z.exe`.
+   If the portable exe exits immediately or never shows the Electron window
+   when launched from the VirtualBox shared folder, copy it to a local guest
+   path such as `%USERPROFILE%\Downloads` first, then launch that local copy by
+   GUI/keyboard interaction. Do not assume a fixed mapped drive letter such as
+   `Y:`; use `\\VBOXSVR\release` directly or let `pushd` create the temporary
+   drive letter for that command.
+3. Complete the HTML installer by keyboard/mouse injection or direct clicks,
+   choosing a clean directory such as
+   `%USERPROFILE%\Documents\AutoScriptorGuiInstall`.
+   The primary wizard button must be keyboard reachable: when focus is not in an
+   editable input control, Enter should trigger the current primary action. If a VM can
+   show the installer but cannot advance without a mouse-only click path, treat
+   that as an installer accessibility regression and fix it before publishing.
+4. Keep screenshots for the selected path, install progress/completion, and
+   the launched main window.
+5. Verify the install tree contains `backend\autoscriptor-engine.exe`,
+   `%APPDATA%\autoscriptor\install.json` points at the chosen install root,
+   the daily launcher exists, and WebUI responds on `127.0.0.1:5000`.
+
+The headless path below is still useful for repeatable installer hygiene and
+log collection, but it is not a substitute when the requested acceptance target
+is the real GUI flow.
 
 Inside the VM:
 
@@ -137,6 +172,13 @@ UTF-8 Chinese string literals for executable names. Build names such as
 script with a BOM; otherwise `Start-Process` / `taskkill` can fail with "file not
 found" after the install/update itself has succeeded.
 
+The inverse applies to JSON marker files that Electron/Node reads directly,
+such as `%APPDATA%\autoscriptor\install.json` and
+`.autoscriptor\release_version.json`: write them as UTF-8 without BOM. In
+Windows PowerShell 5.1, `Set-Content -Encoding UTF8` writes a BOM; use
+`[System.IO.File]::WriteAllText($path, $json, [System.Text.UTF8Encoding]::new($false))`
+instead so Node `JSON.parse` does not fail before launcher root detection.
+
 ## Update Package Acceptance
 
 Use a clean VM snapshot and test the upgrade path, not only the final package:
@@ -179,6 +221,15 @@ Keep same-line update reports split by layer:
   probe. If both the pre-update baseline launcher and post-update launcher fail
   under `guestcontrol`, the result is "launcher path not VM-proven", not
   "update package broke the app".
+- If the post-update launcher opens the old installer wizard and no
+  `autoscriptor-engine.exe` appears, inspect whether the update package replaced
+  the installed daily launcher `造笔.exe`. Same-line update packages that advance
+  the recorded version must include the new launcher with `--include-file`.
+- Before the post-update launcher probe, terminate the baseline launcher by the
+  captured PID and by install-root path matching. Do not rely only on killing the
+  Chinese image name `造笔.exe`; if that process remains, Electron's
+  single-instance lock can make the post-update launcher probe fail without ever
+  starting the backend.
 - The real WebUI "choose zip and apply" path uses Electron IPC in an already
   running shell. It still needs manual UI validation or a dedicated hidden
   acceptance mode; backend direct probes alone do not prove the file-picker UI.
@@ -187,7 +238,7 @@ Keep same-line update reports split by layer:
 
 - The release EXE starts on a clean Windows machine.
 - The installation tree is complete.
-- `data/config.json` is valid.
+- `install.json.dataRoot/config.json` is valid.
 - Windows uninstall registration exists.
 - The daily launcher exists.
 - The local WebUI responds on `127.0.0.1:5000`.

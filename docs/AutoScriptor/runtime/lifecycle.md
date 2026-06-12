@@ -53,8 +53,8 @@
 
 ## 配置与账号
 
-- 全局配置：`config.json` 或发行版 `data/config.json`。
-- 账号配置：`data/accounts/*.json`。
+- 全局配置：开发模式 `config.json`；发行版 `install.json.dataRoot/config.json`。
+- 账号配置：`dataRoot/accounts/*.json`。
 - 当前角色的 `tasks` / `status` / `game_profession` 被展开到运行态 `cfg`。
 - 写 JSON 使用同目录临时文件加 `os.replace()`。
 - `WebUILifecycleService` 负责配置副作用顺序：修改内存、保存、重载任务、刷新 order map、唤醒调度、递增 `config_version`。

@@ -44,7 +44,34 @@ const SettingsPanel = {
       return Object.prototype.hasOwnProperty.call(this.ocrConfig, 'scale');
     },
   },
+  watch: {
+    'emulatorConfig.adb_addr': {
+      immediate: true,
+      handler() {
+        this.ensureDefaultAdbAddr();
+      },
+    },
+    'emulatorConfig.index': {
+      immediate: true,
+      handler() {
+        this.ensureDefaultAdbAddr();
+      },
+    },
+  },
   methods: {
+    defaultAdbAddrForIndex(index) {
+      const n = Number(index);
+      const safeIndex = Number.isFinite(n) && n >= 0 ? n : 0;
+      const port = this.MUMU_ADB_BASE_PORT + safeIndex * this.MUMU_ADB_PORT_STEP;
+      return `127.0.0.1:${port}`;
+    },
+    ensureDefaultAdbAddr() {
+      if (!this.emulatorConfig || typeof this.emulatorConfig !== 'object') return;
+      const addr = String(this.emulatorConfig.adb_addr || '').trim();
+      if (!addr || addr.startsWith('YOUR_') || addr.endsWith(':0')) {
+        this.emulatorConfig.adb_addr = this.defaultAdbAddrForIndex(this.emulatorConfig.index);
+      }
+    },
     syncAdbPortFromIndex(index) {
       const n = Number(index);
       if (!Number.isFinite(n) || n < 0) return;

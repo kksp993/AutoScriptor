@@ -12,6 +12,7 @@
 
 额外文件:
   --include-backend services/webui/static/js/components/UpdatePanel.js
+  --include-file dist_electron/AutoScriptor_Zao_Install_1.1.5.exe=造笔.exe
   --mkdir data/assets/cache
   --copy-if-missing path/to/template.json=data/templates/template.json
 """
@@ -97,7 +98,7 @@ def add_file(
 
 def parse_copy_if_missing(raw: str) -> tuple[Path, str]:
     if "=" not in raw:
-        raise ValueError("--copy-if-missing 需要 SRC=DEST")
+        raise ValueError("参数需要 SRC=DEST")
     src, dest = raw.split("=", 1)
     return Path(src).resolve(), normalize_rel(dest)
 
@@ -143,6 +144,10 @@ def cmd_create(args: argparse.Namespace) -> int:
                 action="replace",
             )
 
+        for raw in args.include_file or []:
+            src, dest = parse_copy_if_missing(raw)
+            add_file(zf, replace_entries, src, dest, action="replace")
+
         for raw in args.copy_if_missing or []:
             src, dest = parse_copy_if_missing(raw)
             add_file(zf, copy_entries, src, dest, action="copy_if_missing")
@@ -183,6 +188,7 @@ def main() -> int:
     p.add_argument("--base-version", default="", help="兼容线基线，默认 x.y.0")
     p.add_argument("--no-engine", action="store_true", help="不自动纳入 autoscriptor-engine.exe")
     p.add_argument("--include-backend", action="append", default=[], help="额外纳入新版 backend 下的相对路径，可重复")
+    p.add_argument("--include-file", action="append", default=[], help="额外替换安装根内文件，格式 SRC=DEST，可重复")
     p.add_argument("--mkdir", action="append", default=[], help="安装根下需要确保存在的目录，可重复")
     p.add_argument("--copy-if-missing", action="append", default=[], help="仅目标不存在时复制，格式 SRC=DEST，可重复")
     p.add_argument("--config-defaults-json", default="", help="要合并进 data/config.json 的默认配置 JSON，只补缺失 key")

@@ -563,6 +563,9 @@ async def save_config_api(request: Request):
         return api_ok(config_version=lifecycle_service.save_runtime_config(data))
     except (KeyError, ValueError) as e:
         return api_error(400, str(e), code="invalid_payload")
+    except Exception as e:
+        logger.error("save config error: %s", e)
+        return api_error(500, str(e), code="save_config_failed")
 
 
 @app.post("/api/tasks")
@@ -1415,6 +1418,8 @@ async def accounts_add_api(request: Request):
     if busy is not None:
         return busy
     data = await request.json()
+    if not _check_request_freshness(data):
+        return api_error(400, "请求已过期，请重试", code="stale_request")
     name = str(data.get("name", "") or "").strip()
     account = str(data.get("account", "") or "").strip()
     password = str(data.get("password", "") or "").strip()
@@ -1423,24 +1428,32 @@ async def accounts_add_api(request: Request):
     security_key = str(data.get("security_key", "") or "").strip()
 
     if not name:
-        return JSONResponse(status_code=400, content={"error": "账号名称不能为空"})
+        return api_error(400, "账号名称不能为空", code="invalid_payload")
     if not account:
-        return JSONResponse(status_code=400, content={"error": "游戏账号不能为空"})
+        return api_error(400, "游戏账号不能为空", code="invalid_payload")
     if not password:
-        return JSONResponse(status_code=400, content={"error": "游戏密码不能为空"})
+        return api_error(400, "游戏密码不能为空", code="invalid_payload")
     if not server:
-        return JSONResponse(status_code=400, content={"error": "服务器不能为空"})
+        return api_error(400, "服务器不能为空", code="invalid_payload")
     if not character_name:
-        return JSONResponse(status_code=400, content={"error": "角色名不能为空"})
+        return api_error(400, "角色名不能为空", code="invalid_payload")
     if not security_key:
-        return JSONResponse(status_code=400, content={"error": "安全密码不能为空"})
+        return api_error(400, "安全密码不能为空", code="invalid_payload")
 
     try:
         version = lifecycle_service.add_account(name, account, password, server, character_name, security_key)
-        return {"accounts": cfg.list_accounts(), "config_version": version}
+        return api_ok(
+            accounts=cfg.list_accounts(),
+            current_account=cfg.current_account(),
+            active_character=cfg.active_character(),
+            characters=task_tree_service.characters_summary(),
+            config_version=version,
+        )
+    except ValueError as e:
+        return api_error(400, str(e), code="invalid_account")
     except Exception as e:
         logger.error("add account error: %s", e)
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return api_error(500, str(e), code="add_account_failed")
 
 
 @app.post("/api/accounts/delete")
