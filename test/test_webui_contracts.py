@@ -540,6 +540,31 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
             ["lock", "save_config", ("reload_tasks", None), "wake", "read_config", ("bump", "save tasks")],
         )
 
+    def test_save_runtime_config_normalizes_placeholder_adb_addr(self):
+        class FakeConfig:
+            def __init__(inner_self):
+                inner_self._config = {}
+
+            def __setitem__(inner_self, key, value):
+                inner_self._config[key] = value
+
+            def save_config(inner_self):
+                self.calls.append("save_config")
+
+        service, cfg = self._service(cfg=FakeConfig())
+        payload = {
+            "app": {"name": "ZmxyOL"},
+            "emulator": {"index": 2, "adb_addr": "YOUR_ADB_ADDR, e.g.127.0.0.1:16384"},
+            "ocr": {"use_gpu": False},
+        }
+
+        version = service.save_runtime_config(payload)
+
+        self.assertEqual(version, 42)
+        self.assertEqual(cfg._config["emulator"]["adb_addr"], "127.0.0.1:16448")
+        self.assertEqual(payload["emulator"]["adb_addr"], "YOUR_ADB_ADDR, e.g.127.0.0.1:16384")
+        self.assertEqual(self.calls, ["lock", "save_config", "apply_log_level", ("bump", "save config")])
+
     def test_switch_character_uses_task_manager_boundary_and_invalidates_login(self):
         service, _cfg = self._service()
 
@@ -814,6 +839,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
             "/api/tasks/reload",
             "/api/accounts",
             "/api/accounts/switch",
+            "/api/accounts/add",
             "/api/characters/switch",
             "/api/dispatch/queue",
         }:
@@ -829,6 +855,22 @@ class TestWebUIServerRouteContract(unittest.TestCase):
 
         self.assertNotIn("from ZmxyOL.task import load_tasks", content)
         self.assertNotIn("with TASK_MANAGER._cfg_lock", content)
+
+    def test_accounts_add_uses_standard_api_response(self):
+        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        start = content.index("async def accounts_add_api")
+        end = content.index("@app.post(\"/api/accounts/delete\")", start)
+        body = content[start:end]
+
+        self.assertIn("return api_ok(", body)
+        self.assertIn("return api_error(400", body)
+        self.assertIn("return api_error(500", body)
+
+    def test_frontend_api_error_message_accepts_fastapi_detail(self):
+        content = (ROOT / "services/webui/static/js/core/api.js").read_text(encoding="utf-8")
+
+        self.assertIn("data.detail", content)
+        self.assertIn("JSON.stringify(data.detail)", content)
 
     def test_webui_startup_does_not_initialize_device_controls(self):
         content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
@@ -1137,7 +1179,7 @@ class TestInstallerContract(unittest.TestCase):
             ".backend.new.",
             ".backend.incremental.",
             "彻底卸载造笔.bat",
-            "dataRoot: dataDest",
+            "resolveRuntimeDataRoot(rootResolved, userDataPath)",
         ]:
             with self.subTest(marker=marker):
                 self.assertIn(marker, installer)
@@ -1154,6 +1196,8 @@ class TestInstallerContract(unittest.TestCase):
         self.assertIn("mode: 'existing'", main)
         self.assertIn("allowManagedExisting: true", main)
         self.assertIn("AUTOSCRIPTOR_DATA_DIR: getRuntimeDataRoot()", main)
+        self.assertIn("getUserDataRuntimeDataRoot()", main)
+        self.assertIn("updateInstallJsonDataRoot(fallback)", main)
 
         self.assertIn("事务切换", html)
         self.assertIn("保留 <code>config.json</code>", html)

@@ -149,13 +149,32 @@ if ($Mode -eq "PreInstall") {
   Assert-File (Join-Path $InstallRoot "backend\autoscriptor-engine.exe") "engine" ([ref]$errors)
   Assert-File (Join-Path $InstallRoot "backend\vcomp140.dll") "VC OpenMP runtime" ([ref]$errors)
   Assert-File (Join-Path $InstallRoot "backend\paddle\libs\mkldnn.dll") "Paddle MKLDNN runtime" ([ref]$errors)
-  Assert-File (Join-Path $InstallRoot "data\config.json") "data/config.json" ([ref]$errors)
   Assert-File (Join-Path $InstallRoot "Uninstall.ps1") "Uninstall.ps1" ([ref]$errors)
   Assert-File (Join-Path $InstallRoot $KeepDataUninstallName) "keep-data uninstall bat" ([ref]$errors)
   Assert-File (Join-Path $InstallRoot $RemoveAllUninstallName) "remove-all uninstall bat" ([ref]$errors)
   Assert-File (Join-Path $InstallRoot $DailyLauncherName) "daily launcher" ([ref]$errors)
 
-  $cfgPath = Join-Path $InstallRoot "data\config.json"
+  $installMarker = Join-Path $env:APPDATA "autoscriptor\install.json"
+  Assert-File $installMarker "install.json" ([ref]$errors)
+  $dataRoot = $null
+  if (Test-Path -LiteralPath $installMarker) {
+    try {
+      $marker = Get-Content -LiteralPath $installMarker -Raw -Encoding UTF8 | ConvertFrom-Json
+      $dataRoot = [string]$marker.dataRoot
+      $markerRoot = [string]$marker.installRoot
+      $report.Checks.InstallJsonVersion = $marker.version
+      $report.Checks.InstallJsonInstallRoot = $markerRoot
+      $report.Checks.InstallJsonDataRoot = $dataRoot
+      if ($markerRoot -and ([System.IO.Path]::GetFullPath($markerRoot) -ne [System.IO.Path]::GetFullPath($InstallRoot))) {
+        $errors += "install.json installRoot mismatch: $markerRoot"
+      }
+    } catch {
+      $errors += "install.json is not valid JSON: $($_.Exception.Message)"
+    }
+  }
+
+  $cfgPath = if ($dataRoot) { Join-Path $dataRoot "config.json" } else { Join-Path $InstallRoot "data\config.json" }
+  Assert-File $cfgPath "dataRoot/config.json" ([ref]$errors)
   if (Test-Path -LiteralPath $cfgPath) {
     try {
       $cfg = Get-Content -LiteralPath $cfgPath -Raw -Encoding UTF8 | ConvertFrom-Json

@@ -1358,6 +1358,21 @@
       }
     }
 
+    function shouldLetControlHandleEnter(target) {
+      if (!target) return false;
+      const tag = String(target.tagName || '').toLowerCase();
+      if (tag === 'input') return !target.readOnly && !target.disabled;
+      return tag === 'textarea' || tag === 'select' || tag === 'button';
+    }
+
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' || event.defaultPrevented) return;
+      if (shouldLetControlHandleEnter(event.target)) return;
+      if (!btnNext || btnNext.disabled || typeof btnNext.onclick !== 'function') return;
+      event.preventDefault();
+      btnNext.click();
+    });
+
     function applyWizardGate(ctx) {
       if (!ctx) return;
       const existingEl = document.getElementById('wizardExistingBlock');

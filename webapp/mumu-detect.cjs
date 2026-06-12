@@ -527,8 +527,9 @@ function previewMumuConfig(configData, opts = {}) {
   return report;
 }
 
-function applyMumuConfig(installRoot, send) {
-  const cfgInData = path.join(installRoot, 'data', 'config.json');
+function applyMumuConfig(installRoot, send, opts = {}) {
+  const dataRoot = opts && opts.dataRoot ? path.resolve(String(opts.dataRoot)) : path.join(installRoot, 'data');
+  const cfgInData = path.join(dataRoot, 'config.json');
   const cfgLegacy = path.join(installRoot, 'config.json');
   const cfgPath = fs.existsSync(cfgInData) ? cfgInData : cfgLegacy;
   let data = {};

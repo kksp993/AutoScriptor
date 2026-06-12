@@ -19,7 +19,7 @@ WebUI 后端是 FastAPI；静态前端位于 `services/webui/static/`，Electron
 }
 ```
 
-现状中仍有历史接口返回 `{"success": ...}`、`{"error": ...}` 或业务裸对象；不要在新接口继续扩散。HTTP 状态码必须有意义：参数错误 `400`，未授权/未解锁 `401/403`，运行冲突 `409`。
+现状中仍有历史接口返回 `{"success": ...}`、`{"error": ...}` 或业务裸对象；不要在新接口继续扩散。HTTP 状态码必须有意义：参数错误 `400`，未授权/未解锁 `401/403`，运行冲突 `409`。前端通用错误解析必须兼容 FastAPI 的 `detail` 字段，否则 404/422 等框架错误会退化成“创建失败/操作失败”等空泛提示。
 
 ## 认证与解锁
 
@@ -53,6 +53,8 @@ WebUI 后端是 FastAPI；静态前端位于 `services/webui/static/`，Electron
 | `POST /api/config/import` | 导入允许的配置段，剥离 deploy 密码/证书等敏感字段 |
 | `GET/POST /api/deploy` | 读取/保存 deploy、notify、update、remote_access |
 
+`POST /api/config` 保存时会把空的、`YOUR_` 占位的或 `:0` 结尾的 `emulator.adb_addr` 规范化为 MuMu 默认地址：`127.0.0.1:16384 + index*32`。保存失败必须返回标准 `api_error` JSON，前端不能只显示“未知错误”。
+
 保存任务时必须通过 `TaskTreeService.strip_runtime_fields()`，不能持久化 `fn/order/param_meta/param_keys/beta/custom/debug_mode/task_description/task_doc_flow/_due/progress/progress_display` 等运行时字段。
 
 ## 账号、角色和队列
@@ -61,7 +63,7 @@ WebUI 后端是 FastAPI；静态前端位于 `services/webui/static/`，Electron
 |------|------|
 | `GET /api/accounts` | 账号列表 |
 | `POST /api/accounts/switch` | 切换账号并重载任务 |
-| `POST /api/accounts/add` / `delete` | 新增/删除账号 |
+| `POST /api/accounts/add` / `delete` | 新增/删除账号；新增账号使用标准 `api_ok/api_error` 响应 |
 | `GET /api/characters` | 当前账号角色树 |
 | `POST /api/characters/switch` | 切换角色并重载任务 |
 | `POST /api/characters/add` / `delete` | 新增/删除角色 |

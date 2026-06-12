@@ -69,22 +69,24 @@ function makeZipFromDir(srcDir, zipPath) {
 function createInstalled(tmp, name, version = '1.1.0') {
   const installRoot = path.join(tmp, `install-${name}`);
   const userDataPath = path.join(tmp, `userdata-${name}`);
+  const dataRoot = path.join(userDataPath, 'data');
   fs.rmSync(installRoot, { recursive: true, force: true });
   fs.rmSync(userDataPath, { recursive: true, force: true });
   writeText(path.join(installRoot, 'backend', 'autoscriptor-engine.exe'), 'old engine\n');
   writeText(path.join(installRoot, 'backend', 'services', 'webui', 'static', 'app.js'), 'old app\n');
-  writeText(path.join(installRoot, 'data', 'accounts', 'default.json'), '{"kept":true}\n');
-  writeText(path.join(installRoot, 'data', 'custom_task', 'user.py'), '# user\n');
-  writeText(path.join(installRoot, 'data', 'battle_character', 'role.py'), '# role\n');
+  writeText(path.join(installRoot, '造笔.exe'), 'old launcher\n');
+  writeText(path.join(dataRoot, 'accounts', 'default.json'), '{"kept":true}\n');
+  writeText(path.join(dataRoot, 'custom_task', 'user.py'), '# user\n');
+  writeText(path.join(dataRoot, 'battle_character', 'role.py'), '# role\n');
   writeText(
-    path.join(installRoot, 'data', 'config.json'),
+    path.join(dataRoot, 'config.json'),
     JSON.stringify({ app: { debug_mode: true }, deploy: { theme: 'dark' } }, null, 2),
   );
   writeText(
     path.join(userDataPath, 'install.json'),
-    JSON.stringify({ installRoot, dataRoot: path.join(installRoot, 'data'), version }, null, 2),
+    JSON.stringify({ installRoot, dataRoot, version }, null, 2),
   );
-  return { installRoot, userDataPath };
+  return { installRoot, userDataPath, dataRoot };
 }
 
 function createUpdateZip(tmp, name, manifest, files) {
@@ -104,22 +106,30 @@ function manifestFor(targetVersion, entries = {}) {
   const engine = entries.engine || 'new engine\n';
   const app = entries.app || 'new app\n';
   const template = entries.template || '{"template":true}\n';
+  const launcher = entries.launcher || '';
+  const replace = [
+    {
+      path: 'backend/autoscriptor-engine.exe',
+      sha256: sha256Text(engine),
+    },
+    {
+      path: 'backend/services/webui/static/app.js',
+      sha256: sha256Text(app),
+    },
+  ];
+  if (launcher) {
+    replace.push({
+      path: '造笔.exe',
+      sha256: sha256Text(launcher),
+    });
+  }
   return {
     format: 'autoscriptor_update_v1',
     compat_line: targetVersion.split('.').slice(0, 2).join('.'),
     base_version: `${targetVersion.split('.')[0]}.${targetVersion.split('.')[1]}.0`,
     target_version: targetVersion,
     mode: 'minor-cumulative',
-    replace: [
-      {
-        path: 'backend/autoscriptor-engine.exe',
-        sha256: sha256Text(engine),
-      },
-      {
-        path: 'backend/services/webui/static/app.js',
-        sha256: sha256Text(app),
-      },
-    ],
+    replace,
     mkdir: ['data/assets/cache'],
     copy_if_missing: [
       {
@@ -135,16 +145,18 @@ function manifestFor(targetVersion, entries = {}) {
 }
 
 async function testCumulativeUpdateDryRunAndApply(tmp) {
-  const { installRoot, userDataPath } = createInstalled(tmp, 'ok', '1.1.0');
-  const configPath = path.join(installRoot, 'data', 'config.json');
+  const { installRoot, userDataPath, dataRoot } = createInstalled(tmp, 'ok', '1.1.0');
+  const configPath = path.join(dataRoot, 'config.json');
   writeText(configPath, '\ufeff' + readText(configPath));
   const engine = 'new engine\n';
   const app = 'new app\n';
   const template = '{"template":true}\n';
-  const zipPath = createUpdateZip(tmp, '1.1.5', manifestFor('1.1.5', { engine, app, template }), {
+  const launcher = 'launcher 1.1.5\n';
+  const zipPath = createUpdateZip(tmp, '1.1.5', manifestFor('1.1.5', { engine, app, template, launcher }), {
     'backend/autoscriptor-engine.exe': engine,
     'backend/services/webui/static/app.js': app,
     'data/templates/example.json': template,
+    '造笔.exe': launcher,
   });
 
   const dry = await dryRunLocalReleaseUpdate({ installRoot, userDataPath, packagePath: zipPath });
@@ -152,7 +164,7 @@ async function testCumulativeUpdateDryRunAndApply(tmp) {
   assert(dry.currentVersion === '1.1.0', 'dry-run should read current version from install marker');
   assert(dry.targetVersion === '1.1.5', 'dry-run should report target version');
   assert(dry.compatLine === '1.1', 'dry-run should report compat line');
-  assert(dry.plan.replace === 2, 'dry-run should count replacement files');
+  assert(dry.plan.replace === 3, 'dry-run should count replacement files');
   assert(dry.plan.add === 1, 'dry-run should count copy_if_missing as add');
   assert(dry.plan.mkdir === 1, 'dry-run should count missing mkdir');
   assert(dry.plan.requiresBackendStop, 'engine replacement should require backend stop');
@@ -163,21 +175,23 @@ async function testCumulativeUpdateDryRunAndApply(tmp) {
   assert(result.ok, 'apply should succeed');
   assert(readText(path.join(installRoot, 'backend', 'autoscriptor-engine.exe')) === engine, 'engine should be replaced');
   assert(readText(path.join(installRoot, 'backend', 'services', 'webui', 'static', 'app.js')) === app, 'static file should be replaced');
+  assert(readText(path.join(installRoot, '造笔.exe')) === launcher, 'daily launcher should be replaced');
   assert(readText(path.join(installRoot, 'data', 'templates', 'example.json')) === template, 'missing template should be copied');
   assert(fs.existsSync(path.join(installRoot, 'data', 'assets', 'cache')), 'mkdir should be applied');
-  const cfg = JSON.parse(readText(path.join(installRoot, 'data', 'config.json')));
+  const cfg = JSON.parse(readText(path.join(dataRoot, 'config.json')));
   assert(cfg.app.debug_mode === true, 'config defaults must not overwrite user value');
   assert(cfg.app.new_flag === true, 'config defaults should add missing nested key');
   assert(cfg.deploy.content_manifest_url.includes('updates.example'), 'config defaults should add missing deploy key');
-  assert(readText(path.join(installRoot, 'data', 'accounts', 'default.json')).includes('kept'), 'accounts must be preserved');
+  assert(readText(path.join(dataRoot, 'accounts', 'default.json')).includes('kept'), 'accounts must be preserved');
   const marker = JSON.parse(readText(path.join(userDataPath, 'install.json')));
   assert(marker.version === '1.1.5', 'install marker version should be updated');
+  assert(marker.dataRoot === dataRoot, 'install marker dataRoot should be preserved');
   const versionFile = JSON.parse(readText(path.join(installRoot, '.autoscriptor', 'release_version.json')));
   assert(versionFile.version === '1.1.5', 'install root version file should be updated');
 }
 
 async function testPatch101UpdateFrom100PreservesUserData(tmp) {
-  const { installRoot, userDataPath } = createInstalled(tmp, 'patch-101', '1.0.0');
+  const { installRoot, userDataPath, dataRoot } = createInstalled(tmp, 'patch-101', '1.0.0');
   const engine = 'engine 1.0.1\n';
   const app = 'app 1.0.1\n';
   const template = '{"template":"1.0.1"}\n';
@@ -196,9 +210,9 @@ async function testPatch101UpdateFrom100PreservesUserData(tmp) {
   const result = await applyLocalReleaseUpdate({ installRoot, userDataPath, packagePath: zipPath, keepBackup: false });
   assert(result.ok, '1.0.0 -> 1.0.1 apply should succeed');
   assert(readText(path.join(installRoot, 'backend', 'autoscriptor-engine.exe')) === engine, 'engine should be updated to 1.0.1');
-  assert(readText(path.join(installRoot, 'data', 'accounts', 'default.json')).includes('kept'), 'accounts must be preserved on 1.0.1 update');
-  assert(readText(path.join(installRoot, 'data', 'custom_task', 'user.py')).includes('# user'), 'custom tasks must be preserved on 1.0.1 update');
-  assert(readText(path.join(installRoot, 'data', 'battle_character', 'role.py')).includes('# role'), 'battle character data must be preserved on 1.0.1 update');
+  assert(readText(path.join(dataRoot, 'accounts', 'default.json')).includes('kept'), 'accounts must be preserved on 1.0.1 update');
+  assert(readText(path.join(dataRoot, 'custom_task', 'user.py')).includes('# user'), 'custom tasks must be preserved on 1.0.1 update');
+  assert(readText(path.join(dataRoot, 'battle_character', 'role.py')).includes('# role'), 'battle character data must be preserved on 1.0.1 update');
   const marker = JSON.parse(readText(path.join(userDataPath, 'install.json')));
   assert(marker.version === '1.0.1', 'install marker version should be 1.0.1');
   const versionFile = JSON.parse(readText(path.join(installRoot, '.autoscriptor', 'release_version.json')));
@@ -267,8 +281,8 @@ async function testRollbackWhenLaterFileFails(tmp) {
 }
 
 async function testRejectsInvalidConfigBeforeDefaultsMerge(tmp) {
-  const { installRoot, userDataPath } = createInstalled(tmp, 'bad-config', '1.1.0');
-  writeText(path.join(installRoot, 'data', 'config.json'), '{broken json');
+  const { installRoot, userDataPath, dataRoot } = createInstalled(tmp, 'bad-config', '1.1.0');
+  writeText(path.join(dataRoot, 'config.json'), '{broken json');
   const engine = 'new engine\n';
   const app = 'new app\n';
   const template = '{"template":true}\n';
@@ -289,7 +303,7 @@ async function testRejectsInvalidConfigBeforeDefaultsMerge(tmp) {
     /data\/config\.json is invalid/i,
     'apply should reject invalid config before writing defaults',
   );
-  assert(readText(path.join(installRoot, 'data', 'config.json')) === '{broken json', 'invalid user config must be preserved');
+  assert(readText(path.join(dataRoot, 'config.json')) === '{broken json', 'invalid user config must be preserved');
 }
 
 async function main() {

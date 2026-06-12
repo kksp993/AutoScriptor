@@ -56,7 +56,7 @@ ensureUtf8Console();
 process.once('exit', restoreWindowsConsoleCodePage);
 
 // ── Config ──────────────────────────────────────────────────────────────────
-/** 开发模式：仓库根目录。发行安装包：install.json 中的 installRoot，或 exe 同层（旧版整包）。 */
+/** 开发模式：仓库根目录。发行安装包：程序文件在 installRoot，可写数据在 install.json.dataRoot。 */
 const SERVER_URL = 'http://127.0.0.1:5000';
 const BOSS_KEY = 'Alt+W';
 
@@ -209,10 +209,71 @@ function isInstalled() {
   return fs.existsSync(path.join(getRoot(), '.venv', 'Scripts', 'python.exe'));
 }
 
+function getUserDataRuntimeDataRoot() {
+  return path.join(app.getPath('userData'), 'data');
+}
+
+function canWriteDirectory(dirPath) {
+  try {
+    fs.mkdirSync(dirPath, { recursive: true });
+    const probe = path.join(dirPath, `.write-test-${process.pid}-${Date.now()}`);
+    fs.writeFileSync(probe, 'ok', 'utf8');
+    fs.unlinkSync(probe);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function copyMissingTree(src, dest) {
+  if (!src || !dest || !fs.existsSync(src)) return;
+  const st = fs.statSync(src);
+  if (st.isDirectory()) {
+    fs.mkdirSync(dest, { recursive: true });
+    for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+      copyMissingTree(path.join(src, entry.name), path.join(dest, entry.name));
+    }
+    return;
+  }
+  if (st.isFile() && !fs.existsSync(dest)) {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+  }
+}
+
+function updateInstallJsonDataRoot(dataRoot) {
+  try {
+    const marker = path.join(app.getPath('userData'), 'install.json');
+    const data = fs.existsSync(marker) ? JSON.parse(fs.readFileSync(marker, 'utf8')) : {};
+    data.dataRoot = dataRoot;
+    if (!data.installRoot && app.isPackaged) data.installRoot = getRoot();
+    fs.mkdirSync(path.dirname(marker), { recursive: true });
+    fs.writeFileSync(marker, JSON.stringify(data, null, 2), 'utf8');
+  } catch (e) {
+    console.warn('[main] Failed to update install dataRoot:', e && e.message ? e.message : e);
+  }
+}
+
 function getRuntimeDataRoot() {
   const existing = readInstallJsonExisting();
-  if (existing.dataRoot) return existing.dataRoot;
-  return path.join(getRoot(), 'data');
+  const configured = existing.dataRoot || path.join(getRoot(), 'data');
+  if (!app.isPackaged || canWriteDirectory(configured)) return configured;
+
+  const fallback = getUserDataRuntimeDataRoot();
+  try {
+    copyMissingTree(configured, fallback);
+    if (!fs.existsSync(path.join(fallback, 'config.json'))) {
+      copyMissingTree(path.join(getRoot(), 'data'), fallback);
+    }
+    if (canWriteDirectory(fallback)) {
+      updateInstallJsonDataRoot(fallback);
+      console.warn('[main] Runtime dataRoot was not writable, migrated to:', fallback);
+      return fallback;
+    }
+  } catch (e) {
+    console.warn('[main] Runtime dataRoot migration failed:', e && e.message ? e.message : e);
+  }
+  return configured;
 }
 
 /** 安装向导专用：命令行带 `--installer` / `--install-wizard` 时始终只打开向导，不启动主窗口与 Python。 */
@@ -1202,7 +1263,9 @@ ipcMain.on('installer:launch', () => {
 
 // ── Installer path-verification IPC ─────────────────────────────────────────
 function getInstallerConfigPath() {
-  // 发行引擎实际读取 data/config.json；保留 legacy 根目录 config.json 兜底兼容旧包。
+  // 发行引擎实际读取 dataRoot/config.json；保留安装目录 data/config.json 和 legacy 根目录兜底兼容旧包。
+  const cfgInRuntimeData = path.join(getRuntimeDataRoot(), 'config.json');
+  if (fs.existsSync(cfgInRuntimeData)) return cfgInRuntimeData;
   const cfgInData = path.join(getRoot(), 'data', 'config.json');
   if (fs.existsSync(cfgInData)) return cfgInData;
   return path.join(getRoot(), 'config.json');

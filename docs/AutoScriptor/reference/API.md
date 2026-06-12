@@ -17,13 +17,13 @@
 
 | 目录/文件 | 说明 |
 |-----------|------|
-| `config.json` / `data/config.json` | 全局配置：源码模式默认在仓库根；发行/Electron 模式由 `AUTOSCRIPTOR_DATA_DIR` 指向安装目录 `data` |
-| `data/accounts/*.json` | 账号、角色、任务树、任务状态、加密凭据；真实账号文件不提交 |
-| `data/custom_task/` | 用户自定义任务脚本 |
-| `data/battle_character/` | 当前唯一生效的运行态职业脚本目录 |
+| `config.json` / `dataRoot/config.json` | 全局配置：源码模式默认在仓库根；发行/Electron 模式由 `AUTOSCRIPTOR_DATA_DIR` 指向 `install.json.dataRoot` |
+| `dataRoot/accounts/*.json` | 账号、角色、任务树、任务状态、加密凭据；真实账号文件不提交 |
+| `dataRoot/custom_task/` | 用户自定义任务脚本 |
+| `dataRoot/battle_character/` | 当前唯一生效的运行态职业脚本目录 |
 | `ZmxyOL/assets/config/ui_map.csv` | UI 名称到图片/文本/坐标的映射 |
 | `ZmxyOL/assets/pic/` | 模板图片资源 |
-| `logs/` / `data/logs/` | `get_logs_root()` 返回的运行日志、调试截图、错误归档目录；源码模式通常是仓库 `logs/`，发行模式通常是安装目录 `data/logs/` |
+| `logs/` / `dataRoot/logs/` | `get_logs_root()` 返回的运行日志、调试截图、错误归档目录；源码模式通常是仓库 `logs/`，发行模式通常是 `install.json.dataRoot/logs/` |
 
 路径统一通过 `AutoScriptor.utils.paths` 解析。不要在仓库根目录新建 `accounts/`、`custom_task/` 或 `battle_character/`。
 

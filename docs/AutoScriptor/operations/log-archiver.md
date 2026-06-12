@@ -1,6 +1,6 @@
 # 错误归档当前基线
 
-错误归档用于任务失败后保存足够还原现场的信息。当前目录由 `AutoScriptor.utils.paths.get_error_archives_dir()` 决定：源码模式通常是仓库 `logs/errors/`，发行/Electron 模式通常是安装目录 `data/logs/errors/`。WebUI 会兼容读取旧位置。
+错误归档用于任务失败后保存足够还原现场的信息。当前目录由 `AutoScriptor.utils.paths.get_error_archives_dir()` 决定：源码模式通常是仓库 `logs/errors/`，发行/Electron 模式通常是 `install.json.dataRoot/logs/errors/`。WebUI 会兼容读取旧位置。
 
 ## 产生位置
 

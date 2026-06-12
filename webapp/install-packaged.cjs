@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * 发行版（薄包）：将 resources/backend.zip 解压到用户选择的安装目录，复制 data，写 install.json，注册卸载。
+ * 发行版（薄包）：将 resources/backend.zip 解压到用户选择的安装目录，将可写 data 放到 Electron userData，写 install.json，注册卸载。
  *
  * 增量包（backend_incremental.zip）：由 scripts/release/release_backend_incremental.py 对比旧版 gui.dist / backend.zip
  * 与新版生成；applyBackendIncremental 在已有 backend/ 上校验 SHA-256 后覆盖，无需全量删除解压。
@@ -18,6 +18,12 @@ function safeJoin(dest, name) {
     throw new Error('非法 zip 路径: ' + name);
   }
   return path.join(dest, ...n.split('/'));
+}
+
+function resolveRuntimeDataRoot(installRoot, userDataPath) {
+  const userData = String(userDataPath || '').trim();
+  if (userData) return path.join(path.resolve(userData), 'data');
+  return path.join(path.resolve(installRoot), 'data');
 }
 
 function countZipFiles(zipPath) {
@@ -129,15 +135,17 @@ function extractZipWithNativeTar(zipPath, destDir, { send, total }) {
   });
 }
 
-function writeUninstallPs1(installRoot, userDataInstallJson) {
+function writeUninstallPs1(installRoot, userDataInstallJson, dataRoot) {
   const rootResolved = path.resolve(installRoot);
   const rootJson = JSON.stringify(rootResolved);
   const markerJson = JSON.stringify(userDataInstallJson);
+  const dataRootJson = JSON.stringify(dataRoot ? path.resolve(dataRoot) : '');
 
   const buildInner = (removeUserData) => [
     '$ErrorActionPreference = "Continue"',
     `$log = Join-Path $env:TEMP "ZaoBiUninstall-error.log"`,
     `$root = ${rootJson}`,
+    `$dataRoot = ${dataRootJson}`,
     `$removeUserData = ${removeUserData ? '$true' : '$false'}`,
     'function Stop-UnderRoot {',
     '  try {',
@@ -167,10 +175,18 @@ function writeUninstallPs1(installRoot, userDataInstallJson) {
     '}',
     'Start-Sleep -Seconds 5',
     'foreach ($round in 1..12) {',
-    '  if (-not (Test-Path -LiteralPath $root)) { exit 0 }',
+    '  if (-not (Test-Path -LiteralPath $root)) {',
+    '    if ($removeUserData -and $dataRoot -and (Test-Path -LiteralPath $dataRoot)) {',
+    '      try { Remove-Item -LiteralPath $dataRoot -Recurse -Force -ErrorAction Stop } catch { $_ | Out-File -FilePath $log -Append -Encoding utf8 }',
+    '    }',
+    '    exit 0',
+    '  }',
     '  Stop-UnderRoot',
     '  Start-Sleep -Milliseconds (400 + $round * 150)',
     '  if ($removeUserData) {',
+    '    if ($dataRoot -and ($dataRoot.IndexOf($root, [System.StringComparison]::OrdinalIgnoreCase) -ne 0) -and (Test-Path -LiteralPath $dataRoot)) {',
+    '      try { Remove-Item -LiteralPath $dataRoot -Recurse -Force -ErrorAction Stop } catch { $_ | Out-File -FilePath $log -Append -Encoding utf8 }',
+    '    }',
     '    try { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction Stop } catch { $_ | Out-File -FilePath $log -Append -Encoding utf8 }',
     '    if (-not (Test-Path -LiteralPath $root)) { exit 0 }',
     '    try {',
@@ -928,7 +944,7 @@ async function dryRunPackagedInstall(opts) {
     }
 
     const dataSrc = exeDir ? path.join(exeDir, 'data') : '';
-    const dataDest = path.join(rootResolved, 'data');
+    const dataDest = resolveRuntimeDataRoot(rootResolved, userDataPath);
     const dataPlan = planPackagedDataMerge(dataSrc, dataDest);
     const runtimePlan = inspectPackagedRuntimeData(dataSrc, dataDest, { previewMumu: !skipMumuConfig });
     report.plan.data = {
@@ -995,7 +1011,7 @@ async function dryRunPackagedInstall(opts) {
       '读取并校验 backend.zip',
       '解压到 .backend.new.<timestamp>.<pid> 临时目录',
       report.plan.backend.hasExistingBackend ? '备份并事务切换现有 backend' : '创建新的 backend',
-      '合并随包 data，同时保留用户配置与自定义任务',
+      '合并随包 data 到用户可写数据目录，同时保留用户配置与自定义任务',
       '写入 userData/install.json 安装标记',
       '写入卸载脚本和应用程序卸载入口',
     );
@@ -1661,7 +1677,7 @@ async function runPackagedInstall(opts) {
     send,
   );
   const dataSrc = path.join(exeDir, 'data');
-  const dataDest = path.join(rootResolved, 'data');
+  const dataDest = resolveRuntimeDataRoot(rootResolved, userDataPath);
   const runtimePlan = inspectPackagedRuntimeData(dataSrc, dataDest, { previewMumu: false });
   if (runtimePlan.errors.length) {
     throw new Error('runtime data validation failed: ' + runtimePlan.errors.join('; '));
@@ -1685,9 +1701,25 @@ async function runPackagedInstall(opts) {
 
   try {
     const nativeExtract = await extractZipWithNativeTar(zipPath, stagingDir, { send, total });
-    if (!nativeExtract.ok) {
-      if (nativeExtract.attempted) {
-        await removeDirWithRetry(stagingDir, send, 'tar.exe 解压残留目录');
+    let needsJsExtract = !nativeExtract.ok;
+    let stagingReset = false;
+    if (nativeExtract.ok) {
+      try {
+        verifyBackendDir(stagingDir);
+      } catch (e) {
+        const msg = e && e.message ? e.message : String(e);
+        safeSend(send, { type: 'log', message: `[解压] tar.exe 解压结果校验失败，回退 JS 解压：${msg}` });
+        const errRm = await removeDirWithRetry(stagingDir, send, 'tar.exe 解压残留目录');
+        if (errRm) throw errRm;
+        fs.mkdirSync(stagingDir, { recursive: true });
+        stagingReset = true;
+        needsJsExtract = true;
+      }
+    }
+    if (needsJsExtract) {
+      if (nativeExtract.attempted && !stagingReset) {
+        const errRm = await removeDirWithRetry(stagingDir, send, 'tar.exe 解压残留目录');
+        if (errRm) throw errRm;
         fs.mkdirSync(stagingDir, { recursive: true });
       }
       const reportExtractProgress = createExtractProgressReporter({ send, total });
@@ -1723,7 +1755,7 @@ async function runPackagedInstall(opts) {
     safeSend(send, { type: 'log', message: '[MuMu] 测试模式：跳过自动检测与配置写入' });
   } else {
     const { applyMumuConfig } = require('./mumu-detect.cjs');
-    applyMumuConfig(rootResolved, send);
+    applyMumuConfig(rootResolved, send, { dataRoot: dataDest });
   }
 
   const markerPath = path.join(userDataPath, 'install.json');
@@ -1740,12 +1772,12 @@ async function runPackagedInstall(opts) {
   copyDailyLauncher(rootResolved, portableExePath, send);
 
   safeSend(send, { type: 'progress', percent: 97, message: '写入卸载程序…' });
-  writeUninstallPs1(rootResolved, markerPath);
+  writeUninstallPs1(rootResolved, markerPath, dataDest);
   registerUninstall(rootResolved, manifest.version, { skipRegistry, send });
   const registryNote = skipRegistry ? '；测试模式未写入「应用和功能」注册表' : '，并已注册「应用和功能」';
   safeSend(send, {
     type: 'log',
-    message: `[卸载] 已写入 ${path.join(rootResolved, '卸载造笔.bat')}（保留 data）与 ${path.join(rootResolved, '彻底卸载造笔.bat')}${registryNote}`,
+    message: `[卸载] 已写入 ${path.join(rootResolved, '卸载造笔.bat')}（保留 dataRoot）与 ${path.join(rootResolved, '彻底卸载造笔.bat')}${registryNote}`,
   });
 
   safeSend(send, { type: 'progress', percent: 100, message: '安装完成' });
