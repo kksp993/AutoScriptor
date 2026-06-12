@@ -222,9 +222,12 @@ Keep same-line update reports split by layer:
   under `guestcontrol`, the result is "launcher path not VM-proven", not
   "update package broke the app".
 - If the post-update launcher opens the old installer wizard and no
-  `autoscriptor-engine.exe` appears, inspect whether the update package replaced
-  the installed daily launcher `造笔.exe`. Same-line update packages that advance
-  the recorded version must include the new launcher with `--include-file`.
+  `autoscriptor-engine.exe` appears, inspect whether the old installed daily
+  launcher `造笔.exe` can support the updated backend. Same-line update packages
+  should remain lightweight; include the full portable installer with
+  `--include-file` only after this launcher probe proves it is required. If that
+  would make the update zip exceed 100 MB, record the release decision explicitly
+  or ship full-installer-only for that version.
 - Before the post-update launcher probe, terminate the baseline launcher by the
   captured PID and by install-root path matching. Do not rely only on killing the
   Chinese image name `造笔.exe`; if that process remains, Electron's
