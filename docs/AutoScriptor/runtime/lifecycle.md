@@ -8,6 +8,7 @@
 - 启动、刷新、普通轮询和默认诊断不应主动创建 `mixctrl/mumu`。
 - 设备会话由明确需要实时设备的入口创建：任务执行、实时截图、遥控点击/滑动、无缓存定位、真实代码执行。
 - `RuntimeContext` 是唯一运行态对象中心，负责 `mixctrl`、`mumu`、`bg`、`vlm_client` 和兼容全局变量同步。
+- Electron portable 启动必须先创建可见加载窗口，再执行端口清理和 Python 后端启动。加载页要持续显示阶段日志，包括运行目录检查、端口检查、Python 进程创建、WebUI 模块导入、等待本地 WebUI 响应；不要让首次运行长时间无输出。
 
 ## 设备会话
 
@@ -32,6 +33,7 @@
 - `DeviceFacade` 用于诊断页聚合 Manager、ADB、App、NemuIpc、OCR、UI Map 状态。
 - MuMuManager 负责低频生命周期命令；`version` 等命令失败但 ADB 可用时通常是 warning。
 - ADB 是点击、滑动、输入、按键、App 启停和包状态的稳定路径；高频输入优先直接走 `adb.exe`。
+- MuMu TCP ADB 地址（如 `127.0.0.1:16384`）不会因为 `adb start-server` 自动出现在 `adb devices`；`DeviceFacade` 在 `get-state` 失败时会先 `adb connect <adb_addr>` 并重试，再判断端口错误或设备未启动。
 - NemuIpc 仍是截图主路径。默认诊断不做截图探测；用户点击“截图探测”才检查该层。
 
 ## WebUI 运行状态
@@ -55,9 +57,13 @@
 
 - 全局配置：开发模式 `config.json`；发行版 `install.json.dataRoot/config.json`。
 - 账号配置：`dataRoot/accounts/*.json`。
+- 发行版或 Electron 指定 `AUTOSCRIPTOR_DATA_DIR` 时，旧配置里的绝对 `accounts.dir` 会迁移/归一到 `dataRoot/accounts`，避免继续写旧安装目录或 Program Files。
+- 配置/账号保存优先使用同目录临时文件加原子替换；默认不强制 `fsync`，避免低内存、杀毒扫描或慢盘把小 JSON 写入拖成秒级阻塞。需要严格刷盘时设置 `AUTOSCRIPTOR_STRICT_FSYNC=1`。
+- 纯全局配置保存（如基础配置、deploy、notify、update、remote_access）只写 `config.json`，不重写当前账号 JSON。任务、状态、账号、角色变更才写 `accounts/*.json`。
+- 若 Windows ACL 允许写入但拒绝替换/删除（`WinError 5`），保存层会降级为直接写目标文件并记录 warning。完全不可写时仍返回包含 `dataRoot/config_path/accounts_dir` 的错误诊断。
 - 当前角色的 `tasks` / `status` / `game_profession` 被展开到运行态 `cfg`。
 - 写 JSON 使用同目录临时文件加 `os.replace()`。
-- `WebUILifecycleService` 负责配置副作用顺序：修改内存、保存、重载任务、刷新 order map、唤醒调度、递增 `config_version`。
+- `WebUILifecycleService` 负责配置副作用顺序：修改内存、保存、重载任务、刷新 order map、唤醒调度、递增 `config_version`。新增账号完成写入和切换后，任务重载失败只记录 warning，不回滚创建结果。
 
 WebUI 公开配置必须剥离账号、密码、加密块、运行时任务字段和 `_due` 等后端投影字段。
 

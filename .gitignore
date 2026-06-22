@@ -43,6 +43,9 @@ nuitka-crash-report.xml
 /main.js
 
 /output/
+/dist_plain_portable/
+/dist_source_portable/
+/packaging/
 /errors/
 /examples/
 /logs/

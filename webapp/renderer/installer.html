@@ -2056,13 +2056,13 @@
               }
               const step1sub = document.querySelector('#step1 > .subtitle');
               if (step1sub) {
-                step1sub.textContent = '请选择安装根目录；完成后可在下一步配置 MuMu 等路径。';
+                step1sub.textContent = '请选择程序安装目录；用户配置与账号数据会写入系统用户数据目录。';
               }
               const pipEl = document.getElementById('pipSourceGroup');
               if (pipEl) pipEl.closest('.setting-group').style.display = 'none';
               const hint = document.getElementById('installPathHint');
               if (hint) {
-                hint.textContent = '请选择安装根目录（将创建 backend、data 与配置文件）。解压过程较长，请查看下方实时日志。';
+                hint.textContent = '请选择程序安装目录（将创建 backend 与日常启动器）；配置、账号与日志会写入系统用户数据目录。解压过程较长，请查看下方实时日志。';
               }
               const def = await window.electron.installer.defaultInstallDir();
               if (def) document.getElementById('installPath').value = def;

@@ -90,6 +90,7 @@ def import_app_config_for_test(tmp_root: str):
     paths = types.ModuleType("AutoScriptor.utils.paths")
     paths.get_data_root = lambda: tmp_root
     paths.get_accounts_dir = lambda: Path(tmp_root) / "accounts"
+    paths.is_compiled = lambda: False
 
     module_name = "app_config_under_test"
     spec = importlib.util.spec_from_file_location(
@@ -565,6 +566,33 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
         self.assertEqual(payload["emulator"]["adb_addr"], "YOUR_ADB_ADDR, e.g.127.0.0.1:16384")
         self.assertEqual(self.calls, ["lock", "save_config", "apply_log_level", ("bump", "save config")])
 
+    def test_save_runtime_config_prefers_global_only_persistence(self):
+        class FakeConfig:
+            def __init__(inner_self):
+                inner_self._config = {}
+
+            def __setitem__(inner_self, key, value):
+                inner_self._config[key] = value
+
+            def save_global_config(inner_self):
+                self.calls.append("save_global_config")
+
+            def save_config(inner_self):
+                self.calls.append("save_config")
+
+        service, cfg = self._service(cfg=FakeConfig())
+        payload = {
+            "app": {"name": "ZmxyOL"},
+            "emulator": {"index": 0, "adb_addr": "127.0.0.1:16384"},
+            "ocr": {"use_gpu": False},
+        }
+
+        version = service.save_runtime_config(payload)
+
+        self.assertEqual(version, 42)
+        self.assertEqual(cfg._config["app"], {"name": "ZmxyOL"})
+        self.assertEqual(self.calls, ["lock", "save_global_config", "apply_log_level", ("bump", "save config")])
+
     def test_switch_character_uses_task_manager_boundary_and_invalidates_login(self):
         service, _cfg = self._service()
 
@@ -630,6 +658,39 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
             ["lock", ("delete_character", "s1", "deleted"), "save_account_file", ("bump", "delete character")],
         )
 
+    def test_add_account_does_not_fail_when_task_reload_fails(self):
+        class FailingTaskManager:
+            @contextmanager
+            def config_transaction(inner_self):
+                self.calls.append("lock")
+                yield
+
+            def reload_tasks(inner_self, security_key=None):
+                self.calls.append(("reload_tasks", security_key))
+                raise RuntimeError("ui map missing")
+
+        cfg = SimpleNamespace(
+            add_account=lambda *args: self.calls.append(("add_account",) + args),
+            switch_account=lambda name, key: self.calls.append(("switch_account", name, key)),
+        )
+        service, _cfg = self._service(cfg=cfg, task_manager=FailingTaskManager())
+
+        version = service.add_account("main", "user", "pwd", "s1", "hero", "key")
+
+        self.assertEqual(version, 42)
+        self.assertEqual(
+            self.calls,
+            [
+                "lock",
+                ("add_account", "main", "user", "pwd", "s1", "hero", "key"),
+                ("switch_account", "main", "key"),
+                ("reload_tasks", "key"),
+                "invalidate_login",
+                "read_config",
+                ("bump", "add account"),
+            ],
+        )
+
 
 class TestConfigLifecycleContract(unittest.TestCase):
     def test_account_can_restore_decrypted_credentials_after_config_only_reload(self):
@@ -655,6 +716,27 @@ class TestConfigLifecycleContract(unittest.TestCase):
             self.assertTrue(cfg.has_decrypted_credentials())
             self.assertEqual(cfg._config["game"]["account"], "user")
             self.assertEqual(cfg._config["game"]["password"], "pwd")
+
+    def test_clear_decrypted_credentials_keeps_encrypted_account_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module = import_app_config_for_test(tmp)
+            cfg = module.cfg
+            cfg.add_account("main", "user", "pwd", "s1", "hero", "key")
+            cfg._config["current_account"] = "main"
+            cfg.save_config()
+            cfg.load_config("key")
+            self.assertTrue(cfg.has_decrypted_credentials())
+            self.assertTrue(cfg.has_encrypted_credentials())
+
+            cfg.clear_decrypted_credentials()
+
+            self.assertFalse(cfg.has_decrypted_credentials())
+            self.assertTrue(cfg.has_encrypted_credentials())
+            self.assertNotIn("account", cfg._config["game"])
+            self.assertNotIn("password", cfg._config["game"])
+
+            cfg.load_config("key")
+            self.assertTrue(cfg.has_decrypted_credentials())
 
     def test_task_manager_reload_uses_config_reload_preserving_credentials(self):
         content = (ROOT / "services/core/task_manager.py").read_text(encoding="utf-8")
@@ -696,6 +778,51 @@ class TestConfigLifecycleContract(unittest.TestCase):
             self.assertTrue(calls)
             self.assertEqual(calls[-1][1], "config.json")
 
+    def test_json_persistence_does_not_fsync_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module = import_app_config_for_test(tmp)
+            with patch.dict(os.environ, {"AUTOSCRIPTOR_STRICT_FSYNC": "0"}), \
+                    patch.object(module.os, "fsync") as fsync:
+                module._atomic_write_json(Path(tmp) / "config.json", {"app": {"name": "ZmxyOL"}})
+
+            fsync.assert_not_called()
+
+    def test_json_persistence_can_enable_strict_fsync(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module = import_app_config_for_test(tmp)
+            with patch.dict(os.environ, {"AUTOSCRIPTOR_STRICT_FSYNC": "1"}), \
+                    patch.object(module.os, "fsync") as fsync:
+                module._atomic_write_json(Path(tmp) / "config.json", {"app": {"name": "ZmxyOL"}})
+
+            fsync.assert_called_once()
+
+    def test_global_config_save_does_not_rewrite_account_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module = import_app_config_for_test(tmp)
+            cfg = module.cfg
+            cfg.add_account("main", "user", "pwd", "s1", "hero", "key")
+            cfg._config["current_account"] = "main"
+            cfg.save_global_config()
+            cfg.load_config("key")
+            calls = []
+
+            with patch.object(module, "_atomic_write_json", side_effect=lambda path, data: calls.append(Path(path).name)):
+                cfg._config["app"] = {"name": "ZmxyOL"}
+                cfg.save_global_config()
+
+            self.assertEqual(calls, ["config.json"])
+
+    def test_config_save_falls_back_when_atomic_replace_is_denied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module = import_app_config_for_test(tmp)
+
+            with patch.object(module.os, "replace", side_effect=PermissionError("replace denied")):
+                module.cfg._config["app"] = {"name": "ZmxyOL"}
+                module.cfg.save_config()
+
+            saved = json.loads((Path(tmp) / "config.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved["app"]["name"], "ZmxyOL")
+
     def test_config_load_accepts_utf8_bom(self):
         with tempfile.TemporaryDirectory() as tmp:
             module = import_app_config_for_test(tmp)
@@ -720,9 +847,29 @@ class TestConfigLifecycleContract(unittest.TestCase):
                 with self.subTest(raw=raw):
                     self.assertEqual(mgr.resolved_accounts_dir(), default_dir)
 
+    def test_packaged_absolute_accounts_dir_is_migrated_to_data_root(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as legacy:
+            legacy_dir = Path(legacy) / "accounts"
+            legacy_dir.mkdir()
+            (legacy_dir / "old.json").write_text('{"characters": {}}', encoding="utf-8")
+            cfg_path = Path(tmp) / "config.json"
+            cfg_path.write_text(
+                json.dumps({"accounts": {"dir": str(legacy_dir)}, "current_account": ""}),
+                encoding="utf-8",
+            )
+            module = import_app_config_for_test(tmp)
+
+            with patch.dict(os.environ, {"AUTOSCRIPTOR_DATA_DIR": tmp}):
+                module.cfg.load_config()
+
+            self.assertEqual(module.cfg._mgr.global_cfg["accounts"]["dir"], "")
+            self.assertEqual(module.cfg.ACCOUNTS_DIR, str(Path(tmp) / "accounts"))
+            self.assertTrue((Path(tmp) / "accounts" / "old.json").exists())
+
 
 class TestWebUIFrontendContract(unittest.TestCase):
     JS_FILES = [
+        ROOT / "services/webui/static/js/core/api.js",
         ROOT / "services/webui/static/js/app.js",
         ROOT / "services/webui/static/js/stores/runtimeStore.js",
         ROOT / "services/webui/static/js/components/DiagnosticsPanel.js",
@@ -856,21 +1003,58 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertNotIn("from ZmxyOL.task import load_tasks", content)
         self.assertNotIn("with TASK_MANAGER._cfg_lock", content)
 
+    def test_http_middlewares_do_not_wrap_request_body_with_base_http_middleware(self):
+        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+
+        self.assertNotIn('@app.middleware("http")', content)
+        self.assertNotIn("BaseHTTPMiddleware", content)
+        self.assertIn("class _AuthAndApiErrorMiddleware", content)
+        self.assertIn("class _StaticCacheHeadersMiddleware", content)
+        self.assertIn("app.add_middleware(_AuthAndApiErrorMiddleware)", content)
+
     def test_accounts_add_uses_standard_api_response(self):
         content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
         start = content.index("async def accounts_add_api")
         end = content.index("@app.post(\"/api/accounts/delete\")", start)
         body = content[start:end]
 
-        self.assertIn("return api_ok(", body)
+        self.assertIn("api_ok(", body)
         self.assertIn("return api_error(400", body)
-        self.assertIn("return api_error(500", body)
+        self.assertIn("500,", body)
+        self.assertIn("diagnostics=_persistence_diagnostics()", body)
+        self.assertIn("_attach_credential_unlock_cookie", body)
+        self.assertIn('credential={"unlocked"', body)
+
+    def test_accounts_add_switches_to_created_account(self):
+        content = (ROOT / "services/webui/lifecycle_service.py").read_text(encoding="utf-8")
+        start = content.index("    def add_account(")
+        end = content.index("    def delete_account", start)
+        body = content[start:end]
+
+        self.assertIn("self.cfg.add_account", body)
+        self.assertIn("self.cfg.switch_account(name, security_key)", body)
+        self.assertIn("self.task_manager.reload_tasks(security_key)", body)
+        self.assertIn("self.scheduler.invalidate_login()", body)
 
     def test_frontend_api_error_message_accepts_fastapi_detail(self):
         content = (ROOT / "services/webui/static/js/core/api.js").read_text(encoding="utf-8")
 
         self.assertIn("data.detail", content)
         self.assertIn("JSON.stringify(data.detail)", content)
+        self.assertIn("HTTP ${res.status}", content)
+        self.assertIn("rawText", content)
+        self.assertIn("${path}", content)
+
+    def test_persistence_errors_include_runtime_paths(self):
+        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+
+        self.assertIn("def _persistence_diagnostics()", content)
+        self.assertIn("config_path", content)
+        self.assertIn("accounts_dir", content)
+        self.assertIn("dataRoot=", content)
+        self.assertIn("diagnostics=_persistence_diagnostics()", content)
+        self.assertIn("unhandled_api_error", content)
+        self.assertIn("保存任务失败", content)
 
     def test_webui_startup_does_not_initialize_device_controls(self):
         content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
@@ -905,6 +1089,33 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("intervals = [1, 2, 3, 3, 3, 3, 3, 3]", api)
         self.assertIn("join_with_cancel(t, 3, cancel_check)", api)
         self.assertNotIn("join_with_cancel(t, 5, cancel_check)", api)
+
+    def test_electron_startup_reports_stages_before_backend_ready(self):
+        main = (ROOT / "webapp/main.js").read_text(encoding="utf-8")
+        loading = (ROOT / "webapp/renderer/loading.html").read_text(encoding="utf-8")
+        gui = (ROOT / "gui.py").read_text(encoding="utf-8")
+
+        for marker in [
+            "function reportStartupStep",
+            "startupTimers",
+            "sendToRenderer('log', line)",
+            "checking-port",
+            "starting-python",
+            "backend-spawned",
+            "waiting-webui",
+            "setTimeout(() => {",
+        ]:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, main)
+        self.assertLess(
+            main.index("createMainWindow();"),
+            main.index("killStalePort5000();", main.index("createMainWindow();")),
+        )
+        self.assertIn("statusTextMap", loading)
+        self.assertIn("'backend-spawned': 'Python 进程已启动，正在导入依赖...'", loading)
+        self.assertIn("def _boot_log", gui)
+        self.assertIn("正在导入 WebUI 服务模块", gui)
+        self.assertIn("WebUI 子进程已启动", gui)
 
     def test_device_facade_centralizes_manager_adb_nemu_checks(self):
         content = (ROOT / "AutoScriptor/control/MumuAdaptor/device_facade.py").read_text(encoding="utf-8")
@@ -1189,13 +1400,23 @@ class TestInstallerContract(unittest.TestCase):
         self.assertIn("if (n.startsWith('custom_task/')", installer)
         self.assertIn("if (n.startsWith('battle_character/')", installer)
         self.assertIn("ProcessId -ne $PID", installer)
+        self.assertIn("ZaoBiUninstall-", installer)
+        self.assertIn("registryKey", installer)
+        self.assertIn("New-ItemProperty -LiteralPath $key", installer)
+        self.assertIn("Set-RegDword 'EstimatedSize'", installer)
+        self.assertIn("Set-RegDword 'NoModify' 1", installer)
+        self.assertNotIn("Set-ItemProperty -LiteralPath $key -Name DisplayName", installer)
+        self.assertNotIn("path.join(rootResolved, 'config.json')", installer)
         self.assertNotIn("taskkill /F /IM", installer)
 
         self.assertIn("killStalePort5000([...roots])", main)
+        self.assertIn("getDefaultInstallRoot()", main)
+        self.assertIn("process.env.LOCALAPPDATA", main)
+        self.assertNotIn("path.join(app.getPath('documents'), 'AutoScriptor')", main)
         self.assertIn("if ($owned)", main)
         self.assertIn("mode: 'existing'", main)
         self.assertIn("allowManagedExisting: true", main)
-        self.assertIn("AUTOSCRIPTOR_DATA_DIR: getRuntimeDataRoot()", main)
+        self.assertIn("AUTOSCRIPTOR_DATA_DIR: dataRoot", main)
         self.assertIn("getUserDataRuntimeDataRoot()", main)
         self.assertIn("updateInstallJsonDataRoot(fallback)", main)
 
@@ -1873,7 +2094,10 @@ class TestInstallerContract(unittest.TestCase):
             elif hasattr(sys, "frozen"):
                 delattr(sys, "frozen")
 
-        main = (ROOT / "gui.py").read_text(encoding="utf-8").split("if __name__ == '__main__':", 1)[1]
+        main = (ROOT / "gui.py").read_text(encoding="utf-8").split("def main() -> int:", 1)[1].split(
+            "if __name__ == '__main__':",
+            1,
+        )[0]
         self.assertLess(main.index("_configure_packaged_multiprocessing_spawn()"), main.index("ensure_single_instance()"))
         self.assertLess(main.index("multiprocessing.freeze_support()"), main.index("ensure_single_instance()"))
         self.assertIn("multiprocessing.set_executable(sys.executable)", main)
@@ -1914,6 +2138,7 @@ class TestInstallerContract(unittest.TestCase):
         for marker in [
             "testDryRunAndInvalidTargets",
             "testInstallRepairAndUninstallScript",
+            "testWindowsAppsUninstallEntryCanUninstall",
             "testIncrementalUpdateAndRollback",
             "parsePowerShellScript",
             "KEEP_INSTALLER_TESTS",
@@ -1997,13 +2222,63 @@ class TestReleaseUpdatePanelContract(unittest.TestCase):
         script = (ROOT / "scripts/build_release.py").read_text(encoding="utf-8")
 
         for marker in [
-            "copy_gift_code_runtime_assets",
-            "collect_zmxy_redeem_2026.py",
-            "zmxy_redeem_codes.json",
-            "copy_gift_code_runtime_assets()",
+            "docs\" / \"zmxy_redeem_codes.json",
+            "assets\" / \"redeem_codes\" / \"zmxy_redeem_codes.json",
+            "shutil.copy2(redeem_codes_src, redeem_codes_dst)",
+            "[data] assets/redeem_codes/zmxy_redeem_codes.json",
         ]:
             with self.subTest(marker=marker):
                 self.assertIn(marker, script)
+
+    def test_plain_portable_package_excludes_backend_docs_and_keeps_light_update(self):
+        builder = (ROOT / "packaging/plain_portable/build_plain_portable.py").read_text(encoding="utf-8")
+        config = (ROOT / "packaging/plain_portable/electron-builder.plain.config.js").read_text(encoding="utf-8")
+
+        for marker in [
+            "ensure_runtime_data_assets",
+            "assets\" / \"redeem_codes\" / \"zmxy_redeem_codes.json",
+            "backend/autoscriptor-engine.exe",
+            "verify_update_zip",
+            "create_portable_zip",
+            "low.startswith(\"data/accounts/\")",
+        ]:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, builder)
+        for marker in [
+            "to: 'backend'",
+            "!docs/**",
+            "to: 'data'",
+            "!accounts/**/*.json",
+            "AUTOSCRIPTOR_PLAIN_NSIS",
+            "AutoScriptor_Zao_Plain_Install_${version}.exe",
+        ]:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, config)
+
+    def test_source_portable_uses_pyz_backend_update_branch(self):
+        builder = (ROOT / "packaging/source_portable/build_source_portable.py").read_text(encoding="utf-8")
+        electron_main = (ROOT / "webapp/main.js").read_text(encoding="utf-8")
+        release_update = (ROOT / "webapp/release-update.cjs").read_text(encoding="utf-8")
+        docs = (ROOT / "docs/AutoScriptor/release/build-and-run.md").read_text(encoding="utf-8")
+
+        for marker in [
+            "BACKEND_PYZ",
+            "write_backend_pyz",
+            "backend.pyz",
+            "EXTERNAL_WEB_ASSET_DIRS",
+            "pyz-cumulative",
+            "Path(\"services/webui/static\")",
+            "Path(\"services/webui/vendor\")",
+        ]:
+            with self.subTest(marker=marker):
+                self.assertIn(marker, builder)
+        self.assertIn("getPackagedPyzBackend", electron_main)
+        self.assertIn("AUTOSCRIPTOR_APP_ROOT", electron_main)
+        self.assertIn("currentPyzBackend", electron_main)
+        self.assertIn("backend', 'backend.pyz", electron_main)
+        self.assertIn("fs.existsSync(pyz)", electron_main)
+        self.assertIn("backend/backend.pyz", release_update)
+        self.assertIn("backend/backend.pyz", docs)
 
 
 class TestUpdaterGitCommandContract(unittest.TestCase):
@@ -2190,6 +2465,7 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
         )
 
         self.assertIn("docs/zmxy_redeem_codes.json", content)
+        self.assertIn('"assets" / "redeem_codes" / "zmxy_redeem_codes.json"', content)
         for old_name in [
             "zmxy_codes.json",
             "zmxy_gift_codes_rows.json",
@@ -2237,7 +2513,9 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
         )
 
         for marker in [
-            "font-size:28px",
+            "font-size:14px",
+            "font-size:20px",
+            "class=\\\"expires\\\"",
             "<th>序号</th><th>兑换码</th><th>到期时间</th><th>来源链接</th><th>操作</th>",
             ">复制</button>",
             ">前往兑换</button>",

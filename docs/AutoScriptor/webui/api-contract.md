@@ -53,7 +53,7 @@ WebUI 后端是 FastAPI；静态前端位于 `services/webui/static/`，Electron
 | `POST /api/config/import` | 导入允许的配置段，剥离 deploy 密码/证书等敏感字段 |
 | `GET/POST /api/deploy` | 读取/保存 deploy、notify、update、remote_access |
 
-`POST /api/config` 保存时会把空的、`YOUR_` 占位的或 `:0` 结尾的 `emulator.adb_addr` 规范化为 MuMu 默认地址：`127.0.0.1:16384 + index*32`。保存失败必须返回标准 `api_error` JSON，前端不能只显示“未知错误”。
+`POST /api/config` 保存时会把空的、`YOUR_` 占位的或 `:0` 结尾的 `emulator.adb_addr` 规范化为 MuMu 默认地址：`127.0.0.1:16384 + index*32`。保存失败必须返回标准 `api_error` JSON，并附带 `data_root/config_path/accounts_dir/current_account` 诊断字段；前端不能只显示“未知错误”。保存层会优先原子替换，遇到 Windows 允许写但拒绝替换的 `PermissionError/WinError 5` 时降级为直接写入。
 
 保存任务时必须通过 `TaskTreeService.strip_runtime_fields()`，不能持久化 `fn/order/param_meta/param_keys/beta/custom/debug_mode/task_description/task_doc_flow/_due/progress/progress_display` 等运行时字段。
 
@@ -71,7 +71,7 @@ WebUI 后端是 FastAPI；静态前端位于 `services/webui/static/`，Electron
 | `GET /api/characters/all_tasks_summary` | 全角色任务汇总 |
 | `GET/POST /api/dispatch/queue` | 跨角色调度队列 |
 
-调度器只执行 `dispatch_queue` 内角色；队列保存时会去重并过滤不存在的角色。
+新增账号的业务成功条件是账号 JSON 写入、切换到新账号、凭据可解锁；后续任务重载失败只记录 warning，不能把账号创建接口打成失败。调度器只执行 `dispatch_queue` 内角色；队列保存时会去重并过滤不存在的角色。
 
 ## 设备、Editor 和 Canvas
 
@@ -110,7 +110,7 @@ Editor 真实设备动作需要 credential unlock；模拟执行且已有缓存�
 
 - 打开资讯页、WebUI 登录成功后停留在资讯页、或再次点击资讯入口时，前端都应调用 `/api/news/posts?force=1` 立即拉取远端列表，不等 30 分钟缓存。
 - `/api/news/gift_codes?refresh=1` 只从官方公告近 10 天、最多 15 个帖子增量查找兑换码；记录已查帖子 ID 和仍有效兑换码，后续只查新增帖子。
-- `/api/news/gift_codes/page` 是兑换码弹窗的内嵌页，读取本地 `docs/zmxy_redeem_codes.json`；表格列为序号、兑换码、到期时间、来源链接、操作，支持 Shift 连续选择和批量兑换，不要再使用旧的 4399 礼包页作为兑换码来源。
+- `/api/news/gift_codes/page` 是兑换码弹窗的内嵌页，优先读取运行时 `data/assets/redeem_codes/zmxy_redeem_codes.json`，源码/兼容模式可回退到 `docs/zmxy_redeem_codes.json`；表格列为序号、兑换码、到期时间、来源链接、操作，支持 Shift 连续选择和批量兑换，不要再使用旧的 4399 礼包页作为兑换码来源。
 - `/api/news/redeem_targets` 只返回账号名和 `服务器:角色名` 选择项；`POST /api/news/gift_codes/redeem` 需要 credential unlock 或安全密码，接受 `redeem_code` 或 `redeem_codes`，先切到所选账号/角色并强制自动登录，再按顺序以临时 `redeem_code` 参数执行内置一般任务 `一般任务/活动/兑换豪礼礼品兑换`。
 - `/api/news/proxy` 遇到 4399 登录墙时会使用可用资讯通行证重试一次；缓存通行证失效时应重登后再拉取正文。
 - `news.account = "85rwm3janyyc"` 且 `news.password = "123456"` 是唯一允许明文模板保留的公开资讯通行证，仅用于 4399 news/forum/gift-code 代理。

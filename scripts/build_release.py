@@ -1333,6 +1333,13 @@ def collect_data():
         shutil.copytree(assets_pic_src, pic_dst, dirs_exist_ok=True)
         print("[data] assets/pic/")
 
+    redeem_codes_src = PROJECT_ROOT / "docs" / "zmxy_redeem_codes.json"
+    redeem_codes_dst = DATA_DIR / "assets" / "redeem_codes" / "zmxy_redeem_codes.json"
+    if redeem_codes_src.is_file():
+        redeem_codes_dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(redeem_codes_src, redeem_codes_dst)
+        print("[data] assets/redeem_codes/zmxy_redeem_codes.json")
+
     # license/ 目录 (占位)。electron-builder 不会稳定复制空目录，放一个小文件保证发布包结构可验证。
     LICENSE_DIR.mkdir(parents=True, exist_ok=True)
     (LICENSE_DIR / "README.txt").write_text(

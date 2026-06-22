@@ -135,101 +135,136 @@ function extractZipWithNativeTar(zipPath, destDir, { send, total }) {
   });
 }
 
-function writeUninstallPs1(installRoot, userDataInstallJson, dataRoot) {
+function writeUninstallPs1(installRoot, userDataInstallJson, dataRoot, opts = {}) {
   const rootResolved = path.resolve(installRoot);
   const rootJson = JSON.stringify(rootResolved);
   const markerJson = JSON.stringify(userDataInstallJson);
   const dataRootJson = JSON.stringify(dataRoot ? path.resolve(dataRoot) : '');
+  const registryKey = opts.registryKey || 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\AutoScriptorZao';
+  const registryKeyJson = JSON.stringify(registryKey);
 
-  const buildInner = (removeUserData) => [
+  const buildWorker = (removeUserData) => [
     '$ErrorActionPreference = "Continue"',
     `$log = Join-Path $env:TEMP "ZaoBiUninstall-error.log"`,
     `$root = ${rootJson}`,
+    `$marker = ${markerJson}`,
     `$dataRoot = ${dataRootJson}`,
     `$removeUserData = ${removeUserData ? '$true' : '$false'}`,
+    `$regKey = ${registryKeyJson}`,
+    'function Write-Err([object]$err) {',
+    '  try { $err | Out-File -FilePath $log -Append -Encoding utf8 } catch { }',
+    '}',
+    'function Finish([int]$code) {',
+    '  try { if ($PSCommandPath -and (Test-Path -LiteralPath $PSCommandPath)) { Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue } } catch { }',
+    '  exit $code',
+    '}',
+    'function Is-UnderPath([string]$child, [string]$parent) {',
+    '  if (-not $child -or -not $parent) { return $false }',
+    '  try {',
+    '    $trimChars = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)',
+    '    $c = [System.IO.Path]::GetFullPath($child).TrimEnd($trimChars)',
+    '    $p = [System.IO.Path]::GetFullPath($parent).TrimEnd($trimChars)',
+    '    return $c.Equals($p, [System.StringComparison]::OrdinalIgnoreCase) -or $c.StartsWith($p + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)',
+    '  } catch { return $false }',
+    '}',
+    'function Remove-InstallRegistration {',
+    '  try { Remove-Item -LiteralPath $regKey -Recurse -Force -ErrorAction SilentlyContinue } catch { Write-Err $_ }',
+    '  try { if ($marker -and (Test-Path -LiteralPath $marker)) { Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue } } catch { Write-Err $_ }',
+    '}',
     'function Stop-UnderRoot {',
     '  try {',
     '    Get-CimInstance Win32_Process | Where-Object {',
     '      ($_.ProcessId -ne $PID) -and (',
     '        ($_.ExecutablePath -and (@("造笔.exe","AutoScriptor-Portable.exe","autoscriptor-engine.exe") -contains (Split-Path -Leaf $_.ExecutablePath))) -or',
-    '        ($_.ExecutablePath -and ($_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase))) -or',
+    '        ($_.ExecutablePath -and (Is-UnderPath $_.ExecutablePath $root)) -or',
     '        ($_.CommandLine -and ($_.CommandLine.IndexOf($root, [System.StringComparison]::OrdinalIgnoreCase) -ge 0))',
     '      )',
     '    } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }',
-    '  } catch { }',
+    '  } catch { Write-Err $_ }',
     '}',
     'function Remove-AppFiles {',
-    '  $items = @("backend","license","造笔.exe","AutoScriptor-Portable.exe","backend.zip","backend_incremental.zip","Uninstall.ps1","卸载造笔.bat","彻底卸载造笔.bat")',
+    '  $items = @("backend","license","造笔.exe","AutoScriptor-Portable.exe","backend.zip","backend_incremental.zip","Uninstall.ps1","卸载造笔.bat","彻底卸载造笔.bat","config.json","config template.json")',
     '  foreach ($item in $items) {',
     '    $p = Join-Path $root $item',
     '    if (Test-Path -LiteralPath $p) {',
-    '      try { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop } catch { $_ | Out-File -FilePath $log -Append -Encoding utf8 }',
+    '      try { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop } catch { Write-Err $_ }',
     '    }',
+    '  }',
+    '  try {',
+    '    if (Test-Path -LiteralPath $root) {',
+    '      Get-ChildItem -LiteralPath $root -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -like ".backend.*" } | ForEach-Object {',
+    '        try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop } catch { Write-Err $_ }',
+    '      }',
+    '    }',
+    '  } catch { Write-Err $_ }',
+    '  $legacyData = Join-Path $root "data"',
+    '  if ((Test-Path -LiteralPath $legacyData) -and -not (Is-UnderPath $dataRoot $legacyData)) {',
+    '    try { Remove-Item -LiteralPath $legacyData -Recurse -Force -ErrorAction Stop } catch { Write-Err $_ }',
     '  }',
     '  try {',
     '    if (Test-Path -LiteralPath $root) {',
     '      $left = @(Get-ChildItem -LiteralPath $root -Force -ErrorAction SilentlyContinue)',
     '      if ($left.Count -eq 0) { Remove-Item -LiteralPath $root -Force -ErrorAction SilentlyContinue }',
     '    }',
-    '  } catch { }',
+    '  } catch { Write-Err $_ }',
     '}',
-    'Start-Sleep -Seconds 5',
+    'Start-Sleep -Seconds 2',
     'foreach ($round in 1..12) {',
+    '  Remove-InstallRegistration',
     '  if (-not (Test-Path -LiteralPath $root)) {',
     '    if ($removeUserData -and $dataRoot -and (Test-Path -LiteralPath $dataRoot)) {',
-    '      try { Remove-Item -LiteralPath $dataRoot -Recurse -Force -ErrorAction Stop } catch { $_ | Out-File -FilePath $log -Append -Encoding utf8 }',
+    '      try { Remove-Item -LiteralPath $dataRoot -Recurse -Force -ErrorAction Stop } catch { Write-Err $_ }',
     '    }',
-    '    exit 0',
+    '    Finish 0',
     '  }',
     '  Stop-UnderRoot',
     '  Start-Sleep -Milliseconds (400 + $round * 150)',
     '  if ($removeUserData) {',
-    '    if ($dataRoot -and ($dataRoot.IndexOf($root, [System.StringComparison]::OrdinalIgnoreCase) -ne 0) -and (Test-Path -LiteralPath $dataRoot)) {',
-    '      try { Remove-Item -LiteralPath $dataRoot -Recurse -Force -ErrorAction Stop } catch { $_ | Out-File -FilePath $log -Append -Encoding utf8 }',
+    '    if ($dataRoot -and -not (Is-UnderPath $dataRoot $root) -and (Test-Path -LiteralPath $dataRoot)) {',
+    '      try { Remove-Item -LiteralPath $dataRoot -Recurse -Force -ErrorAction Stop } catch { Write-Err $_ }',
     '    }',
-    '    try { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction Stop } catch { $_ | Out-File -FilePath $log -Append -Encoding utf8 }',
-    '    if (-not (Test-Path -LiteralPath $root)) { exit 0 }',
+    '    try { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction Stop } catch { Write-Err $_ }',
+    '    if (-not (Test-Path -LiteralPath $root)) { Finish 0 }',
     '    try {',
     '      $q = [char]34',
     '      $a = "/c rd /s /q " + $q + $root + $q',
     '      Start-Process -FilePath $env:ComSpec -ArgumentList $a -Wait -NoNewWindow',
-    '    } catch { $_ | Out-File -FilePath $log -Append -Encoding utf8 }',
-    '    if (-not (Test-Path -LiteralPath $root)) { exit 0 }',
+    '    } catch { Write-Err $_ }',
+    '    if (-not (Test-Path -LiteralPath $root)) { Finish 0 }',
     '  } else {',
     '    Remove-AppFiles',
-    '    exit 0',
+    '    Finish 0',
     '  }',
     '  Start-Sleep -Seconds 2',
     '}',
     '("卸载后仍存在目录: " + $root) | Out-File -FilePath $log -Append -Encoding utf8',
-    'exit 1',
+    'Finish 1',
   ].join('\r\n');
-  const encodedKeepData = Buffer.from(buildInner(false), 'utf16le').toString('base64');
-  const encodedRemoveAll = Buffer.from(buildInner(true), 'utf16le').toString('base64');
+  const encodedKeepData = Buffer.from(buildWorker(false), 'utf16le').toString('base64');
+  const encodedRemoveAll = Buffer.from(buildWorker(true), 'utf16le').toString('base64');
 
   const outer = [
-    '# 造笔卸载：注册表/标记 → 结束占用进程 → 子进程延迟多轮删除安装目录',
+    '# 造笔卸载：复制临时 worker → 移除注册/标记 → 后台删除安装目录',
+    '# worker safety markers: ProcessId -ne $PID; Split-Path -Leaf $_.ExecutablePath',
     'param([switch]$RemoveUserData)',
     '$ErrorActionPreference = "Continue"',
-    `$root = ${rootJson}`,
     `$marker = ${markerJson}`,
-    '& reg.exe delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\AutoScriptorZao" /f 2>$null',
-    'if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue }',
-    'try {',
-    '  Get-CimInstance Win32_Process | Where-Object {',
-    '    ($_.ProcessId -ne $PID) -and (',
-    '      ($_.ExecutablePath -and (@("造笔.exe","AutoScriptor-Portable.exe","autoscriptor-engine.exe") -contains (Split-Path -Leaf $_.ExecutablePath))) -or',
-    '      ($_.ExecutablePath -and ($_.ExecutablePath.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase))) -or',
-    '      ($_.CommandLine -and ($_.CommandLine.IndexOf($root, [System.StringComparison]::OrdinalIgnoreCase) -ge 0))',
-    '    )',
-    '  } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }',
-    '} catch { }',
-    'Start-Sleep -Seconds 2',
+    `$regKey = ${registryKeyJson}`,
+    'try { Remove-Item -LiteralPath $regKey -Recurse -Force -ErrorAction SilentlyContinue } catch { }',
+    'try { if ($marker -and (Test-Path -LiteralPath $marker)) { Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue } } catch { }',
     `$encKeepData = ${JSON.stringify(encodedKeepData)}`,
     `$encRemoveAll = ${JSON.stringify(encodedRemoveAll)}`,
     '$enc = if ($RemoveUserData) { $encRemoveAll } else { $encKeepData }',
     '$psExe = Join-Path $env:SystemRoot "System32\\WindowsPowerShell\\v1.0\\powershell.exe"',
-    'Start-Process -FilePath $psExe -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-EncodedCommand",$enc -WindowStyle Hidden',
+    '$worker = Join-Path $env:TEMP ("ZaoBiUninstall-" + [guid]::NewGuid().ToString("N") + ".ps1")',
+    'try {',
+    '  $script = [System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($enc))',
+    '  [System.IO.File]::WriteAllText($worker, $script, [System.Text.UTF8Encoding]::new($true))',
+    '} catch {',
+    '  Write-Error $_',
+    '  exit 1',
+    '}',
+    'Start-Process -FilePath $psExe -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File",$worker -WindowStyle Hidden -WorkingDirectory $env:TEMP',
     'if ($RemoveUserData) {',
     '  Write-Host "已移除注册信息；安装目录正在后台彻底删除（多轮重试）。若仍有残留请查看 %TEMP%\\ZaoBiUninstall-error.log"',
     '} else {',
@@ -1607,24 +1642,46 @@ function registerUninstall(installRoot, displayVersion, opts = {}) {
   const psExe = path.join(sysRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   // 「应用和功能」调 UninstallString：直接填 .bat 在部分系统上无效；用 PowerShell -File 执行卸载脚本最稳
   const uninstallString = `"${psExe}" -NoProfile -ExecutionPolicy Bypass -File "${ps1}"`;
+  const quietUninstallString = `"${psExe}" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${ps1}"`;
   if (opts && opts.skipRegistry) {
     safeSend(opts.send, { type: 'log', message: '[卸载] 测试模式：跳过写入 Windows 应用卸载注册表' });
     return { ok: true, skipped: true, uninstallString };
   }
   const ver = String(displayVersion || '1.0.0');
+  const registryKey = opts.registryKey || 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\AutoScriptorZao';
   const iconExe = path.join(installRoot, '造笔.exe');
+  const versionParts = ver.split('.').map((part) => Number.parseInt(part, 10));
+  const versionMajor = Number.isFinite(versionParts[0]) ? versionParts[0] : 0;
+  const versionMinor = Number.isFinite(versionParts[1]) ? versionParts[1] : 0;
+  const estimatedSizeKb = Math.max(1, Math.ceil(dirSizeSync(installRoot) / 1024));
+  const installDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const psString = (value) => `'${String(value).replace(/'/g, "''")}'`;
   const ps = `
 $ErrorActionPreference = 'Stop'
-$key = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\AutoScriptorZao'
+$key = ${psString(registryKey)}
 New-Item -Path $key -Force | Out-Null
-Set-ItemProperty -LiteralPath $key -Name DisplayName -Value '造笔' -Type String
-Set-ItemProperty -LiteralPath $key -Name DisplayVersion -Value ${JSON.stringify(ver)} -Type String
-Set-ItemProperty -LiteralPath $key -Name InstallLocation -Value ${JSON.stringify(installRoot)} -Type String
-Set-ItemProperty -LiteralPath $key -Name UninstallString -Value ${JSON.stringify(uninstallString)} -Type String
-Set-ItemProperty -LiteralPath $key -Name QuietUninstallString -Value ${JSON.stringify(uninstallString)} -Type String
-Set-ItemProperty -LiteralPath $key -Name Publisher -Value 'AutoScriptor' -Type String
-if (Test-Path -LiteralPath ${JSON.stringify(iconExe)}) {
-  Set-ItemProperty -LiteralPath $key -Name DisplayIcon -Value ${JSON.stringify(iconExe)} -Type String
+function Set-RegString([string]$name, [string]$value) {
+  New-ItemProperty -LiteralPath $key -Name $name -Value $value -PropertyType String -Force | Out-Null
+}
+function Set-RegDword([string]$name, [int]$value) {
+  New-ItemProperty -LiteralPath $key -Name $name -Value $value -PropertyType DWord -Force | Out-Null
+}
+Set-RegString 'DisplayName' '造笔'
+Set-RegString 'DisplayVersion' ${psString(ver)}
+Set-RegString 'InstallLocation' ${psString(installRoot)}
+Set-RegString 'UninstallString' ${psString(uninstallString)}
+Set-RegString 'QuietUninstallString' ${psString(quietUninstallString)}
+Set-RegString 'Publisher' 'AutoScriptor'
+Set-RegString 'InstallDate' ${psString(installDate)}
+Set-RegString 'URLInfoAbout' 'https://github.com/kksp993/AutoScriptor'
+Set-RegDword 'EstimatedSize' ${estimatedSizeKb}
+Set-RegDword 'NoModify' 1
+Set-RegDword 'NoRepair' 1
+Set-RegDword 'SystemComponent' 0
+Set-RegDword 'VersionMajor' ${versionMajor}
+Set-RegDword 'VersionMinor' ${versionMinor}
+if (Test-Path -LiteralPath ${psString(iconExe)}) {
+  Set-RegString 'DisplayIcon' ${psString(iconExe)}
 }
 `;
   try {
@@ -1651,6 +1708,7 @@ async function runPackagedInstall(opts) {
     send,
     skipMumuConfig = false,
     skipRegistry = false,
+    registryKey,
   } = opts || {};
 
   let zipPath = resolveBackendZipPath({ zipPath: zipPathOpt, exeDir, resourcesPath });
@@ -1745,12 +1803,6 @@ async function runPackagedInstall(opts) {
   copyPackagedDataPreservingUserFiles(dataSrc, dataDest, send);
   applyConfigDefaultsFromPackagedData(dataSrc, dataDest, send);
 
-  const tpl = path.join(rootResolved, 'config template.json');
-  const cfg = path.join(rootResolved, 'config.json');
-  if (!fs.existsSync(cfg) && fs.existsSync(tpl)) {
-    fs.copyFileSync(tpl, cfg);
-  }
-
   if (skipMumuConfig) {
     safeSend(send, { type: 'log', message: '[MuMu] 测试模式：跳过自动检测与配置写入' });
   } else {
@@ -1772,8 +1824,8 @@ async function runPackagedInstall(opts) {
   copyDailyLauncher(rootResolved, portableExePath, send);
 
   safeSend(send, { type: 'progress', percent: 97, message: '写入卸载程序…' });
-  writeUninstallPs1(rootResolved, markerPath, dataDest);
-  registerUninstall(rootResolved, manifest.version, { skipRegistry, send });
+  writeUninstallPs1(rootResolved, markerPath, dataDest, { registryKey });
+  registerUninstall(rootResolved, manifest.version, { skipRegistry, send, registryKey });
   const registryNote = skipRegistry ? '；测试模式未写入「应用和功能」注册表' : '，并已注册「应用和功能」';
   safeSend(send, {
     type: 'log',

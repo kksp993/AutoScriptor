@@ -43,6 +43,9 @@ def get_app_root() -> Path:
     - 编译模式: gui.dist/ 所在目录的父级 (即安装目录)
     - 开发模式: 项目根目录 (包含 gui.py)
     """
+    env_override = os.environ.get("AUTOSCRIPTOR_APP_ROOT")
+    if env_override:
+        return Path(env_override).resolve()
     if is_compiled():
         return Path(sys.executable).resolve().parent.parent
     # 开发模式: paths.py -> AutoScriptor/utils/ -> AutoScriptor/ -> 项目根

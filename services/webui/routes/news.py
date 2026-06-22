@@ -23,6 +23,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from lxml import html as lxml_html
 
+from AutoScriptor.utils.paths import get_data_root
 from services.webui.routes.news_4399_session import (
     get_cached_or_login_session,
     get_cached_session,
@@ -57,6 +58,9 @@ def _project_root() -> Path:
 
 
 def _redeem_codes_path() -> Path:
+    data_path = get_data_root() / "assets" / "redeem_codes" / "zmxy_redeem_codes.json"
+    if data_path.is_file():
+        return data_path
     return _project_root() / "docs" / "zmxy_redeem_codes.json"
 
 
@@ -605,7 +609,7 @@ async def get_redeem_codes(request: Request, force: int = Query(0, description="
 
 @router.get("/gift_codes")
 def get_gift_codes(refresh: int = Query(0, description="传 1 时先执行采集脚本再返回")):
-    """未过期兑换码列表（JSON），与 `docs/zmxy_redeem_codes.json` 同步。"""
+    """未过期兑换码列表（JSON），优先读取 data-root 运行时副本。"""
     if refresh:
         _refresh_gift_codes_rows()
     return _load_redeem_codes_payload()
@@ -622,27 +626,28 @@ def get_gift_codes_page():
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>",
         "<style>",
         "*{box-sizing:border-box;}",
-        "body{font-family:system-ui,sans-serif;margin:0;padding:24px 28px;background:#f8fafc;color:#0f172a;font-size:28px;line-height:1.45;}",
-        "h1{font-size:30px;margin:0 0 20px;font-weight:600;}",
-        ".hint{color:#64748b;font-size:24px;margin-bottom:24px;}",
-        ".toolbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 20px;}",
-        ".selected-count{font-size:24px;color:#64748b;}",
-        ".page-status{font-size:24px;margin:0 0 20px;color:#2563eb;min-height:34px;}",
+        "body{font-family:system-ui,sans-serif;margin:0;padding:16px 18px;background:#f8fafc;color:#0f172a;font-size:14px;line-height:1.4;}",
+        "h1{font-size:20px;margin:0 0 10px;font-weight:600;}",
+        ".hint{color:#64748b;font-size:13px;margin-bottom:14px;}",
+        ".toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px;}",
+        ".selected-count{font-size:13px;color:#64748b;}",
+        ".page-status{font-size:13px;margin:0 0 12px;color:#2563eb;min-height:20px;}",
         ".page-status.error{color:#dc2626;}",
         ".table-wrap{width:100%;overflow:auto;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.06);}",
-        "table{width:100%;min-width:980px;border-collapse:collapse;background:#fff;}",
-        "th,td{text-align:left;padding:20px 24px;border-bottom:1px solid #e2e8f0;vertical-align:middle;}",
-        "th{background:#f1f5f9;font-weight:600;font-size:24px;color:#475569;white-space:nowrap;}",
+        "table{width:100%;min-width:760px;border-collapse:collapse;background:#fff;}",
+        "th,td{text-align:left;padding:10px 12px;border-bottom:1px solid #e2e8f0;vertical-align:middle;}",
+        "th{background:#f1f5f9;font-weight:600;font-size:12px;color:#475569;white-space:nowrap;}",
         "tbody tr:last-child td{border-bottom:none;}",
         "tr.row-working{background:#eff6ff;}",
-        ".index{width:140px;color:#64748b;}",
-        ".select-cell{display:flex;align-items:center;gap:14px;}",
-        ".row-check{width:24px;height:24px;accent-color:#2563eb;}",
-        ".code{font-family:ui-monospace,Menlo,monospace;word-break:break-all;}",
-        ".actions{display:flex;gap:12px;align-items:center;white-space:nowrap;}",
+        ".index{width:78px;color:#64748b;}",
+        ".select-cell{display:flex;align-items:center;gap:8px;}",
+        ".row-check{width:16px;height:16px;accent-color:#2563eb;}",
+        ".code{font-family:ui-monospace,Menlo,monospace;font-size:13px;word-break:break-all;}",
+        ".expires{white-space:nowrap;font-variant-numeric:tabular-nums;}",
+        ".actions{display:flex;gap:6px;align-items:center;white-space:nowrap;}",
         "a.link{color:#2563eb;text-decoration:none;}",
         "a.link:hover{text-decoration:underline;}",
-        ".btn{cursor:pointer;border:1px solid transparent;color:#fff;padding:12px 22px;border-radius:6px;font-size:24px;line-height:1.2;}",
+        ".btn{cursor:pointer;border:1px solid transparent;color:#fff;padding:6px 10px;border-radius:5px;font-size:13px;line-height:1.2;}",
         ".btn:disabled{cursor:not-allowed;opacity:.55;}",
         ".btn-secondary{background:#fff;color:#334155;border-color:#cbd5e1;}",
         ".btn-secondary:hover{background:#f8fafc;}",
@@ -652,18 +657,18 @@ def get_gift_codes_page():
         ".btn-redeem:hover{background:#1d4ed8;}",
         ".btn-cancel{background:#fff;color:#334155;border-color:#cbd5e1;}",
         ".btn-cancel:hover{background:#f8fafc;}",
-        "td.empty{text-align:center;color:#94a3b8;padding:56px 24px;}",
-        ".modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.48);display:none;align-items:center;justify-content:center;padding:28px;z-index:20;}",
+        "td.empty{text-align:center;color:#94a3b8;padding:34px 16px;}",
+        ".modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.48);display:none;align-items:center;justify-content:center;padding:18px;z-index:20;}",
         ".modal-backdrop.open{display:flex;}",
-        ".modal{width:min(760px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:8px;box-shadow:0 18px 45px rgba(15,23,42,.22);padding:28px;}",
-        ".modal h2{font-size:30px;margin:0 0 24px;font-weight:650;}",
-        ".field{margin-bottom:20px;}",
-        ".field label{display:block;font-size:24px;color:#475569;margin-bottom:8px;}",
-        ".field select,.field input{width:100%;font-size:28px;line-height:1.25;padding:14px 16px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f172a;}",
-        ".modal-status{min-height:34px;font-size:24px;color:#64748b;margin:4px 0 24px;}",
+        ".modal{width:min(520px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:8px;box-shadow:0 18px 45px rgba(15,23,42,.22);padding:18px;}",
+        ".modal h2{font-size:20px;margin:0 0 16px;font-weight:650;}",
+        ".field{margin-bottom:12px;}",
+        ".field label{display:block;font-size:13px;color:#475569;margin-bottom:6px;}",
+        ".field select,.field input{width:100%;font-size:14px;line-height:1.25;padding:8px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;color:#0f172a;}",
+        ".modal-status{min-height:20px;font-size:13px;color:#64748b;margin:2px 0 14px;}",
         ".modal-status.error{color:#dc2626;}",
-        ".modal-actions{display:flex;gap:12px;justify-content:flex-start;}",
-        "@media(max-width:720px){body{padding:18px 16px;font-size:24px;}h1{font-size:28px}.hint,.modal-status,.field label,th{font-size:22px}.field select,.field input{font-size:24px}.btn{font-size:22px;padding:11px 18px}.modal{padding:22px}.modal-actions{flex-wrap:wrap}}",
+        ".modal-actions{display:flex;gap:8px;justify-content:flex-start;}",
+        "@media(max-width:720px){body{padding:12px;font-size:13px;}h1{font-size:18px}.table-wrap{border-radius:6px}.btn{padding:6px 9px}.modal{padding:16px}.modal-actions{flex-wrap:wrap}}",
         "</style></head><body>",
         f"<h1>兑换码</h1><p class=\"hint\">更新时间：{gen}</p>",
         '<div class="toolbar"><button type="button" class="btn btn-secondary" id="batchRedeem" disabled>兑换选中</button>'
@@ -689,7 +694,7 @@ def get_gift_codes_page():
             parts.append(
                 f'<tr data-code="{code_attr}"><td class="index"><label class="select-cell">'
                 f'<input type="checkbox" class="row-check" data-code="{code_attr}" onclick="setChecked(this,event)"/>'
-                f"<span>{idx}</span></label></td><td class=\"code\">{code}</td><td>{exp}</td><td>{source_cell}</td>"
+                f"<span>{idx}</span></label></td><td class=\"code\">{code}</td><td class=\"expires\">{exp}</td><td>{source_cell}</td>"
                 f'<td><div class="actions"><button type="button" class="btn btn-copy" data-code="{code_attr}" '
                 f'onclick="copyCode(this)">复制</button>'
                 f'<button type="button" class="btn btn-redeem" data-code="{code_attr}" '

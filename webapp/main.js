@@ -7,6 +7,26 @@ const path = require('path');
 const http = require('http');
 const fs = require('fs');
 
+const startupProcessStartedAt = Date.now();
+
+function startupLog(message, detail) {
+  try {
+    const line = `[${new Date().toISOString()}] ${message}${detail ? ` ${detail}` : ''}\n`;
+    const logPath = path.join(app.getPath('userData'), 'startup.log');
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fs.appendFileSync(logPath, line, 'utf8');
+  } catch (_) {}
+}
+
+process.on('uncaughtException', (err) => {
+  startupLog('uncaughtException', err && err.stack ? err.stack : String(err));
+  throw err;
+});
+
+process.on('unhandledRejection', (err) => {
+  startupLog('unhandledRejection', err && err.stack ? err.stack : String(err));
+});
+
 let previousWindowsConsoleCodePage = null;
 
 function getWindowsConsoleCodePage() {
@@ -70,6 +90,18 @@ function getRoot() {
     return path.resolve(__dirname, '..');
   }
   if (_rootCache !== null) return _rootCache;
+  const currentRoot = path.dirname(process.execPath);
+  const currentEngine = path.join(
+    currentRoot,
+    'backend',
+    process.platform === 'win32' ? 'autoscriptor-engine.exe' : 'autoscriptor-engine',
+  );
+  const currentSourceGui = path.join(currentRoot, 'backend', 'src', 'gui.py');
+  const currentPyzBackend = path.join(currentRoot, 'backend', 'backend.pyz');
+  if (fs.existsSync(currentEngine) || fs.existsSync(currentSourceGui) || fs.existsSync(currentPyzBackend)) {
+    _rootCache = currentRoot;
+    return _rootCache;
+  }
   try {
     const marker = path.join(app.getPath('userData'), 'install.json');
     if (fs.existsSync(marker)) {
@@ -83,7 +115,7 @@ function getRoot() {
       }
     }
   } catch (_) {}
-  _rootCache = path.dirname(process.execPath);
+  _rootCache = currentRoot;
   return _rootCache;
 }
 
@@ -98,6 +130,22 @@ function installStepScriptPath() {
 function getBackendEngineExe() {
   const name = process.platform === 'win32' ? 'autoscriptor-engine.exe' : 'autoscriptor-engine';
   return path.join(getRoot(), 'backend', name);
+}
+
+function getPackagedSourceBackend() {
+  const root = getRoot();
+  const pythonName = process.platform === 'win32' ? 'python.exe' : 'python';
+  const pythonExe = path.join(root, 'runtime', 'python', pythonName);
+  const guiScript = path.join(root, 'backend', 'src', 'gui.py');
+  return { pythonExe, guiScript, cwd: path.dirname(guiScript) };
+}
+
+function getPackagedPyzBackend() {
+  const root = getRoot();
+  const pythonName = process.platform === 'win32' ? 'python.exe' : 'python';
+  const pythonExe = path.join(root, 'runtime', 'python', pythonName);
+  const pyzPath = path.join(root, 'backend', 'backend.pyz');
+  return { pythonExe, pyzPath, cwd: path.join(root, 'backend') };
 }
 
 /** 发行包内 backend.zip：优先 exe 同级（extraFiles），其次 resources（旧布局）。portable 解压后前者更可靠。 */
@@ -204,7 +252,11 @@ function createLineReader(onLine) {
 /** 开发：venv 就绪。发行包：backend 下已有 Nuitka 引擎。 */
 function isInstalled() {
   if (app.isPackaged) {
-    return fs.existsSync(getBackendEngineExe());
+    const sourceBackend = getPackagedSourceBackend();
+    const pyzBackend = getPackagedPyzBackend();
+    return fs.existsSync(getBackendEngineExe())
+      || (fs.existsSync(pyzBackend.pythonExe) && fs.existsSync(pyzBackend.pyzPath))
+      || (fs.existsSync(sourceBackend.pythonExe) && fs.existsSync(sourceBackend.guiScript));
   }
   return fs.existsSync(path.join(getRoot(), '.venv', 'Scripts', 'python.exe'));
 }
@@ -256,7 +308,7 @@ function updateInstallJsonDataRoot(dataRoot) {
 
 function getRuntimeDataRoot() {
   const existing = readInstallJsonExisting();
-  const configured = existing.dataRoot || path.join(getRoot(), 'data');
+  const configured = existing.dataRoot || (app.isPackaged ? getUserDataRuntimeDataRoot() : path.join(getRoot(), 'data'));
   if (!app.isPackaged || canWriteDirectory(configured)) return configured;
 
   const fallback = getUserDataRuntimeDataRoot();
@@ -274,6 +326,57 @@ function getRuntimeDataRoot() {
     console.warn('[main] Runtime dataRoot migration failed:', e && e.message ? e.message : e);
   }
   return configured;
+}
+
+function hasPackagedPlainBackend(installRoot) {
+  const engine = path.join(installRoot, 'backend', process.platform === 'win32' ? 'autoscriptor-engine.exe' : 'autoscriptor-engine');
+  const pyz = path.join(installRoot, 'backend', 'backend.pyz');
+  const source = path.join(installRoot, 'backend', 'src', 'gui.py');
+  const python = path.join(installRoot, 'runtime', 'python', process.platform === 'win32' ? 'python.exe' : 'python');
+  return fs.existsSync(engine) || ((fs.existsSync(pyz) || fs.existsSync(source)) && fs.existsSync(python));
+}
+
+function ensurePackagedInstallMarkerForPortableBackend() {
+  if (!app.isPackaged) return;
+  const installRoot = path.dirname(process.execPath);
+  if (!hasPackagedPlainBackend(installRoot)) return;
+  const existing = readInstallJsonExisting();
+  if (
+    existing.hasExisting
+    && existing.installRoot
+    && path.resolve(existing.installRoot).toLowerCase() === path.resolve(installRoot).toLowerCase()
+    && existing.dataRoot
+  ) {
+    return;
+  }
+
+  const dataRoot = getUserDataRuntimeDataRoot();
+  try {
+    copyMissingTree(path.join(installRoot, 'data'), dataRoot);
+    const marker = path.join(app.getPath('userData'), 'install.json');
+    const pkg = require('./package.json');
+    const manifest = {
+      installRoot,
+      dataRoot,
+      version: String(pkg.version || '0.0.0'),
+    };
+    fs.mkdirSync(path.dirname(marker), { recursive: true });
+    fs.writeFileSync(marker, JSON.stringify(manifest, null, 2), 'utf8');
+
+    const versionDir = path.join(installRoot, '.autoscriptor');
+    fs.mkdirSync(versionDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(versionDir, 'release_version.json'),
+      JSON.stringify({ version: manifest.version, initialized_at: new Date().toISOString() }, null, 2),
+      'utf8',
+    );
+    invalidateRootCache();
+    console.log('[main] Initialized packaged install marker:', marker);
+    startupLog('install-marker-updated', JSON.stringify(manifest));
+  } catch (e) {
+    console.warn('[main] Failed to initialize packaged install marker:', e && e.message ? e.message : e);
+    startupLog('install-marker-failed', e && e.stack ? e.stack : String(e));
+  }
 }
 
 /** 安装向导专用：命令行带 `--installer` / `--install-wizard` 时始终只打开向导，不启动主窗口与 Python。 */
@@ -294,11 +397,17 @@ function getArgValue(name) {
   return '';
 }
 
+function getDefaultInstallRoot() {
+  const localAppData = String(process.env.LOCALAPPDATA || '').trim();
+  if (localAppData) return path.join(localAppData, 'AutoScriptor');
+  return path.join(app.getPath('appData'), 'AutoScriptor');
+}
+
 async function maybeRunHeadlessInstall() {
   if (!hasArg('--headless-install')) return false;
 
   const installRoot = path.resolve(
-    String(getArgValue('--install-root') || path.join(app.getPath('documents'), 'AutoScriptor')).trim(),
+    String(getArgValue('--install-root') || getDefaultInstallRoot()).trim(),
   );
   const reportPath = String(getArgValue('--install-report') || '').trim();
   const events = [];
@@ -386,13 +495,58 @@ const LOG_BUFFER_MAX = 500;
 const logBuffer = [];
 let loadingScreenLogFlushDone = false;
 let pendingStatus = null;
+const startupTimers = new Map();
+let startupPhase = '';
+let startupPhaseStartedAt = 0;
+
+function startupElapsedMs() {
+  return Date.now() - startupProcessStartedAt;
+}
+
+function formatElapsed(ms) {
+  return `${(Math.max(0, ms) / 1000).toFixed(1)}s`;
+}
+
+function reportStartupStep(status, message, detail) {
+  startupPhase = status || startupPhase;
+  startupPhaseStartedAt = Date.now();
+  const line = `[启动] ${message}${detail ? `：${detail}` : ''}（${formatElapsed(startupElapsedMs())}）`;
+  startupLog(status || 'startup-step', `${message}${detail ? ` ${detail}` : ''}`);
+  console.log('[main]', line);
+  sendToRenderer('status', status || 'starting');
+  sendToRenderer('log', line);
+}
+
+function clearStartupTimer(name) {
+  const timer = startupTimers.get(name);
+  if (timer) clearTimeout(timer);
+  startupTimers.delete(name);
+}
+
+function scheduleStartupTimer(name, delayMs, message) {
+  clearStartupTimer(name);
+  startupTimers.set(name, setTimeout(() => {
+    startupTimers.delete(name);
+    if (serverReady || app.isQuitting || quitStarted) return;
+    const phaseSeconds = startupPhaseStartedAt ? formatElapsed(Date.now() - startupPhaseStartedAt) : '0.0s';
+    sendToRenderer('log', `[启动] ${message}；当前阶段 ${startupPhase || 'unknown'} 已等待 ${phaseSeconds}`);
+  }, delayMs));
+}
+
+function clearStartupTimers() {
+  for (const timer of startupTimers.values()) clearTimeout(timer);
+  startupTimers.clear();
+}
 
 // ── Single instance lock ─────────────────────────────────────────────────────
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
+  startupLog('single-instance-lock-denied');
   app.quit();
 } else {
+  startupLog('single-instance-lock-acquired');
   app.on('second-instance', () => {
+    startupLog('second-instance');
     showMainWindow();
   });
 }
@@ -497,6 +651,8 @@ function maybeNotifyServerReady(line) {
   if (line.includes('Application startup complete') || line.includes('Uvicorn running on')) {
     if (!serverReady) {
       serverReady = true;
+      clearStartupTimers();
+      reportStartupStep('webui-ready', '后端服务已报告启动完成');
       pollServer();
     }
   }
@@ -504,12 +660,16 @@ function maybeNotifyServerReady(line) {
 
 function attachBackendProcessHandlers() {
   pyProc.stdout.on('data', createLineReader(line => {
+    clearStartupTimer('backend-no-output-5s');
+    clearStartupTimer('backend-no-output-15s');
     console.log('[backend]', line);
     sendToRenderer('log', line);
     maybeNotifyServerReady(line);
   }));
 
   pyProc.stderr.on('data', createLineReader(line => {
+    clearStartupTimer('backend-no-output-5s');
+    clearStartupTimer('backend-no-output-15s');
     console.log('[backend:err]', line);
     sendToRenderer('log', line);
     maybeNotifyServerReady(line);
@@ -518,17 +678,21 @@ function attachBackendProcessHandlers() {
   pyProc.on('error', err => {
     console.error('[backend:error]', err);
     sendToRenderer('log', String(err));
+    clearStartupTimers();
   });
 
   pyProc.on('spawn', () => {
     pyPid = pyProc.pid;
     console.log('[main] Backend PID:', pyPid);
-    sendToRenderer('status', 'starting');
-    setTimeout(() => { if (!serverReady) pollServer(); }, 20000);
+    reportStartupStep('backend-spawned', '后端进程已创建，等待 Python 输出', `pid=${pyPid}`);
+    scheduleStartupTimer('backend-no-output-5s', 5000, 'Python 正在导入依赖，首次运行或低内存机器可能需要更久');
+    scheduleStartupTimer('backend-no-output-15s', 15000, '后端仍在启动；如果这里停很久，请通过托盘菜单打开控制台查看详细错误');
+    setTimeout(() => { if (!serverReady) pollServer(); }, 8000);
   });
 
   pyProc.on('exit', (code) => {
     console.log('[backend] exited with code', code);
+    clearStartupTimers();
     if (!app.isQuitting) {
       sendToRenderer('log', `[后端进程退出: code=${code}]`);
     }
@@ -559,22 +723,27 @@ function stopBackendForUpdate() {
 }
 
 function startPython() {
+  reportStartupStep('starting-backend', '正在准备后端运行环境');
   const engineExe = getBackendEngineExe();
   if (app.isPackaged && fs.existsSync(engineExe)) {
     const backendCwd = path.dirname(engineExe);
+    const dataRoot = getRuntimeDataRoot();
     const backendEnv = {
       ...process.env,
       PYTHONIOENCODING: 'utf-8',
       PYTHONUTF8: '1',
+      PYTHONNOUSERSITE: '1',
       AUTOSCRIPTOR_ELECTRON_PIPE: '1',
       AUTOSCRIPTOR_ELECTRON: '1',
-      AUTOSCRIPTOR_DATA_DIR: getRuntimeDataRoot(),
+      AUTOSCRIPTOR_DATA_DIR: dataRoot,
       UVICORN_LOG_LEVEL: 'info',
       NO_COLOR: '1',
     };
     delete backendEnv.PYTHONHOME;
     delete backendEnv.PYTHONPATH;
     console.log('[main] Starting packaged engine:', engineExe, 'cwd:', backendCwd);
+    startupLog('starting-packaged-engine', `${engineExe} cwd=${backendCwd}`);
+    reportStartupStep('starting-backend', '正在启动后端引擎', `dataRoot=${dataRoot}`);
     pyProc = spawn(engineExe, ['--electron'], {
       cwd: backendCwd,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -584,9 +753,69 @@ function startPython() {
     return;
   }
 
+  if (app.isPackaged) {
+    const pyzBackend = getPackagedPyzBackend();
+    if (fs.existsSync(pyzBackend.pythonExe) && fs.existsSync(pyzBackend.pyzPath)) {
+      const dataRoot = getRuntimeDataRoot();
+      const backendEnv = {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUTF8: '1',
+        PYTHONNOUSERSITE: '1',
+        AUTOSCRIPTOR_ELECTRON_PIPE: '1',
+        AUTOSCRIPTOR_ELECTRON: '1',
+        AUTOSCRIPTOR_APP_ROOT: pyzBackend.cwd,
+        AUTOSCRIPTOR_DATA_DIR: dataRoot,
+        UVICORN_LOG_LEVEL: 'info',
+        NO_COLOR: '1',
+      };
+      delete backendEnv.PYTHONHOME;
+      delete backendEnv.PYTHONPATH;
+      console.log('[main] Starting packaged pyz backend:', pyzBackend.pythonExe, pyzBackend.pyzPath);
+      startupLog('starting-packaged-pyz-backend', `${pyzBackend.pythonExe} ${pyzBackend.pyzPath}`);
+      reportStartupStep('starting-python', '正在启动随包 Python 压缩后端', `dataRoot=${dataRoot}`);
+      pyProc = spawn(pyzBackend.pythonExe, ['-X', 'utf8', '-u', pyzBackend.pyzPath, '--electron'], {
+        cwd: pyzBackend.cwd,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: backendEnv,
+      });
+      attachBackendProcessHandlers();
+      return;
+    }
+
+    const sourceBackend = getPackagedSourceBackend();
+    if (fs.existsSync(sourceBackend.pythonExe) && fs.existsSync(sourceBackend.guiScript)) {
+      const dataRoot = getRuntimeDataRoot();
+      const backendEnv = {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUTF8: '1',
+        PYTHONNOUSERSITE: '1',
+        AUTOSCRIPTOR_ELECTRON_PIPE: '1',
+        AUTOSCRIPTOR_ELECTRON: '1',
+        AUTOSCRIPTOR_DATA_DIR: dataRoot,
+        UVICORN_LOG_LEVEL: 'info',
+        NO_COLOR: '1',
+      };
+      delete backendEnv.PYTHONHOME;
+      delete backendEnv.PYTHONPATH;
+      console.log('[main] Starting packaged source backend:', sourceBackend.pythonExe, sourceBackend.guiScript);
+      startupLog('starting-packaged-source-backend', `${sourceBackend.pythonExe} ${sourceBackend.guiScript}`);
+      reportStartupStep('starting-python', '正在启动随包 Python 环境', `dataRoot=${dataRoot}`);
+      pyProc = spawn(sourceBackend.pythonExe, ['-X', 'utf8', '-u', sourceBackend.guiScript, '--electron'], {
+        cwd: sourceBackend.cwd,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: backendEnv,
+      });
+      attachBackendProcessHandlers();
+      return;
+    }
+  }
+
   const pythonPath = findPython();
   const guiScript = guiScriptPath();
   console.log('[main] Starting Python:', pythonPath, guiScript);
+  reportStartupStep('starting-python', '正在启动开发 Python 环境', pythonPath);
 
   pyProc = spawn(
     pythonPath,
@@ -613,12 +842,19 @@ function pollServer(retries = 0) {
     sendToRenderer('log', '[错误] 服务器启动超时，请检查本机环境与后端日志');
     return;
   }
+  if (retries === 0) {
+    reportStartupStep('waiting-webui', '正在连接本地 WebUI', SERVER_URL);
+  } else if (retries % 5 === 0) {
+    sendToRenderer('log', `[启动] WebUI 仍在准备中，已等待约 ${retries}s`);
+  }
   const req = http.get(SERVER_URL, (res) => {
     let body = '';
     res.on('data', d => { body += d; });
     res.on('end', () => {
       if (res.statusCode === 200 && (body.includes('AutoScriptor') || body.includes('造笔'))) {
         console.log('[main] Server ready, loading app...');
+        clearStartupTimers();
+        reportStartupStep('ready', 'WebUI 已响应，正在加载主界面');
         sendToRenderer('status', 'ready');
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.loadURL(SERVER_URL);
@@ -640,11 +876,13 @@ function showMainWindow() {
   if (mainWindow.isMinimized()) mainWindow.restore();
   if (!mainWindow.isVisible()) mainWindow.show();
   mainWindow.focus();
+  refreshTrayMenu();
 }
 
 function hideMainWindowToTray() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.hide();
+  refreshTrayMenu();
 }
 
 function toggleMainWindowToTray() {
@@ -656,8 +894,15 @@ function toggleMainWindowToTray() {
   showMainWindow();
 }
 
+function openMainWindowDevTools() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  showMainWindow();
+  mainWindow.webContents.openDevTools({ mode: 'detach' });
+}
+
 function createMainWindow() {
   const icon = loadAppIcon();
+  startupLog('create-main-window');
 
   mainWindow = new BrowserWindow({
     width:  1400,
@@ -671,7 +916,11 @@ function createMainWindow() {
   });
 
   // Show once DOM is ready
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.once('ready-to-show', () => {
+    startupLog('main-window-ready-to-show');
+    mainWindow.show();
+    reportStartupStep('window-visible', '启动窗口已显示');
+  });
 
   // 转发 renderer console 到主进程 stdout（便于终端看到前端 JS 报错）
   mainWindow.webContents.on('console-message', (_e, level, msg, line, src) => {
@@ -705,24 +954,38 @@ function createMainWindow() {
 }
 
 // ── Tray ─────────────────────────────────────────────────────────────────────
+function buildTrayMenu() {
+  const windowVisible = !!(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized());
+  return Menu.buildFromTemplate([
+    {
+      label: `${windowVisible ? '隐藏造笔' : '显示造笔'} (${BOSS_KEY})`,
+      click: () => toggleMainWindowToTray(),
+    },
+    { type: 'separator' },
+    { label: '在浏览器中打开', click: () => shell.openExternal(SERVER_URL) },
+    { label: '打开控制台', click: () => openMainWindowDevTools() },
+    { type: 'separator' },
+    { label: '退出', click: () => quitApp() },
+  ]);
+}
+
+function refreshTrayMenu() {
+  if (!tray || (typeof tray.isDestroyed === 'function' && tray.isDestroyed())) return;
+  tray.setContextMenu(buildTrayMenu());
+}
+
 function createTray() {
   const icon = loadTrayIcon() || nativeImage.createEmpty();
 
   tray = new Tray(icon);
 
-  const menu = Menu.buildFromTemplate([
-    { label: `显示窗口 (${BOSS_KEY})`, click: () => showMainWindow() },
-    { label: `隐藏窗口 (${BOSS_KEY})`, click: () => hideMainWindowToTray() },
-    { type: 'separator' },
-    { label: '在浏览器中打开', click: () => shell.openExternal(SERVER_URL) },
-    { type: 'separator' },
-    { label: '退出',        click: () => quitApp() },
-  ]);
-
   tray.setToolTip('造笔 - AutoScriptor');
-  tray.setContextMenu(menu);
-  tray.on('click', () => toggleMainWindowToTray());
-  tray.on('right-click', () => tray.popUpContextMenu(menu));
+  refreshTrayMenu();
+  tray.on('click', () => {
+    toggleMainWindowToTray();
+    refreshTrayMenu();
+  });
+  tray.on('right-click', () => tray.popUpContextMenu(buildTrayMenu()));
 }
 
 function registerBossKey() {
@@ -739,6 +1002,7 @@ function registerBossKey() {
 function createInstallerWindow() {
   const icon = loadAppIcon();
   installerMode = true;
+  startupLog('create-installer-window');
 
   mainWindow = new BrowserWindow({
     width: 960,
@@ -751,7 +1015,10 @@ function createInstallerWindow() {
     webPreferences: browserWindowWebPreferences(),
   });
 
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.once('ready-to-show', () => {
+    startupLog('installer-window-ready-to-show');
+    mainWindow.show();
+  });
   mainWindow.loadFile(INSTALL_HTML);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -809,7 +1076,7 @@ ipcMain.handle('installer:get-mode', () => {
 ipcMain.handle('installer:default-install-dir', () => {
   const existing = readInstallJsonExisting();
   if (existing.installRoot) return existing.installRoot;
-  return path.join(app.getPath('documents'), 'AutoScriptor');
+  return getDefaultInstallRoot();
 });
 
 /** 读取 userData/install.json，用于覆盖安装提示 */
@@ -1357,13 +1624,11 @@ ipcMain.on('window-close', () => {
 
 // ── IPC ───────────────────────────────────────────────────────────────────────
 function sendToRenderer(channel, data) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-
   if (channel === 'log') {
     const line = String(data);
     logBuffer.push(line);
     if (logBuffer.length > LOG_BUFFER_MAX) logBuffer.shift();
-    if (loadingScreenLogFlushDone) {
+    if (mainWindow && !mainWindow.isDestroyed() && loadingScreenLogFlushDone) {
       mainWindow.webContents.send('log', line);
     }
     return;
@@ -1371,12 +1636,13 @@ function sendToRenderer(channel, data) {
 
   if (channel === 'status') {
     pendingStatus = data;
-    if (loadingScreenLogFlushDone) {
+    if (mainWindow && !mainWindow.isDestroyed() && loadingScreenLogFlushDone) {
       mainWindow.webContents.send('status', data);
     }
     return;
   }
 
+  if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send(channel, data);
 }
 
@@ -1431,23 +1697,36 @@ function quitApp() {
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
   app.isQuitting = false;
+  startupLog('app-ready', `argv=${JSON.stringify(process.argv)} exec=${process.execPath}`);
+  reportStartupStep('electron-ready', '桌面窗口环境已就绪');
 
   if (await maybeRunHeadlessInstall()) {
+    startupLog('headless-install-complete');
     return;
   }
 
+  reportStartupStep('checking-install', '正在检查安装与运行目录');
+  ensurePackagedInstallMarkerForPortableBackend();
+
   if (isInstallerWizardArgv()) {
+    startupLog('installer-argv');
     createInstallerWindow();
     return;
   }
 
   if (isInstalled()) {
-    killStalePort5000();
+    startupLog('installed-mode', `root=${getRoot()} engine=${getBackendEngineExe()}`);
+    reportStartupStep('creating-window', '正在创建启动窗口', getRoot());
     createMainWindow();
     createTray();
     registerBossKey();
-    startPython();
+    setTimeout(() => {
+      reportStartupStep('checking-port', '正在检查本地端口占用');
+      killStalePort5000();
+      startPython();
+    }, 250);
   } else {
+    startupLog('installer-mode-no-backend', `root=${getRoot()} engine=${getBackendEngineExe()}`);
     createInstallerWindow();
   }
 });

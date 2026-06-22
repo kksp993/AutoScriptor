@@ -169,14 +169,57 @@ cd D:\Projects\AutoScriptor
 | **NSIS** | 否（`--electron-nsis`） | `AutoScriptor_Zao_installer_<version>.exe` | 需要「开始菜单 / 控制面板卸载」等**系统级安装**时。 |
 | **ZIP 目录包** | 否（`--electron-zip`） | `AutoScriptor_Zao_*.zip` | 解压整目录调试；**不是**默认分发形态。 |
 
-### 6.1 系统 NSIS 安装器 vs HTML 安装向导（重要）
+### 6.1 Plain portable 原型
+
+`packaging/plain_portable/` 是新的明文件打包原型，用来验证“不再把 backend 压成 `backend.zip`”的发行方向。它不运行 Nuitka，只复用已经通过 smoke 的 `dist/gui.dist`、`dist/data`、`dist/license` 和 WebUI release staging：
+
+```powershell
+.\.venv-nuitka\Scripts\python.exe -X utf8 packaging\plain_portable\build_plain_portable.py
+```
+
+默认输出在 `dist_plain_portable/`：
+
+- `AutoScriptor_Zao_Plain_Portable_<version>.zip`
+- `AutoScriptor_Update_<version>.zip`
+- `win-unpacked/`，根目录含可直接双击的 `造笔.exe`
+
+该原型把 `dist/gui.dist` 放入 portable 根目录 `backend/`，把 `dist/data` 作为种子数据合并到 `install.json.dataRoot`，并显式排除 backend `docs/`、source map、账号 JSON、pycache。默认不再生成大体积 NSIS 自解压安装器，避免双击后长时间没有项目 UI；如确需 NSIS，显式传 `--nsis` 并单独验收首屏响应。小版本更新包默认只包含 `backend/autoscriptor-engine.exe` 和 `update_manifest.json`，保持轻量；只有 VM post-update launcher 证明旧启动器不兼容时，才考虑额外纳入启动器。
+
+本地或 VM 启动验收前必须确认当前 shell 没有 `ELECTRON_RUN_AS_NODE=1`。该变量会把 Electron exe 强制当 Node 执行，表现为双击/探针进程很快退出且 `main.js` 完全不加载；PowerShell 探针先执行 `Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue`。
+
+### 6.2 Source portable 原型
+
+`packaging/source_portable/` 是不走 Nuitka/C++ 的 portable 路线。v1.0.3 是新的重新下载基线；v1.0.3 以前的 source update 包不再兼容，后续更新只按本分支的 pyz 包形态维护。
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 packaging\source_portable\build_source_portable.py
+```
+
+默认输出在 `dist_source_portable/`：
+
+- `AutoScriptor_Zao_Source_Portable_<version>.zip`：可分发目录包，根目录含 `造笔.exe`。
+- `AutoScriptor_Source_Update_<version>.zip`：同 `x.y` 线 source update 包。
+- `win-unpacked/`：本地验收用展开目录。
+
+布局：
+
+- `runtime/python/`：随包 Python 3.10 与依赖。构建脚本会确保 `python310._pth` 包含 `import site`，Electron 启动后端时设置 `PYTHONNOUSERSITE=1`，避免加载用户全局 site-packages。
+- `backend/backend.pyz`：`gui.py`、`AutoScriptor/`、`ZmxyOL/`、`services/` 等 Python 运行代码压成 zipapp，不包含 `docs/`、测试、source map、账号 JSON。
+- `backend/services/webui/static/` 与 `backend/services/webui/vendor/`：FastAPI `StaticFiles` 需要真实文件系统路径，因此这两类少量 Web 资源保留为外置目录。
+- `data/`：首次启动种子数据，会复制到 Electron `userData/data`；账号 JSON 不随包。
+
+source update 包使用 `pyz-cumulative` 模式，默认替换 `backend/backend.pyz` 以及改变过的外置 Web 静态资源，并通过 `config_defaults` 补齐缺失配置项；不要把 `data/config.json`、`data/accounts/`、`data/custom_task/`、`data/battle_character/`、`data/logs/` 放进 replace/mkdir/copy 清单。Electron 启动 pyz 时会设置 `AUTOSCRIPTOR_APP_ROOT=安装目录/backend`，确保 zipapp 内代码把静态资源解析到真实文件系统。
+
+`--single-exe` 只用于实验。electron-builder portable 单文件会先自解压大 payload，可能 60 秒仍无窗口，不符合快速启动要求；未单独通过 smoke 的单文件 exe 不得分发。当前推荐分发目录 zip。
+
+### 6.3 系统 NSIS 安装器 vs HTML 安装向导（重要）
 
 - **NSIS 安装程序**（`AutoScriptor_Zao_installer_<version>.exe`）：Nullsoft **默认向导**（选目录 → 进度条 → 完成），负责把 Electron 壳与随包文件释放到磁盘。
 - **HTML 安装向导**（`webapp/renderer/installer.html`）：**Electron 窗口**，与开发时同一套界面逻辑；负责 **解压 `backend.zip` 到用户所选目录**、**复制 data**、**MuMu/ADB 路径校验**（`install-packaged.cjs` + `mumu-detect.cjs`）。
 
 **默认 portable 流程**：用户**不经过 NSIS**；运行 `造笔.exe` 后，首次启动即进入 **HTML 向导**。大体积引擎解压发生在向导内，**不是** NSIS 那一屏。
 
-### 6.2 NSIS 安装阶段很慢或卡在进度条
+### 6.4 NSIS 安装阶段很慢或卡在进度条
 
 常见原因：**解压 + 写盘 + Windows Defender 扫描**。处理方向：
 
@@ -209,7 +252,7 @@ cd D:\Projects\AutoScriptor
 
 ## 9. 发行版安装流程（最终用户）
 
-1. 运行 **`AutoScriptor_Zao_Install.exe`**（portable 会自解压到临时目录再启动，**用户数据**通过 `install.json.dataRoot` 指向 Electron `userData/data`，不写入受保护的安装目录）。
+1. 运行 **`AutoScriptor_Zao_Install.exe`**（portable 会自解压到临时目录再启动；默认程序目录为 `%LOCALAPPDATA%\AutoScriptor`，**用户数据**通过 `install.json.dataRoot` 指向 Electron `userData/data`，不写入安装目录或“文档”目录）。
 2. **HTML 向导**：选择安装根目录 → 预检磁盘空间与 `backend.zip` 完整性 → 解压到 `.backend.new.*` 临时目录 → 校验 `autoscriptor-engine.exe` → 事务切换 `backend` → 合并 `data` 到用户可写数据目录（保留用户账号/脚本/角色数据）→ 自动写入/探测 **MuMu**（`applyMumuConfig`）→ **环境验证页**确认 **MuMu 目录 / 模拟器 exe / adb** 路径。
 3. 完成后启动主程序（`installer:launch` → 正常窗口 + 托盘）。
 
@@ -217,9 +260,9 @@ cd D:\Projects\AutoScriptor
 
 - **修复安装**：允许选择已有造笔安装目录，不要求空目录；旧 `backend` 会先备份为 `.bak.*`，新引擎校验成功后再切换，失败时回滚旧引擎。
 - **增量更新**：`backend_incremental.zip` 会先复制当前 `backend` 到 `.backend.incremental.*`，按清单校验旧文件 SHA-256，再替换并校验新文件 SHA-256；基线不匹配时会中止，不破坏旧引擎。
-- **用户数据**：默认保留 `dataRoot/config.json`、`dataRoot/accounts/*.json`、`dataRoot/custom_task/`、`dataRoot/battle_character/`，随包基础数据只合并到 `install.json.dataRoot`。旧安装若仍指向安装目录下 `data` 且运行时不可写，Electron 启动会把缺失数据复制到 `userData/data` 并更新 `install.json`。
+- **用户数据**：默认保留 `dataRoot/config.json`、`dataRoot/accounts/*.json`、`dataRoot/custom_task/`、`dataRoot/battle_character/`，随包基础数据只合并到 `install.json.dataRoot`。安装器不再向安装根目录写 `config.json`；旧安装若仍指向安装目录下 `data` 且运行时不可写，Electron 启动会把缺失数据复制到 `userData/data` 并更新 `install.json`。
 - **进程占用**：安装前只结束安装目录内的后端进程，并且只清理属于造笔安装目录的 5000 端口监听，避免误杀其他本地服务。
-- **卸载**：安装目录写入 `卸载造笔.bat` 与 `彻底卸载造笔.bat`。控制面板/默认卸载保留 `dataRoot`；彻底卸载才移除安装目录和外置用户数据目录。
+- **卸载**：安装目录写入 `卸载造笔.bat` 与 `彻底卸载造笔.bat`，并注册 HKCU「应用和功能」卸载项。卸载入口会把真正执行删除的 worker 复制到 `%TEMP%` 后再后台运行，避免安装目录内脚本删除自身失败；默认卸载保留外置 `dataRoot`，彻底卸载才移除安装目录和外置用户数据目录。注册表写入必须使用 `New-ItemProperty -PropertyType` 明确写入字符串/DWORD 字段（含 `EstimatedSize`、`InstallDate`、`NoModify`、`NoRepair`），不要使用 `Set-ItemProperty -Type`。
 
 ### 9.2 发行版更新通道
 
@@ -227,7 +270,7 @@ cd D:\Projects\AutoScriptor
 
 - **同一 `x.y` 线的小版本**：例如 `1.0.0 -> 1.0.1` 或 `1.1.0 -> 1.1.5`，使用累计小版本更新包 `AutoScriptor_Update_x.y.z.zip`。更新包必须包含从 `x.y.0` 到目标版本所需的全部 engine/少量附属文件变动，允许用户从同一 `x.y` 线任意更低小版本直接跳到目标版本。
 - 小版本更新包不是底库，也不是完整安装包；它只适用于已经安装同一 `x.y` 线版本的目录。空机器或无旧安装树时必须先运行完整安装包。
-- 若本次改动包含随 backend 读取的外置文件（例如 `services/webui/static/**`、`scripts/collect_zmxy_redeem_2026.py`、`docs/zmxy_redeem_codes.json`），同线更新包不能只替换 exe；这些文件必须通过 `--include-backend` 进入 `replace` 清单。
+- 若本次改动包含随 backend 读取的外置文件（例如 `services/webui/static/**`、`scripts/collect_zmxy_redeem_2026.py`，或从 `docs/zmxy_redeem_codes.json` 复制到运行时 `data/assets/redeem_codes/zmxy_redeem_codes.json` 的兑换码 JSON），同线更新包不能只替换 exe；这些文件必须通过 `--include-backend`、`--copy-if-missing` 或对应打包脚本进入清单。
 - 若更新后 `install.json` / `.autoscriptor/release_version.json` 会提升到新小版本，不要默认把完整 portable 安装器塞进更新包。先跑 VM 旧版安装器 -> 新版 update -> post-update launcher 探针；旧 `造笔.exe` 能启动新版 backend 时，更新包只包含 engine 与必要外置资源。只有旧 launcher 实测失败时，才通过 `--include-file dist_electron\AutoScriptor_Zao_Install_x.y.z.exe=造笔.exe` 或更理想的轻量 launcher 方案替换它。update zip 超过 100 MB 时必须作为发布决策单独说明，不能静默上传。
 - **跨 `x.y` 线的大版本**：例如 `1.0.x -> 1.1.0`，使用完整安装包。依赖库、Nuitka 运行时、backend 目录布局、Electron 壳或安装器行为变化，都应走完整安装包。
 - **本地小版本更新包**：WebUI“检查更新”页支持选择或拖入 `.zip`。Electron 主进程先 dry-run 校验 `update_manifest.json`、版本线、SHA-256、写入路径与用户数据保护；应用时停止 backend，备份旧文件，替换 `backend/autoscriptor-engine.exe` 等少量文件，失败则回滚并重启旧 backend。

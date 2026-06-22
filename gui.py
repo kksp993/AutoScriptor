@@ -53,6 +53,19 @@ def _electron_force_utf8_stdio() -> None:
 _electron_force_utf8_stdio()
 
 import os
+import time
+
+_BOOT_T0 = time.perf_counter()
+
+
+def _boot_log(message: str) -> None:
+    if "--electron" not in sys.argv and not os.environ.get("AUTOSCRIPTOR_ELECTRON_PIPE"):
+        return
+    elapsed = time.perf_counter() - _BOOT_T0
+    print(f"[启动] {message}（Python {elapsed:.1f}s）", flush=True)
+
+
+_boot_log("Python 进程已启动，正在初始化运行时")
 
 
 def _windows_current_executable_path() -> str:
@@ -555,7 +568,9 @@ def _bootstrap_packaged_stdlib() -> None:
     _patch_packaged_typing_protocol_allowlist()
 
 
+_boot_log("正在检查打包运行时兼容层")
 _bootstrap_packaged_stdlib()
+_boot_log("运行时兼容层检查完成")
 
 import argparse
 import json
@@ -625,7 +640,9 @@ def _webui_worker(restart_event):
         import webbrowser as _wb
         _wb.open = lambda *a, **kw: None
 
+    _boot_log("正在导入 WebUI 服务模块")
     from services.webui.server import run_webui
+    _boot_log("WebUI 服务模块导入完成，正在启动 HTTP 服务")
     run_webui(restart_event=restart_event)
 
 
@@ -890,12 +907,14 @@ def _run_mumu_runtime_probe(probe_args) -> bool:
     return bool(report["ok"])
 
 
-if __name__ == '__main__':
+def main() -> int:
+    _boot_log("正在解析启动参数")
     if args.runtime_import_smoke:
-        sys.exit(0 if _run_runtime_import_smoke(args.probe_out) else 1)
+        return 0 if _run_runtime_import_smoke(args.probe_out) else 1
     if args.mumu_runtime_probe:
-        sys.exit(0 if _run_mumu_runtime_probe(args) else 1)
+        return 0 if _run_mumu_runtime_probe(args) else 1
 
+    _boot_log("正在初始化多进程运行环境")
     import multiprocessing
     import signal
 
@@ -906,6 +925,7 @@ if __name__ == '__main__':
         pass
     multiprocessing.freeze_support()
 
+    _boot_log("正在检查单实例锁")
     from services.single_instance import ensure_single_instance
 
     ensure_single_instance()
@@ -914,6 +934,7 @@ if __name__ == '__main__':
         os.environ['UVICORN_LOG_LEVEL'] = 'info'
         os.environ['AUTOSCRIPTOR_ELECTRON'] = '1'
 
+    _boot_log("正在准备 WebUI worker")
     from multiprocessing import Event, Process
 
     _mp_state = {"should_exit": False, "process": None}
@@ -952,7 +973,9 @@ if __name__ == '__main__':
         event = Event()
         process = Process(target=_webui_worker, args=(event,))
         _mp_state["process"] = process
+        _boot_log("正在创建 WebUI 子进程")
         process.start()
+        _boot_log(f"WebUI 子进程已启动 pid={process.pid}")
         while not should_exit:
             if _mp_state["should_exit"]:
                 should_exit = True
@@ -979,3 +1002,8 @@ if __name__ == '__main__':
             except Exception:
                 pass
         _mp_state["process"] = None
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

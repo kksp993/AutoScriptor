@@ -41,10 +41,20 @@ function psQuote(value) {
 }
 
 function powershell(command) {
+  const utf8Prelude = '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [Console]::OutputEncoding;';
   execFileSync(
     'powershell.exe',
-    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command],
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `${utf8Prelude} ${command}`],
     { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', windowsHide: true, timeout: 30000 },
+  );
+}
+
+function powershellOutput(command) {
+  const utf8Prelude = '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [Console]::OutputEncoding;';
+  return execFileSync(
+    'powershell.exe',
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `${utf8Prelude} ${command}`],
+    { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', windowsHide: true, timeout: 60000 },
   );
 }
 
@@ -171,6 +181,15 @@ function parsePowerShellScript(ps1Path) {
     `$ErrorActionPreference='Stop'; `
     + `$null = [scriptblock]::Create((Get-Content -Raw -LiteralPath ${psQuote(ps1Path)}))`,
   );
+}
+
+function waitUntil(predicate, timeoutMs, message) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (predicate()) return;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+  }
+  throw new Error(message || 'timed out waiting for condition');
 }
 
 function testMumuInfoMappingHelpers() {
@@ -330,6 +349,7 @@ async function testInstallRepairAndUninstallScript(tmp) {
   assert(fs.existsSync(path.join(installRoot, 'backend', 'autoscriptor-engine.exe')), 'engine should be installed');
   assertIncludes(readText(path.join(installRoot, 'backend', 'lib', 'version.txt')), 'v1', 'backend v1 should be installed');
   assert(fs.existsSync(path.join(installRoot, '造笔.exe')), 'daily launcher should be copied');
+  assert(!fs.existsSync(path.join(installRoot, 'config.json')), 'runtime config must stay in user dataRoot, not install root');
   assert(fs.existsSync(path.join(installRoot, 'Uninstall.ps1')), 'uninstall ps1 should be written');
   assert(fs.existsSync(path.join(installRoot, '卸载造笔.bat')), 'keep-data uninstall bat should be written');
   assert(fs.existsSync(path.join(installRoot, '彻底卸载造笔.bat')), 'remove-all uninstall bat should be written');
@@ -339,7 +359,10 @@ async function testInstallRepairAndUninstallScript(tmp) {
   assert(marker.dataRoot === runtimeDataRoot, 'install marker should contain writable user dataRoot');
   parsePowerShellScript(path.join(installRoot, 'Uninstall.ps1'));
   assertIncludes(readText(path.join(installRoot, 'Uninstall.ps1')), 'ProcessId -ne $PID', 'uninstaller must not kill its own PowerShell process');
+  assertIncludes(readText(path.join(installRoot, 'Uninstall.ps1')), 'ZaoBiUninstall-', 'uninstaller should launch a temp worker outside install root');
   assertIncludes(readText(path.join(__dirname, '..', 'install-packaged.cjs')), '$dataRoot', 'remove-all uninstaller should know external dataRoot');
+  assertIncludes(readText(path.join(__dirname, '..', 'install-packaged.cjs')), "New-ItemProperty -LiteralPath $key", 'uninstall registry should write typed registry values');
+  assertIncludes(readText(path.join(__dirname, '..', 'install-packaged.cjs')), "Set-RegDword 'EstimatedSize'", 'Windows Apps entry should include estimated size');
   assertIncludes(readText(path.join(installRoot, 'Uninstall.ps1')), 'Split-Path -Leaf $_.ExecutablePath', 'uninstaller should stop temporary portable app processes by executable name');
   assertIncludes(readText(path.join(installRoot, '彻底卸载造笔.bat')), '-RemoveUserData', 'remove-all bat should request user data removal');
 
@@ -398,6 +421,61 @@ async function testInstallRepairAndUninstallScript(tmp) {
   assertIncludes(readText(path.join(runtimeDataRoot, 'battle_character', 'packaged.json')), 'userBattle', 'battle character data should be preserved');
   assertIncludes(readText(path.join(runtimeDataRoot, 'common', 'packaged.txt')), 'v2', 'unprotected packaged data should update');
   assertNoBackendStaging(installRoot);
+}
+
+async function testWindowsAppsUninstallEntryCanUninstall(tmp) {
+  const release = createReleaseFixture(tmp, 'apps-uninstall');
+  const installRoot = path.join(tmp, 'apps-uninstall-root');
+  const userDataPath = path.join(tmp, 'apps-uninstall-userdata');
+  const registryKey = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\AutoScriptorZaoTest_' + process.pid;
+  const registryKeyPs = psQuote(registryKey);
+
+  try {
+    await runPackagedInstall({
+      installRoot,
+      exeDir: release.exeDir,
+      resourcesPath: release.exeDir,
+      zipPath: release.zipPath,
+      portableExePath: release.portableExe,
+      appVersion: '9.9.9',
+      userDataPath,
+      skipMumuConfig: true,
+      registryKey,
+      send: () => {},
+    });
+
+    const uninstallString = powershellOutput(
+      `$ErrorActionPreference='Stop'; `
+      + `$item = Get-ItemProperty -LiteralPath ${registryKeyPs}; `
+      + '@($item.DisplayName, $item.DisplayVersion, $item.InstallLocation, $item.UninstallString, $item.EstimatedSize, $item.NoModify, $item.NoRepair) -join "`n"',
+    ).trim().split(/\r?\n/);
+    assert(uninstallString[0] === '造笔', 'Windows Apps entry should have DisplayName');
+    assert(uninstallString[1] === '9.9.9', 'Windows Apps entry should have DisplayVersion');
+    assert(path.resolve(uninstallString[2]) === path.resolve(installRoot), 'Windows Apps entry should have InstallLocation');
+    assertIncludes(uninstallString[3], 'powershell.exe', 'UninstallString should invoke PowerShell');
+    assertIncludes(uninstallString[3], 'Uninstall.ps1', 'UninstallString should invoke the installed uninstall launcher');
+    assert(Number(uninstallString[4]) > 0, 'Windows Apps entry should have EstimatedSize');
+    assert(uninstallString[5] === '1', 'Windows Apps entry should disable Modify');
+    assert(uninstallString[6] === '1', 'Windows Apps entry should disable Repair');
+
+    powershell(`$ErrorActionPreference='Stop'; cmd.exe /c ${psQuote(uninstallString[3])}`);
+    waitUntil(
+      () => !fs.existsSync(path.join(installRoot, 'backend'))
+        && !fs.existsSync(path.join(installRoot, 'Uninstall.ps1'))
+        && !fs.existsSync(path.join(installRoot, '造笔.exe')),
+      30000,
+      'Windows Apps UninstallString did not remove installed app files',
+    );
+    waitUntil(
+      () => !fs.existsSync(path.join(userDataPath, 'install.json')),
+      30000,
+      'Windows Apps UninstallString did not remove install marker',
+    );
+    powershell(`if (Test-Path -LiteralPath ${registryKeyPs}) { throw 'test uninstall registry key still exists' }`);
+    assert(fs.existsSync(path.join(userDataPath, 'data', 'config.json')), 'default uninstall should preserve external dataRoot');
+  } finally {
+    powershell(`if (Test-Path -LiteralPath ${registryKeyPs}) { Remove-Item -LiteralPath ${registryKeyPs} -Recurse -Force -ErrorAction SilentlyContinue }`);
+  }
 }
 
 async function testInstallProgressIsThrottled(tmp) {
@@ -532,6 +610,7 @@ async function main() {
     testMumuInfoMappingHelpers();
     await testDryRunAndInvalidTargets(tmp);
     await testInstallRepairAndUninstallScript(tmp);
+    await testWindowsAppsUninstallEntryCanUninstall(tmp);
     await testInstallProgressIsThrottled(tmp);
     await testIncrementalUpdateAndRollback(tmp);
     console.log('[installer-test] OK');
