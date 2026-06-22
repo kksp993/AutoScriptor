@@ -428,15 +428,38 @@
       });
 
       window.electron.onStatus(status => {
-        if (status === 'starting') {
-          setStatus('正在启动 Python 服务...');
-          progressFill.style.width = '15%';
-        } else if (status === 'ready') {
+        const statusTextMap = {
+          'electron-ready': '正在准备桌面环境...',
+          'checking-install': '正在检查运行目录...',
+          'creating-window': '正在创建启动窗口...',
+          'window-visible': '启动窗口已显示，正在准备后端...',
+          'checking-port': '正在检查本地端口...',
+          'starting-backend': '正在准备后端服务...',
+          'starting-python': '正在启动 Python 环境...',
+          'backend-spawned': 'Python 进程已启动，正在导入依赖...',
+          'waiting-webui': '正在连接本地 WebUI...',
+          'webui-ready': '后端服务已启动，正在加载界面...',
+          'starting': '正在启动 Python 服务...',
+        };
+        if (status === 'ready') {
           setStatus('服务就绪，正在跳转...');
           progressFill.style.width = '100%';
           spinner.style.display = 'none';
           readyBadge.classList.add('show');
           addLog('✅ 服务就绪，正在加载造笔...', 'highlight');
+        } else {
+          setStatus(statusTextMap[status] || '正在启动...');
+          if (status === 'backend-spawned') {
+            progressFill.style.width = '35%';
+          } else if (status === 'waiting-webui') {
+            progressFill.style.width = '65%';
+          } else if (status === 'webui-ready') {
+            progressFill.style.width = '85%';
+          } else if (status === 'starting-python' || status === 'starting-backend') {
+            progressFill.style.width = '25%';
+          } else if (status === 'window-visible') {
+            progressFill.style.width = '18%';
+          }
         }
       });
     } else {

@@ -6,7 +6,9 @@ import copy
 import datetime
 import json
 import os
+import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +36,7 @@ _TEST_TASK_PATHS = (
 
 def _atomic_write_json(path: Path, data: Any) -> None:
     """Write JSON via same-directory temp file then atomic replace."""
+    start = time.perf_counter()
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
     tmp_path = Path(tmp_name)
@@ -42,14 +45,37 @@ def _atomic_write_json(path: Path, data: Any) -> None:
             json.dump(data, f, ensure_ascii=False, indent=4)
             f.write("\n")
             f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
+            if _strict_json_fsync_enabled():
+                os.fsync(f.fileno())
+        try:
+            os.replace(tmp_path, path)
+        except PermissionError as e:
+            logger.warning(
+                "原子替换失败，降级为直接写入: target=%s temp=%s error=%s",
+                path,
+                tmp_path,
+                e,
+            )
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
+                f.write("\n")
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+        elapsed = time.perf_counter() - start
+        if elapsed >= 1.0:
+            logger.warning("JSON 保存耗时 %.2fs: %s", elapsed, path)
     except Exception:
         try:
             tmp_path.unlink(missing_ok=True)
         except Exception:
             pass
         raise
+
+
+def _strict_json_fsync_enabled() -> bool:
+    return str(os.environ.get("AUTOSCRIPTOR_STRICT_FSYNC", "")).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _has_task_path(tasks: dict[str, Any], task_path: str) -> bool:
@@ -246,6 +272,42 @@ class ConfigManager:
     def config_path(self, p: Path | str) -> None:
         self._config_path = Path(p)
 
+    @staticmethod
+    def _is_under_path(child: Path, parent: Path) -> bool:
+        try:
+            child.resolve().relative_to(parent.resolve())
+            return True
+        except (OSError, ValueError):
+            return False
+
+    def _force_default_accounts_dir(self) -> bool:
+        from AutoScriptor.utils.paths import is_compiled
+
+        return bool(os.environ.get("AUTOSCRIPTOR_DATA_DIR") or is_compiled())
+
+    def _migrate_external_accounts_dir(self, source: Path) -> None:
+        if not source.is_dir():
+            return
+        try:
+            self.default_accounts_dir.mkdir(parents=True, exist_ok=True)
+            for src in source.glob("*.json"):
+                dst = self.default_accounts_dir / src.name
+                if not dst.exists():
+                    shutil.copy2(src, dst)
+        except OSError as e:
+            logger.warning("迁移旧账号目录失败: %s -> %s (%s)", source, self.default_accounts_dir, e)
+
+    def _normalize_accounts_dir_config(self) -> None:
+        accounts = self.global_cfg.setdefault("accounts", {})
+        raw = str((accounts or {}).get("dir") or "").strip()
+        if not raw:
+            return
+        p = Path(raw)
+        if p.is_absolute() and self._force_default_accounts_dir() and not self._is_under_path(p, self.data_root):
+            self._migrate_external_accounts_dir(p)
+            accounts["dir"] = ""
+            logger.warning("发行版账号目录已切回 dataRoot/accounts: %s -> %s", p, self.default_accounts_dir)
+
     def resolved_accounts_dir(self) -> Path:
         raw = (self.global_cfg.get("accounts") or {}).get("dir") or ""
         raw = str(raw).strip()
@@ -306,6 +368,7 @@ class ConfigManager:
         self.global_cfg["scheduler"].setdefault("auto_start", False)
         self.global_cfg.setdefault("accounts", {})
         self.global_cfg["accounts"].setdefault("dir", "")
+        self._normalize_accounts_dir_config()
         acc_name = self.global_cfg.get("current_account", "")
         if acc_name:
             self.load_account(acc_name, pwd)
@@ -345,14 +408,25 @@ class ConfigManager:
                 self.global_cfg[k] = copy.deepcopy(flat[k])
         self.global_cfg["current_account"] = flat.get("current_account", self.global_cfg.get("current_account", ""))
         self._update_runtime_dates()
-        safe_cfg = {k: self.global_cfg.get(k, {}) for k in _GLOBAL_KEYS}
-        safe_cfg["current_account"] = self.global_cfg.get("current_account", "")
-        _atomic_write_json(self.config_path, safe_cfg)
+        _atomic_write_json(self.config_path, self._persistable_global_config())
         if self.current_acc:
             self.current_acc.prepare_for_save(flat)
             _assert_no_testing_tasks_in_account(self.current_acc.root)
             acc_dir = self.resolved_accounts_dir()
             _atomic_write_json(acc_dir / f"{self.current_acc.account_name}.json", self.current_acc.to_persist_dict())
+
+    def save_global_only(self, flat: dict[str, Any]) -> None:
+        for k in _GLOBAL_KEYS:
+            if k in flat:
+                self.global_cfg[k] = copy.deepcopy(flat[k])
+        self.global_cfg["current_account"] = flat.get("current_account", self.global_cfg.get("current_account", ""))
+        self._update_runtime_dates()
+        _atomic_write_json(self.config_path, self._persistable_global_config())
+
+    def _persistable_global_config(self) -> dict[str, Any]:
+        safe_cfg = {k: self.global_cfg.get(k, {}) for k in _GLOBAL_KEYS}
+        safe_cfg["current_account"] = self.global_cfg.get("current_account", "")
+        return safe_cfg
 
     def save_account_file_only(self) -> None:
         if not self.current_acc:
@@ -421,6 +495,17 @@ class AutoConfig:
                 return
             raise
 
+    def save_global_config(self, *, quiet: bool = False) -> None:
+        os.makedirs(os.path.dirname(self.CONFIG_PATH), exist_ok=True)
+        self._mgr.config_path = Path(self.CONFIG_PATH)
+        try:
+            self._mgr.save_global_only(self._config)
+        except OSError as e:
+            if quiet:
+                logger.debug("退出时保存全局配置失败，已忽略: %s", e)
+                return
+            raise
+
     def _save_account_file(self) -> None:
         self._mgr.save_account_file_only()
 
@@ -437,6 +522,14 @@ class AutoConfig:
     def has_decrypted_credentials(self) -> bool:
         game = self._config.get("game") or {}
         return bool(game.get("account") and game.get("password"))
+
+    def clear_decrypted_credentials(self) -> None:
+        """Clear in-memory plaintext credentials without touching encrypted account data."""
+        if self._mgr.current_acc:
+            self._mgr.current_acc.credentials = {"account": "", "password": ""}
+        game = self._config.setdefault("game", {})
+        game.pop("account", None)
+        game.pop("password", None)
 
     def verify_account_security_key(self, name: str, security_key: str) -> bool:
         """Return whether the security key can decrypt the named account credentials."""

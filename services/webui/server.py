@@ -17,6 +17,7 @@ import time as _time
 import traceback
 import urllib.request
 import webbrowser
+from http.cookies import SimpleCookie
 from queue import Queue, Empty
 from typing import Any, Set
 
@@ -81,7 +82,7 @@ _plain_fmt    = logging.Formatter(
     datefmt="%H:%M:%S",
 )
 
-from AutoScriptor.utils.paths import get_logs_root, get_static_dir, get_vendor_dir
+from AutoScriptor.utils.paths import get_accounts_dir, get_data_root, get_logs_root, get_static_dir, get_vendor_dir
 from services.webui.error_archives import (
     delete_archives,
     get_archive_detail,
@@ -301,6 +302,23 @@ def _mark_config_changed(reason: str) -> int:
     return bump_version(reason)
 
 
+def _persistence_diagnostics() -> dict[str, str]:
+    return {
+        "data_root": str(get_data_root()),
+        "config_path": str(getattr(cfg, "CONFIG_PATH", "")),
+        "accounts_dir": str(getattr(cfg, "ACCOUNTS_DIR", get_accounts_dir())),
+        "current_account": str(cfg.current_account() or ""),
+    }
+
+
+def _persistence_error_message(action: str, exc: Exception) -> str:
+    diag = _persistence_diagnostics()
+    return (
+        f"{action}: {exc}; "
+        f"config={diag['config_path']}; accounts={diag['accounts_dir']}; dataRoot={diag['data_root']}"
+    )
+
+
 def _consume_runtime_config_updates() -> bool:
     if not scheduler.consume_tasks_updated():
         return False
@@ -330,17 +348,67 @@ _GIFT_REDEEM_TASK_PATH = "一般任务/活动/兑换豪礼礼品兑换"
 app = FastAPI(title="AutoScriptor WebUI")
 
 
-@app.middleware("http")
-async def auth_middleware(request: Request, call_next):
-    """WebUI 密码保护中间件 — 使用安全会话令牌验证，仅拦截 /api/ 请求"""
-    password = cfg._config.get("deploy", {}).get("password")
-    if password and request.url.path.startswith("/api/"):
-        exempt = ("/api/auth", "/api/deploy")
-        if not any(request.url.path.startswith(p) for p in exempt):
-            token = request.cookies.get("auth_token") or request.headers.get("X-Auth-Token")
-            if not _validate_session(token):
-                return JSONResponse(status_code=401, content={"error": "unauthorized"})
-    return await call_next(request)
+def _scope_header(scope: dict, name: bytes) -> str:
+    for key, value in scope.get("headers", []) or []:
+        if key.lower() == name:
+            try:
+                return value.decode("latin-1")
+            except Exception:
+                return ""
+    return ""
+
+
+def _scope_cookie(scope: dict, name: str) -> str | None:
+    raw = _scope_header(scope, b"cookie")
+    if not raw:
+        return None
+    try:
+        cookie = SimpleCookie()
+        cookie.load(raw)
+        morsel = cookie.get(name)
+        return morsel.value if morsel is not None else None
+    except Exception:
+        return None
+
+
+class _AuthAndApiErrorMiddleware:
+    """ASGI middleware that avoids Starlette's request-body replay layer."""
+
+    def __init__(self, inner_app):
+        self.inner_app = inner_app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.inner_app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        method = scope.get("method", "")
+        try:
+            password = cfg._config.get("deploy", {}).get("password")
+            if password and path.startswith("/api/"):
+                exempt = ("/api/auth", "/api/deploy")
+                if not any(path.startswith(p) for p in exempt):
+                    token = _scope_cookie(scope, "auth_token") or _scope_header(scope, b"x-auth-token")
+                    if not _validate_session(token):
+                        response = JSONResponse(status_code=401, content={"error": "unauthorized"})
+                        await response(scope, receive, send)
+                        return
+            await self.inner_app(scope, receive, send)
+        except BaseException as e:
+            if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                raise
+            logger.exception("api middleware error: %s %s", method, path)
+            if path.startswith("/api/"):
+                response = api_error(
+                    500,
+                    _persistence_error_message(f"{path} 未捕获异常", e),
+                    code="unhandled_api_error",
+                    diagnostics=_persistence_diagnostics(),
+                )
+                await response(scope, receive, send)
+                return
+            raise
 
 
 @app.post("/api/auth")
@@ -388,15 +456,40 @@ app.include_router(canvas_router)
 from services.webui.routes.news import router as news_router
 app.include_router(news_router)
 
-@app.middleware("http")
-async def static_cache_headers(request: Request, call_next):
-    response = await call_next(request)
-    rpath = request.url.path
-    if rpath.startswith("/vendor/") or rpath.startswith("/fonts/"):
-        response.headers["Cache-Control"] = "public, max-age=86400"
-    elif rpath.startswith("/static/") and rpath.endswith((".js", ".css")):
-        response.headers["Cache-Control"] = "no-cache"
-    return response
+class _StaticCacheHeadersMiddleware:
+    def __init__(self, inner_app):
+        self.inner_app = inner_app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.inner_app(scope, receive, send)
+            return
+
+        rpath = scope.get("path", "")
+
+        async def send_with_cache(message):
+            if message.get("type") == "http.response.start":
+                cache_control = None
+                if rpath.startswith("/vendor/") or rpath.startswith("/fonts/"):
+                    cache_control = b"public, max-age=86400"
+                elif rpath.startswith("/static/") and rpath.endswith((".js", ".css")):
+                    cache_control = b"no-cache"
+                if cache_control is not None:
+                    headers = [
+                        (key, value)
+                        for key, value in message.get("headers", [])
+                        if key.lower() != b"cache-control"
+                    ]
+                    headers.append((b"cache-control", cache_control))
+                    message = dict(message)
+                    message["headers"] = headers
+            await send(message)
+
+        await self.inner_app(scope, receive, send_with_cache)
+
+
+app.add_middleware(_StaticCacheHeadersMiddleware)
+app.add_middleware(_AuthAndApiErrorMiddleware)
 
 # 静态文件挂载
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -565,7 +658,12 @@ async def save_config_api(request: Request):
         return api_error(400, str(e), code="invalid_payload")
     except Exception as e:
         logger.error("save config error: %s", e)
-        return api_error(500, str(e), code="save_config_failed")
+        return api_error(
+            500,
+            _persistence_error_message("保存配置失败", e),
+            code="save_config_failed",
+            diagnostics=_persistence_diagnostics(),
+        )
 
 
 @app.post("/api/tasks")
@@ -582,7 +680,12 @@ async def save_tasks_api(request: Request):
         return make_public_config()
     except Exception as e:
         logger.error("save_tasks error: %s", e)
-        return api_error(500, str(e), code="save_tasks_failed")
+        return api_error(
+            500,
+            _persistence_error_message("保存任务失败", e),
+            code="save_tasks_failed",
+            diagnostics=_persistence_diagnostics(),
+        )
 
 
 def _apply_run_character_from_body(body: dict):
@@ -901,6 +1004,7 @@ async def credential_revoke_api(request: Request):
     """用户主动「重新验证」时吊销解锁令牌并清除 Cookie。"""
     old = _credential_unlock_from_request(request)
     _revoke_credential_unlock(old)
+    cfg.clear_decrypted_credentials()
     resp = JSONResponse(content={"status": "ok"})
     return _clear_credential_unlock_cookie(resp)
 
@@ -1442,18 +1546,29 @@ async def accounts_add_api(request: Request):
 
     try:
         version = lifecycle_service.add_account(name, account, password, server, character_name, security_key)
-        return api_ok(
+        old_tok = _credential_unlock_from_request(request)
+        _revoke_credential_unlock(old_tok)
+        tok = _grant_credential_unlock()
+        resp = JSONResponse(content=api_ok(
             accounts=cfg.list_accounts(),
             current_account=cfg.current_account(),
+            character_name=cfg._config.get("game", {}).get("character_name", ""),
             active_character=cfg.active_character(),
             characters=task_tree_service.characters_summary(),
+            credential={"unlocked": cfg.has_decrypted_credentials()},
             config_version=version,
-        )
+        ))
+        return _attach_credential_unlock_cookie(resp, tok)
     except ValueError as e:
         return api_error(400, str(e), code="invalid_account")
     except Exception as e:
         logger.error("add account error: %s", e)
-        return api_error(500, str(e), code="add_account_failed")
+        return api_error(
+            500,
+            _persistence_error_message("创建账号失败", e),
+            code="add_account_failed",
+            diagnostics=_persistence_diagnostics(),
+        )
 
 
 @app.post("/api/accounts/delete")

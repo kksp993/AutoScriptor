@@ -40,9 +40,11 @@ Protected release-update paths include config, accounts, custom tasks, battle ch
 
 - `scripts/build_release.py collect_data()` copies `config template.json` to `dist/data/config template.json` and `dist/data/config.json`.
 - It creates empty `dist/data/accounts/`, copies `data/battle_character/`, `data/custom_task/`, `ZmxyOL/assets/config/`, `ZmxyOL/assets/pic/`, and creates `dist/data/logs/`.
+- It copies the source gift-code JSON from `docs/zmxy_redeem_codes.json` into runtime `dist/data/assets/redeem_codes/zmxy_redeem_codes.json`; packaged routes should prefer the data-root copy and only fall back to docs for source compatibility.
 - It does not copy `data/accounts/*.json` or old `ZmxyOL/assets/profiles/*.yaml`.
 - Release `config template.json` / `data/config.json` must not ship `emulator.adb_addr` as a `YOUR_` placeholder; use MuMu's default `127.0.0.1:16384` so first-run diagnostics start from a valid serial.
 - Packaged runtime writes mutable data through `install.json.dataRoot`, normally Electron `userData/data`, not the install root. Config/account/task/log writes and release-update `config_defaults` must target that data root so Program Files/system-drive installs do not fail under normal user privileges.
+- In packaged/Electron data-root mode, old absolute `accounts.dir` values are stale deployment state. Normalize them to `dataRoot/accounts` and include config/account/dataRoot diagnostics in save errors so the UI never collapses write failures to "unknown error". Windows ACLs can allow ordinary writes while denying atomic replace/delete; config/account persistence should fall back to direct target writes for that `PermissionError/WinError 5` case and still report path diagnostics for true write failures.
 - Portable artifact: `AutoScriptor_Zao_Install_<version>.exe`; NSIS artifact: `AutoScriptor_Zao_installer_<version>.exe`.
 
 ## Debug Cleanup
@@ -101,7 +103,7 @@ Get-Process -Name "electron" -ErrorAction SilentlyContinue | Stop-Process -Force
 - Forum fetches may use the exact public news pair without credential unlock; non-public news or game credentials still require WebUI credential unlock.
 - News list opening must force `/api/news/posts?force=1`; do not rely on the 30-minute cache for first display after auth or tab entry.
 - News proxy should retry once with a fresh 4399 session when the upstream page redirects to the 4399 login wall; stale cached sessions must not become permanent placeholders.
-- The gift-code collector should inspect official announcements only: last 10 days, at most 15 posts, with `checked_post_ids`/active rows in `docs/zmxy_redeem_codes.json` for incremental refresh.
+- The gift-code collector should inspect official announcements only: last 10 days, at most 15 posts, with `checked_post_ids`/active rows in source `docs/zmxy_redeem_codes.json` for incremental refresh. Release builds copy that file to runtime `data/assets/redeem_codes/zmxy_redeem_codes.json`; do not package backend `docs/` just for this route.
 - The gift-code dialog iframe should load local `/api/news/gift_codes/page` and refresh through `/api/news/gift_codes?refresh=1`; do not use the stale external 4399 gift-code page.
 - Gift-code redemption uses `/api/news/redeem_targets` and `POST /api/news/gift_codes/redeem`; keep credential unlock/security-key checks, support `redeem_code` and batched `redeem_codes`, switch to the selected `server:character`, force login even for debug-mode redeem tasks, and pass each code as a one-time task param override to the built-in normal task `一般任务/活动/兑换豪礼礼品兑换`.
 - Keep the release-owned redeem task under `ZmxyOL.task.normal_task.huodong.redeem_gift`, not only under `data/custom_task`; same-line update packages protect user `data/custom_task`, so backend-owned redemption logic must ship through the engine.

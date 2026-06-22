@@ -16,10 +16,26 @@
     if (upper !== 'GET') {
       options.body = JSON.stringify({ ...(body || {}), _timestamp: Date.now() / 1000 });
     }
-    const res = await fetch(apiPath(url), options);
+    const path = apiPath(url);
+    const res = await fetch(path, options);
     let data = {};
     if (res.status !== 204) {
-      data = await res.json().catch(() => ({}));
+      const text = await res.text().catch(() => '');
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch (_) {
+          data = { rawText: text };
+        }
+      }
+    }
+    if (!res.ok && (!data || !Object.keys(data).length)) {
+      data = {};
+    }
+    if (!res.ok && !data.message && !data.error) {
+      const prefix = `HTTP ${res.status}${res.statusText ? ': ' + res.statusText : ''}`;
+      const raw = data.rawText ? String(data.rawText).replace(/\s+/g, ' ').trim() : '';
+      data.message = raw ? `${prefix}; ${path}; ${raw.slice(0, 240)}` : `${prefix}; ${path}`;
     }
     return { ok: res.ok, status: res.status, data, res };
   }
@@ -30,6 +46,7 @@
       if (typeof data.detail === 'string') return data.detail;
       try { return JSON.stringify(data.detail); } catch { /* ignore */ }
     }
+    if (data && data.rawText) return String(data.rawText).slice(0, 240);
     return fallback || '操作失败';
   }
 

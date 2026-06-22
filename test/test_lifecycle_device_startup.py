@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import threading
 import time
@@ -615,6 +616,121 @@ class TestDeviceFacadeDiagnostics(unittest.TestCase):
         self.assertEqual(device_only["device_overall"]["status"], "ok")
         self.assertEqual(device_only["overall"]["status"], "ok")
         self.assertEqual(task_required["overall"]["status"], "error")
+
+    def test_adb_device_check_reconnects_configured_tcp_serial(self):
+        module = import_device_facade_for_test()
+        with tempfile.TemporaryDirectory() as tmp:
+            adb_path = str(Path(tmp) / "adb.exe")
+            emu_path = str(Path(tmp) / "MuMuManager.exe")
+            Path(adb_path).write_text("", encoding="utf-8")
+            Path(emu_path).write_text("", encoding="utf-8")
+            facade = self._facade(module, adb_path, emu_path)
+            calls = []
+            get_state_calls = 0
+
+            def fake_run(cmd, **kwargs):
+                nonlocal get_state_calls
+                calls.append(cmd)
+                if cmd == [adb_path, "-s", "127.0.0.1:16416", "get-state"]:
+                    get_state_calls += 1
+                    if get_state_calls == 1:
+                        return SimpleNamespace(
+                            returncode=1,
+                            stdout="",
+                            stderr="error: device '127.0.0.1:16416' not found",
+                        )
+                    return SimpleNamespace(returncode=0, stdout="device\n", stderr="")
+                if cmd == [adb_path, "connect", "127.0.0.1:16416"]:
+                    return SimpleNamespace(returncode=0, stdout="connected to 127.0.0.1:16416\n", stderr="")
+                if cmd == [adb_path, "-s", "127.0.0.1:16416", "shell", "getprop", "sys.boot_completed"]:
+                    return SimpleNamespace(returncode=0, stdout="1\n", stderr="")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with patch.object(module.subprocess, "run", side_effect=fake_run):
+                check = facade._adb_device_check()
+
+        self.assertEqual(check["status"], "ok")
+        self.assertEqual(check["message"], "ADB device is ready after reconnect")
+        self.assertEqual(check["reconnect"], "connected to 127.0.0.1:16416")
+        self.assertIn([adb_path, "connect", "127.0.0.1:16416"], calls)
+
+    def test_adb_device_ready_reconnects_before_boot_probe(self):
+        module = import_device_facade_for_test()
+        with tempfile.TemporaryDirectory() as tmp:
+            adb_path = str(Path(tmp) / "adb.exe")
+            emu_path = str(Path(tmp) / "MuMuManager.exe")
+            Path(adb_path).write_text("", encoding="utf-8")
+            Path(emu_path).write_text("", encoding="utf-8")
+            facade = self._facade(module, adb_path, emu_path)
+            get_state_calls = 0
+
+            def fake_run(cmd, **kwargs):
+                nonlocal get_state_calls
+                if cmd == [adb_path, "-s", "127.0.0.1:16416", "get-state"]:
+                    get_state_calls += 1
+                    if get_state_calls == 1:
+                        return SimpleNamespace(returncode=1, stdout="", stderr="not found")
+                    return SimpleNamespace(returncode=0, stdout="device\n", stderr="")
+                if cmd == [adb_path, "connect", "127.0.0.1:16416"]:
+                    return SimpleNamespace(returncode=0, stdout="connected\n", stderr="")
+                if cmd == [adb_path, "-s", "127.0.0.1:16416", "shell", "getprop", "sys.boot_completed"]:
+                    return SimpleNamespace(returncode=0, stdout="1\n", stderr="")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with patch.object(module.subprocess, "run", side_effect=fake_run):
+                ready = facade.adb_device_ready()
+
+        self.assertTrue(ready)
+        self.assertEqual(get_state_calls, 2)
+
+    def test_adb_device_check_reports_detected_mumu_serial_when_configured_serial_is_wrong(self):
+        module = import_device_facade_for_test()
+        with tempfile.TemporaryDirectory() as tmp:
+            adb_path = str(Path(tmp) / "adb.exe")
+            emu_path = str(Path(tmp) / "MuMuManager.exe")
+            Path(adb_path).write_text("", encoding="utf-8")
+            Path(emu_path).write_text("", encoding="utf-8")
+            facade = self._facade(module, adb_path, emu_path)
+            facade.emulator["adb_addr"] = "127.0.0.1:16384"
+            facade.emulator["index"] = 0
+            facade.vm_index = "0"
+
+            def fake_run(cmd, **kwargs):
+                if cmd == [adb_path, "-s", "127.0.0.1:16384", "get-state"]:
+                    return SimpleNamespace(returncode=1, stdout="", stderr="error: device '127.0.0.1:16384' not found")
+                if cmd == [adb_path, "connect", "127.0.0.1:16384"]:
+                    return SimpleNamespace(returncode=1, stdout="", stderr="cannot connect")
+                if cmd == [adb_path, "start-server"]:
+                    return SimpleNamespace(returncode=0, stdout="", stderr="")
+                if cmd == [adb_path, "devices"]:
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout="List of devices attached\n127.0.0.1:16416\tdevice\n",
+                        stderr="",
+                    )
+                if cmd == [emu_path, "info", "-v", "all"]:
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout=json.dumps({
+                            "index": "1",
+                            "is_process_started": True,
+                            "is_android_started": True,
+                            "player_state": "start_finished",
+                            "adb_host_ip": "127.0.0.1",
+                            "adb_port": 16416,
+                        }),
+                        stderr="",
+                    )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with patch.object(module.subprocess, "run", side_effect=fake_run):
+                check = facade._adb_device_check()
+
+        self.assertEqual(check["status"], "error")
+        self.assertEqual(check["suggested_adb_addr"], "127.0.0.1:16416")
+        self.assertEqual(check["fallback_serial"], "127.0.0.1:16416")
+        self.assertEqual(check["detected_index"], 1)
+        self.assertEqual(check["connected_devices"], ["127.0.0.1:16416"])
 
 
 class TestEnsureAppRunningLifecycle(unittest.TestCase):

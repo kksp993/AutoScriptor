@@ -7,7 +7,10 @@ server-side projections, notify scheduler, then bump the public config version.
 from __future__ import annotations
 
 from copy import deepcopy
+import logging
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 MUMU_ADB_BASE_PORT = 16384
 MUMU_ADB_PORT_STEP = 32
@@ -78,7 +81,7 @@ class WebUILifecycleService:
                 self.cfg["scheduler"] = deepcopy(data["scheduler"])
             self.cfg["emulator"] = normalize_emulator_config(data["emulator"])
             self.cfg["ocr"] = deepcopy(data["ocr"])
-            self.cfg.save_config()
+            self._save_global_config()
         self._apply_log_level()
         return self.mark_config_changed("save config")
 
@@ -130,6 +133,16 @@ class WebUILifecycleService:
     ) -> int:
         with self.task_manager.config_transaction():
             self.cfg.add_account(name, account, password, server, character_name, security_key)
+            self.cfg.switch_account(name, security_key)
+            try:
+                self.task_manager.reload_tasks(security_key)
+            except Exception as e:
+                logger.warning("账号已创建并切换，但任务重载失败: %s", e)
+        self.scheduler.invalidate_login()
+        try:
+            self.refresh_order_map()
+        except Exception as e:
+            logger.warning("账号已创建并切换，但任务顺序刷新失败: %s", e)
         return self.mark_config_changed("add account")
 
     def delete_account(self, name: str) -> int:
@@ -202,7 +215,7 @@ class WebUILifecycleService:
         with self.task_manager.config_transaction():
             self.cfg["notify.enabled"] = enabled
             self.cfg["notify.config_yaml"] = config_yaml
-            self.cfg.save_config()
+            self._save_global_config()
         return self.mark_config_changed("save notify settings")
 
     def save_deploy_sections(self, data: dict[str, Any]) -> int:
@@ -210,7 +223,7 @@ class WebUILifecycleService:
             for section in ("deploy", "notify", "update", "remote_access"):
                 if section in data:
                     self.cfg._config[section] = deepcopy(data[section])
-            self.cfg.save_config()
+            self._save_global_config()
         self._apply_log_level()
         return self.mark_config_changed("save deploy settings")
 
@@ -227,3 +240,10 @@ class WebUILifecycleService:
     def _apply_log_level(self) -> None:
         if self.apply_log_level is not None:
             self.apply_log_level()
+
+    def _save_global_config(self) -> None:
+        saver = getattr(self.cfg, "save_global_config", None)
+        if callable(saver):
+            saver()
+        else:
+            self.cfg.save_config()

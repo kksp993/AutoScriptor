@@ -1,72 +1,43 @@
 {
-  "generated_at": "2026-06-09 22:28:20",
+  "generated_at": "2026-06-13 17:02:34",
   "timezone": "Asia/Shanghai",
   "source": "https://bbs.4399.cn/forums-kind-id-1493-order-dl",
   "window_days": 10,
   "max_posts": 15,
-  "rows": [
-    {
-      "title": "[福利码]得胜归来，不负韶华！ DAY3",
-      "code": "不负韶华",
-      "expires_at": "2026-06-12T12:00:00+08:00",
-      "url": "https://bbs.4399.cn/thread-tid-53089108",
-      "source": "4399官方论坛",
-      "kind": "conditional_code",
-      "status": "active",
-      "note": "公告说明账号或区服存在领取限制"
-    },
-    {
-      "title": "[福利码]乘风破浪，稳扎稳打！ DAY2",
-      "code": "无悔青春",
-      "expires_at": "2026-06-12T12:00:00+08:00",
-      "url": "https://bbs.4399.cn/thread-tid-53089105",
-      "source": "4399官方论坛",
-      "kind": "conditional_code",
-      "status": "active",
-      "note": "公告说明账号或区服存在领取限制"
-    },
-    {
-      "title": "[福利码]首战告捷，旗开得胜！ DAY1",
-      "code": "高考加油",
-      "expires_at": "2026-06-12T12:00:00+08:00",
-      "url": "https://bbs.4399.cn/thread-tid-53089102",
-      "source": "4399官方论坛",
-      "kind": "conditional_code",
-      "status": "active",
-      "note": "公告说明账号或区服存在领取限制"
-    }
-  ],
+  "rows": [],
   "checked_post_ids": [
-    "53052985",
-    "53054526",
-    "53076569",
     "53089102",
     "53089105",
     "53089108",
-    "53107081",
     "53107083",
     "53107085",
     "53107712",
     "53107869",
     "53148219",
     "53154557",
-    "53158013"
+    "53158013",
+    "53164040",
+    "53164041",
+    "53164043",
+    "53169436",
+    "53177162"
   ],
   "checked_post_urls": [
-    "https://bbs.4399.cn/thread-tid-53052985",
-    "https://bbs.4399.cn/thread-tid-53054526",
-    "https://bbs.4399.cn/thread-tid-53076569",
     "https://bbs.4399.cn/thread-tid-53089102",
     "https://bbs.4399.cn/thread-tid-53089105",
     "https://bbs.4399.cn/thread-tid-53089108",
-    "https://bbs.4399.cn/thread-tid-53107081",
     "https://bbs.4399.cn/thread-tid-53107083",
     "https://bbs.4399.cn/thread-tid-53107085",
     "https://bbs.4399.cn/thread-tid-53107712",
     "https://bbs.4399.cn/thread-tid-53107869",
     "https://bbs.4399.cn/thread-tid-53148219",
     "https://bbs.4399.cn/thread-tid-53154557",
-    "https://bbs.4399.cn/thread-tid-53158013"
+    "https://bbs.4399.cn/thread-tid-53158013",
+    "https://bbs.4399.cn/thread-tid-53164040",
+    "https://bbs.4399.cn/thread-tid-53164041",
+    "https://bbs.4399.cn/thread-tid-53164043",
+    "https://bbs.4399.cn/thread-tid-53169436",
+    "https://bbs.4399.cn/thread-tid-53177162"
   ],
   "inspected_posts": [
     {
@@ -81,42 +52,6 @@
       ],
       "expires_at": "2026-06-05T05:00:00+08:00",
       "active": true,
-      "error": ""
-    },
-    {
-      "post_id": "53076569",
-      "title": "【16.5.0】天道重铸逆乾坤，混沌侵蚀战先锋！",
-      "url": "https://bbs.4399.cn/thread-tid-53076569",
-      "date": "2026-06-01",
-      "checked_at": "2026-06-01 20:16:42",
-      "opened_thread": true,
-      "codes": [],
-      "expires_at": "",
-      "active": false,
-      "error": ""
-    },
-    {
-      "post_id": "53054526",
-      "title": "「已修复」登录异常问题",
-      "url": "https://bbs.4399.cn/thread-tid-53054526",
-      "date": "2026-05-30",
-      "checked_at": "2026-06-01 20:16:42",
-      "opened_thread": true,
-      "codes": [],
-      "expires_at": "",
-      "active": false,
-      "error": ""
-    },
-    {
-      "post_id": "53052985",
-      "title": "[已修复]关于《造梦西游OL》服务器登录异常问题",
-      "url": "https://bbs.4399.cn/thread-tid-53052985",
-      "date": "2026-05-30",
-      "checked_at": "2026-06-01 20:16:42",
-      "opened_thread": true,
-      "codes": [],
-      "expires_at": "",
-      "active": false,
       "error": ""
     },
     {
@@ -159,18 +94,6 @@
       "post_id": "53107083",
       "title": "6月5日活动兑换详情",
       "url": "https://bbs.4399.cn/thread-tid-53107083",
-      "date": "2026-06-04",
-      "checked_at": "2026-06-04 20:10:45",
-      "opened_thread": true,
-      "codes": [],
-      "expires_at": "",
-      "active": false,
-      "error": ""
-    },
-    {
-      "post_id": "53107081",
-      "title": "[公告]6月5日：五行四季赢好礼，时来运转限时返场",
-      "url": "https://bbs.4399.cn/thread-tid-53107081",
       "date": "2026-06-04",
       "checked_at": "2026-06-04 20:10:45",
       "opened_thread": true,
@@ -255,6 +178,66 @@
       ],
       "expires_at": "2026-06-12T12:00:00+08:00",
       "active": true,
+      "error": ""
+    },
+    {
+      "post_id": "53177162",
+      "title": "近期BUG繁多，开发组来滑跪道歉了...",
+      "url": "https://bbs.4399.cn/thread-tid-53177162",
+      "date": "2026-06-13",
+      "checked_at": "2026-06-13 17:02:25",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2026-06-16T12:00:00+08:00",
+      "active": false,
+      "error": ""
+    },
+    {
+      "post_id": "53164040",
+      "title": "[公告]6月12日：神秘礼包再临，权能返利大派送",
+      "url": "https://bbs.4399.cn/thread-tid-53164040",
+      "date": "2026-06-11",
+      "checked_at": "2026-06-13 17:02:25",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "2026-06-19T05:00:00+08:00",
+      "active": false,
+      "error": ""
+    },
+    {
+      "post_id": "53164041",
+      "title": "6月12日活动兑换详情",
+      "url": "https://bbs.4399.cn/thread-tid-53164041",
+      "date": "2026-06-11",
+      "checked_at": "2026-06-13 17:02:25",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false,
+      "error": ""
+    },
+    {
+      "post_id": "53169436",
+      "title": "[已修复]星光商店兑换次数未刷新异常公告",
+      "url": "https://bbs.4399.cn/thread-tid-53169436",
+      "date": "2026-06-11",
+      "checked_at": "2026-06-13 17:02:25",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false,
+      "error": ""
+    },
+    {
+      "post_id": "53164043",
+      "title": "6月12日活动概率公示",
+      "url": "https://bbs.4399.cn/thread-tid-53164043",
+      "date": "2026-06-10",
+      "checked_at": "2026-06-13 17:02:25",
+      "opened_thread": true,
+      "codes": [],
+      "expires_at": "",
+      "active": false,
       "error": ""
     }
   ]

@@ -219,6 +219,36 @@ async function testPatch101UpdateFrom100PreservesUserData(tmp) {
   assert(versionFile.version === '1.0.1', 'install root version file should be 1.0.1');
 }
 
+async function testPyzBackendUpdateRequiresBackendStop(tmp) {
+  const { installRoot, userDataPath, dataRoot } = createInstalled(tmp, 'pyz-104', '1.0.3');
+  writeText(path.join(installRoot, 'backend', 'backend.pyz'), 'old pyz\n');
+  const pyz = 'new pyz payload\n';
+  const manifest = {
+    format: 'autoscriptor_update_v1',
+    compat_line: '1.0',
+    base_version: '1.0.0',
+    target_version: '1.0.4',
+    mode: 'pyz-cumulative',
+    replace: [{ path: 'backend/backend.pyz', sha256: sha256Text(pyz) }],
+    config_defaults: { deploy: { pyz_update_branch: true } },
+  };
+  const zipPath = createUpdateZip(tmp, 'pyz-1.0.4', manifest, {
+    'backend/backend.pyz': pyz,
+  });
+
+  const dry = await dryRunLocalReleaseUpdate({ installRoot, userDataPath, packagePath: zipPath });
+  assert(dry.ok, `pyz dry-run should pass: ${JSON.stringify(dry.errors)}`);
+  assert(dry.plan.requiresBackendStop, 'backend.pyz replacement should require backend stop');
+  assert(dry.plan.replace === 1, 'pyz dry-run should count one replacement');
+
+  const result = await applyLocalReleaseUpdate({ installRoot, userDataPath, packagePath: zipPath, keepBackup: false });
+  assert(result.ok, 'pyz apply should succeed');
+  assert(readText(path.join(installRoot, 'backend', 'backend.pyz')) === pyz, 'backend.pyz should be replaced');
+  assert(readText(path.join(dataRoot, 'accounts', 'default.json')).includes('kept'), 'accounts must be preserved on pyz update');
+  const marker = JSON.parse(readText(path.join(userDataPath, 'install.json')));
+  assert(marker.version === '1.0.4', 'install marker version should be 1.0.4');
+}
+
 async function testRejectsUnsafeVersionsAndPaths(tmp) {
   const base = createInstalled(tmp, 'reject', '1.0.9');
   const engine = 'new engine\n';
@@ -316,6 +346,7 @@ async function main() {
   try {
     await testCumulativeUpdateDryRunAndApply(tmp);
     await testPatch101UpdateFrom100PreservesUserData(tmp);
+    await testPyzBackendUpdateRequiresBackendStop(tmp);
     await testRejectsUnsafeVersionsAndPaths(tmp);
     await testRollbackWhenLaterFileFails(tmp);
     await testRejectsInvalidConfigBeforeDefaultsMerge(tmp);

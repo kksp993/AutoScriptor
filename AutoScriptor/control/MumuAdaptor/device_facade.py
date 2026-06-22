@@ -35,6 +35,82 @@ def _status(status: str, message: str = "", **extra: Any) -> dict[str, Any]:
     return payload
 
 
+def _normalize_serial_host(host: str) -> str:
+    h = str(host or "").strip().lower()
+    if not h or h in {"localhost", "::1"}:
+        return "127.0.0.1"
+    return h
+
+
+def _split_adb_serial(serial: str) -> tuple[str, str] | None:
+    s = str(serial or "").strip()
+    if ":" not in s:
+        return None
+    host, port = s.rsplit(":", 1)
+    if not host or not port.isdigit():
+        return None
+    return _normalize_serial_host(host), port
+
+
+def _parse_mumu_info_payload(text: str) -> list[dict[str, Any]]:
+    try:
+        data = json.loads((text or "").strip() or "{}")
+    except Exception:
+        return []
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    if isinstance(data, dict):
+        if "index" in data:
+            return [data]
+        return [item for item in data.values() if isinstance(item, dict) and "index" in item]
+    return []
+
+
+def _player_serial(player: dict[str, Any] | None) -> str:
+    if not player:
+        return ""
+    port = str(player.get("adb_port", "") or "").strip()
+    if not port:
+        return ""
+    host = _normalize_serial_host(str(player.get("adb_host_ip", "127.0.0.1") or "127.0.0.1"))
+    return f"{host}:{port}"
+
+
+def _player_is_running(player: dict[str, Any] | None) -> bool:
+    if not player:
+        return False
+    if player.get("is_process_started") is True or player.get("is_android_started") is True:
+        return True
+    state = str(player.get("player_state", "") or "").lower()
+    return "start" in state or "running" in state
+
+
+def _find_player_by_serial(players: list[dict[str, Any]], serial: str) -> dict[str, Any] | None:
+    target = _split_adb_serial(serial)
+    if target is None:
+        return None
+    target_host, target_port = target
+    for player in players:
+        current = _split_adb_serial(_player_serial(player))
+        if current is None:
+            continue
+        host, port = current
+        if port != target_port:
+            continue
+        if host == target_host or host == "127.0.0.1" or target_host == "127.0.0.1":
+            return player
+    return None
+
+
+def _coerce_player_index(player: dict[str, Any] | None) -> str | int | None:
+    if not player or player.get("index") is None:
+        return None
+    try:
+        return int(player.get("index"))
+    except Exception:
+        return str(player.get("index"))
+
+
 class DeviceFacade:
     """Small facade around configured MuMuManager, ADB and NemuIpc paths."""
 
@@ -121,7 +197,12 @@ class DeviceFacade:
         try:
             state = self.run_adb(["get-state"], timeout=5)
             if state.returncode != 0 or state.stdout.strip() != "device":
-                return False
+                if ":" not in self.adb_addr:
+                    return False
+                self._adb_connect_serial(self.adb_addr)
+                state = self.run_adb(["get-state"], timeout=5)
+                if state.returncode != 0 or state.stdout.strip() != "device":
+                    return False
             booted = self.run_adb(["shell", "getprop", "sys.boot_completed"], timeout=5)
             return booted.returncode == 0 and booted.stdout.strip() == "1"
         except (OSError, subprocess.SubprocessError):
@@ -236,11 +317,149 @@ class DeviceFacade:
         except Exception as exc:
             return _status("error", f"ADB check failed: {exc}", path=path, exists=True)
 
+    def _manager_info_rows(self) -> list[dict[str, Any]]:
+        path = str(self.emulator.get("emu_path", "") or "").strip()
+        if not path or not Path(path).is_file():
+            return []
+        try:
+            from AutoScriptor.utils.perf import mumu_safe_subprocess
+
+            with mumu_safe_subprocess():
+                result = subprocess.run(
+                    [path, "info", "-v", "all"],
+                    capture_output=True,
+                    text=True,
+                    timeout=8,
+                    creationflags=CREATE_NO_WINDOW,
+                )
+            if result.returncode == 0:
+                return _parse_mumu_info_payload(result.stdout or "")
+        except Exception:
+            pass
+        return []
+
+    def _adb_device_rows(self) -> list[tuple[str, str]]:
+        path = str(self.emulator.get("adb_path", "") or "").strip()
+        if not path or not Path(path).is_file():
+            return []
+        try:
+            subprocess.run([path, "start-server"], capture_output=True, text=True, timeout=5, creationflags=CREATE_NO_WINDOW)
+            out = subprocess.run([path, "devices"], capture_output=True, text=True, timeout=5, creationflags=CREATE_NO_WINDOW)
+            rows: list[tuple[str, str]] = []
+            for line in (out.stdout or "").splitlines():
+                line = line.strip()
+                if not line or line.lower().startswith("list of devices"):
+                    continue
+                parts = line.split()
+                if len(parts) >= 2:
+                    rows.append((parts[0], parts[1]))
+            return rows
+        except Exception:
+            return []
+
+    def _adb_connect_serial(self, serial: str) -> str:
+        path = str(self.emulator.get("adb_path", "") or "").strip()
+        s = str(serial or "").strip()
+        if not path or not Path(path).is_file() or ":" not in s:
+            return ""
+        try:
+            result = subprocess.run(
+                [path, "connect", s],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                creationflags=CREATE_NO_WINDOW,
+            )
+            return (result.stdout or result.stderr or "").strip()
+        except Exception as exc:
+            return str(exc)
+
+    def _adb_mismatch_detail(
+        self,
+        *,
+        configured: str,
+        raw_detail: str,
+        rows: list[tuple[str, str]],
+        players: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        usable = [(serial, state) for serial, state in rows if state == "device"]
+        configured_player = _find_player_by_serial(players, configured)
+        running_players = [player for player in players if _player_is_running(player) and _player_serial(player)]
+
+        fallback_serial = ""
+        fallback_player: dict[str, Any] | None = None
+        for player in running_players:
+            serial = _player_serial(player)
+            if any(row_serial == serial and state == "device" for row_serial, state in rows):
+                fallback_serial = serial
+                fallback_player = player
+                break
+        if not fallback_serial and usable:
+            fallback_serial = usable[0][0]
+            fallback_player = _find_player_by_serial(players, fallback_serial)
+        if not fallback_serial and running_players:
+            fallback_player = running_players[0]
+            fallback_serial = _player_serial(fallback_player)
+
+        extra: dict[str, Any] = {
+            "serial": configured,
+            "detail": raw_detail,
+            "connected_devices": [serial for serial, state in rows if state == "device"],
+        }
+        if configured_player:
+            extra["configured_index"] = _coerce_player_index(configured_player)
+            extra["configured_running"] = _player_is_running(configured_player)
+        else:
+            extra["configured_index"] = self.vm_index
+        if fallback_serial:
+            extra["fallback_serial"] = fallback_serial
+            extra["suggested_adb_addr"] = fallback_serial
+        if fallback_player:
+            extra["detected_index"] = _coerce_player_index(fallback_player)
+            extra["detected_running"] = _player_is_running(fallback_player)
+
+        if fallback_serial:
+            msg = f"Configured ADB device is not connected; detected usable MuMu ADB at {fallback_serial}"
+            if extra.get("detected_index") is not None:
+                msg += f" (index {extra['detected_index']})"
+            return _status("error", msg, **extra)
+        return _status("error", "ADB device is not connected", **extra)
+
     def _adb_device_check(self) -> dict[str, Any]:
         try:
+            connect_detail = ""
             state = self.run_adb(["get-state"], timeout=5)
             if state.returncode != 0:
-                return _status("error", "ADB device is not connected", serial=self.adb_addr, detail=_text(state))
+                if ":" in self.adb_addr:
+                    connect_detail = self._adb_connect_serial(self.adb_addr)
+                    state = self.run_adb(["get-state"], timeout=5)
+                    if state.returncode == 0 and state.stdout.strip() == "device":
+                        booted = self.run_adb(["shell", "getprop", "sys.boot_completed"], timeout=5)
+                        if booted.returncode == 0 and booted.stdout.strip() == "1":
+                            return _status(
+                                "ok",
+                                "ADB device is ready after reconnect",
+                                serial=self.adb_addr,
+                                boot_completed=True,
+                                reconnect=connect_detail,
+                            )
+                        return _status(
+                            "warn",
+                            "ADB device connected after reconnect but Android boot is not complete",
+                            serial=self.adb_addr,
+                            reconnect=connect_detail,
+                        )
+                rows = self._adb_device_rows()
+                players = self._manager_info_rows()
+                detail = _text(state)
+                if connect_detail:
+                    detail = f"{detail}; adb connect: {connect_detail}".strip("; ")
+                return self._adb_mismatch_detail(
+                    configured=self.adb_addr,
+                    raw_detail=detail,
+                    rows=rows,
+                    players=players,
+                )
             if state.stdout.strip() != "device":
                 return _status("warn", f"ADB device state is {state.stdout.strip()!r}", serial=self.adb_addr)
             booted = self.run_adb(["shell", "getprop", "sys.boot_completed"], timeout=5)

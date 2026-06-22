@@ -8,6 +8,8 @@ const yauzl = require('yauzl');
 const UPDATE_FORMAT = 'autoscriptor_update_v1';
 const MANIFEST_NAMES = ['update_manifest.json', 'autoscriptor_update.json'];
 const ENGINE_PATH = 'backend/autoscriptor-engine.exe';
+const PYZ_BACKEND_PATH = 'backend/backend.pyz';
+const SOURCE_BACKEND_PREFIX = 'backend/src/';
 
 function stamp() {
   return new Date().toISOString().replace(/[:.]/g, '-');
@@ -390,7 +392,10 @@ async function inspectUpdatePackage(opts) {
       const targetPath = safeJoin(report.installRoot, op.path);
       const exists = fs.existsSync(targetPath);
       const same = exists && fs.statSync(targetPath).isFile() && sha256FileSync(targetPath) === op.sha256;
-      if (op.path.toLowerCase() === ENGINE_PATH) report.plan.requiresBackendStop = true;
+      const opPath = op.path.toLowerCase();
+      if (opPath === ENGINE_PATH || opPath === PYZ_BACKEND_PATH || opPath.startsWith(SOURCE_BACKEND_PREFIX)) {
+        report.plan.requiresBackendStop = true;
+      }
       if (op.kind === 'copy_if_missing' && exists) {
         report.plan.skip += 1;
       } else if (same) {
@@ -445,7 +450,7 @@ async function inspectUpdatePackage(opts) {
 
     report.plan.actions.push(
       '校验更新包 manifest、版本线与所有 payload SHA-256',
-      report.plan.requiresBackendStop ? '停止当前 backend 后替换 autoscriptor-engine.exe' : '替换/补齐清单中的文件',
+      report.plan.requiresBackendStop ? '停止当前 backend 后替换 backend 文件' : '替换/补齐清单中的文件',
       '写入前备份旧文件，失败时回滚',
       '只补齐 config_defaults 中缺失配置项，不覆盖用户已有值',
     );
@@ -629,6 +634,8 @@ async function applyLocalReleaseUpdate(opts) {
 module.exports = {
   UPDATE_FORMAT,
   ENGINE_PATH,
+  PYZ_BACKEND_PATH,
+  SOURCE_BACKEND_PREFIX,
   inspectUpdatePackage,
   dryRunLocalReleaseUpdate: inspectUpdatePackage,
   applyLocalReleaseUpdate,
