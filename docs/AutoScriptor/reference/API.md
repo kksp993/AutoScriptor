@@ -1,15 +1,16 @@
 # AutoScriptor API 与运行入口速查
 
-本文只记录当前代码事实。更细的生命周期、调度、WebUI 和发行说明见本目录其他功能域文档。
+本文只记录 `src` 分支当前保留的源码运行事实。更细的生命周期、调度、WebUI 和任务说明见本目录其他功能文档。
 
 ## 入口
 
 | 场景 | 入口 |
 |------|------|
-| 桌面开发运行 | `cd webapp; npm start` |
-| 后端 WebUI | `.venv\Scripts\python.exe -X utf8 gui.py` 或 `services/webui/server.py` |
-| CLI | `.venv\Scripts\python.exe -X utf8 services/main_cli/run.py` |
-| 发行构建 | `.venv-nuitka\Scripts\python.exe scripts\build_release.py -j N` |
+| 安装源码依赖 | `scripts\install.bat` |
+| 源码 Electron 桌面壳 | `scripts\run.bat electron` 或根目录 `start.bat` |
+| 后端 WebUI | `scripts\run.bat webui`、根目录 `webui.bat` 或 `.venv\Scripts\python.exe -X utf8 services\webui\gui.py` |
+| 更新源码 | `scripts\update.bat` |
+| WebUI 模块直跑 | `.venv\Scripts\python.exe -X utf8 services\webui\server.py` |
 
 导入 `AutoScriptor` 本身是懒加载：不会初始化 OCR、UI Map、MuMu、NemuIpc 或 `mixctrl/mumu`。真正执行 `click()`、`locate()`、任务运行或显式设备接口时才需要设备会话。
 
@@ -17,15 +18,16 @@
 
 | 目录/文件 | 说明 |
 |-----------|------|
-| `config.json` / `dataRoot/config.json` | 全局配置：源码模式默认在仓库根；发行/Electron 模式由 `AUTOSCRIPTOR_DATA_DIR` 指向 `install.json.dataRoot` |
-| `dataRoot/accounts/*.json` | 账号、角色、任务树、任务状态、加密凭据；真实账号文件不提交 |
-| `dataRoot/custom_task/` | 用户自定义任务脚本 |
-| `dataRoot/battle_character/` | 当前唯一生效的运行态职业脚本目录 |
-| `ZmxyOL/assets/config/ui_map.csv` | UI 名称到图片/文本/坐标的映射 |
+| `data/config.json` | 源码运行的全局配置 |
+| `data/accounts/*.json` | 账号、角色、任务树、任务状态、加密凭据；真实账号文件不提交 |
+| `data/custom_task/` | 用户自定义任务脚本 |
+| `data/battle_character/` | 当前有效的运行态职业脚本目录 |
+| `logs/zmxy_redeem_codes.json` | 4399 兑换码采集器生成的运行态缓存；不提交到仓库 |
+| `ZmxyOL/assets/config/ui_map.csv` | UI 名称到图片、文本、坐标的映射 |
 | `ZmxyOL/assets/pic/` | 模板图片资源 |
-| `logs/` / `dataRoot/logs/` | `get_logs_root()` 返回的运行日志、调试截图、错误归档目录；源码模式通常是仓库 `logs/`，发行模式通常是 `install.json.dataRoot/logs/` |
+| `logs/` | `get_logs_root()` 返回的运行日志、调试截图、错误归档目录 |
 
-路径统一通过 `AutoScriptor.utils.paths` 解析。不要在仓库根目录新建 `accounts/`、`custom_task/` 或 `battle_character/`。
+路径统一通过 `AutoScriptor.utils.paths` 解析。不要在仓库根目录新增散落的 `accounts/`、`custom_task/` 或 `battle_character/`。
 
 ## 公共导入
 
@@ -39,7 +41,7 @@ from AutoScriptor import *
 
 | 类型 | 名称 |
 |------|------|
-| 目标 | `B`、`I`、`T`、`V`、`Box`、`Target`、`ui` |
+| 目标 | `B`、`I`、`T`、`Box`、`Target`、`ui` |
 | 操作 | `click`、`swipe`、`input`、`key_event`、`sleep` |
 | 定位 | `locate`、`ui_T`、`ui_F`、`wait_for_appear`、`wait_for_disappear` |
 | OCR/颜色 | `extract_info`、`get_colors` |
@@ -52,12 +54,11 @@ from AutoScriptor import *
 ## 目标语义
 
 ```python
-from AutoScriptor import B, I, T, V, Box
+from AutoScriptor import B, I, T, Box
 
 btn = I("确认")                         # 图片目标，来自 ui_map / pic
 txt = T("胜利", box=B(300, 100, 400, 80)) # OCR 文本目标
 box = B(100, 200, 120, 60)              # 直接坐标区域，参数为 x, y, w, h
-vlm = V("红色确认按钮", box=box)         # VLM 目标，需启用 llm.use_agent
 ```
 
 `locate()` 的组合语义：
@@ -86,7 +87,7 @@ sleep(1)
 
 - `sleep()` 是可取消等待；任务脚本不要直接 `time.sleep()`。
 - `click(..., if_exist=True)` 找不到目标时返回 `False`，不会抛错。
-- `click(..., until=callable)` 会循环点击直到条件满足或超时。
+- `click(..., until=callable)` 会循环点击直到条件满足或超时；未传 `interval` 时循环间隔默认 0.5 秒，普通 `click()` 默认仍为 0 秒。
 - `offset` / `resize` 和 `Box + {"offset": ..., "resize": ...}` 使用同一坐标语义。
 - `click()`、`locate()` 超时较长时会保存失败截图到调试截图目录。
 
@@ -104,9 +105,9 @@ colors = get_colors((B(10, 10, 20, 20), B(40, 10, 20, 20)))
 
 `cfg` 是当前账号/角色扁平运行视图：
 
-- 全局字段来自 `config.json`。
+- 全局字段来自 `data/config.json`。
 - 当前账号与角色来自 `data/accounts/*.json`。
-- 当前角色的 `tasks`、`status` 会被展开到 `cfg["tasks"]`、`cfg["status"]`。
+- 当前角色的 `tasks`、`status` 会展开到 `cfg["tasks"]`、`cfg["status"]`。
 - 保存通过 `AutoScriptor.utils.app_config` 原子写 JSON。
 
 任务内状态：
@@ -116,7 +117,7 @@ set_task_status("progress", "5/6")
 progress = get_task_status("progress")
 ```
 
-`progress` 是可观测业务进度，不等同于函数返回。未完成进度会被执行层转为 retry；超过 retry 后进入人工接管冷却。
+`progress` 是可观察业务进度，不等同于函数返回。未完成进度会被执行层转为 retry；超过 retry 后进入人工接管冷却。
 
 ## 任务入口
 
@@ -150,6 +151,6 @@ WebUI 当前是 FastAPI + Vue 静态组件：
 - 主状态轮询为 `/api/runtime/snapshot`。
 - 配置快照为 `/api/refresh`。
 - 设备诊断为 `/api/device/diagnostics`，默认不做截图探测。
-- Editor、Canvas、News 使用独立 router：`/api/editor/*`、`/api/canvas/*`、`/api/news/*`。
+- Editor、News 使用独立 router：`/api/editor/*`、`/api/news/*`。
 
 新增或修改接口前先看 [webui/api-contract.md](../webui/api-contract.md)。

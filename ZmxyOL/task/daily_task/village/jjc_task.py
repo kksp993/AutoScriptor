@@ -1,4 +1,3 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
@@ -29,7 +28,7 @@ def daily_arena_task(
     click(B(970,230,80,80))
     while(ui_T(I("加载中"))): sleep(0.5)
     sleep(2)
-    from ZmxyOL.battle.character.hero import h
+    from AutoScriptor.battle_character.hero import h
     with bg.scope("决斗场") as scope:
         scope.add(
             name="try_exit",
@@ -38,14 +37,3 @@ def daily_arena_task(
         )
         h.set(True,1).jjc_battle()
     click(B(1210,20,40,40))
-
-
-
-if __name__ == "__main__":
-    try:
-        daily_arena_task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

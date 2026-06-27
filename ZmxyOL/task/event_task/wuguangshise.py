@@ -1,4 +1,3 @@
-import traceback
 from AutoScriptor import *
 from ZmxyOL import *
 
@@ -14,14 +13,5 @@ tasks =[
 
 @register_task
 def task(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
-    from ZmxyOL.battle.character.hero import h
+    from AutoScriptor.battle_character.hero import h
     h.battle_tasks(task_table=tasks[0])
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

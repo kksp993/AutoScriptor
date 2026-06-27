@@ -13,7 +13,6 @@ adapter classes do not each invent their own "is the device usable?" logic.
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import sys
@@ -55,7 +54,7 @@ def _split_adb_serial(serial: str) -> tuple[str, str] | None:
 def _parse_mumu_info_payload(text: str) -> list[dict[str, Any]]:
     try:
         data = json.loads((text or "").strip() or "{}")
-    except Exception:
+    except json.JSONDecodeError:
         return []
     if isinstance(data, list):
         return [item for item in data if isinstance(item, dict)]
@@ -107,7 +106,7 @@ def _coerce_player_index(player: dict[str, Any] | None) -> str | int | None:
         return None
     try:
         return int(player.get("index"))
-    except Exception:
+    except (TypeError, ValueError):
         return str(player.get("index"))
 
 
@@ -174,16 +173,13 @@ class DeviceFacade:
         operate: str | list[str] | None = None,
         timeout: int = 10,
     ) -> subprocess.CompletedProcess[str]:
-        from AutoScriptor.utils.perf import mumu_safe_subprocess
-
-        with mumu_safe_subprocess():
-            return subprocess.run(
-                self.manager_base_args(operate) + args,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                creationflags=CREATE_NO_WINDOW,
-            )
+        return subprocess.run(
+            self.manager_base_args(operate) + args,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            creationflags=CREATE_NO_WINDOW,
+        )
 
     def configured_adb_host_port(self) -> tuple[str, str] | None:
         if ":" not in self.adb_addr:
@@ -266,21 +262,19 @@ class DeviceFacade:
         if not exists:
             return _status("error", "MuMuManager path is missing", path=path, exists=False)
         try:
-            from AutoScriptor.utils.perf import mumu_safe_subprocess
-
-            with mumu_safe_subprocess():
-                result = subprocess.run(
-                    [path, "version"],
-                    capture_output=True,
-                    text=True,
-                    timeout=8,
-                    creationflags=CREATE_NO_WINDOW,
-                )
+            result = subprocess.run(
+                [path, "version"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                creationflags=CREATE_NO_WINDOW,
+            )
             version = ""
             try:
                 data = json.loads(result.stdout or "{}")
-                version = str(data.get("version") or "")
-            except Exception:
+                if isinstance(data, dict):
+                    version = str(data.get("version") or "")
+            except json.JSONDecodeError:
                 pass
             if result.returncode == 0:
                 return _status("ok", "MuMuManager version command succeeded", path=path, exists=True, version=version)
@@ -294,7 +288,7 @@ class DeviceFacade:
             )
         except subprocess.TimeoutExpired:
             return _status("warn", "MuMuManager version command timed out", path=path, exists=True)
-        except Exception as exc:
+        except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
             return _status("warn", f"MuMuManager check failed: {exc}", path=path, exists=True)
 
     def _adb_check(self) -> dict[str, Any]:
@@ -314,7 +308,7 @@ class DeviceFacade:
                 return _status("error", "ADB version command failed", path=path, exists=True, detail=_text(result))
             match = re.search(r"Android Debug Bridge version ([\d.]+)", result.stdout or "")
             return _status("ok", "ADB executable is available", path=path, exists=True, version=match.group(1) if match else "")
-        except Exception as exc:
+        except (OSError, subprocess.SubprocessError) as exc:
             return _status("error", f"ADB check failed: {exc}", path=path, exists=True)
 
     def _manager_info_rows(self) -> list[dict[str, Any]]:
@@ -322,19 +316,16 @@ class DeviceFacade:
         if not path or not Path(path).is_file():
             return []
         try:
-            from AutoScriptor.utils.perf import mumu_safe_subprocess
-
-            with mumu_safe_subprocess():
-                result = subprocess.run(
-                    [path, "info", "-v", "all"],
-                    capture_output=True,
-                    text=True,
-                    timeout=8,
-                    creationflags=CREATE_NO_WINDOW,
-                )
+            result = subprocess.run(
+                [path, "info", "-v", "all"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                creationflags=CREATE_NO_WINDOW,
+            )
             if result.returncode == 0:
                 return _parse_mumu_info_payload(result.stdout or "")
-        except Exception:
+        except (OSError, subprocess.SubprocessError, RuntimeError):
             pass
         return []
 
@@ -354,7 +345,7 @@ class DeviceFacade:
                 if len(parts) >= 2:
                     rows.append((parts[0], parts[1]))
             return rows
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             return []
 
     def _adb_connect_serial(self, serial: str) -> str:
@@ -371,7 +362,7 @@ class DeviceFacade:
                 creationflags=CREATE_NO_WINDOW,
             )
             return (result.stdout or result.stderr or "").strip()
-        except Exception as exc:
+        except (OSError, subprocess.SubprocessError) as exc:
             return str(exc)
 
     def _adb_mismatch_detail(
@@ -466,7 +457,7 @@ class DeviceFacade:
             if booted.returncode == 0 and booted.stdout.strip() == "1":
                 return _status("ok", "ADB device is ready", serial=self.adb_addr, boot_completed=True)
             return _status("warn", "ADB device connected but Android boot is not complete", serial=self.adb_addr)
-        except Exception as exc:
+        except (OSError, subprocess.SubprocessError) as exc:
             return _status("error", f"ADB device check failed: {exc}", serial=self.adb_addr)
 
     def _app_check(self) -> dict[str, Any]:
@@ -510,7 +501,7 @@ class DeviceFacade:
             if initializing:
                 return _status("warn", "OCR engine is still initializing", use_gpu=bool(module.ocr_config.get("use_gpu")))
             return _status("error", "OCR engine is not ready", use_gpu=bool(module.ocr_config.get("use_gpu")))
-        except Exception as exc:
+        except (AttributeError, TypeError) as exc:
             return _status("error", f"OCR status check failed: {exc}")
 
     def _ui_map_check(self) -> dict[str, Any]:
@@ -520,15 +511,11 @@ class DeviceFacade:
 
         try:
             ui_manager = module.ui_manager
-            thread = getattr(ui_manager, "_init_thread", None)
-            initializing = bool(thread and thread.is_alive())
             count = len(getattr(ui_manager, "_ui", {}) or {})
             if count:
                 return _status("ok", "UI Map is loaded", entries=count)
-            if initializing:
-                return _status("warn", "UI Map is still initializing", entries=count)
             return _status("error", "UI Map is empty", entries=count)
-        except Exception as exc:
+        except (AttributeError, TypeError) as exc:
             return _status("error", f"UI Map status check failed: {exc}")
 
     @staticmethod

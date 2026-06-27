@@ -19,8 +19,10 @@ DEFAULT_GAME_PROFESSION = GAME_PROFESSIONS[0]
 
 
 def normalize_game_profession(raw: str | None) -> str:
-    """返回合法职业名；未知或空时回退为默认。"""
+    """Return a valid profession; blank means the configured default."""
     s = (raw or "").strip()
-    if s in GAME_PROFESSION_SET:
-        return s
-    return DEFAULT_GAME_PROFESSION
+    if not s:
+        return DEFAULT_GAME_PROFESSION
+    if s not in GAME_PROFESSION_SET:
+        raise ValueError(f"Unknown game profession: {s}")
+    return s

@@ -1,5 +1,4 @@
 import enum
-import traceback
 
 from ZmxyOL import *
 from AutoScriptor import *
@@ -93,6 +92,7 @@ def task(
             h.set(has_cd=True, speed_x=3).battle_task(
                 crash_suddenly=True, bonus_x=3,
                 cancel_on_failed=row_cancel, flow_name=row_flow,
+                check_pioneer=True,
             )
         else:
             h.set(has_cd=True, speed_x=3).battle_task(
@@ -100,6 +100,7 @@ def task(
                 has_loading_after_battle=True,
                 exit_loc=get_task_table(name)["exit_loc"],
                 cancel_on_failed=row_cancel, flow_name=row_flow,
+                check_pioneer=True,
             )
 
     # ── 阶段一：灵气匹配关卡打灵狱（共享3次，只打1个本） ──
@@ -151,13 +152,3 @@ def task(
             _run_battle(name, is_lingyu=False)
         else:
             _after_no_remains()
-
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

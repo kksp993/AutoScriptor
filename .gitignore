@@ -16,10 +16,7 @@
 **/.mypy_cache
 **/.ruff_cache
 /.nuitka-cache
-# Nuitka 专用完整 Python venv（与 **/.venv 不同名，需单独忽略）
-/.venv-nuitka/
-# electron-builder 输出（与 **/dist 的「dist」目录名不同，需单独忽略）
-/dist_electron/
+
 /release_snapshots/
 # Nuitka 崩溃报告（本地排错）
 nuitka-crash-report.xml
@@ -49,6 +46,7 @@ nuitka-crash-report.xml
 /errors/
 /examples/
 /logs/
+/data/config.json
 /data/accounts/*.json
 /data/canvas_data/
 /data/logs/
@@ -65,6 +63,7 @@ webapp/buildResources/icon.ico
 /battle_character/
 /.autoscriptor/
 docs/zmxy_codes.json
+docs/zmxy_redeem_codes.json
 docs/zmxy_gift_codes_rows.json
 docs/zmxy_redeem_codes_only_detail.txt
 docs/zmxy_redeem_codes_only.meta.txt

@@ -1,7 +1,5 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
 
 @register_task(next_exec_offset_hours=10)
 def task():
@@ -19,15 +17,3 @@ def task():
         click(T("完成",color="绿色"),if_exist=True)
         sleep(0.5)
     click(B(1200,30,30,30))
-
-
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)
-

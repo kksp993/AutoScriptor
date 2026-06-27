@@ -88,7 +88,6 @@ class RuntimeController:
         self,
         target: Callable[[list[Any]], None],
         tasks: list[Any],
-        set_high_priority: Callable[[Thread], None] | None = None,
     ) -> Thread:
         if self.direct_run_alive():
             raise RuntimeError("direct run is already running")
@@ -108,8 +107,6 @@ class RuntimeController:
         with self._lock:
             self._direct_thread = thread
         thread.start()
-        if set_high_priority is not None:
-            set_high_priority(thread)
         return thread
 
     def request_stop(self) -> str:

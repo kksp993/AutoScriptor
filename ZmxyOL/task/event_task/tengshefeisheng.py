@@ -1,8 +1,5 @@
-import traceback
 from AutoScriptor import *
 from ZmxyOL import *
-
-from AutoScriptor.utils.logger import logger
 
 @register_task
 def task():
@@ -24,13 +21,3 @@ def task():
     click(B(1200,30,30,30))
     wait_for_appear(T("天赋晋升"))
     click(B(1200,30,30,30))
-
-if __name__ == "__main__":
-
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

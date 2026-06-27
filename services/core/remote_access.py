@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import json
-import shlex
 import subprocess
 import threading
 import time
@@ -112,10 +111,6 @@ class RemoteAccess:
             and cls._process is not None
             and cls._process.poll() is None
         )
-
-    @classmethod
-    def get_address(cls) -> Optional[str]:
-        return cls._address if cls.is_alive() else None
 
     @classmethod
     def get_status(cls) -> dict:

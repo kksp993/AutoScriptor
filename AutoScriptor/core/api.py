@@ -1,26 +1,19 @@
 import os
-import sys
 import threading
 import time
-import traceback
-import getpass
-import cv2
 from typing import Callable
 from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
 from AutoScriptor.core.control import MixControl
 from AutoScriptor.core.targets import Target, B
-from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget,VLMTarget
-from AutoScriptor.core.locate_dispatch import has_handler, dispatch_locate
+from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget
 from AutoScriptor.recognition.ocr_rec import ocr_for_box
 from AutoScriptor.recognition.rec import get_box_color
 from AutoScriptor.utils.box import Box, b2p
-from AutoScriptor.utils.logger import setup_task_aware_logging
 from AutoScriptor.utils.tracer import save_debug_screenshot
 from AutoScriptor.utils.logger import logger, setup_logfile
 from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.app_package_resolve import resolve_app_to_start
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
-from AutoScriptor.utils.edit_img import launch_editor
 from AutoScriptor.utils.cancel import check_cancel_raise, cancellable_sleep, join_with_cancel, sleep_with_cancel
 
 def ensure_all_environment_ready():
@@ -32,7 +25,6 @@ def ensure_all_environment_ready():
     os.makedirs(log_dir, exist_ok=True)
     timestamp = datetime.now().strftime('%y%m%d_%H%M%S')
     setup_logfile(os.path.join(log_dir, f"[{timestamp}].log"))
-    setup_task_aware_logging()
     selected_emulator_index = cfg["emulator"]["index"]
     adb_addr = cfg["emulator"]["adb_addr"]
     app_to_start = cfg["app"]["app_to_start"]
@@ -43,38 +35,27 @@ def ensure_app_running(
     adb_addr,
     app_to_start,
     *,
-    start_emulator: bool | None = None,
-    launch_app: bool | None = None,
+    start_emulator: bool = True,
+    launch_app: bool = True,
     cancel_check: Callable[[], None] | None = None,
 ):
     """
     确保当前配置的 MuMu 实例可控制，并按需启动游戏。
 
     start_emulator:
-        True 表示执行链需要 MuMu，未运行时必须启动。None 兼容旧语义，
-        使用 cfg["app"]["auto_start"]。
+        True 表示执行链需要 MuMu，未运行时必须启动。
     launch_app:
-        True 表示启动/拉起 app_to_start。None 兼容旧语义，使用
-        cfg["app"]["auto_start"]。
+        True 表示启动/拉起 app_to_start。
     cancel_check:
         协作式取消检查；WebUI 停止按钮会通过它快速打断启动、解析和探测等待。
     """
     cancel_check = cancel_check or check_cancel_raise
-    if start_emulator is None:
-        start_emulator = bool(cfg["app"].get("auto_start", True))
-    if launch_app is None:
-        launch_app = bool(cfg["app"].get("auto_start", True))
 
     mumu_manager_path = cfg["emulator"]["emu_path"]
     logger.debug(
         "ensure_app_running: index=%s, adb=%s, app=%s, emu=%s, start_emulator=%s, launch_app=%s",
         selected_emulator_index, adb_addr, app_to_start, mumu_manager_path, start_emulator, launch_app,
     )
-    # 启动模拟器前必须恢复正常进程优先级。
-    # boost() 会将 Python 设为 HIGH_PRIORITY_CLASS，subprocess 子进程默认继承，
-    # MuMu Hypervisor 在高优先级下启动会误判权限 → "安卓设备无法启动"。
-    from AutoScriptor.utils.perf import unboost as _unboost
-    _unboost()
     mumu = Mumu().select(selected_emulator_index)
     cancel_check()
 
@@ -87,7 +68,7 @@ def ensure_app_running(
     if not is_running:
         raise RuntimeError("ensure_app_running: 模拟器启动失败")
 
-    # app_to_start 为空或未安装时由 resolve_app_to_start 枚举候选包并写回 config.json。
+    # app_to_start 为空或未安装时由 resolve_app_to_start 枚举候选包并写回 data/config.json。
     # 解析只在需要拉起应用时进行，避免 WebUI 初始化或纯设备探测误触 MuMuManager。
     if launch_app:
         cancel_check()
@@ -303,47 +284,29 @@ def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=No
         else:
             raise ValueError(f"Unsupported target type: {type(target)}")
 
-    dispatched: dict[int, Target] = {}
-    batch: list[tuple[int, Target]] = []
-    for i, tgt in enumerate(target):
-        if has_handler(type(tgt)):
-            dispatched[i] = tgt
-        else:
-            batch.append((i, tgt))
-
     boxes: list[list[Box] | None] = [None] * len(target)
 
-    if batch:
-        if image_first:
-            img_items = [(idx, t) for idx, t in batch if isinstance(t, ImageTarget)]
-            rest_items = [(idx, t) for idx, t in batch if not isinstance(t, ImageTarget)]
+    if image_first:
+        img_items = [(idx, t) for idx, t in enumerate(target) if isinstance(t, ImageTarget)]
+        rest_items = [(idx, t) for idx, t in enumerate(target) if not isinstance(t, ImageTarget)]
 
-            if img_items:
-                img_triples = [genertate_source(t) for _, t in img_items]
-                frame = screenshot if screenshot is not None else mixctrl.screenshot()
-                img_boxes = mixctrl.locate(img_triples, screenshot=frame)
-                for j, (orig_idx, _) in enumerate(img_items):
-                    boxes[orig_idx] = img_boxes[j]
-                if first(boxes):
-                    return boxes
-                screenshot = frame
+        if img_items:
+            img_triples = [genertate_source(t) for _, t in img_items]
+            frame = screenshot if screenshot is not None else mixctrl.screenshot()
+            img_boxes = mixctrl.locate(img_triples, screenshot=frame)
+            for j, (orig_idx, _) in enumerate(img_items):
+                boxes[orig_idx] = img_boxes[j]
+            if first(boxes):
+                return boxes
+            screenshot = frame
 
-            if rest_items:
-                rest_triples = [genertate_source(t) for _, t in rest_items]
-                rest_boxes = mixctrl.locate(rest_triples, screenshot=screenshot)
-                for j, (orig_idx, _) in enumerate(rest_items):
-                    boxes[orig_idx] = rest_boxes[j]
-        else:
-            ordered_targets = [t for _, t in batch]
-            tgt_triples = [genertate_source(t) for t in ordered_targets]
-            batch_boxes = mixctrl.locate(tgt_triples, screenshot=screenshot)
-            for j, (orig_idx, _) in enumerate(batch):
-                boxes[orig_idx] = batch_boxes[j]
-
-    if dispatched:
-        frame = screenshot if screenshot is not None else mixctrl.screenshot()
-        for idx, tgt in dispatched.items():
-            boxes[idx] = dispatch_locate(tgt, frame)
+        if rest_items:
+            rest_triples = [genertate_source(t) for _, t in rest_items]
+            rest_boxes = mixctrl.locate(rest_triples, screenshot=screenshot)
+            for j, (orig_idx, _) in enumerate(rest_items):
+                boxes[orig_idx] = rest_boxes[j]
+    else:
+        return mixctrl.locate([genertate_source(t) for t in target], screenshot=screenshot)
 
     return boxes
 
@@ -357,7 +320,6 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
         assure_stable: 是否保证稳定,如果为True，则每次定位都会保证稳定，直到找到目标或超时
     """
     _validate_timeout(timeout, "locate")
-    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     check_cancel_raise()
     first_attempt = True
     _stable_retry = False
@@ -387,7 +349,6 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
                         _stable_retry = True
                     continue
             if first(boxes): return first(boxes) if is_simplify else boxes  # 确保返回单个Box或None
-            # if delta > 5 and cfg["llm"]["use_agent"]:
         # 超时未找到目标时，保存搜索失败截图
         if timeout >= 5:
             try:
@@ -459,14 +420,13 @@ def click(
         if_exist: bool = False,
         repeat: int = 1,
         delay: float = 0,
-        interval: float = 0,
+        interval: float | None = None,
         offset:tuple=(0,0), 
         resize:tuple=(-1,-1),
         until: callable = None,
         assure_stable: bool = True,
         save_screenshot: bool = True
 ):
-    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     """
     点击目标元素
     
@@ -486,7 +446,7 @@ def click(
         
         delay: 点击前延迟（秒），默认0
         
-        interval: 多次点击之间的间隔（秒），默认0
+        interval: 多次点击之间的间隔（秒）。普通点击默认0；click(..., until=...)未显式传入时默认0.5秒。
         
         offset: 点击位置偏移量 (x, y)，相对于定位到的Box左上角
             - 示例: offset=(120, 120) 表示在定位到的Box基础上，向右偏移120px，向下偏移120px
@@ -532,12 +492,14 @@ def click(
         click(T("确定"), until=lambda: ui_F(T("确定")))
     """
     check_cancel_raise()
+    click_interval = 0 if interval is None else interval
+    until_interval = 0.5 if interval is None else interval
     if until:
         t = time.time()
-        click(target, long_click_duration_s, timeout=timeout, if_exist=False, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize,assure_stable=assure_stable)
+        click(target, long_click_duration_s, timeout=timeout, if_exist=False, repeat=repeat, delay=delay, interval=until_interval, offset=offset, resize=resize,assure_stable=assure_stable)
         while not until():
             check_cancel_raise()
-            click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize,assure_stable=assure_stable)
+            click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=until_interval, offset=offset, resize=resize,assure_stable=assure_stable)
             if time.time() - t > timeout:
                 try:
                     save_debug_screenshot(
@@ -567,7 +529,7 @@ def click(
             mixctrl.long_click(*pt, duration=long_click_duration_s)
         else:
             mixctrl.click(*pt)
-        cancellable_sleep(interval)
+        cancellable_sleep(click_interval)
     if pt is None:
         return True
     if isinstance(target, BoxTarget):
@@ -587,7 +549,6 @@ def swipe(
         delay: float = 0,
         ensure_stable_after_swipe: bool = True,
     ):
-    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     check_cancel_raise()
     start_box = locate(start_target, 3) if not isinstance(start_target, BoxTarget) else start_target.box
     end_box = locate(end_target, 3, assure_stable=False) if not isinstance(end_target, BoxTarget) else end_target.box
@@ -599,7 +560,6 @@ def swipe(
     return True
 
 def input(text: str, target_field: Target|tuple[Target, ...] = None):
-    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     check_cancel_raise()
     if target_field:
         click(target_field)
@@ -695,9 +655,6 @@ def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), re
 def sleep(seconds: float):
     cancellable_sleep(seconds)
 
-def edit_img():
-    launch_editor(mixctrl,is_screenshot=True) 
-
 def detect_floating_window(debug: bool = False) -> dict:
     """
     检测屏幕边缘的 4399 悬浮窗（基于 HSV 绿色边缘扫描，不依赖模板匹配）。
@@ -748,13 +705,3 @@ def dismiss_floating_window(max_retries: int = 1, debug: bool = False) -> bool:
         logger.warning(f"⚠️ 悬浮窗关闭后仍检测到: {verify['edge']}边 {verify['box']}")
 
     return False
-
-_boosted = False
-def _ensure_boosted():
-    """延迟 boost：只在首次真正使用 API 时才执行性能优化。"""
-    global _boosted
-    if _boosted:
-        return
-    _boosted = True
-    from AutoScriptor.utils.perf import ABOVE_NORMAL_PRIORITY_CLASS, boost
-    boost(process_priority=ABOVE_NORMAL_PRIORITY_CLASS)  # 温和提升 Python 自身；不提升 MuMu，避免干扰其他程序

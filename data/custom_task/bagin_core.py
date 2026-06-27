@@ -5,7 +5,7 @@ Rune order:
     1 -> 敖玥之符
     2 -> 嫦娥之符
 
-The real UI layer only needs to fill in ``peek``, ``exchange`` and ``merge``.
+The real UI layer supplies an ``execute`` callable for Peek/exchange/merge ops.
 ``solve`` returns the trajectory that was actually executed.
 
 The planner scores a trajectory as:
@@ -402,26 +402,6 @@ class MergeMacroSearch(BoundedExchangeSearch):
     def run(self) -> SearchResult:
         return self._best_macro(self.initial)
 
-    def run_frontier(self) -> SearchResult:
-        """Pick the best next merge segment using H* without deep recursion."""
-
-        best = SearchResult(0, 0, 0, 0)
-        best_rank = (0, 0, 0, 0)
-        for actions, next_state, segment_score, segment_cost in self._macro_options(self.initial):
-            self._check_budget()
-            optimistic_score = segment_score + self._upper_bound_score(next_state)
-            rank = (optimistic_score, segment_score, -segment_cost, -len(actions))
-            if rank > best_rank:
-                best_rank = rank
-                best = SearchResult(
-                    score=optimistic_score,
-                    merges=1,
-                    cost=segment_cost,
-                    ops=len(actions),
-                    actions=tuple(actions),
-                )
-        return best
-
     def _best_macro(self, state: SearchState) -> SearchResult:
         if state in self.memo:
             return self.memo[state]
@@ -728,108 +708,19 @@ class BaginPlanner:
         return self._best_action()
 
     def _best_action(self) -> SearchAction | None:
-        try:
-            result = MergeMacroSearch(
-                self.users,
-                self._search_state(),
-                max_nodes=self.exact_state_limit,
-                max_seconds=self.max_step_seconds,
-                merge_value=self.merge_value,
-            ).run()
-        except (SearchLimitExceeded, RecursionError):
-            self.pending_actions.clear()
-            action = self._frontier_action()
-            if action is not None:
-                return action
-            return self._fallback_action()
+        result = MergeMacroSearch(
+            self.users,
+            self._search_state(),
+            max_nodes=self.exact_state_limit,
+            max_seconds=self.max_step_seconds,
+            merge_value=self.merge_value,
+        ).run()
 
         if result.merges <= 0 or not result.actions:
             self.pending_actions.clear()
             return None
         self.pending_actions = list(result.actions[1:])
         return result.actions[0]
-
-    def _frontier_action(self) -> SearchAction | None:
-        try:
-            result = MergeMacroSearch(
-                self.users,
-                self._search_state(),
-                max_nodes=max(1_000, self.exact_state_limit // 20),
-                max_seconds=min(0.08, max(0.01, self.max_step_seconds / 4)),
-                merge_value=self.merge_value,
-            ).run_frontier()
-        except (SearchLimitExceeded, RecursionError):
-            return None
-        if result.merges <= 0 or not result.actions:
-            return None
-        self.pending_actions = list(result.actions[1:])
-        return result.actions[0]
-
-    def _fallback_action(self) -> SearchAction | None:
-        index = {name: idx for idx, name in enumerate(self.users)}
-        if self.current is not None and self.states[self.current].can_merge():
-            return SearchAction("merge", user=index[self.current])
-
-        if self.current is not None:
-            action = self._quick_exchange_action(index[self.current])
-            if action is not None:
-                return action
-
-        candidates = [
-            (state.can_merge(), sum(state.counts or ([0] * NUM_RUNE_TYPES)), state.merge_remaining, name)
-            for name, state in self.states.items()
-            if state.counts is not None and state.merge_remaining > 0
-            and not (name == self.current and self._user_cache_empty_actual(state))
-        ]
-        if not candidates:
-            return None
-        candidates.sort(reverse=True)
-        return SearchAction("Peek", user=index[candidates[0][3]])
-
-    def _quick_exchange_action(self, actor_idx: int) -> SearchAction | None:
-        actor_name = self.users[actor_idx]
-        actor = self.states[actor_name]
-        if actor.counts is None:
-            return None
-        index = {name: idx for idx, name in enumerate(self.users)}
-        best: tuple[int, int, str, int, int] | None = None
-        for take_id in sorted(range(NUM_RUNE_TYPES), key=lambda rid: actor.counts[rid]):
-            for give_id in sorted(range(NUM_RUNE_TYPES), key=lambda rid: -actor.counts[rid]):
-                if give_id == take_id or actor.counts[give_id] <= 0:
-                    continue
-                for partner_name, partner in self.states.items():
-                    if partner_name == actor_name or partner.counts is None:
-                        continue
-                    if partner.counts[take_id] <= 0:
-                        continue
-                    if take_id in partner.requested_runes:
-                        continue
-                    if actor_name not in partner.requesters and len(partner.requesters) >= MAX_REQUESTERS:
-                        continue
-                    after_actor = actor.counts[:]
-                    after_partner = partner.counts[:]
-                    after_actor[give_id] -= 1
-                    after_actor[take_id] += 1
-                    after_partner[take_id] -= 1
-                    after_partner[give_id] += 1
-                    actor_ready = int(actor.merge_remaining > 0 and all(v > 0 for v in after_actor))
-                    partner_ready = int(partner.merge_remaining > 0 and all(v > 0 for v in after_partner))
-                    immediate = actor_ready + partner_ready
-                    if immediate <= 0:
-                        continue
-                    candidate = (immediate, actor_ready, partner_name, give_id, take_id)
-                    if best is None or candidate > best:
-                        best = candidate
-        if best is None:
-            return None
-        _, _, partner_name, give_id, take_id = best
-        return SearchAction(
-            "exchange",
-            from_user=actor_idx,
-            to_user=index[partner_name],
-            give_id=give_id,
-            take_id=take_id,
-        )
 
     def _search_state(self) -> SearchState:
         if self.current is None:
@@ -1159,43 +1050,6 @@ class StaticBaginEnv:
         return int(text)
 
 
-def peek(user: str) -> Sequence[int]:
-    """Real Peek interface: login/switch to user and return [0, 1, 2] counts."""
-
-    from test_merge import peek as peek_impl
-    return peek_impl(user)
-
-
-def exchange(from_user: str, to_user: str, give_id: str | int, take_id: str | int) -> None:
-    """Real exchange interface.
-
-    ``from_user`` is the current login. It gives ``give_id`` to ``to_user`` and
-    asks ``to_user`` for ``take_id``.
-    """
-
-    from test_merge import exchange as exchange_impl
-    return exchange_impl(from_user, to_user, give_id, take_id)
-
-
-def merge(user: str) -> Sequence[int]:
-    """Real merge interface. Return the free post-merge Peek result."""
-
-    from test_merge import merge as merge_impl
-    return merge_impl(user)
-
-
-def interface_execute(op: Op) -> Sequence[int] | None:
-    kind = op.get("op")
-    if kind == "Peek":
-        return peek(str(op["user"]))
-    if kind == "merge":
-        return merge(str(op["user"]))
-    if kind == "exchange":
-        exchange(str(op["from"]), str(op["to"]), op["give_id"], op["take_id"])
-        return None
-    raise RuntimeError(f"unknown op: {op!r}")
-
-
 def solve(
     users: Sequence[str],
     execute: Executor | None = None,
@@ -1219,7 +1073,7 @@ def solve(
 
     if execute is None:
         if initial_counts is None:
-            execute = interface_execute
+            raise ValueError("solve() requires execute or initial_counts")
         else:
             execute = StaticBaginEnv(initial_counts, merge_rewards, merge_remaining)
 
@@ -1245,10 +1099,6 @@ __all__ = [
     "RUNE_ID",
     "BaginPlanner",
     "StaticBaginEnv",
-    "peek",
-    "exchange",
-    "merge",
-    "interface_execute",
     "solve",
     "build_trajectory",
     "plan",

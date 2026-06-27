@@ -7,6 +7,7 @@
 
 import time
 import json
+import subprocess
 from typing import Callable
 
 from AutoScriptor.control.MumuAdaptor.device_facade import get_device_facade
@@ -18,6 +19,22 @@ class Power:
 
     def __init__(self, utils):
         self.utils = utils
+
+    def _wait_until_android_ready(
+        self,
+        timeout: float = 90.0,
+        interval: float = 2.0,
+        cancel_check: Callable[[], None] | None = None,
+    ) -> bool:
+        cancel_check = cancel_check or check_cancel_raise
+        deadline = time.monotonic() + timeout
+        facade = get_device_facade(vm_index=self.utils.get_vm_id())
+        while time.monotonic() < deadline:
+            cancel_check()
+            if facade.adb_device_ready():
+                return True
+            sleep_with_cancel(interval, cancel_check)
+        return False
 
     def is_running(self) -> bool:
         """检测模拟器是否正在运行。"""
@@ -34,11 +51,11 @@ class Power:
                             or "start" in str(data.get("player_state", "")).lower()
                             or "running" in str(data.get("player_state", "")).lower()
                         )
-                except Exception:
+                except json.JSONDecodeError:
                     pass
                 return 'running' in (retval or '').lower() or 'start_finished' in (retval or '').lower()
             logger.debug("MuMuManager info 失败，回退 ADB 检测: ret=%s, out=%s", ret_code, retval)
-        except Exception:
+        except (OSError, RuntimeError, subprocess.SubprocessError):
             logger.debug("MuMuManager info 异常，回退 ADB 检测", exc_info=True)
         return get_device_facade(vm_index=self.utils.get_vm_id()).adb_device_ready()
 
@@ -70,6 +87,8 @@ class Power:
 
                 ret_code, retval = self.utils.run_command(args)
                 if ret_code == 0:
+                    if not self._wait_until_android_ready(cancel_check=cancel_check):
+                        raise RuntimeError("MuMuManager launch code succeeded, but device did not become ready")
                     logger.info(f"模拟器 {self.utils.get_vm_id()} 启动成功")
                     return True
                 if get_device_facade(vm_index=self.utils.get_vm_id()).adb_device_ready():

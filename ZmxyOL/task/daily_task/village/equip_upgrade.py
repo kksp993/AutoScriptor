@@ -1,7 +1,6 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
+
 
 @register_task
 def daily_qianghua_task():
@@ -29,15 +28,6 @@ def daily_qianghua_task():
     click(T("确定",color="绿色"))
     while ui_F(I("炼丹炉-启灵-添加装备")):
         click(T(key="炼丹炉-启灵"))
+        sleep(0.5)
     click(B(1200,30,30,30))
     click(I("菜单"))
-
-
-if __name__ == "__main__":
-    try:
-        daily_qianghua_task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

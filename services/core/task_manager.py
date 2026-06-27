@@ -9,14 +9,13 @@ import datetime
 import enum
 import importlib
 import inspect
-import os
 import sys
-import traceback
 from contextlib import contextmanager
 from typing import Any, List, Tuple
 from threading import Event, RLock
 
 import dpath
+from dpath.exceptions import PathNotFound
 from AutoScriptor.utils.cancel import TaskCancelled, bind_cancel_event
 from AutoScriptor.utils.logger import logger
 
@@ -33,6 +32,7 @@ from AutoScriptor.utils.task_state import (
     progress_label,
     set_current_task_path,
 )
+from AutoScriptor.utils.paths import get_logs_root
 from services.core.runtime_context import runtime_ctx
 
 
@@ -81,7 +81,7 @@ def is_task_debug_mode(task_path: str, task_data: dict | None = None) -> bool:
         return bool(task_data.get("debug_mode") or task_data.get("debug"))
     try:
         data = dpath.get(cfg["tasks"], task_path)
-    except Exception:
+    except PathNotFound:
         return False
     return isinstance(data, dict) and bool(data.get("debug_mode") or data.get("debug"))
 
@@ -160,6 +160,9 @@ class TaskManager:
     def request_cancel(self):
         self._cancel_event.set()
 
+    def reset_cancel(self):
+        self._reset_cancel()
+
     def _reset_cancel(self):
         self._cancel_event.clear()
 
@@ -174,10 +177,15 @@ class TaskManager:
             yield
 
     def switch_character_and_reload(self, server: str, character: str) -> None:
-        """Switch the active character and reload task registry/config atomically."""
+        """Switch the active character and perform a full task registry reload."""
         with self.config_transaction():
             cfg.switch_character(server, character)
             self.reload_tasks()
+
+    def switch_character(self, server: str, character: str) -> None:
+        """Switch the active character without rebuilding task modules."""
+        with self.config_transaction():
+            cfg.switch_character(server, character)
 
     def execute_tasks(
         self,
@@ -214,29 +222,16 @@ class TaskManager:
             try:
                 cfg.reload_preserving_decrypted_credentials(security_key)
                 # 清除 ZmxyOL 子模块缓存，强制重新导入
-                for name in [m for m in sys.modules if m.startswith('ZmxyOL.')]:
+                for name in [m for m in sys.modules if m == "ZmxyOL" or m.startswith("ZmxyOL.")]:
                     sys.modules.pop(name, None)
-                try:
-                    from AutoScriptor.battle_character.hero import reload_battle_character_modules
+                from AutoScriptor.battle_character.hero import reload_battle_character_modules
 
-                    reload_battle_character_modules()
-                except Exception as e:
-                    logger.warning("职业脚本热重载失败（将使用已缓存职业）: %s", e)
-                try:
-                    import ZmxyOL
-                    importlib.reload(ZmxyOL)
-                except Exception:
-                    pass
+                reload_battle_character_modules()
                 # 重新发现并注册任务（不再由 import 自动触发）
                 from ZmxyOL.task import force_reload_tasks
                 force_reload_tasks()
                 logger.info("✅ 任务重新加载完成")
             except Exception as e:
-                if _is_request_human_takeover(e):
-                    logger.error(f"Request requires human takeover: {task}, reason: {e}")
-                    with self._cfg_lock:
-                        self._update_next_exec_time(task)
-                    return False
                 logger.error(f"❌ 任务重新加载失败: {e}")
                 raise
             finally:
@@ -323,7 +318,6 @@ class TaskManager:
                     return False
                 logger.error("❌ 执行失败: %s，错误: %r", task, e)
                 self._archive_error(task, e)
-                traceback.print_exc()
                 if is_task_debug_mode(task):
                     logger.info("🔄 debug_mode: 跳过失败恢复，不关闭/重启游戏: %s", task)
                     return False
@@ -433,7 +427,7 @@ class TaskManager:
         """任务成功或用户重新激活后，清掉人工接管冻结标记。"""
         try:
             task_data = dpath.get(cfg["tasks"], task)
-        except Exception:
+        except PathNotFound:
             return
         if not isinstance(task_data, dict):
             return
@@ -499,9 +493,6 @@ class TaskManager:
             dpath.set(cfg["tasks"], task + "/on", False)
         return None
 
-    # 向后兼容
-    _update_task_post_execution = _update_next_exec_time
-
     # ── 错误恢复 ──
 
     def _try_recover_app(self, retry_count: int, task: str | None = None) -> bool:
@@ -515,25 +506,20 @@ class TaskManager:
         if runtime_ctx.mixctrl is None:
             logger.warning("🔄 mixctrl 不可用，跳过应用重启恢复")
             return False
-        from AutoScriptor.utils.perf import mumu_safe_subprocess
-        with mumu_safe_subprocess():
-            try:
-                runtime_ctx.mixctrl.app.close(app_name)
-                self._wait_app_stopped(app_name)
-                if retry_count >= 1:
-                    self._restart_adb_and_wait()
-                if not self._wait_app_running(app_name):
-                    return False
-                # if not dismiss_floating_window(max_retries=40, debug=False):
-                #     logger.warning("🔄 悬浮窗关闭失败，尝试完全重启模拟器")
-                #     return self._full_emulator_restart(app_name)
-                sleep(5)
-                from ZmxyOL.nav.map_manager import mm
-                mm.set_region("登录")
-                return True
-            except Exception as e:
-                logger.error("🔄 应用重启失败: %r", e)
+        try:
+            runtime_ctx.mixctrl.app.close(app_name)
+            self._wait_app_stopped(app_name)
+            if retry_count >= 1:
+                self._restart_adb_and_wait()
+            if not self._wait_app_running(app_name):
                 return False
+            sleep(5)
+            from ZmxyOL.nav.map_manager import mm
+            mm.set_region("登录")
+            return True
+        except Exception as e:
+            logger.error("🔄 应用重启失败: %r", e)
+            return False
 
     def _wait_app_stopped(self, app_name: str, timeout: int = 15):
         """等待应用完全停止后再返回，防止 close 后立即 launch 被忽略。"""
@@ -566,35 +552,6 @@ class TaskManager:
                 runtime_ctx.mixctrl.app.launch(app_name)
         logger.error("🔄 应用启动超时 (%ds)", timeout)
         return False
-
-    def _full_emulator_restart(self, app_name: str) -> bool:
-        """完全重启模拟器（最后手段）。"""
-        try:
-            if runtime_ctx.mixctrl is not None:
-                try:
-                    runtime_ctx.mixctrl.app.close(app_name)
-                    sleep(2)
-                except Exception as e:
-                    logger.debug("🔄 关闭应用失败(可忽略): %s", e)
-
-            runtime_ctx._release_nemu_ipc()
-
-            from AutoScriptor.control.MumuAdaptor.mumu import Mumu
-            mumu = Mumu().select(cfg["emulator"]["index"])
-            mumu.power.shutdown(wait=True, timeout=30)
-
-            runtime_ctx.mixctrl = None
-            runtime_ctx.mumu = None
-
-            sleep(3)
-            runtime_ctx.refresh(cancel_check=self._check_cancel_requested)
-            sleep(5)
-            from ZmxyOL.nav.map_manager import mm
-            mm.set_region("登录")
-            return True
-        except Exception as e:
-            logger.error(f"🔄 模拟器重启失败: {e}")
-            return False
 
     def _restart_adb_and_wait(self):
         """重启 ADB 并验证连接。"""
@@ -636,13 +593,12 @@ class TaskManager:
 
     @staticmethod
     def _clean_debug_dir():
-        d = os.path.join(os.getcwd(), 'logs', 'debug_screenshot')
-        if not os.path.isdir(d):
+        d = get_logs_root() / "debug_screenshot"
+        if not d.is_dir():
             return
-        for f in os.listdir(d):
-            fp = os.path.join(d, f)
-            if os.path.isfile(fp):
+        for fp in d.iterdir():
+            if fp.is_file():
                 try:
-                    os.remove(fp)
-                except Exception:
-                    pass
+                    fp.unlink()
+                except OSError as e:
+                    logger.warning("清理 debug 截图失败: %s -> %s", fp, e)

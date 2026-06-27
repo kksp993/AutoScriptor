@@ -292,6 +292,9 @@ class Scheduler:
     def wake(self):
         self._wake.set()
 
+    def mark_tasks_updated(self) -> None:
+        self._tasks_updated.set()
+
     def _check_cancel_requested(self) -> None:
         if self._task_manager and self._task_manager._cancel_event.is_set():
             raise TaskCancelled("scheduler stop requested")
@@ -474,6 +477,12 @@ class Scheduler:
                 paths.append(cfg._account_path(cfg.current_account()))
             return paths
 
+        def _runtime_persistence_paths() -> list[str]:
+            paths = [cfg.CONFIG_PATH]
+            if cfg.current_account():
+                paths.append(cfg._account_path(cfg.current_account()))
+            return paths
+
         watcher = ConfigWatcher(
             cfg.CONFIG_PATH,
             extra_paths=_extra_reload_paths,
@@ -486,6 +495,7 @@ class Scheduler:
                 break
             if watcher.should_reload():
                 self._handle_watched_config_change()
+                watcher.mark_seen()
             if self.state == SchedulerState.RUNNING and self._task_manager:
                 try:
                     self._check_and_run()
@@ -494,6 +504,12 @@ class Scheduler:
                     self._consecutive_errors += 1
                     if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
                         self.mark_error()
+                finally:
+                    # Scheduler/task execution persists task state and next_exec_time.
+                    # Those self-writes should update WebUI state, but should not be
+                    # mistaken for external config/script edits that need another
+                    # task registry hot reload on the next scheduler tick.
+                    watcher.mark_seen(_runtime_persistence_paths())
 
     # ── 到期任务收集 ──
 
@@ -559,6 +575,15 @@ class Scheduler:
 
         yield from iter_dispatch_characters(cfg)
 
+    def _switch_active_character(self, server: str, character: str) -> None:
+        """Switch cfg/account state without rebuilding task modules."""
+        from AutoScriptor.utils.app_config import cfg
+
+        if self._task_manager and hasattr(self._task_manager, "switch_character"):
+            self._task_manager.switch_character(server, character)
+        else:
+            cfg.switch_character(server, character)
+
     def _collect_due_cross_character(self) -> list[str]:
         """
         收集到期任务路径；若当前角色无到期，则按顺序切换到下一有到期任务的角色。
@@ -580,10 +605,7 @@ class Scheduler:
                 due = self._collect_due(cfg.get("tasks") or {}, "", time.time())
             else:
                 try:
-                    if self._task_manager:
-                        self._task_manager.switch_character_and_reload(server, name)
-                    else:
-                        cfg.switch_character(server, name)
+                    self._switch_active_character(server, name)
                 except (KeyError, ValueError) as e:
                     logger.warning("📅 切换角色跳过 %s/%s: %s", server, name, e)
                     continue
@@ -597,10 +619,7 @@ class Scheduler:
                 return due
         if switched and original_key[0] and original_key[1]:
             try:
-                if self._task_manager:
-                    self._task_manager.switch_character_and_reload(*original_key)
-                else:
-                    cfg.switch_character(*original_key)
+                self._switch_active_character(*original_key)
                 self.invalidate_login()
             except (KeyError, ValueError) as e:
                 logger.warning("📅 恢复原角色失败 %s/%s: %s", original_key[0], original_key[1], e)
@@ -622,10 +641,7 @@ class Scheduler:
         try:
             if current != first_char:
                 logger.info("📅 全角色调度完成，切回首个角色: %s/%s", server, name)
-                if self._task_manager:
-                    self._task_manager.switch_character_and_reload(server, name)
-                else:
-                    cfg.switch_character(server, name)
+                self._switch_active_character(server, name)
                 self.invalidate_login()
                 self._tasks_updated.set()
             else:
@@ -655,7 +671,6 @@ class Scheduler:
         """
         import inspect
         from AutoScriptor.utils.app_config import cfg
-        from AutoScriptor.utils.perf import ABOVE_NORMAL_PRIORITY_CLASS, boost, unboost
 
         if not cfg._config.get("game", {}).get("character_name", ""):
             logger.warning("⚠️ 账号未验证，跳过执行")
@@ -691,7 +706,7 @@ class Scheduler:
             if not server or not name:
                 return False
             try:
-                self._task_manager.switch_character_and_reload(server, name)
+                self._switch_active_character(server, name)
                 self.invalidate_login()
                 self._tasks_updated.set()
                 return True
@@ -799,10 +814,6 @@ class Scheduler:
                 else:
                     self._maybe_daily_restart(cfg)
 
-                # 必须先让模拟器在正常优先级下启动，启动完成后再温和 boost。
-                # 如果先 boost 再启动，MuMu 子进程会继承提升后的优先级，
-                # 可能导致虚拟化引擎误判权限状态 → "安卓设备无法启动"。
-                unboost()
                 try:
                     # 与 api.init() 不同：ensure_app_running 的返回值必须写入 runtime_ctx，
                     # 否则 mixctrl 仅存在于栈上，runtime_ctx.mixctrl 仍为 None（例如关机清理后）。
@@ -825,7 +836,6 @@ class Scheduler:
                         logger.info("⏹ 检测到取消请求，停止执行")
                         break
                     continue
-                boost(process_priority=ABOVE_NORMAL_PRIORITY_CLASS)
 
                 if not skip_login_for_debug:
                     self._ensure_character_logged_in(cfg)
@@ -878,13 +888,12 @@ class Scheduler:
                         self._apply_deferred_reload_if_needed()
                     else:
                         cfg.save_config()
-                        self._task_manager.reload_tasks()
+                        self._tasks_updated.set()
                 except Exception as e:
-                    logger.error("📅 配置保存/重载失败（将在下一轮重新收集任务）: %s", e)
+                    logger.error("📅 配置保存失败（将在下一轮重新收集任务）: %s", e)
 
         finally:
             self._pipeline_active.clear()
-            unboost()
 
         if total_success > 0 or total_failed > 0:
             logger.info("📅 执行完成: 成功 %d, 失败 %d", total_success, total_failed)
@@ -985,9 +994,6 @@ class Scheduler:
 
             runtime_ctx._release_nemu_ipc()
 
-            # 关闭模拟器前恢复正常优先级，防止 MuMu 子进程继承 HIGH_PRIORITY_CLASS
-            from AutoScriptor.utils.perf import unboost as _unboost
-            _unboost()
             from AutoScriptor.control.MumuAdaptor.mumu import Mumu
             mumu = Mumu().select(cfg["emulator"]["index"])
             mumu.power.shutdown(wait=True, timeout=30)

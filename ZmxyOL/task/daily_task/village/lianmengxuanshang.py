@@ -2,8 +2,6 @@
 from AutoScriptor import *
 from ZmxyOL.nav import *
 from ZmxyOL import register_task
-import traceback
-from AutoScriptor.utils.logger import logger
 
 LEVEL_MAP = {
     1: B(260,110,30,30),
@@ -62,12 +60,3 @@ def lianmengxuanshang():
             result = fabuxuanshang(level, item)
             if result == -1: break
             elif result == -2: return
-
-if __name__ == "__main__":
-    try:
-        lianmengxuanshang()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

@@ -1,4 +1,3 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
@@ -29,16 +28,8 @@ def daily_alliance_task():
         click(T("领取奖励"))
     while ui_F(T("翡翠灵签任务")):
         click(T("限时任务"))
+        sleep(0.5)
     click(B(1200,30,30,30))
     wait_for_appear(T("活跃任务"))
     click(B(1200,30,30,30))
-
-if __name__ == "__main__":
-    try:
-        daily_alliance_task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)
 

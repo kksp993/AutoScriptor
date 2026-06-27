@@ -1,8 +1,7 @@
-import traceback
-from AutoScriptor.core.targets import ui_point
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
+
 
 @register_task(default_offset_hours=12)
 def eunan_fuBen(
@@ -24,13 +23,3 @@ def eunan_fuBen(
         click(B(385,605,30,30), repeat=bonus_minus)
         click(T("开始挑战"))
         h.set(True,3).battle_task(has_loading_after_battle=False, exit_loc=300, bonus_x=bonus_x)
-
-
-if __name__ == "__main__":
-    try:
-        eunan_fuBen()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

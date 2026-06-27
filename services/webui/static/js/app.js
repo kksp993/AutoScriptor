@@ -1,10 +1,7 @@
 const { createApp, ref, reactive, computed, nextTick, watch } = Vue;
 
-/** 临时关闭「脚本画布」侧边入口与主区面板；改为 true 可恢复 */
-const FEATURE_SCRIPT_CANVAS = false;
-
 const app = createApp({
-  components: { AppSidebar, NewsPanel, OverviewPanel, SchedulerPanel, TaskPanel, SettingsPanel, EditorPanel, DiagnosticsPanel, CanvasPanel, ErrorArchivesPanel, UpdatePanel, AboutPanel },
+  components: { AppSidebar, NewsPanel, OverviewPanel, SchedulerPanel, TaskPanel, SettingsPanel, EditorPanel, DiagnosticsPanel, ErrorArchivesPanel, UpdatePanel, AboutPanel },
   setup() {
     const configData = reactive({});
     const activeTab = ref('news');
@@ -20,7 +17,7 @@ const app = createApp({
       /** 全账号最早一次计划执行时间（与各角色 next_execution 一致口径） */
       overall_next_execution: null,
       upcoming: [],
-      runtime: { initialized: false, has_mixctrl: false, has_mumu: false, has_bg: false, has_vlm: false },
+      runtime: { initialized: false, has_mixctrl: false, has_mumu: false, has_bg: false },
     });
 
     /** 错误汇总「前往标注」等：切换到编辑器后由 EditorPanel 消费并清空 */
@@ -39,7 +36,6 @@ const app = createApp({
       battle_times: '战斗轮数',
       speed_x: '战斗加速',
       has_cd: '关卡有CD',
-      battle_weight: '战斗配比',
       difficulty: '难度选择',
       diff: '难度',
       preference: '关卡偏好',
@@ -171,7 +167,7 @@ const app = createApp({
 
     const pageTitle = computed(() => {
       const map = {
-        news: '资讯', overview: '总览', scheduler: '调度', editor: '编辑器', canvas: '脚本画布',
+        news: '资讯', overview: '总览', scheduler: '调度', editor: '编辑器',
         errorArchives: '错误汇总', updater: '检查更新', settings: '设置', about: '关于',
         daily: '每日任务', weekly: '每周任务', general: '一般任务', custom: '自定义任务',
       };
@@ -281,6 +277,15 @@ const app = createApp({
         console.error('runtime snapshot failed:', e);
         return false;
       }
+    }
+
+    let _postStopRefreshTimer = null;
+    function scheduleRuntimeRefreshAfterStop() {
+      if (_postStopRefreshTimer) clearTimeout(_postStopRefreshTimer);
+      _postStopRefreshTimer = setTimeout(() => {
+        _postStopRefreshTimer = null;
+        fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
+      }, 300);
     }
 
     async function reloadTasks() {
@@ -504,15 +509,15 @@ const app = createApp({
     async function unifiedStop() {
       try {
         const { ok, data } = await API.request('POST', '/stop', {});
-        if (!ok) showApiError(data, '终止失败');
+        if (!ok) {
+          showApiError(data, '终止失败');
+        } else if (data && data.runtime) {
+          applyRuntimeSnapshotPayload({ runtime: data.runtime, scheduler: data.runtime.scheduler });
+        }
       } catch (e) {
         console.error('Stop error:', e);
       }
-      await refreshRuntimePanels();
-    }
-
-    function stopRun() {
-      unifiedStop();
+      scheduleRuntimeRefreshAfterStop();
     }
 
     async function verifyAccount(securityKeyDirect) {
@@ -612,22 +617,34 @@ const app = createApp({
       }
       const uniquePaths = [...new Set(paths)];
       if (uniquePaths.length) {
-        API.post('/enum-options', { paths: uniquePaths, task_path: editTaskPath.value || '' }).then(map => {
+        API.request('POST', '/enum-options', { paths: uniquePaths, task_path: editTaskPath.value || '' }).then(({ ok, data: map }) => {
+          if (!ok) {
+            showApiError(map, '加载参数选项失败');
+            return;
+          }
+          const requireOptions = (enumPath) => {
+            const options = map && map[enumPath];
+            if (!Array.isArray(options)) throw new Error(`枚举选项缺失: ${enumPath}`);
+            return options;
+          };
           Object.entries(meta).forEach(([pk, ep]) => {
             if (ep && typeof ep === 'object' && ep.type === 'table' && ep.columns) {
               for (const [col, colMeta] of Object.entries(ep.columns)) {
-                if (colMeta.enum && map[colMeta.enum]) {
-                  paramEnumOptions[pk + '.' + col] = map[colMeta.enum];
+                if (colMeta.enum) {
+                  paramEnumOptions[pk + '.' + col] = requireOptions(colMeta.enum);
                 }
               }
             } else {
               const p = _enumMetaPath(ep);
-              if (p) paramEnumOptions[pk] = map[p] || [];
+              if (p) paramEnumOptions[pk] = requireOptions(p);
             }
           });
           _initTableRowsCache(meta);
           editModalVisible.value = true;
-        }).catch(() => { _initTableRowsCache(meta); editModalVisible.value = true; });
+        }).catch((e) => {
+          const message = e && e.message ? e.message : String(e || '');
+          ElementPlus.ElMessage.error(message ? `加载参数选项失败: ${message}` : '加载参数选项失败');
+        });
       } else { _initTableRowsCache(meta); editModalVisible.value = true; }
     }
 
@@ -1089,10 +1106,6 @@ const app = createApp({
     }
 
     watch(activeTab, (v) => {
-      if (!FEATURE_SCRIPT_CANVAS && v === 'canvas') {
-        activeTab.value = 'news';
-        return;
-      }
       const map = { daily: '每日任务', weekly: '每周任务', general: '', custom: '自定义任务' };
       window.__TASK_HELP_PREFIX__ = map[v] !== undefined ? map[v] : '';
     }, { immediate: true });
@@ -1141,14 +1154,13 @@ const app = createApp({
       currentTheme,
       setActiveGroup: path => { activeGroupPath.value = path; },
       refreshOverviewPanel,
-      startRun, stopRun, runSingleTask, verifyAccount, resetScheduler,
+      startRun, runSingleTask, verifyAccount, resetScheduler,
       openEditModal, enumParamIsMultiple, saveTask, addListItem, removeListItem,
       isTableParam, getTableRows, getTableColumns, getTableColumnLabel, getTableEnumOptions, tableRowsCache,
       saveTasks, saveSettings, clearLogs, reloadTasks,
       submitAddAccount,
       isElectron, minimizeToTray, navigateTo,
       pendingEditorImportUrl, goToEditorWithImage, onEditorImported,
-      featureScriptCanvas: FEATURE_SCRIPT_CANVAS,
       init,
     };
   },

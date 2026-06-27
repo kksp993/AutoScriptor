@@ -4,19 +4,6 @@ const { spawn, execFileSync } = require('child_process');
 const path = require('path');
 const { StringDecoder } = require('string_decoder');
 
-function forceUtf8Console() {
-  if (process.platform !== 'win32') return;
-  try {
-    execFileSync(
-      'cmd.exe',
-      ['/d', '/s', '/c', 'chcp 65001 >nul'],
-      { stdio: 'ignore', windowsHide: true, timeout: 2000 },
-    );
-  } catch (_) {
-    // The app can still run; this only affects terminal rendering.
-  }
-}
-
 function buildEnv() {
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
@@ -28,13 +15,8 @@ function buildEnv() {
 }
 
 function electronPath() {
-  if (process.platform === 'win32') {
-    return path.join(__dirname, '..', 'node_modules', 'electron', 'dist', 'electron.exe');
-  }
   return require('electron');
 }
-
-forceUtf8Console();
 
 const child = spawn(electronPath(), ['.'], {
   cwd: path.resolve(__dirname, '..'),

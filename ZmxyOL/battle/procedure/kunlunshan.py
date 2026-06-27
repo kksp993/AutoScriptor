@@ -1,9 +1,8 @@
-import traceback
 from threading import Thread
 from time import time
 from AutoScriptor import *
 from ZmxyOL import *
-from ZmxyOL.battle.character.hero import h, combo
+from AutoScriptor.battle_character.hero import h, combo
 from ZmxyOL.nav.api import ensure_in
 from AutoScriptor.utils.logger import logger
 
@@ -58,7 +57,7 @@ def _request_try_exit_with_confirm_guard(max_wait: float = 180, interval: float 
         try:
             confirm_box = first(locate(confirm_target, timeout=0, assure_stable=False))
             if confirm_box is not None:
-                click(B(confirm_box), until=lambda: ui_F(confirm_target), interval=0.5)
+                click(B(confirm_box), until=lambda: ui_F(confirm_target))
                 return
         except Exception as e:
             logger.debug("昆仑山退出确认守护本轮检测失败: %s", e)

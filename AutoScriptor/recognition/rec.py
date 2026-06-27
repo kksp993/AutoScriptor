@@ -1,240 +1,144 @@
-
-import collections
-import os
-import tempfile
-import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-import cv2
-from AutoScriptor.utils.logger import logger
-
 from AutoScriptor.recognition.img_rec import imgOnScreen
 from AutoScriptor.recognition.ocr_rec import ocr
 from AutoScriptor.utils.box import Box
 
 
-
 def locate_on_screen(haystack_frame, targets, confidence=0.8, pf_boxes=None, colors=None):
-    """
-    在屏幕上定位多个目标
-    
-    Args:
-        haystack_frame: 屏幕帧图像
-        targets: 目标列表，可以是图像、文本或Box对象
-        confidence: 置信度阈值
-        pf_boxes: 偏好区域列表
-        colors: 颜色筛选列表
-    
-    Returns:
-        list[None|list[Box]]
-        外层列表长度与targets相同，内层列表长度与targets中每个目标匹配到的区域数量相同
-        当没找到，对应元素返回None
-    """
-    # 1. 分离img和text,并记录位置，方便后续组装list[Box]
     img_targets, text_targets, box_targets = [], [], []
     img_pf_boxes, text_pf_boxes = [], []
     img_colors, text_colors, box_colors = [], [], []
-    idfs = []
+    ids = []
+
     for i, target in enumerate(targets):
         if isinstance(target, str):
             text_targets.append(target)
             text_pf_boxes.append(pf_boxes[i])
             text_colors.append(colors[i])
-            idfs.append("t"+str(len(text_targets)-1))
+            ids.append("t" + str(len(text_targets) - 1))
         elif isinstance(target, Box):
             box_targets.append(target)
             box_colors.append(colors[i] if colors is not None else None)
-            idfs.append("b"+str(len(box_targets)-1))
+            ids.append("b" + str(len(box_targets) - 1))
         else:
             img_targets.append(target)
             img_pf_boxes.append(pf_boxes[i])
             img_colors.append(colors[i])
-            idfs.append("i"+str(len(img_targets)-1))
-    if img_targets and text_targets or box_targets:
+            ids.append("i" + str(len(img_targets) - 1))
+
+    if (img_targets and text_targets) or box_targets:
         img_boxes = locate_on_screen(haystack_frame, img_targets, confidence, img_pf_boxes, img_colors) if img_targets else []
         text_boxes = locate_on_screen(haystack_frame, text_targets, confidence, text_pf_boxes, text_colors) if text_targets else []
-        # 对 Box 目标进行颜色过滤（如果指定了 color），不触发 OCR/图像匹配
         box_boxes = []
-        for j, b in enumerate(box_targets):
-            col = box_colors[j]
-            if col:
-                detected_color = get_box_color(haystack_frame, b)
-                box_boxes.append([b] if detected_color == col else None)
+        for j, box in enumerate(box_targets):
+            color = box_colors[j]
+            if color:
+                detected_color = get_box_color(haystack_frame, box)
+                box_boxes.append([box] if detected_color == color else None)
             else:
-                box_boxes.append([b])
-        boxes = [img_boxes[int(idfs[i][1:])] if idfs[i][0]=="i" else text_boxes[int(idfs[i][1:])] if idfs[i][0]=="t" else box_boxes[int(idfs[i][1:])] for i in range(len(targets))]
-        return boxes
-    
-    # 2. 裁剪ROI
+                box_boxes.append([box])
+        return [
+            img_boxes[int(item[1:])]
+            if item[0] == "i"
+            else text_boxes[int(item[1:])]
+            if item[0] == "t"
+            else box_boxes[int(item[1:])]
+            for item in ids
+        ]
+
     def get_roi(preferred_box):
         if preferred_box:
-            return haystack_frame[preferred_box.top:preferred_box.top + preferred_box.height,
-                                preferred_box.left:preferred_box.left + preferred_box.width]
-        else:
-            return haystack_frame
+            return haystack_frame[
+                preferred_box.top:preferred_box.top + preferred_box.height,
+                preferred_box.left:preferred_box.left + preferred_box.width,
+            ]
+        return haystack_frame
+
     roi_dict = {pf_box: get_roi(pf_box) for pf_box in set(pf_boxes)}
-    # 如果ROI只有一个，则直接使用，否则全图识别再作筛选
-    if len(roi_dict.keys()) == 1:
-        roi = next(iter(roi_dict.values()))
-    else: 
-        roi = haystack_frame
-    # 3. 全图或ROI识别
+    roi = next(iter(roi_dict.values())) if len(roi_dict) == 1 else haystack_frame
+
     if isinstance(targets[0], str):
         from AutoScriptor.utils.app_config import cfg as _cfg
-        try:
-            _scale = float(_cfg["ocr.scale"])
-        except (KeyError, TypeError, ValueError):
-            _scale = 1.0
-        res = ocr(roi, targets, confidence, None, scale=_scale)
-        assert res is not None, "ocr omit None！"
+
+        scale = float(_cfg.get("ocr.scale", 1.0))
+        res = ocr(roi, targets, confidence, None, scale=scale)
+        assert res is not None, "ocr returned None"
     else:
         res = imgOnScreen(roi, targets, confidence=confidence)
-        assert res is not None, "imgOnScreen omit None！"
-    # 4. 筛选
-    # 4.0 调到全图坐标
+        assert res is not None, "imgOnScreen returned None"
+
     def to_full_frame(box, preferred_box):
-        return Box(box.left + preferred_box.left,
-                    box.top + preferred_box.top,
-                    box.width,
-                    box.height)
-    # 只有当用roi扫描才需要恢复全图坐标
-    if len(roi_dict.keys()) == 1:
+        return Box(
+            box.left + preferred_box.left,
+            box.top + preferred_box.top,
+            box.width,
+            box.height,
+        )
+
+    if len(roi_dict) == 1:
         res = [[to_full_frame(box, pf_boxes[i]) for box in res[i]] for i in range(len(targets))]
-    # 4.1 筛选范围,判断是否在对应的prefer_box里
+
     for i, boxes in enumerate(res):
-        for box in boxes:
+        for box in list(boxes):
             if not box.is_in(pf_boxes[i]):
-                res[i].remove(box)
-        if not res[i]: res[i] = None
-        
-    # 4.2 筛选颜色
+                boxes.remove(box)
+        if not boxes:
+            res[i] = None
+
     for i, boxes in enumerate(res):
-        if colors[i] and boxes:   
-            res_color = [get_box_color(haystack_frame, b) for b in boxes]
-            if not colors[i] in res_color: res[i] = None
-            else: res[i] = [res[i][j] for j in range(len(res[i])) if res_color[j] == colors[i]]
+        if colors[i] and boxes:
+            res_color = [get_box_color(haystack_frame, box) for box in boxes]
+            if colors[i] not in res_color:
+                res[i] = None
+            else:
+                res[i] = [boxes[j] for j in range(len(boxes)) if res_color[j] == colors[i]]
 
     return res
 
+
 def get_box_color(haystack_frame, box):
-    """
-    【最终修正版 v2.1】修复了UnboundLocalError变量未定义错误。
-
-    Args:
-        haystack_frame: 屏幕帧图像 (BGR格式)
-        box: Box对象，指定要分析的区域
-
-    Returns:
-        str: 主要颜色名称
-    """
     import cv2
     import numpy as np
 
-    # 1. 裁剪ROI区域
-    roi = haystack_frame[box.top:box.top + box.height, 
-                         box.left:box.left + box.width]
-    
+    roi = haystack_frame[box.top:box.top + box.height, box.left:box.left + box.width]
     if roi.size == 0:
         return "区域无效"
 
-    # 2. 转换为HSV格式
     hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-
-    # 3. 创建遮罩，过滤掉“非彩色”像素
     lower_bound = np.array([0, 50, 50])
     upper_bound = np.array([180, 255, 255])
     mask = cv2.inRange(hsv_roi, lower_bound, upper_bound)
 
-    # 4. 根据是否存在有效像素来决定如何获取HSV值
     if mask.any():
-        # 如果有彩色像素，计算色相直方图
         hist = cv2.calcHist([hsv_roi], [0], mask, [180], [0, 180])
         h_main = np.argmax(hist)
-        
-        # --- FIX: Renamed s_mean/v_mean to s_main/v_main for consistency ---
         s_main = np.mean(hsv_roi[mask > 0][:, 1])
         v_main = np.mean(hsv_roi[mask > 0][:, 2])
-
     else:
-        # 如果没有彩色像素（图像是纯黑/白/灰），则根据平均亮度判断
-        h_main = 0 
+        h_main = 0
         s_main = 0
         v_main = np.mean(hsv_roi[:, :, 2])
 
-    # 5. 根据HSV值获取颜色名称
     def get_hsv_color_name(h_value, s_value, v_value):
         if s_value <= 50:
-            if v_value <= 50: return "黑色"
-            elif v_value <= 220: return "灰色"
-            else: return "白色"
-
-        if (0 <= h_value <= 10) or (156 <= h_value <= 180): return "红色"
-        elif 11 <= h_value <= 25: return "橙色"
-        elif 26 <= h_value <= 34: return "黄色"
-        elif 35 <= h_value <= 77: return "绿色"
-        elif 78 <= h_value <= 99: return "青色"
-        elif 100 <= h_value <= 124: return "蓝色"
-        elif 125 <= h_value <= 155: return "紫色"
-        
+            if v_value <= 50:
+                return "黑色"
+            if v_value <= 220:
+                return "灰色"
+            return "白色"
+        if (0 <= h_value <= 10) or (156 <= h_value <= 180):
+            return "红色"
+        if 11 <= h_value <= 25:
+            return "橙色"
+        if 26 <= h_value <= 34:
+            return "黄色"
+        if 35 <= h_value <= 77:
+            return "绿色"
+        if 78 <= h_value <= 99:
+            return "青色"
+        if 100 <= h_value <= 124:
+            return "蓝色"
+        if 125 <= h_value <= 155:
+            return "紫色"
         return "其他"
 
-    color_name = get_hsv_color_name(h_main, s_main, v_main)
-    return color_name
-
-
-def vlm_locate(haystack_frame, description: str, roi_box: Box = None) -> list[Box] | None:
-    """
-    VLM grounding: use a vision-language model to locate a UI element by description.
-
-    Args:
-        haystack_frame: full screenshot (BGR ndarray)
-        description: natural-language description of the element to find
-        roi_box: optional ROI to crop before sending to VLM
-
-    Returns:
-        list containing one Box on success, or None if not found
-    """
-    if roi_box and roi_box != Box(0, 0, 1280, 720):
-        roi = haystack_frame[roi_box.top:roi_box.top + roi_box.height,
-                             roi_box.left:roi_box.left + roi_box.width]
-        offset_x, offset_y = roi_box.left, roi_box.top
-    else:
-        roi = haystack_frame
-        offset_x, offset_y = 0, 0
-
-    tmp_path = os.path.join(tempfile.gettempdir(), "_vlm_locate.png")
-    cv2.imwrite(tmp_path, roi)
-
-    try:
-        from AutoScriptor.vlm.vlm import VLMClient
-
-        _vlm_locate._agent = getattr(_vlm_locate, "_agent", None)
-        if _vlm_locate._agent is None:
-            _vlm_locate._agent = VLMClient()
-
-        h, w = roi.shape[:2]
-        result = _vlm_locate._agent.ground(description, tmp_path, width=w, height=h)
-        if result is None:
-            logger.warning("VLM grounding '%s' returned no result", description)
-            return None
-        px, py = result
-        abs_x, abs_y = px + offset_x, py + offset_y
-        half = 15
-        box = Box(max(abs_x - half, 0), max(abs_y - half, 0), half * 2, half * 2)
-        logger.info("VLM grounding '%s' → (%d, %d)", description, abs_x, abs_y)
-        return [box]
-    except Exception as e:
-        logger.warning("VLM grounding '%s' failed: %s", description, e)
-        return None
-
-
-# ── register-dispatch: 挂载 VLMTarget locate handler ──
-
-from AutoScriptor.core.locate_dispatch import register_locator
-from AutoScriptor.core.targets import VLMTarget
-
-
-@register_locator(VLMTarget)
-def _locate_vlm(target: VLMTarget, frame, **_kw):
-    """VLMTarget dispatch handler — 转发到 vlm_locate。"""
-    return vlm_locate(frame, target.description, target.box)
+    return get_hsv_color_name(h_main, s_main, v_main)

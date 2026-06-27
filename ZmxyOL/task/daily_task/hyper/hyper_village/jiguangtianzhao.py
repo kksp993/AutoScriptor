@@ -1,7 +1,5 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
 
 @register_task
 def task():
@@ -17,13 +15,3 @@ def task():
     wait_for_appear(I("青莲炎"))
     click(B(60,605,30,30))
     ensure_in("极北村庄")
-
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

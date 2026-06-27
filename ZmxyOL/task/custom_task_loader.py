@@ -1,11 +1,10 @@
-"""从 data 侧 custom_task/ 目录动态加载用户 Python 任务（Nuitka 与开发模式通用）。"""
+"""从 data 侧 custom_task/ 目录动态加载用户 Python 任务。"""
 
 from __future__ import annotations
 
 import hashlib
 import importlib.util
 import sys
-from pathlib import Path
 
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.paths import get_custom_task_dir

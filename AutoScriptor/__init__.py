@@ -33,12 +33,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "B": ("AutoScriptor.core.targets", "B"),
     "I": ("AutoScriptor.core.targets", "I"),
     "T": ("AutoScriptor.core.targets", "T"),
-    "V": ("AutoScriptor.core.targets", "V"),
     "ui": ("AutoScriptor.utils.ui_map", "ui"),
     # utils
     "cfg": ("AutoScriptor.utils.app_config", "cfg"),
     "log_flush": ("AutoScriptor.utils.logger", "log_flush"),
-    "perf_boost": ("AutoScriptor.utils.perf", "boost"),
     "make_box_grid": ("AutoScriptor.utils.box_grid", "make_box_grid"),
     "indexof": ("AutoScriptor.utils.box_grid", "indexof"),
     "get_task_status": ("AutoScriptor.utils.task_state", "get_task_status"),
@@ -47,8 +45,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "bg": ("AutoScriptor.core.background", "bg"),
     "BG_SIGNALS": ("AutoScriptor.core.background", "BG_SIGNALS"),
     "BgSignals": ("AutoScriptor.core.background", "BgSignals"),
-    "set_config": ("AutoScriptor.crypto.update_config", "set_config"),
-    "verify_config": ("AutoScriptor.crypto.update_config", "verify_config"),
 }
 
 
@@ -58,7 +54,6 @@ for _name in [
     "locate",
     "input",
     "get_colors",
-    "edit_img",
     "swipe",
     "ui_T",
     "ui_F",
@@ -96,7 +91,6 @@ __all__ = [
     "B",
     "I",
     "T",
-    "V",
     # utils
     "cfg",
     "log_flush",
@@ -110,7 +104,6 @@ __all__ = [
     "locate",
     "input",
     "get_colors",
-    "edit_img",
     "swipe",
     "ui_T",
     "ui_F",
@@ -134,11 +127,8 @@ __all__ = [
     "BgSignals",
     "mixctrl",
     "mumu",
-    "set_config",
-    "verify_config",
     "RequestHumanTakeover",
     "TaskRequireReTry",
-    "perf_boost",
     *_ERROR_EXPORTS,
 ]
 

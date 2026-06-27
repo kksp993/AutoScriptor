@@ -207,6 +207,7 @@ def _handle_post_login_popups():
 def _select_character():
     """在角色选择页进入游戏；服务器与角色名仅来自已加载的 cfg['game']（Web 验证或 load_config 已写入），此处不解析、不触发解密。"""
     click(T("开心收下"), if_exist=True, timeout=3)
+    click(B(805,209,35,35))
     click(B(640, 575), if_exist=True)
 
     g = cfg["game"]
@@ -341,6 +342,7 @@ def ensure_server(server_name:str):
         wait_for_appear(T("更换服务器", box=Box(532,110,217,38).margin()))
         while ui_F(T(server_name)):
             swipe(B(482,494), B(482,224))
+            sleep(0.5)
         click(T(server_name))
         cnt = 0
         while cnt < 10:

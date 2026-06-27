@@ -16,6 +16,7 @@ def task(redeem_code: str | list[str] = "1111"):
     sleep(1)
     while ui_F(T("兑换豪礼", box=Box(600, 110, 260, 120).margin()), 1):
         swipe(B(1030, 160, 1, 1), B(260, 160, 1, 1), duration_s=1)
+        sleep(0.5)
     result = "未识别"
     for code in redeem_codes:
         click(T("兑换豪礼", box=Box(600, 110, 260, 120).margin()))

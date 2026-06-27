@@ -9,9 +9,9 @@ Old Cursor-only `.mdc` files were reviewed and either migrated into shared skill
 | `task-registry.mdc` | Migrated to `docs/agents/skill-references/architecture-lifecycle.md`. |
 | `refactor-docs.mdc` | Migrated to `docs/agents/skill-references/architecture-lifecycle.md`. |
 | `perf_optimize.mdc` | Migrated to `docs/agents/skill-references/architecture-lifecycle.md`. |
-| `webui.mdc` | Migrated to `docs/agents/skill-references/webui-release-news.md`. |
-| `sourcemap-publish-security.mdc` | Release security content migrated to `webui-release-news.md`; unrelated CLI-agent design memo dropped. |
-| `news-4399.mdc` | Migrated to `webui-release-news.md`. |
+| `webui.mdc` | Migrated to `docs/agents/skill-references/webui-electron-news.md`. |
+| `sourcemap-publish-security.mdc` | WebUI/news maintenance guidance migrated to `webui-electron-news.md`; unrelated command-agent design memo dropped. |
+| `news-4399.mdc` | Migrated to `webui-electron-news.md`. |
 | `register.mdc` | Migrated as a conditional pattern in `task-authoring-style.md`. |
 | `autoschedule.mdc` | Migrated as style guidance in `task-authoring-style.md`, softened from absolute rule to judgment-based guidance. |
 | `web-search-fallback.mdc` | Not migrated as project skill content; superseded by agent-level browsing/search policy and `docs/agents/project-rules.md` local-evidence guidance. |

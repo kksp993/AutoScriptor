@@ -1,7 +1,6 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
+
 
 @register_task
 def daily_fxiang_task():
@@ -17,7 +16,9 @@ def daily_fxiang_task():
     click(B(500,300,300,200))
     sleep(1)
     click(B(727,432,135,79))
-    while ui_F(T("合成")):click(B(20,20,30,30))
+    while ui_F(T("合成")):
+        click(B(20,20,30,30))
+        sleep(0.5)
     click(T("遗迹"))
     click(T("魔神遗迹"))
     wait_for_appear(T("魔神遗迹"))
@@ -27,15 +28,7 @@ def daily_fxiang_task():
     click(B(500,300,300,200))
     sleep(1)
     click(B(727,432,135,79))
-    while ui_F(T("合成")):click(B(20,20,30,30))
+    while ui_F(T("合成")):
+        click(B(20,20,30,30))
+        sleep(0.5)
     click(B(1200,30,30,30))
-
-
-if __name__ == "__main__":
-    try:
-         daily_fxiang_task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

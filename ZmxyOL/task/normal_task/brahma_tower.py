@@ -1,5 +1,4 @@
 from enum import Enum
-import traceback
 
 from numpy import arange
 from AutoScriptor.utils import box
@@ -19,7 +18,7 @@ class FFT_preference(Enum):
 def battle():
     bg.set_signal("short_cut", False)
     wait_for_disappear(I("加载中"))
-    from ZmxyOL.battle.character.hero import h
+    from AutoScriptor.battle_character.hero import h
     sleep(0.5)
     with bg.scope("梵天塔") as scope:
         scope.add(
@@ -63,6 +62,7 @@ def FTT_battle_one_round(preference:list[FFT_preference], conquer_TianMo:bool):
 def FTT_TianMo():
     while ui_F(T("天魔禁忌",box=Box(732,342,77,27))):
         click(B(94,623,2,3))
+        sleep(0.5)
     sleep(0.5)
     click(I("梵天塔-天魔挑战"))
     battle()
@@ -87,6 +87,8 @@ def fanTianTa(
         click(B(30,30,30,30))
     click(T(difficulty.value),offset=(0,100))
     sleep(3)
+    if ui_T(T("入劫", box=Box(597,430,87,38).margin())):
+        click(B(931,134,43,50))
     for _ in range(battle_times):
         FTT_battle_one_round(preference, conquer_TianMo)
         sleep(3)
@@ -95,19 +97,3 @@ def fanTianTa(
     click(B(30,30,30,30))
     sleep(1)
     click(B(30,30,30,30))
-
-
-
-if __name__ == "__main__":
-    try:
-        fanTianTa(
-            battle_times=50, 
-            difficulty=FFT_difficulty.now, 
-            preference=(FFT_preference.yellow,),
-            conquer_TianMo=False
-        )
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

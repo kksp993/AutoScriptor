@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""造梦西游 OL 包名解析：在 app_to_start 为空或未安装时按顺序匹配已安装包，并写回 config.json。"""
+"""造梦西游 OL 包名解析：在 app_to_start 为空或未安装时按顺序匹配已安装包，并写回 data/config.json。"""
 from __future__ import annotations
 
 import os
@@ -81,7 +81,7 @@ def resolve_app_to_start(mumu, cancel_check: Callable[[], None] | None = None) -
     根据 cfg['app']['app_to_start'] 与已安装应用解析最终包名。
     - 未填写或仅空白：按 ZMXY_PACKAGE_FALLBACK_ORDER 依次匹配。
     - 已填写：优先该包名；若未安装则继续按上述顺序匹配。
-    解析结果与配置不一致时写入 config.json。
+    解析结果与配置不一致时写入 data/config.json。
     """
     from AutoScriptor.utils.app_config import cfg
 

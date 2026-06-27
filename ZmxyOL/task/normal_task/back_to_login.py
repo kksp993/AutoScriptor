@@ -1,4 +1,3 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
 

@@ -3,11 +3,8 @@
 --prefer-binary
 adbutils==1.2.15
 numpy>=1.24.4,<2.0.0
-pandas
 opencv-python
-questionary==2.1.0
 pure-python-adb==0.3.0.dev0
-prompt_toolkit<3.0.0
 pillow>=10.0.0
 loguru>=0.7.0
 rich>=13.0.0
@@ -22,20 +19,17 @@ mkl>=2023.0.0
 colormath
 uiautomator2==2.16.17
 uiautomator2cache==0.3.1
-bsdiff4
 astor>=0.8.1
 # jax==0.4.27
 # jaxlib == 0.4.27
 fastapi
-# Form / UploadFile 必装；pip 包名 python-multipart，import 名为 multipart（另有 python_multipart；Nuitka 见 build_release --include-module）
+# Form / UploadFile support. pip package: python-multipart; import name: multipart.
 python-multipart>=0.0.9
 multipart
 uvicorn[standard]
 websockets
 dpath
-openai
 requests
-bsdiff4>=1.2.0
 lxml
 pyyaml
 pywebio

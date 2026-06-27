@@ -1,9 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from collections.abc import Sequence
 
 from AutoScriptor import *
-from ZmxyOL.battle.character.hero import *
+from AutoScriptor.battle_character.hero import *
 
 # 灵气优先级默认顺序（与 LingQi 枚举一致）；fallback 选关时序号越小越优先
 DEFAULT_LINGQI_PRIORITY_VALUES: tuple[str, ...] = ("金", "木", "水", "火", "土", "雷", "月", "时", "天")

@@ -1,4 +1,4 @@
-/** 与 webapp/package.json version 保持同步（发行构建时一并发布） */
+/** 与 webapp/package.json version 保持同步。 */
 const APP_DISPLAY_VERSION = '1.0.3';
 
 const AboutPanel = {

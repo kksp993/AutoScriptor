@@ -1,7 +1,6 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
+
 
 def buy(item):
     item_box = locate(T(item), timeout=10)
@@ -51,30 +50,3 @@ def task():
 
     sleep(1)
     click(B(1200,30,30,30))
-
-if __name__ == "__main__":
-    try:
-        task()
-        # swipe(B(640,600),B(640,300),duration_s=1)
-        # swipe(B(640,600),B(640,300),duration_s=1)
-        # swipe(B(640,600),B(640,300),duration_s=1)
-        # swipe(B(640,600),B(640,300),duration_s=1)
-        # swipe(B(640,300),B(640,600),duration_s=1)
-        # swipe(B(640,300),B(640,600),duration_s=1)
-        # swipe(B(640,300),B(640,600),duration_s=1)
-        # swipe(B(640,300),B(640,600),duration_s=1)
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)
-
-
-
-
-
-
-
-
-
-

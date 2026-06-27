@@ -5,7 +5,7 @@
 | 文档 | 内容 |
 |------|------|
 | [scheduler.md](scheduler.md) | 任务注册、跨角色调度、retry、人工接管、progress、WebUI 状态投影 |
-| [perf.md](perf.md) | Windows 性能优化、boost/unboost、MuMu subprocess 边界、CPU 亲和性 |
+| [perf.md](perf.md) | 源码运行的主机性能策略边界和已移除的 boost 行为 |
 
 ## 快速判断任务为什么没执行
 

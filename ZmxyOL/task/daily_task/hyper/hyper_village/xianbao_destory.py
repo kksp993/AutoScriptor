@@ -1,12 +1,7 @@
-import traceback
-
-from numpy import isin
 
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import RequestHumanTakeover
-from AutoScriptor.utils import box
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
 
 def destory_item():
     click((I("A"), I("B")))
@@ -57,19 +52,5 @@ def lianqishi_destory():
         else:
             make_more_for_destory(remains*2)
     click(B(890,50,30,30))
-
-
-if __name__ == "__main__":
-    try:
-        # lianqishi_destory()
-        for i in range(5):
-            ensure_in("法相")
-            ensure_in("炼器师")
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)
-
 
 

@@ -1,7 +1,7 @@
 """Task tree projection, persistence sanitizing and summaries for WebUI.
 
 Storage remains split as:
-- global config.json for shared app settings;
+- data/config.json for shared app settings;
 - data/accounts/{account}.json for encrypted account data, dispatch queue and
   per-character tasks/status.
 
@@ -14,6 +14,7 @@ from copy import deepcopy
 from typing import Any
 
 import dpath
+from dpath.exceptions import PathNotFound
 
 from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.game_profession import GAME_PROFESSIONS, normalize_game_profession
@@ -63,7 +64,7 @@ class TaskTreeService:
         ]:
             try:
                 dpath.delete(config_data, pattern)
-            except Exception:
+            except PathNotFound:
                 pass
         tasks = config_data.get("tasks")
         if isinstance(tasks, dict):

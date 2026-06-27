@@ -167,16 +167,6 @@ def import_device_facade_for_test():
     autoscriptor.__path__ = [str(ROOT / "AutoScriptor")]
     utils_pkg = types.ModuleType("AutoScriptor.utils")
     utils_pkg.__path__ = [str(ROOT / "AutoScriptor" / "utils")]
-    perf = types.ModuleType("AutoScriptor.utils.perf")
-
-    class DummySafeSubprocess:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-    perf.mumu_safe_subprocess = lambda: DummySafeSubprocess()
 
     module_name = "device_facade_under_test"
     spec = importlib.util.spec_from_file_location(
@@ -187,7 +177,6 @@ def import_device_facade_for_test():
     with patch.dict(sys.modules, {
         "AutoScriptor": autoscriptor,
         "AutoScriptor.utils": utils_pkg,
-        "AutoScriptor.utils.perf": perf,
     }):
         assert spec.loader is not None
         spec.loader.exec_module(module)
@@ -217,7 +206,6 @@ def import_api_for_test():
     constant.AndroidKey = SimpleNamespace()
     control_mod = mod("AutoScriptor.core.control")
     targets = mod("AutoScriptor.core.targets")
-    locate_dispatch = mod("AutoScriptor.core.locate_dispatch")
     ocr_rec = mod("AutoScriptor.recognition.ocr_rec")
     rec = mod("AutoScriptor.recognition.rec")
     box = mod("AutoScriptor.utils.box")
@@ -225,10 +213,8 @@ def import_api_for_test():
     app_config = mod("AutoScriptor.utils.app_config")
     app_resolve = mod("AutoScriptor.utils.app_package_resolve")
     mumu_mod = mod("AutoScriptor.control.MumuAdaptor.mumu")
-    edit_img = mod("AutoScriptor.utils.edit_img")
     cancel = mod("AutoScriptor.utils.cancel")
     tracer = mod("AutoScriptor.utils.tracer")
-    perf = mod("AutoScriptor.utils.perf")
 
     class Target:
         pass
@@ -285,29 +271,23 @@ def import_api_for_test():
     targets.ImageTarget = type("ImageTarget", (Target,), {})
     targets.TextTarget = type("TextTarget", (Target,), {})
     targets.BoxTarget = type("BoxTarget", (Target,), {"box": None})
-    targets.VLMTarget = type("VLMTarget", (Target,), {})
     control_mod.MixControl = FakeMixControl
-    locate_dispatch.has_handler = lambda typ: False
-    locate_dispatch.dispatch_locate = lambda target, frame: None
     ocr_rec.ocr_for_box = lambda *args, **kwargs: None
     rec.get_box_color = lambda *args, **kwargs: None
     box.Box = Box
     box.b2p = lambda *args, **kwargs: (0, 0)
     logger.logger = logger_stub()
-    logger.setup_task_aware_logging = lambda: None
     logger.setup_logfile = lambda *args, **kwargs: None
     tracer.save_debug_screenshot = lambda *args, **kwargs: None
     app_config.cfg = {
         "emulator": {"emu_path": "mumu.exe", "index": 2, "adb_addr": "addr"},
         "app": {
             "app_to_start": "pkg",
-            "auto_start": False,
             "run_in_background": False,
         },
     }
     app_resolve.resolve_app_to_start = lambda mumu, cancel_check=None: "resolved.pkg"
     mumu_mod.Mumu = FakeMumu
-    edit_img.launch_editor = lambda *args, **kwargs: None
     cancel.check_cancel_raise = lambda: None
     cancel.cancellable_sleep = lambda seconds, chunk=0.05: None
 
@@ -322,7 +302,6 @@ def import_api_for_test():
     cancel.sleep_with_cancel = lambda seconds, cancel_check=None, chunk=0.05: (
         cancel_check() if cancel_check else None
     )
-    perf.unboost = lambda: None
     cv2_stub.__version__ = "test"
 
     with patch.dict(sys.modules, modules):
@@ -405,6 +384,35 @@ class TestMuMuPowerLifecycle(unittest.TestCase):
 
         self.assertTrue(module.Power(utils).is_running())
         self.assertEqual(utils.commands, [("info", [])])
+
+    def test_start_waits_for_android_after_launch_command_succeeds(self):
+        module = import_power_for_test()
+        ready_checks = []
+
+        class FakeUtils:
+            def __init__(self):
+                self.commands = []
+
+            def get_vm_id(self):
+                return "1"
+
+            def set_operate(self, operate):
+                self.operate = operate
+
+            def run_command(self, args):
+                self.commands.append((self.operate, args))
+                return 0, "launch accepted"
+
+        def ready():
+            ready_checks.append(True)
+            return len(ready_checks) >= 2
+
+        utils = FakeUtils()
+        module.test_facade.adb_device_ready = ready
+
+        self.assertTrue(module.Power(utils).start(cancel_check=lambda: None))
+        self.assertEqual(utils.commands, [("control", ["launch"])])
+        self.assertEqual(len(ready_checks), 2)
 
 
 class TestMuMuAppLifecycle(unittest.TestCase):
@@ -734,7 +742,7 @@ class TestDeviceFacadeDiagnostics(unittest.TestCase):
 
 
 class TestEnsureAppRunningLifecycle(unittest.TestCase):
-    def test_execution_start_ignores_legacy_auto_start_false(self):
+    def test_execution_start_uses_explicit_device_flags(self):
         module = import_api_for_test()
 
         with patch.dict(sys.modules, module.stub_modules):

@@ -1,4 +1,3 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
@@ -34,12 +33,3 @@ def upgrade_pet():
     click(T("微型宠物经验药水"))
     click(B(1220,30,30,30))
     click(I("菜单"), delay=0.5)
-
-if __name__ == "__main__":
-    try:
-        upgrade_pet()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

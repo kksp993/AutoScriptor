@@ -55,8 +55,7 @@ class TestTaskDebugMode(unittest.TestCase):
         with patch.object(tm_mod.runtime_ctx, "mixctrl", mixctrl):
             with patch.object(tm, "_archive_error") as archive_error:
                 with patch.object(tm, "_try_recover_app") as recover_app:
-                    with patch.object(tm_mod.traceback, "print_exc"):
-                        self.assertFalse(tm._execute_single_task("测试/任务"))
+                    self.assertFalse(tm._execute_single_task("测试/任务"))
 
         archive_error.assert_called_once()
         recover_app.assert_not_called()
@@ -83,16 +82,16 @@ class TestTaskDebugMode(unittest.TestCase):
         sched = Scheduler()
         sched.set_task_manager(tm)
 
-        with patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}):
-            with patch.object(cfg, "save_config"):
-                with patch("services.core.scheduler.runtime_ctx.refresh"):
-                    with patch("AutoScriptor.utils.perf.boost"):
-                        with patch("AutoScriptor.utils.perf.unboost"):
-                            with patch("services.core.scheduler.notify_from_config"):
-                                with patch.object(sched, "_maybe_daily_restart") as daily_restart:
-                                    with patch.object(sched, "_ensure_character_logged_in") as ensure_login:
-                                        with patch.object(sched, "_post_execution_action") as post_action:
-                                            sched._run_task_pipeline(explicit_tasks=["测试/任务"])
+        with (
+            patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}),
+            patch.object(cfg, "save_config"),
+            patch("services.core.scheduler.runtime_ctx.refresh"),
+            patch("services.core.scheduler.notify_from_config"),
+            patch.object(sched, "_maybe_daily_restart") as daily_restart,
+            patch.object(sched, "_ensure_character_logged_in") as ensure_login,
+            patch.object(sched, "_post_execution_action") as post_action,
+        ):
+            sched._run_task_pipeline(explicit_tasks=["测试/任务"])
 
         self.assertEqual(tm.executed, ["测试/任务"])
         daily_restart.assert_not_called()
@@ -124,20 +123,20 @@ class TestTaskDebugMode(unittest.TestCase):
         sched.set_task_manager(tm)
         overrides = {"测试/任务": {"redeem_code": "临时代码"}}
 
-        with patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}):
-            with patch.object(cfg, "save_config"):
-                with patch("services.core.scheduler.runtime_ctx.refresh"):
-                    with patch("AutoScriptor.utils.perf.boost"):
-                        with patch("AutoScriptor.utils.perf.unboost"):
-                            with patch("services.core.scheduler.notify_from_config"):
-                                with patch.object(sched, "_maybe_daily_restart") as daily_restart:
-                                    with patch.object(sched, "_ensure_character_logged_in") as ensure_login:
-                                        with patch.object(sched, "_post_execution_action") as post_action:
-                                            sched._run_task_pipeline(
-                                                explicit_tasks=["测试/任务"],
-                                                force_login=True,
-                                                param_overrides=overrides,
-                                            )
+        with (
+            patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}),
+            patch.object(cfg, "save_config"),
+            patch("services.core.scheduler.runtime_ctx.refresh"),
+            patch("services.core.scheduler.notify_from_config"),
+            patch.object(sched, "_maybe_daily_restart") as daily_restart,
+            patch.object(sched, "_ensure_character_logged_in") as ensure_login,
+            patch.object(sched, "_post_execution_action") as post_action,
+        ):
+            sched._run_task_pipeline(
+                explicit_tasks=["测试/任务"],
+                force_login=True,
+                param_overrides=overrides,
+            )
 
         self.assertEqual(tm.calls, [(["测试/任务"], overrides)])
         daily_restart.assert_not_called()
@@ -172,16 +171,16 @@ class TestTaskDebugMode(unittest.TestCase):
             {"id": "code-2", "task": "测试/任务", "params": {"redeem_code": "B"}},
         ]
 
-        with patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}):
-            with patch.object(cfg, "save_config"):
-                with patch("services.core.scheduler.runtime_ctx.refresh"):
-                    with patch("AutoScriptor.utils.perf.boost"):
-                        with patch("AutoScriptor.utils.perf.unboost"):
-                            with patch("services.core.scheduler.notify_from_config"):
-                                with patch.object(sched, "_maybe_daily_restart"):
-                                    with patch.object(sched, "_ensure_character_logged_in"):
-                                        with patch.object(sched, "_post_execution_action"):
-                                            sched.run_direct_sequence(runs, force_login=True)
+        with (
+            patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}),
+            patch.object(cfg, "save_config"),
+            patch("services.core.scheduler.runtime_ctx.refresh"),
+            patch("services.core.scheduler.notify_from_config"),
+            patch.object(sched, "_maybe_daily_restart"),
+            patch.object(sched, "_ensure_character_logged_in"),
+            patch.object(sched, "_post_execution_action"),
+        ):
+            sched.run_direct_sequence(runs, force_login=True)
 
         self.assertEqual(tm.calls, [
             (["测试/任务"], {"测试/任务": {"redeem_code": "A"}}),

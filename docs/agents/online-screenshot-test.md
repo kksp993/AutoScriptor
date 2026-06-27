@@ -4,7 +4,7 @@ When the user asks to "截张图测一下", "在线测一下", "拿当前页面�
 
 ## Workflow
 
-1. Capture one live screenshot first, save it under the current logs root with a timestamp (`logs/` in source mode; `data/logs/` in packaged runtime), and reuse that exact frame for all locate/OCR/extract calls in the test. Do not mix multiple implicit screenshots unless the test is explicitly about UI transitions.
+1. Capture one live screenshot first, save it under the current logs root with a timestamp (`logs/` in source mode), and reuse that exact frame for all locate/OCR/extract calls in the test. Do not mix multiple implicit screenshots unless the test is explicitly about UI transitions.
 2. Use `.venv\Scripts\python.exe`. In PowerShell, prefer UTF-8 output with `$env:PYTHONIOENCODING='utf-8'` or `python -X utf8`.
 3. Put temporary test scripts, crops, overlays, and result JSON/text in a new `<logs-root>/<topic>_<timestamp>/` folder unless the user asks to modify source. Do not change production code for a pure online test.
 4. Record screenshot size and coordinate convention before interpreting boxes. Confirm whether `Box` means `(x, y, w, h)` or `(x1, y1, x2, y2)` in the current helper.

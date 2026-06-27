@@ -112,3 +112,17 @@ for dst_loc in available_dst_locs:
         path(src_loc, dst_loc)(partial(way, dst_loc=dst_loc))
     path("荒古万界", dst_loc)(partial(way, dst_loc=dst_loc))
     path(dst_loc, "荒古万界")(lambda: mm.set_loc(mm.get_region()[0]))
+
+
+"=======================    荒古村庄    ======================="
+@path(LOC_ENV, "荒古村庄")
+def way():
+    click(T("回家", box=Box(29,613,77,88).margin()))
+    mm.set_loc("荒古村庄")
+
+def way(env_name: str):
+    click(I("导航-世界地图"), until=lambda: ui_T(I("世界地图-极北")))
+    mm.paths["世界地图", env_name]()
+
+for env_name in SHIJIEDITU_CANTO:
+    path("荒古村庄", env_name)(partial(way, env_name=env_name))

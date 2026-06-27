@@ -1,4 +1,3 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
@@ -37,14 +36,4 @@ def task():
     click(T("使用",color="红色"), if_exist=True, delay=0.5, timeout=2)
     sleep(3)
     ensure_in(LOC_ENV)
-
-if __name__ == "__main__":
-    try:
-        task()
-        # buy_item("至尊成长礼包")
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)
 

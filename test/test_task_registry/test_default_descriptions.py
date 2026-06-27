@@ -31,7 +31,6 @@ class TestDefaultTaskDescriptions(unittest.TestCase):
             "custom_task_loader.py",
             "default_descriptions.py",
             "task_register.py",
-            "template.py",
             "translations.py",
         }
         registered_paths = []

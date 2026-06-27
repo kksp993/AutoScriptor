@@ -1,10 +1,9 @@
-import traceback
-
 from ZmxyOL.nav.api import locate_region
 from ZmxyOL.nav.envs.decorators import HAS_SHEZHI
 from ZmxyOL import *
 from AutoScriptor import *
-from ZmxyOL.battle.character.hero import h
+from AutoScriptor.battle_character.hero import h
+
 
 @register_task
 def task(clear_all=False, lianbao=False):
@@ -30,17 +29,7 @@ def task(clear_all=False, lianbao=False):
         click(B(*tgt))
         sleep(2)
         click(T("确定"), if_exist=True)
-    # TODO: 这里有概率T("空间任务")检测不到，看看跳到哪个界面了优化下
+    # TODO: 这里有概率 T("空间任务") 检测不到，看看跳到哪个界面了优化下
     click(B(50,30,30,30),until=lambda: ui_T(T("空间任务")))
     click(T("回家"))
     locate_region()
-
-
-if __name__ == "__main__":
-    try:
-        task(clear_all=True, lianbao=True)
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

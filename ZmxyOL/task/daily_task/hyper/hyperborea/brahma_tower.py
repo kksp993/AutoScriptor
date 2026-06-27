@@ -1,12 +1,12 @@
-import traceback
 from time import time
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
 
+
 def battle():
     wait_for_disappear(I("加载中"))
-    from ZmxyOL.battle.character.hero import h
+    from AutoScriptor.battle_character.hero import h
     sleep(0.5)
     h.skill(4, 0.95)
     h.zhenling()
@@ -33,6 +33,7 @@ def battle():
             cnt += 1
     click(T("确认"))
     wait_for_disappear(I("加载中"))
+
 
 def FTT_battle_one_round():
     final = False
@@ -67,6 +68,8 @@ def fanTianTa(
         click(B(30,30,30,30))
     click(T("现在"),offset=(0,100))
     sleep(3)
+    if ui_T(T("入劫", box=Box(597,430,87,38).margin())):
+        click(B(931,134,43,50))
     click(T("确认"), if_exist=True)
     sleep(1)
     for _ in range(battle_times):
@@ -86,14 +89,3 @@ def fanTianTa(
     click(B(30,30,30,30))
     sleep(1)
     click(B(30,30,30,30))
-
-
-
-if __name__ == "__main__":
-    try:
-        fanTianTa()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

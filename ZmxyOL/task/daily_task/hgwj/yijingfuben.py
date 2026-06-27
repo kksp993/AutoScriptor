@@ -1,5 +1,4 @@
 import enum
-import traceback
 
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.table_param import TableParam
@@ -7,7 +6,7 @@ from AutoScriptor.utils.table_param import TableParam
 from ZmxyOL.nav.api import locate_region
 from ZmxyOL import *
 from AutoScriptor import *
-from ZmxyOL.battle.character.hero import h
+from AutoScriptor.battle_character.hero import h
 
 
 class YijingNandu(str, enum.Enum):
@@ -81,15 +80,5 @@ def task(
             h.set(has_cd=True, speed_x=3).battle_task(
                 crash_suddenly=True, bonus_x=bonus_x,
                 cancel_on_failed=cancel_on_failed, flow_name=flow_name,
+                check_pioneer=True,
             )
-        
-
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

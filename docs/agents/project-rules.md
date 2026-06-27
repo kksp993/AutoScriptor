@@ -15,61 +15,82 @@ When rules conflict, prefer the most specific project rule, then the tool's syst
 
 Use this workflow for bug fixes, anomalies, regressions, and project improvements:
 
-1. Locate the failing layer: install/update, WebUI/frontend, backend service, scheduler, AutoScriptor core execution, task authoring, recognition/OCR, config/account/status, or packaging.
-2. Trace the lifecycle end to end: initialization, registration, runtime state, persistence, reload, retry/error path, cleanup, API payload, and UI projection.
-3. Check local evidence first: `rg`, nearby tests, docs, and git history for touched files when the area is subtle or recently changed.
-4. Identify the violated assumption before editing.
-5. Make the smallest targeted fix using existing APIs and local patterns. Avoid new abstractions unless they remove real complexity.
-6. Validate with focused tests or a reproducible probe. Check normal path, edge path, and lifecycle side effects.
-7. Audit `docs/AutoScriptor/` for every behavior/API/lifecycle/state/packaging change. Use `docs/AutoScriptor/README.md` as the map, check every affected functional domain, then update shared agent rules or skills when the change teaches a reusable rule or workflow.
+1. Record failures or stale evidence first, then fix and rerun.
+2. Locate the failing layer: source startup, WebUI/frontend, backend service, scheduler, AutoScriptor core execution, task authoring, recognition/OCR, config/account/status, or update state.
+3. Trace the lifecycle end to end: initialization, registration, runtime state, persistence, reload, retry/error path, cleanup, API payload, and UI projection.
+4. Check local evidence first: `rg`, nearby tests, docs, and git history for touched files when the area is subtle or recently changed.
+5. Identify the violated assumption before editing.
+6. Make the smallest targeted fix using existing APIs and local patterns. Avoid new abstractions unless they remove real complexity.
+7. Validate with focused tests or a reproducible probe. Check normal path, edge path, and lifecycle side effects.
+8. Audit `docs/AutoScriptor/` for every behavior/API/lifecycle/state change. Use `docs/AutoScriptor/README.md` as the map, check every affected functional domain, then update shared agent rules or skill references when the change teaches a reusable rule or workflow.
 
 Avoid permanent state traps such as "once marked, never runs again" unless explicitly intended.
+For exception handling, fail precisely in install/run/update/config/security/path code. Runtime device/OCR/task boundaries may catch and record operational failures, and error archive/log cleanup may protect the original error, but do not add broad fallback paths that hide programming errors or resurrect removed product surfaces.
+WebUI dynamic option/status probes must return visible API errors when imports, enum classes, config reads, or Paddle/OCR probes fail; do not synthesize empty lists, `false`, `0`, or `unknown` to make panels appear healthy.
 
-## Release Workflow Discipline
+## Source Workflow Discipline
 
-Before every release build, package generation, or update-package validation, perform a fresh packaging preflight. Do not assume the last build's package-surface decision still applies.
+The `src` branch is source-run only. The durable user paths are:
 
-- Read the release skills and docs first: `autoscriptor-install-deployment-release`, `autoscriptor-packaging-content-config`, `windows-powershell-command-hygiene`, `docs/AutoScriptor/release/build-and-run.md`, `docs/AutoScriptor/release/nuitka-reference.md`, and `docs/AutoScriptor/release/vm-acceptance.md`.
-- Classify the current diff into backend/runtime/task logic, WebUI/Electron static files, runtime external assets, data/docs content, installer/update-contract changes, and dependency/Nuitka/bootstrap changes. The classification determines whether `--skip-nuitka`, full Nuitka, full Electron, and same-line update zip are valid.
-- When a packaged build or smoke test exposes a new class of failure, pause and update the relevant docs plus skill references before retrying. The goal is to prevent the same pitfall from becoming another ad hoc terminal session.
-- VM install/update acceptance is a release gate, not a follow-up. Before pushing a release commit/tag to GitHub, publishing artifacts, or saying the release is complete, restore/use the clean VM, run the required full installer acceptance and same-line update acceptance, collect the report JSON/logs, and confirm the generated artifacts passed. If VM acceptance is not complete, report only "artifacts built, release not published/accepted" and stop before any public push or tag.
-- An interrupted build, a build without packaged runtime import smoke, or a package without VM install/update acceptance is not a releasable artifact and must not be reported as accepted or published.
-- When the user asks to verify the real installer UI, run the portable installer in the VM through GUI interaction, not the headless PowerShell install path. Use VirtualBox keyboard/mouse injection plus screenshots, then verify the resulting install tree, `install.json`, launcher behavior, and WebUI health with collected evidence before release.
-- If a portable installer launched from `\\VBOXSVR\release` or the mapped shared drive exits without showing the Electron window, copy the exe to a local guest path such as `%USERPROFILE%\Downloads` and launch that local copy. Do not assume a fixed VirtualBox shared-folder drive letter such as `Y:`; use the UNC path or the drive letter created by `pushd` for that command. The installer wizard's primary button must be keyboard reachable; Enter should advance the current primary action when focus is not in an editable input control.
-- Do not treat all of `dist_electron/` as a release artifact. It is not automatically cleaned and may contain stale manual install directories with local `data/accounts/*.json` or logs; clear or quarantine those directories before packaging and scan only the current outputs you will distribute.
-- After generating a same-line update zip, inspect `update_manifest.json` or the generator summary. If the current diff includes WebUI static, collector scripts, runtime docs/JSON, or other backend-owned external assets but the manifest only replaces `backend/autoscriptor-engine.exe`, the update zip is incomplete and must be regenerated with explicit `--include-backend` entries before validation.
-- Same-line update zips should stay lightweight by default. Do not include the full portable installer as `造笔.exe` just because the recorded release version advances; first VM-test the previous installed launcher after update. Only include/replace the launcher when the post-update launcher probe fails because the old shell cannot start the updated backend, and treat update zips over 100 MB as a release decision that needs explicit justification or falling back to full-installer-only distribution.
-- For source portable releases under `packaging/source_portable/`, do not run the Nuitka/C++ release path unless the user explicitly redirects back to it. Starting with the v1.0.3 reinstall baseline, the accepted source portable layout is `runtime/python/`, `backend/backend.pyz`, external `backend/services/webui/static|vendor`, and seed `data/`; update packages must replace `backend/backend.pyz` plus needed external Web assets and use `config_defaults` for missing config keys. Do not claim compatibility with pre-v1.0.3 source update packages. Do not distribute electron-builder single-file portable exe artifacts unless they pass an explicit startup smoke; large self-extracting payloads can fail the fast-window requirement.
-- During VirtualBox VM acceptance launched from Win+R or keyboard injection, wrap shared-folder batch commands with `cmd /c "pushd \\VBOXSVR\release && call <script>.cmd"`. Starting a batch file directly from a UNC current directory can make `cmd.exe` fall back to `C:\Windows` and leave acceptance logs empty.
-- VM acceptance scripts must not use unbounded WMI/CIM diagnostics after the WebUI check; add an operation timeout so report writing cannot hang after the actual install/runtime validation has already succeeded.
-- Keep VM release results layered: basic installer/WebUI acceptance does not prove Paddle/OCR or MuMu task execution when runtime smoke fails with `libpaddle.pyd` initialization errors. Claim those only after an AVX-capable VM or MuMu-capable host passes the runtime/device acceptance.
-- Windows PowerShell 5.1 guest scripts should avoid raw UTF-8 Chinese executable name literals such as `造笔.exe` unless saved with BOM; synthesize them with char codes so launcher/start/kill checks do not fail from mojibake.
-- For same-line update VM tests, record the pre-update baseline launcher result, update application/data-preservation result, post-update launcher result, and direct backend WebUI result separately. If the baseline launcher already fails under `VBoxManage guestcontrol`, do not blame the update package for the post-update launcher failure. The WebUI file-picker update path is an Electron IPC path and is not proven by backend direct startup alone.
-- Before the post-update launcher probe in same-line VM tests, stop the baseline launcher by captured PID and install-root process path, not just by the Chinese image name. A lingering `造笔.exe` can hold Electron's single-instance lock and create a false post-update launcher failure with no backend startup logs.
-- VM guest scripts that write JSON markers consumed by Electron/Node, such as `install.json` or `.autoscriptor/release_version.json`, must write UTF-8 without BOM. Windows PowerShell 5.1 `Set-Content -Encoding UTF8` writes a BOM, which can make `JSON.parse(fs.readFileSync(path, "utf8"))` fail and send the launcher down the wrong install-root/installer path. Post-install acceptance must read `install.json.dataRoot` and validate `dataRoot/config.json`, not stale install-root `data/config.json`.
-- Packaged installer uninstallers must not rely on deleting the running script from inside the install root. Keep the visible `Uninstall.ps1`/bat as launchers only; copy or generate a worker under `%TEMP%`, run it from `%TEMP%`, and let that worker remove app files, registry entries, markers, and optional external `dataRoot`. Windows Apps registry entries should be written with `New-ItemProperty -PropertyType` for String/DWord values and include `EstimatedSize`, `InstallDate`, `NoModify`, and `NoRepair`; `Set-ItemProperty -Type` is not a valid registry-writing pattern in Windows PowerShell.
-- On Windows, avoid shell-glob assumptions in release scans. Use explicit `"config.json"` and `"config template.json"` paths rather than bare `config*`, mask sensitive values in command output, and exclude third-party reference or vendored/minified trees such as `docs/refs/**`, `docs/AutoScriptor/3rdparties/**`, `services/webui/vendor/**`, and `webapp/node_modules/**` when classifying source hits. Artifact scans must still cover built `dist` / `dist_electron` outputs.
+- Install source dependencies: `scripts\install.bat`.
+- Desktop shell: `scripts\run.bat electron` or root `start.bat`.
+- Backend WebUI: `scripts\run.bat webui`, root `webui.bat`, or `.venv\Scripts\python.exe -X utf8 services\webui\gui.py`.
+- Static WebUI assets: `services/webui/static/`.
+- Source updater: `scripts\update.bat` for manual Git updates; `/api/update/status`, `/api/update/check`, `/api/update/run` for WebUI updates.
+
+Do not restore deleted command-menu shells, desktop distribution builders, setup wizards, binary delta services, or extra update channels unless the user explicitly asks for that product surface again.
+Do not restore Nuitka/compiled-runtime bootstraps, runtime import smoke probes, MuMu packaged-runtime probes, generated task manifests, or package/frozen data-root fallbacks unless the user explicitly asks for those product surfaces again.
+
+For source startup:
+
+- Keep `start.bat`, `webui.bat`, `local_start.bat`, `scripts/install.*`, `scripts/run.*`, `scripts/update.*`, compatibility `scripts/launcher.*`, `scripts/bootstrap-python310.ps1`, and `webapp/main.js` aligned with source execution.
+- Source install uses winget for Git/Node.js LTS/uv, then `uv venv --python 3.10.15` for `.venv`, then `uv pip install`, then `npm install` inside `webapp`.
+- Keep `webapp/package.json` focused on source Electron startup. Do not hide Python bootstrap or Git update work inside npm lifecycle hooks.
+- Keep WebUI logs on native WebSocket `/ws/logs`; do not reintroduce SSE or Socket.IO assumptions.
+- Source Git updater must disable itself outside a Git working tree or non-source runtime instead of pretending another update path exists. It must reject detached HEAD, check with a single explicit `git fetch origin main`, compare `HEAD` against `origin/main` with ahead/behind counts, fast-forward only the current checked-out branch from `origin/main`, and surface the exact git stderr/timeout/start failure through WebUI status instead of collapsing failures to empty output, generic messages, or slow retry loops.
+
+After moving, renaming, or materially rewriting docs, run `rg` for stale paths and stale behavior claims across `docs/AutoScriptor`, `docs/agents`, README, `docs/AutoScriptor/INSTALL.md`, tests, and scripts.
 
 ## Editing Rules
 
 - Do not revert unrelated user changes.
+- Do not keep a root `tools/` directory for one-off experiments. Durable source-maintenance scripts belong in `scripts/`; reusable runtime helpers belong in package modules such as `AutoScriptor/utils`; personal probes should stay untracked.
 - Prefer package imports, for example `from AutoScriptor.utils.box_grid import make_box_grid, indexof`.
 - Keep OCR/recognition semantics separate from business semantics. Example: OCR returns `None` for unreadable empty badges; inventory logic may later map missing item to `0` or visible item without badge to `1`.
 - For task state/progress, do not treat "function returned" as "business succeeded" when observable completion state exists.
 - For task registration, remember `TaskRegistry` stores runtime data, while `cfg["tasks"]` stores user configuration.
+- Treat `ZmxyOL/task/**/_order.txt` as explicit task source ordering. Task loading may read it, but should not rewrite source-tree order files during normal startup.
+- Do not leave incomplete debug placeholders registered as built-in tasks. A script that hard-stops, prints internal tables, or leaves the real flow unreachable should be deleted or kept unregistered.
+- Do not add task-file direct-run wrappers with broad `try/except`, `traceback.print_exc()`, `bg.stop()`, or `exit(0)`. Use WebUI direct run and task `debug_mode` metadata so scheduler logging, cancellation, retry, and cleanup semantics stay intact.
+- When editing Chinese task/source files on Windows, read and write UTF-8 explicitly and rerun a mojibake scan plus `py_compile`; do not trust terminal display alone.
 - For account/character data, remember active character tasks and status are persisted in account JSON, then flattened through `cfg` at runtime.
-- For paths, use `AutoScriptor.utils.paths`; source mode and packaged mode intentionally differ (`logs/` vs data-root `logs/`, root `config.json` vs packaged `install.json.dataRoot/config.json`). In packaged/Electron data-root mode, stale absolute `accounts.dir` values must be normalized to `dataRoot/accounts`; config/account save errors must expose the real config path, accounts dir, and dataRoot instead of generic "unknown error" UI text. If Windows ACL allows file writes but denies atomic replace/delete, persistence may fall back to direct target writes with a warning instead of making all saves fail.
-- For config/account persistence, keep atomic same-directory replace, but do not add unconditional `fsync` to WebUI interactions; low-RAM or antivirus-constrained Windows hosts can turn tiny JSON writes into multi-second stalls. Use `save_global_config()` for global-only settings so account JSON is not rewritten unnecessarily.
-- Runtime JSON/data assets should be packaged under `dist/data/assets/...` and read through data-root helpers. Do not ship backend `docs/` as runtime payload; `docs/refs/**` is third-party reference material and must stay ignored/excluded.
-- For packaged Electron startup, create the visible loading window before slow checks such as port cleanup, packaged path probing, or Python backend startup. Loading UI and `gui.py` must emit phase logs for Python process creation, WebUI import, worker start, and WebUI polling so first-run delays are observable.
+- For paths, use `AutoScriptor.utils.paths`; source mode uses `data/config.json`, `data/accounts`, `data/custom_task`, `data/battle_character`, and `logs`.
+- WebUI Editor custom-code execution must stay aligned with task authoring APIs, including `AutoScriptor` core helpers plus public `ZmxyOL.nav.api.*` and `ZmxyOL.nav.envs.decorators.*` symbols. Editor-saved scripts must be persisted under `get_custom_task_dir()` as registered custom tasks with explicit `path_cn`, normalized under the `自定义任务` cfg root, migrate stale omitted-root config leaves when possible, then reload tasks through the lifecycle service so the WebUI task tree observes the new script.
+- Do not delete MuMu dynamic adapter attributes or task-authoring helpers solely because `rg` cannot find direct callers. `BaseMumuControl.__getattr__`, `from AutoScriptor import *`, and user scripts can reach these APIs dynamically.
+- Long-lived runtime modules must not keep imported `mixctrl`/`mumu` snapshots from `from AutoScriptor import *` or `from AutoScriptor import mixctrl`; read the current object from `runtime_ctx` or `AutoScriptor.core.api` at the call site.
+- For config/account persistence, keep atomic same-directory replace and do not fall back to direct target-file writes after replace failure. Do not add unconditional `fsync` to WebUI interactions; low-RAM or antivirus-constrained Windows hosts can turn tiny JSON writes into multi-second stalls. Use `save_global_config()` for global-only settings so account JSON is not rewritten unnecessarily.
+- Scheduler/runtime-owned writes to `data/config.json` or the current account JSON (task state, progress, `next_exec_time`) must not be mistaken for external hot-reload edits on the next scheduler tick. Rebaseline those handled config/account files while keeping `data/custom_task/` and `data/battle_character/` script changes observable.
+- WebUI stop controls are signal-only paths: overview, scheduler, and daily/weekly/general/custom task pages must reuse the overview `stop-dispatch` / `stopDispatch()` frontend action; after `POST /api/stop`, apply the returned lightweight runtime projection immediately and let background refresh or normal polling fetch `/api/runtime/snapshot`; do not synchronously wait for full task-tree/config snapshots in the click handler.
+- Static runtime JSON/data assets belong under `data/assets/...` when they are needed at runtime; mutable generated caches belong under `logs/` via `get_logs_root()`. Do not treat `docs/refs/**`, `docs/*.json`, or third-party reference material as runtime payload.
+- Optional OpenAI Agents SDK examples must stay outside the main source runtime, for example under `examples/`, unless the user explicitly asks to integrate OpenAI API calls into AutoScriptor. Do not add `openai` or `openai-agents` to `requirements.txt` for optional examples alone; document the opt-in setup instead.
+- For source Electron startup, create the visible loading window before slow checks such as port cleanup or Python backend startup. Loading UI and `services\webui\gui.py` must emit phase logs for Python process creation, WebUI import, worker start, and WebUI polling so first-run delays are observable. Do not change the Windows console code page from Electron; port cleanup failures must be logged visibly.
+- For source Electron GPU/Chromium stalls, keep mitigation inside `webapp/main.js` render-mode startup switches. Configure `AUTOSCRIPTOR_ELECTRON_RENDER_MODE` before `app.whenReady()`: default `software`, optional `d3d11`, or `default` for comparison. Do not use host power, process priority, thread priority, CPU affinity, or MuMu priority fallbacks for Electron stalls.
 - For MuMu TCP ADB checks, remember `adb start-server` does not connect `127.0.0.1:<port>` devices. Device readiness probes should `adb connect <configured adb_addr>` and retry `get-state` before treating `device not found` as a real failure; NemuIpc screenshot success does not prove ADB is connected.
-- For WebUI logs, use native WebSocket `/ws/logs`; do not reintroduce SSE or Socket.IO assumptions.
-- For release work, keep three channels separate: source git updater, local same-line `AutoScriptor_Update_x.y.z.zip`, and HTTPS release-content manifest update.
-- For release/security scans, the exact 4399 public news pair `85rwm3janyyc` / `123456` is the only allowed real-looking plaintext credential exception. It is a public runtime dependency for 4399 news/forum proxying and must remain plaintext; do not remove it as a leak. Every other account, password, token, deploy secret, private key, and account JSON is sensitive.
+- After `MuMuManager launch` succeeds, treat it as command acceptance only. `Power.start()` must wait for the configured ADB device and Android boot completion before package resolution, App startup, or other Android-side checks.
+- Treat NemuIpc as a single native IPC lane. Runtime screenshot, touch, swipe, release, and disconnect calls must go through the `NemuIpc` wrapper lock; do not bypass it with `nemu_ipc.nemu_ipc.*`, and do not paper over deterministic IPC contention with broader retries or fallback sleeps.
+- Source runtime must not change Windows power state, away mode, display keepalive, CPU affinity, process priority, thread priority, or MuMu process priority as a performance fallback. `AutoScriptor.utils.perf` has been removed; fix OCR frequency, screenshot reuse, ADB state, NemuIpc serialization, or task loops instead.
+- Do not spread `interval=0.5` through task scripts just to get the default click-until polling cadence. `click(..., until=...)` owns that default; plain `click()` remains immediate unless the caller explicitly passes an interval.
+- `Hero.way_to_exit()` uses `bg.scope()` to watch for exit signs while the main thread moves in phases: reach the far right, move left near the exit, check whether it already landed, pulse-search left, hold briefly when an exit sign appears, then micro-adjust right only if the hold did not complete. Do not reintroduce private detector threads, `fast_until`, OCR throttling, or list/AND special cases inside this method.
+- For Heaven team dungeons, visible `抽牌` means the battle loop should stop. The `heaven_battle()` background callback must only set `Pause_battle`/`try_exit`; run `way_to_exit()` and draw-card cleanup after `battle_loop()` returns on the main thread so callback exceptions cannot swallow the exit signal.
+- For latest boss dungeons that may trigger "混沌先锋", task scripts should pass `battle_task(check_pioneer=True)` and keep the detection/extra-battle handling in the shared heaven battle procedure. The normal post-battle return-home flow must finish first; only then open the short pioneer detection window. Do not wrap the previous not-yet-home exit flow inside the pioneer watcher, and do not scatter one-off pioneer checks or auto-entry quickfixes through individual task scripts.
+- For WebUI logs, use native WebSocket `/ws/logs`.
+- For update work, keep the single source Git channel separate from manual dependency/bootstrap changes.
+- For security scans, the exact 4399 public news pair `85rwm3janyyc` / `123456` is the only allowed real-looking plaintext credential exception. It is a public runtime dependency for 4399 news/forum proxying and must remain plaintext; do not remove it as a leak. Every other account, password, token, deploy secret, private key, and account JSON is sensitive.
 
 ## Project Reference Map
 
 - AutoScriptor docs index: `docs/AutoScriptor/README.md`
+- Current architecture baseline: `docs/AutoScriptor/architecture.md`
 - Task authoring: `docs/AutoScriptor/tasks/script-authoring.md`
 - Task safety: `docs/AutoScriptor/tasks/script-authoring-safety.md`
 - Battle flows: `docs/AutoScriptor/tasks/battle-flows.md`
@@ -77,21 +98,18 @@ Before every release build, package generation, or update-package validation, pe
 - Background monitor: `docs/AutoScriptor/runtime/background.md`
 - Scheduler docs: `docs/AutoScriptor/schedule/scheduler.md`
 - WebUI API contract: `docs/AutoScriptor/webui/api-contract.md`
-- Release docs: `docs/AutoScriptor/release/build-and-run.md`
-- Release VM acceptance: `docs/AutoScriptor/release/vm-acceptance.md`
+- WebUI user trajectories: `docs/AutoScriptor/webui/user-trajectories.md`
+- OpenAI multi-agent optional example: `docs/AutoScriptor/reference/openai-multi-agents.md`
 - Error archives: `docs/AutoScriptor/operations/log-archiver.md`
-- Refactor index: `docs/AutoScriptor/refactor/README.md`
 - Online screenshot testing: `docs/agents/online-screenshot-test.md`
 - Project skill references:
   - `docs/agents/skill-references/architecture-lifecycle.md`
   - `docs/agents/skill-references/task-authoring-style.md`
-  - `docs/agents/skill-references/webui-release-news.md`
+  - `docs/agents/skill-references/webui-electron-news.md`
 
 ## Validation
 
 Use `.venv\Scripts\python.exe -X utf8` on Windows unless there is a clear reason not to. Prefer targeted `unittest`/`py_compile` or a small live probe over broad slow runs. If a tool such as `pytest` is unavailable, say so and use the closest available validation.
-
-After moving, renaming, or materially rewriting docs, run `rg` for stale paths and stale behavior claims across `docs/AutoScriptor`, `docs/agents`, README, INSTALL, tests, and scripts.
 
 Before finishing, report:
 
@@ -99,4 +117,3 @@ Before finishing, report:
 - What changed and why it is minimal.
 - What validation ran.
 - Whether docs or skills were updated.
-

@@ -1,4 +1,3 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
@@ -23,15 +22,5 @@ def daily_qujing_task():
     wait_for_appear(I("挑战-取经"))
     sleep(0.5)
     click(B(1200,30,30,30))
-
-
-if __name__ == "__main__":
-    try:
-        daily_qujing_task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)
 
 

@@ -1,10 +1,9 @@
-import traceback
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.cancel import check_cancel_raise
 from ZmxyOL.nav.api import locate_region
 from ZmxyOL import *
 from AutoScriptor import *
-from ZmxyOL.battle.character.hero import h
+from AutoScriptor.battle_character.hero import h
 from time import time
 
 
@@ -210,14 +209,3 @@ def task(
     click(B(1200, 30, 30, 30))
     bg.clear(clear_signals=True)
     locate_region()
-
-
-if __name__ == "__main__":
-    try:
-        init()
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

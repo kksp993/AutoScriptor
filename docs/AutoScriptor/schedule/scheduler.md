@@ -104,7 +104,7 @@ else:
     interval = min(times) - now
 ```
 
-有效时间会考虑 `sched_window_hours`、`allowed_weekdays` 和当前调度周期内 retry 耗尽的任务。配置文件、账号文件、自定义任务目录或职业目录变化时，`ConfigWatcher` 会触发重载；如果正在执行任务，则延迟到安全边界再重载。
+有效时间会考虑 `sched_window_hours`、`allowed_weekdays` 和当前调度周期内 retry 耗尽的任务。配置文件、账号文件、自定义任务目录或职业目录变化时，`ConfigWatcher` 会触发重载；如果正在执行任务，则延迟到安全边界再重载。调度器自身保存任务状态、进度或 `next_exec_time` 后，会把已处理的配置/账号 JSON 写入标记为已见，避免下一轮把内部持久化误判为外部热重载请求；自定义任务和职业脚本目录仍继续监听。
 
 ## 跨角色调度
 
@@ -112,9 +112,12 @@ else:
 
 切换角色后会：
 
-- `TaskManager.switch_character_and_reload()`
+- `TaskManager.switch_character()`；没有 task manager 时直接 `cfg.switch_character()`
 - `invalidate_login()`
+- 标记任务投影更新
 - 重新收集当前角色任务
+
+这个切换只更新账号/角色配置和 WebUI 投影，不重建任务注册表，也不重载职业脚本。只有脚本目录变更、启动初始化、Editor 保存自定义任务或延迟热重载安全边界才走完整 reload。
 
 自动调度模式中，整轮跨角色任务执行完成后会切回 `dispatch_queue` 的第一个有效角色，并再次确认游戏内登录到该角色。这样首角色在空档期保持在线挂机，也让后续人工操作从固定角色开始。单任务直跑和纯 debug 任务不会触发这个收尾。
 
@@ -137,7 +140,7 @@ else:
   │    ├─ 人工接管冷却：计入失败展示，但不增加连续错误
   │    ├─ 普通失败且仍有 retry：放入下一轮 retry 队列
   │    └─ retry 耗尽：计入失败，调度周期内跳过该任务
-  ├─ 每个任务后保存配置并重载任务，或应用延迟重载
+  ├─ 每个任务后保存配置并标记任务投影更新；若存在 _reload_deferred，则应用完整延迟重载
   └─ 有真实执行结果时先回到首个调度角色，再执行 post_execution 收尾
 ```
 
@@ -189,7 +192,7 @@ clear_task_status("progress")
 - `RequestHumanTakeover` 或进度未完成后被标记为人工接管冷却。
 - 用户手动停止导致的 cooperative cancel。
 
-连续错误达到 3 后进入 `error`，调度暂停。WebUI 必须先恢复调度；CLI 当前“开始执行”只调用 `activate()`，如果仍处于 `error`，不会自动 reset。
+连续错误达到 3 后进入 `error`，调度暂停。必须先调用 `reset()` 或通过 WebUI “恢复调度”按钮恢复；单纯调用 `activate()` 不会从 `error` 自动恢复。
 
 ## 人工接管与进度
 
@@ -231,7 +234,7 @@ clear_task_status("progress")
 
 ## post_execution 收尾
 
-配置位置：`config.json -> emulator.post_execution`
+配置位置：`data/config.json -> emulator.post_execution`
 
 | 值 | 行为 |
 |----|------|

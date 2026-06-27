@@ -10,7 +10,7 @@ const SchedulerPanel = {
     gameProfessionOptions: { type: Array, default: () => [] },
     gameProfessionsByCharacter: { type: Object, default: () => ({}) },
   },
-  emits: ['start-run', 'stop-run', 'reset-scheduler', 'clear-logs', 'set-game-profession'],
+  emits: ['start-run', 'stop-dispatch', 'reset-scheduler', 'clear-logs', 'set-game-profession'],
   computed: {
     /** 当前调度状态的文字说明，告知用户该状态的含义 */
     schedStateHint() {
@@ -105,7 +105,7 @@ const SchedulerPanel = {
     <div class="sched-control-actions mb-4">
       <div class="sched-control-row">
         <el-button type="primary" size="large" @click="$emit('start-run')" :disabled="!characterName || executionBusy"><i class="fa fa-play mr-1.5"></i>开始运行</el-button>
-        <el-button type="danger" size="large" @click="$emit('stop-run')"><i class="fa fa-stop mr-1.5"></i>终止执行</el-button>
+        <el-button type="danger" size="large" @click="$emit('stop-dispatch')"><i class="fa fa-stop mr-1.5"></i>终止执行</el-button>
       </div>
       <el-button v-if="overviewData.scheduler.state==='error'" type="danger" size="large" @click="$emit('reset-scheduler')" :disabled="executionBusy" class="sched-btn-full"><i class="fa fa-refresh mr-1.5"></i>恢复调度</el-button>
     </div>

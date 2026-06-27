@@ -1,4 +1,3 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
@@ -12,13 +11,3 @@ def scan_chaos_egg():
             click(B(820,155,110,20))
             click(T("确定"))
             sleep(4)
-
-
-if __name__ == "__main__":
-    try:
-        scan_chaos_egg()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

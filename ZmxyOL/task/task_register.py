@@ -1,20 +1,76 @@
-    
 import inspect
 import os
-import traceback
+from copy import deepcopy
 from ZmxyOL import *
 import enum
 from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.task_registry import task_registry
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.table_param import TableParam
+from ZmxyOL.task.default_descriptions import get_default_task_description
 from ZmxyOL.task.translations import normalize_cfg_key, normalize_to_cn
 from ZmxyOL.nav.api import locate_region
 
 # 在模块顶端添加全局计数器
 registration_counter = 0
+_CUSTOM_TASK_ROOT_KEY = normalize_cfg_key("custom_task")
 
  
+def _find_cfg_leaf(root: dict, keys: list[str]) -> tuple[dict | None, dict | None]:
+    node = root
+    for key in keys[:-1]:
+        child = node.get(key)
+        if not isinstance(child, dict):
+            return None, None
+        node = child
+    leaf = node.get(keys[-1]) if keys else None
+    if isinstance(leaf, dict) and "on" in leaf:
+        return node, leaf
+    return None, None
+
+
+def _remove_empty_cfg_branches(root: dict, keys: list[str]) -> None:
+    stack = []
+    node = root
+    for key in keys:
+        child = node.get(key)
+        if not isinstance(child, dict):
+            return
+        stack.append((node, key, child))
+        node = child
+    for parent, key, child in reversed(stack):
+        if child:
+            break
+        del parent[key]
+
+
+def _migrate_custom_cfg_leaf(legacy_keys: list[str] | None, normalized_keys: list[str]) -> None:
+    if not legacy_keys or legacy_keys == normalized_keys:
+        return
+    legacy_path = "/".join(legacy_keys)
+    if task_registry.has_task(legacy_path):
+        return
+
+    tasks = cfg["tasks"]
+    legacy_parent, legacy_leaf = _find_cfg_leaf(tasks, legacy_keys)
+    if legacy_parent is None or legacy_leaf is None:
+        return
+
+    target_parent = tasks
+    for key in normalized_keys[:-1]:
+        target_parent = target_parent.setdefault(key, {})
+    target_key = normalized_keys[-1]
+    target_leaf = target_parent.get(target_key)
+    if isinstance(target_leaf, dict) and "on" in target_leaf:
+        for key, value in legacy_leaf.items():
+            target_leaf.setdefault(key, deepcopy(value))
+    else:
+        target_parent[target_key] = deepcopy(legacy_leaf)
+
+    del legacy_parent[legacy_keys[-1]]
+    _remove_empty_cfg_branches(tasks, legacy_keys[:-1])
+
+
 
 
 def register_task(
@@ -43,7 +99,7 @@ def register_task(
       - debug_mode (bool): 调试直跑模式；执行时不强制回登录页重登，失败时不关闭/重启游戏，
         若本轮只执行 debug 任务，也跳过 post_execution 收尾动作。也兼容 debug=True 短写。
       - path_cn (str): **仅 custom_task 目录下脚本必填**。斜杠分隔的 cfg 任务路径（中文键），
-        首段一般为「自定义任务」或与目录对应的英文名（如 custom_task 会规范为「自定义任务」）。
+        custom_task 脚本最终都会归一到「自定义任务」根节点；省略首段时会自动补齐。
         示例：path_cn="自定义任务/示例/hello_custom"
       - sched_window_hours (tuple[int,int]): 本地时间可执行时段 [start, end)，如 (10, 22)；
         调度器在时段外不会执行该任务，执行后 next_exec_time 也会落在时段内
@@ -77,148 +133,131 @@ def register_task(
     registration_counter += 1
     reg_order = registration_counter  # 当前注册顺序
     debug_mode = bool(debug_mode or task_kwargs.pop("debug", False))
-    try:
-        module = inspect.getmodule(func)
-        if module is not None:
-            # 注入导航相关的符号
-            if not hasattr(module, 'ensure_in'):
-                try:
-                    from ZmxyOL.nav import ensure_in as _ensure_in
-                    from ZmxyOL.nav.envs.decorators import LOC_ENV
-                    from ZmxyOL.battle.character.hero import h
-                    from ZmxyOL.battle.tasks import get_task_table
-                    setattr(module, 'ensure_in', _ensure_in)
-                    setattr(module, 'LOC_ENV', LOC_ENV)
-                    setattr(module, 'h', h)
-                    setattr(module, 'get_task_table', get_task_table)
-                    setattr(module, 'locate_region', locate_region)
-                except Exception:
-                    pass
-        # 1. Get the full path of the file where the function is defined
-        filepath = inspect.getfile(func)
+    module = inspect.getmodule(func)
+    if module is not None and not hasattr(module, "ensure_in"):
+        # 注入导航相关的符号
+        from ZmxyOL.nav import ensure_in as _ensure_in
+        from ZmxyOL.nav.envs.decorators import LOC_ENV
+        from AutoScriptor.battle_character.hero import h
+        from ZmxyOL.battle.tasks import get_task_table
+        setattr(module, "ensure_in", _ensure_in)
+        setattr(module, "LOC_ENV", LOC_ENV)
+        setattr(module, "h", h)
+        setattr(module, "get_task_table", get_task_table)
+        setattr(module, "locate_region", locate_region)
 
-        # 2. Normalize and split path segments
-        norm_path = os.path.normpath(filepath)
-        path_parts = norm_path.split(os.sep)
+    filepath = inspect.getfile(func)
+    path_parts = os.path.normpath(filepath).split(os.sep)
 
-        is_custom = False
-        # 3a. User scripts under .../custom_task/... → cfg 树顶「自定义任务」
-        if "custom_task" in path_parts:
-            root_index = path_parts.index("custom_task")
-            keys = path_parts[root_index + 1 :]
-            is_custom = True
-        # 3b. Built-in: .../task/...
-        elif "task" in path_parts:
-            root_index = path_parts.index("task")
-            keys = path_parts[root_index + 1 :]
-        else:
-            print(
-                f"Error: Neither 'custom_task' nor 'task' directory was found in the path for {func.__name__}. Registration failed."
-            )
-            return func
-
-        # 4. Last segment is filename → stem
-        filename = keys[-1]
-        task_name, _ = os.path.splitext(filename)
-        keys[-1] = task_name
-
-        if is_custom:
-            raw_cn = path_cn.strip() if isinstance(path_cn, str) else ""
-            if not raw_cn:
-                logger.error(
-                    "custom_task 下的任务必须传入 path_cn，例如 "
-                    '@register_task(path_cn="自定义任务/示例/hello_custom")'
-                )
-                return func
-            keys = [normalize_cfg_key(p) for p in raw_cn.split("/") if p.strip()]
-            if not keys:
-                logger.error("path_cn 解析后为空: %r", path_cn)
-                return func
-        else:
-            keys = [normalize_to_cn(key) for key in keys]
-
-        # 6. Traverse cfg["tasks"], creating nested dicts for the path.
-        current_level = cfg["tasks"]
-        for key in keys[:-1]:
-            current_level = current_level.setdefault(key, {})
-
-        # 7. cfg["tasks"] 只存用户配置（on、next_exec_time、params 等）
-        # 首次写入某任务叶节点时默认关闭，避免新建账号/角色时空任务树被全部点亮
-        last_key = keys[-1]
-        if last_key not in current_level:
-            current_level[last_key] = {'on': False, 'next_exec_time': 0}
-        else:
-            current_level[last_key].setdefault('on', True)
-            current_level[last_key].setdefault('next_exec_time', 0)
-        if default_offset_hours is not None:
-            current_level[last_key]['next_exec_offset_hours'] = default_offset_hours
-        for key, value in task_kwargs.items():
-            current_level[last_key][key] = value
-
-        doc_flow = ""
-        if task_doc is not None and str(task_doc).strip():
-            doc_flow = str(task_doc).strip()
-        else:
-            raw = inspect.getdoc(func) or ""
-            if raw.strip():
-                doc_flow = raw.strip().split("\n\n")[0].strip()
-
-        # 解析函数签名，提取参数默认值和枚举元数据
-        sig = inspect.signature(func)
-        defaults = {}
-        param_meta = {}
-        for name, param in sig.parameters.items():
-            if param.kind in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL):
-                continue
-            default = param.default if param.default is not inspect._empty else None
-            if isinstance(default, TableParam):
-                defaults[name] = default.to_json_data()
-                param_meta[name] = default.get_param_meta()
-            elif isinstance(default, enum.Enum):
-                defaults[name] = default.name
-                enum_path = default.__class__.__module__ + '.' + default.__class__.__qualname__
-                param_meta[name] = {"enum": enum_path, "multiple": False}
-            elif isinstance(default, (list, tuple)) and default and all(isinstance(item, enum.Enum) for item in default):
-                defaults[name] = [item.name for item in default]
-                enum_path = default[0].__class__.__module__ + '.' + default[0].__class__.__qualname__
-                param_meta[name] = {"enum": enum_path, "multiple": True}
-            else:
-                defaults[name] = default
-
-        # params 是用户可编辑配置，留在 cfg
-        task_cfg = current_level[last_key]
-        existing_params = task_cfg.get('params', {})
-        merged_params = defaults.copy()
-        merged_params.update(existing_params)
-        # 仅保留当前签名中的参数名，丢弃已迁移的旧键（如独立难度、battle_flow 等）
-        task_cfg['params'] = {k: merged_params[k] for k in defaults}
-
-        # 8. fn / order / param_meta 注册到 TaskRegistry（运行时数据，不写入 JSON）
-        task_path = "/".join(keys)
-        desc = (description or "").strip() if description is not None else ""
-        if not desc:
-            try:
-                from ZmxyOL.task.default_descriptions import get_default_task_description
-                desc = get_default_task_description(task_path)
-            except Exception:
-                desc = ""
-        if not desc:
-            desc = f"自动执行「{last_key}」相关流程。"
-        task_registry.register(
-            task_path,
-            task_wrapper(func),
-            reg_order,
-            param_meta,
-            param_keys=list(defaults.keys()),
-            beta=beta,
-            custom=is_custom,
-            doc_flow=doc_flow,
-            description=desc,
-            debug_mode=debug_mode,
+    is_custom = False
+    if "custom_task" in path_parts:
+        root_index = path_parts.index("custom_task")
+        keys = path_parts[root_index + 1 :]
+        is_custom = True
+    elif "task" in path_parts:
+        root_index = path_parts.index("task")
+        keys = path_parts[root_index + 1 :]
+    else:
+        raise ValueError(
+            f"任务注册失败: {func.__name__} 不在 task/ 或 custom_task/ 目录下: {filepath}"
         )
-        # print(f"✅ 【{'/'.join(keys)}】 => {a}")
-    except Exception as e:
-        logger.error(f"An error occurred during registration for {func.__name__}: {e}，{traceback.format_exc()}")
+
+    filename = keys[-1]
+    task_name, _ = os.path.splitext(filename)
+    keys[-1] = task_name
+
+    if is_custom:
+        raw_cn = path_cn.strip() if isinstance(path_cn, str) else ""
+        if not raw_cn:
+            raise ValueError(
+                "custom_task 下的任务必须传入 path_cn，例如 "
+                '@register_task(path_cn="自定义任务/示例/hello_custom")'
+            )
+        keys = [normalize_cfg_key(p) for p in raw_cn.split("/") if p.strip()]
+        if not keys:
+            raise ValueError(f"path_cn 解析后为空: {path_cn!r}")
+        legacy_keys = None
+        if keys[0] != _CUSTOM_TASK_ROOT_KEY:
+            legacy_keys = list(keys)
+            keys.insert(0, _CUSTOM_TASK_ROOT_KEY)
+        _migrate_custom_cfg_leaf(legacy_keys, keys)
+    else:
+        keys = [normalize_to_cn(key) for key in keys]
+
+    current_level = cfg["tasks"]
+    for key in keys[:-1]:
+        current_level = current_level.setdefault(key, {})
+
+    # cfg["tasks"] 只存用户配置（on、next_exec_time、params 等）
+    # 首次写入某任务叶节点时默认关闭，避免新建账号/角色时空任务树被全部点亮
+    last_key = keys[-1]
+    if last_key not in current_level:
+        current_level[last_key] = {"on": False, "next_exec_time": 0}
+    else:
+        current_level[last_key].setdefault("on", True)
+        current_level[last_key].setdefault("next_exec_time", 0)
+    if default_offset_hours is not None:
+        current_level[last_key]["next_exec_offset_hours"] = default_offset_hours
+    for key, value in task_kwargs.items():
+        current_level[last_key][key] = value
+
+    doc_flow = ""
+    if task_doc is not None and str(task_doc).strip():
+        doc_flow = str(task_doc).strip()
+    else:
+        raw = inspect.getdoc(func) or ""
+        if raw.strip():
+            doc_flow = raw.strip().split("\n\n")[0].strip()
+
+    # 解析函数签名，提取参数默认值和枚举元数据
+    sig = inspect.signature(func)
+    defaults = {}
+    param_meta = {}
+    for name, param in sig.parameters.items():
+        if param.kind in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL):
+            continue
+        default = param.default if param.default is not inspect._empty else None
+        if isinstance(default, TableParam):
+            defaults[name] = default.to_json_data()
+            param_meta[name] = default.get_param_meta()
+        elif isinstance(default, enum.Enum):
+            defaults[name] = default.name
+            enum_path = default.__class__.__module__ + "." + default.__class__.__qualname__
+            param_meta[name] = {"enum": enum_path, "multiple": False}
+        elif isinstance(default, (list, tuple)) and default and all(isinstance(item, enum.Enum) for item in default):
+            defaults[name] = [item.name for item in default]
+            enum_path = default[0].__class__.__module__ + "." + default[0].__class__.__qualname__
+            param_meta[name] = {"enum": enum_path, "multiple": True}
+        else:
+            defaults[name] = default
+
+    # params 是用户可编辑配置，留在 cfg
+    task_cfg = current_level[last_key]
+    existing_params = task_cfg.get("params", {})
+    merged_params = defaults.copy()
+    merged_params.update(existing_params)
+    # 仅保留当前签名中的参数名，丢弃已迁移的旧键（如独立难度、battle_flow 等）
+    task_cfg["params"] = {k: merged_params[k] for k in defaults}
+
+    # fn / order / param_meta 注册到 TaskRegistry（运行时数据，不写入 JSON）
+    task_path = "/".join(keys)
+    desc = (description or "").strip() if description is not None else ""
+    if not desc:
+        desc = get_default_task_description(task_path)
+    if not desc:
+        desc = f"自动执行「{last_key}」相关流程。"
+    task_registry.register(
+        task_path,
+        task_wrapper(func),
+        reg_order,
+        param_meta,
+        param_keys=list(defaults.keys()),
+        beta=beta,
+        custom=is_custom,
+        doc_flow=doc_flow,
+        description=desc,
+        debug_mode=debug_mode,
+    )
 
     # The decorator must return the original function
     return func
@@ -226,24 +265,18 @@ def register_task(
 
 def _apply_task_battle_startup(kwargs: dict) -> None:
     """任务函数执行前：加载配招职业，并把 WebUI 中的 battle_flow 挂到 h 上供 battle_loop 等使用。"""
-    try:
-        from ZmxyOL.battle.character.hero import h
-        from ZmxyOL.task.battle_task_params import get_battle_profile, resolve_battle_flow_for_profile
-        get_battle_profile(h)
-        h.task_context_battle_flow = resolve_battle_flow_for_profile(
-            h,
-            getattr(kwargs.get("battle_flow"), "value", None),
-        )
-    except Exception:
-        pass
+    from AutoScriptor.battle_character.hero import h
+    from ZmxyOL.task.battle_task_params import get_battle_profile, resolve_battle_flow_for_profile
+    get_battle_profile(h)
+    h.task_context_battle_flow = resolve_battle_flow_for_profile(
+        h,
+        getattr(kwargs.get("battle_flow"), "value", None),
+    )
 
 
 def _clear_task_battle_startup() -> None:
-    try:
-        from ZmxyOL.battle.character.hero import h
-        h.task_context_battle_flow = None
-    except Exception:
-        pass
+    from AutoScriptor.battle_character.hero import h
+    h.task_context_battle_flow = None
 
 
 def task_wrapper(func):
@@ -258,18 +291,15 @@ def task_wrapper(func):
         # 在任务执行前注入必要的导航符号到函数的全局命名空间
         func_globals = func.__globals__
         if 'ensure_in' not in func_globals:
-            try:
-                from ZmxyOL.nav import ensure_in
-                from ZmxyOL.nav.envs.decorators import LOC_ENV
-                from ZmxyOL.battle.character.hero import h
-                from ZmxyOL.battle.tasks import get_task_table
-                func_globals['ensure_in'] = ensure_in
-                func_globals['LOC_ENV'] = LOC_ENV
-                func_globals['h'] = h
-                func_globals['get_task_table'] = get_task_table
-                func_globals['locate_region'] = locate_region
-            except Exception:
-                pass
+            from ZmxyOL.nav import ensure_in
+            from ZmxyOL.nav.envs.decorators import LOC_ENV
+            from AutoScriptor.battle_character.hero import h
+            from ZmxyOL.battle.tasks import get_task_table
+            func_globals['ensure_in'] = ensure_in
+            func_globals['LOC_ENV'] = LOC_ENV
+            func_globals['h'] = h
+            func_globals['get_task_table'] = get_task_table
+            func_globals['locate_region'] = locate_region
 
         _apply_task_battle_startup(kwargs)
         try:
