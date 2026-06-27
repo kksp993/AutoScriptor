@@ -1,4 +1,3 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
@@ -40,17 +39,6 @@ def task(
                     bg.set_signal("try_exit", True),
                 ],
             )
-            h.set(has_cd=False,speed_x=1).battle_loop(battle_weight=100000)
+            flow_name = getattr(battle_flow, "value", battle_flow)
+            h.set(has_cd=False,speed_x=1).battle_loop(flow_name=flow_name)
         click((T("退出副本"),T("确定")), until=lambda:ui_T(I("加载中")), interval=1)
-
-
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)
-

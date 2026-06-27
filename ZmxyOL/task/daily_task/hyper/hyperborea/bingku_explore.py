@@ -1,7 +1,5 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
 @register_task
 def bingkuTanXian():
     ensure_in("极北",-1)
@@ -23,23 +21,5 @@ def bingkuTanXian():
         wait_for_disappear(I("加载中"))
     else:
         click(B(1122,34,30,30))
-
-
-if __name__ == "__main__":
-    try:
-        bingkuTanXian()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)
-
-
-
-
-
-
-
-
 
 

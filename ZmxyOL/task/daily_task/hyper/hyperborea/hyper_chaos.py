@@ -1,4 +1,3 @@
-import traceback
 
 from ZmxyOL.battle.procedure.chaos import DEFAULT_LINGQI_PRIORITY_VALUES, sort_stage_lingqi_pairs
 from ZmxyOL.battle.tasks import JIBEI_CHAOS_TABLE, get_task_table
@@ -37,12 +36,3 @@ def task(
     else:
         click(B(1200,30,30,30))
         wait_for_appear(T("回家", box=Box(29,613,77,88).margin()))
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

@@ -1,7 +1,4 @@
 from __future__ import annotations
-import traceback
-
-from AutoScriptor.core.background import bg
 
 # 翻译映射：中文 <-> 英文（当前项目正在使用的键）
 # 注意：保持与现有 _order.txt 和目录/文件名兼容
@@ -95,7 +92,7 @@ def translate_path_part(part: str) -> str:
 def normalize_cfg_key(part: str) -> str:
     """配置 JSON 里任务树键的规范化：英→中、已知中文保持；未知片段原样保留（不抛错）。
 
-    用于 normalize_cfg_tasks_to_cn，避免用户自定义路径段（如 example_hello）触发异常。
+    用于 normalize_cfg_tasks_to_cn，避免用户自定义英文路径段触发异常。
     """
     if part in TRANSLATION_MAP_REVERSE:
         return TRANSLATION_MAP_REVERSE[part]
@@ -113,8 +110,6 @@ def normalize_to_cn(part: str) -> str:
         return TRANSLATION_MAP_REVERSE[part]
     if part in TRANSLATION_MAP.keys():
         return part
-    bg.stop()
-    traceback.print_exc()
     raise ValueError(f"Unknown part: {part}")
 
 

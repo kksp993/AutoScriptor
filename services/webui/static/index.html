@@ -7,6 +7,7 @@
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; font-src 'self' data:; connect-src 'self' ws: wss: http: https:; frame-src 'self' https://*.4399.com; child-src 'self' https://*.4399.com;" />
   <title>造笔 - AutoScriptor</title>
+  <link rel="icon" type="image/png" href="/favicon.png" />
   <script src="/vendor/tailwind.css"></script>
   <link href="/vendor/font-awesome.min.css" rel="stylesheet" />
   <script src="/vendor/vue.global.prod.js"></script>
@@ -42,9 +43,7 @@
       .stat-label { @apply text-base text-gray-500 mt-1.5; }
     }
   </style>
-  <link rel="stylesheet" href="/vendor/drawflow.min.css" />
-  <script src="/vendor/drawflow.min.js"></script>
-  <link rel="stylesheet" href="/static/css/style.css?v=36" />
+  <link rel="stylesheet" href="/static/css/style.css?v=37" />
 </head>
 <body class="app-body overflow-hidden" style="height:100vh;">
   <div id="app" class="flex h-screen overflow-hidden">
@@ -55,7 +54,6 @@
       :theme="currentTheme"
       :scheduler-status="schedulerStatus"
       :character-name="characterName"
-      :feature-script-canvas="featureScriptCanvas"
       @navigate="navigateTo">
     </app-sidebar>
 
@@ -178,11 +176,9 @@
           :active-character="activeCharacter"
           :game-profession-options="gameProfessionOptions"
           :game-professions-by-character="gameProfessionsByCharacter"
-          @start-run="startRun" @stop-run="stopRun" @reset-scheduler="resetScheduler"
+          @start-run="startRun" @stop-dispatch="stopDispatch" @reset-scheduler="resetScheduler"
           @clear-logs="clearLogs"
           @set-game-profession="(srv, name, p) => setGameProfession(srv, name, p)"></scheduler-panel>
-
-        <canvas-panel v-if="featureScriptCanvas && activeTab==='canvas'"></canvas-panel>
 
         <editor-panel v-if="activeTab==='editor'"
           :pending-import-url="pendingEditorImportUrl"
@@ -205,7 +201,7 @@
           :current-tasks="currentTasks" :logs="logs" :character-name="characterName"
           :scheduler-status="schedulerStatus" :execution-busy="executionBusy"
           @edit-task="openEditModal" @expanded-change="setActiveGroup"
-          @start-run="startRun" @stop-run="stopRun" @save-tasks="saveTasks"
+          @start-run="startRun" @stop-dispatch="stopDispatch" @save-tasks="saveTasks"
           @clear-logs="clearLogs" @refresh-config="reloadTasks" @reset-scheduler="resetScheduler"
           @run-task="runSingleTask"></task-panel>
 
@@ -451,20 +447,19 @@
   <script src="/static/js/components/AppSidebar.js?v=15"></script>
   <script src="/static/js/components/TaskTree.js?v=12"></script>
   <script src="/static/js/components/Overview.js?v=18"></script>
-  <script src="/static/js/components/SchedulerPanel.js?v=14"></script>
-  <script src="/static/js/components/TaskPanel.js?v=11"></script>
+  <script src="/static/js/components/SchedulerPanel.js?v=15"></script>
+  <script src="/static/js/components/TaskPanel.js?v=12"></script>
   <script src="/static/js/components/Settings.js?v=10"></script>
   <script src="/static/js/components/AboutPanel.js?v=1"></script>
   <script src="/static/js/components/UpdatePanel.js?v=1"></script>
   <script src="/static/js/components/editor/EditorCanvas.js?v=10"></script>
   <script src="/static/js/components/editor/EditorControls.js?v=14"></script>
-  <script src="/static/js/components/editor/EditorPanel.js?v=25"></script>
+  <script src="/static/js/components/editor/EditorPanel.js?v=30"></script>
   <script src="/static/js/components/DiagnosticsPanel.js?v=2"></script>
-  <script src="/static/js/components/canvas/CanvasPanel.js?v=4"></script>
   <script src="/static/js/components/ErrorArchivesPanel.js?v=4"></script>
   <script src="/static/js/task_help_docs.js?v=1"></script>
   <script src="/static/js/core/api.js?v=1"></script>
   <script src="/static/js/stores/runtimeStore.js?v=1"></script>
-  <script src="/static/js/app.js?v=28"></script>
+  <script src="/static/js/app.js?v=30"></script>
 </body>
 </html>

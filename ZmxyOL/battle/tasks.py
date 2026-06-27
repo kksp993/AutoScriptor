@@ -1,5 +1,5 @@
-from AutoScriptor import *
-from ZmxyOL.battle.character.hero import combo
+﻿from AutoScriptor import *
+from AutoScriptor.battle_character.hero import combo
 from ZmxyOL.nav.api import ensure_in, try_close_via_x
 EXIT_RADIUS=0  # 退出范围 for safety
 
@@ -37,7 +37,7 @@ TASK_TABLE = {
     "獐王星宫":{"location":("极寒深渊",0),"target":T("獐王星宫", box=Box(537,611,159,53).margin()),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
     "犴神星宫":{"location":("极寒深渊",1),"target":B(970,610,30,30),"idx":0, "exit_loc":230-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":True},
     "兔神星宫":{"location":("极寒深渊",0),"target":T("兔神星宫", box=Box(0,136,1280,28).margin()),"idx":0, "exit_loc":230-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
-    "猪王星宫":{"location":("极寒深渊",0),"target":T("猪王星宫", box=Box(1001,439,142,46).margin()),"idx":0, "exit_loc":230-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
+    "猪王星宫":{"location":("极寒深渊",0),"target":B(1070,253,155,184),"idx":0, "exit_loc":230-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
 }
 
 TASK_TABLE_LIST = [
@@ -101,17 +101,17 @@ def get_task_table(task_name:str|list[str]|tuple[str]):
     
 
 def challenge_task():
-    from ZmxyOL.battle.character.hero import h
+    from AutoScriptor.battle_character.hero import h
     h.battle_tasks(set(TASK_TABLE_LIST).union(set(JIYUAN_TASK_TABLE)))
 
 
 def challenge_task_jiyuan():
-    from ZmxyOL.battle.character.hero import h
+    from AutoScriptor.battle_character.hero import h
     h.battle_tasks(JIYUAN_TASK_TABLE)
 
 
 def challenge_task_daily():
-    from ZmxyOL.battle.character.hero import h
+    from AutoScriptor.battle_character.hero import h
     h.battle_tasks(TASK_TABLE_LIST)
 
 

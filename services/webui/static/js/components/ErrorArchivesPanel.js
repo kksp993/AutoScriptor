@@ -247,7 +247,7 @@ const ErrorArchivesPanel = {
         <div class="text-center text-slate-400 text-sm py-16">
           <i class="fa fa-inbox text-4xl mb-3 opacity-40"></i>
           <p>暂无归档。任务失败时会自动写入 <code class="text-xs bg-slate-100 px-1 rounded">logs/errors</code></p>
-          <p class="mt-2 text-xs">也可导入他人打包的 zip 预览</p>
+          <p class="mt-2 text-xs">也可导入他人导出的 zip 预览</p>
         </div>
       </template>
       <template v-else>

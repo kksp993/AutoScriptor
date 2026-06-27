@@ -12,13 +12,10 @@ import importlib
 import json
 import logging
 import os
-import shutil
 import time as _time
-import traceback
-import urllib.request
 import webbrowser
-from http.cookies import SimpleCookie
-from queue import Queue, Empty
+from http.cookies import CookieError, SimpleCookie
+from queue import Empty, Full, Queue
 from typing import Any, Set
 
 from AutoScriptor.utils.logger import logger, _TaskFilter as _LogTaskFilter
@@ -29,7 +26,6 @@ from AutoScriptor.utils.game_profession import GAME_PROFESSIONS
 from services.core.task_manager import TaskManager
 from services.core.banner import _print_banner
 from services.core.scheduler import scheduler, SchedulerState
-from AutoScriptor.utils.perf import set_thread_high_priority as _set_thread_high_priority
 from services.webui.api_response import api_error, api_ok
 from services.webui.lifecycle_service import WebUILifecycleService
 from services.webui.runtime_controller import RuntimeController
@@ -42,7 +38,7 @@ def _battle_flow_allowed_for_task(flow_value: str, task_path: str | None) -> boo
 
     return battle_flow_allowed_for_task(flow_value, task_path)
 
-# FastAPI Form/UploadFile 运行时依赖；Nuitka 不会从 fastapi 静态跟到该包，须显式 import 以打入 standalone
+# FastAPI Form/UploadFile 运行时依赖；显式导入以保证 multipart 解析可用。
 import multipart  # noqa: F401
 
 from fastapi import FastAPI, File, WebSocket, WebSocketDisconnect, Request, UploadFile
@@ -62,7 +58,6 @@ class _ColoredFormatter(logging.Formatter):
     }
     _RESET = '\033[0m'
     _DIM   = '\033[2m'
-    _BOLD  = '\033[1m'
 
     def format(self, record: logging.LogRecord) -> str:
         color = self._LEVEL_COLORS.get(record.levelname, '')
@@ -82,7 +77,7 @@ _plain_fmt    = logging.Formatter(
     datefmt="%H:%M:%S",
 )
 
-from AutoScriptor.utils.paths import get_accounts_dir, get_data_root, get_logs_root, get_static_dir, get_vendor_dir
+from AutoScriptor.utils.paths import get_accounts_dir, get_app_root, get_data_root, get_logs_root, get_static_dir, get_vendor_dir
 from services.webui.error_archives import (
     delete_archives,
     get_archive_detail,
@@ -90,9 +85,8 @@ from services.webui.error_archives import (
     list_error_archives,
     read_archive_file,
 )
-sse_log_dir = str(get_logs_root())
-sse_log_path = os.path.join(sse_log_dir, 'webui_sse.log')
-file_handler = logging.FileHandler(sse_log_path, encoding='utf-8')
+webui_log_path = os.path.join(str(get_logs_root()), 'webui.log')
+file_handler = logging.FileHandler(webui_log_path, encoding='utf-8')
 file_handler.setLevel(logging.INFO)
 file_handler.setFormatter(_plain_fmt)
 file_handler.addFilter(_LogTaskFilter())
@@ -106,22 +100,24 @@ class QueueHandler(logging.Handler):
         super().__init__(level)
         self.q = q
 
-    def emit(self, record: logging.LogRecord):
+    def emit(self, record: logging.LogRecord) -> None:
         try:
             msg = self.format(record)
+        except Exception:
+            self.handleError(record)
+            return
+
+        try:
+            self.q.put_nowait(msg)
+        except Full:
+            try:
+                self.q.get_nowait()
+            except Empty:
+                pass
             try:
                 self.q.put_nowait(msg)
-            except Exception:
-                try:
-                    self.q.get_nowait()
-                except Exception:
-                    pass
-                try:
-                    self.q.put_nowait(msg)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+            except Full:
+                pass
 
 
 queue_handler = QueueHandler(log_queue, level=logging.DEBUG)
@@ -168,9 +164,6 @@ from services.webui.security import (
     check_request_freshness as _check_request_freshness,
     login_limiter as _login_limiter,
     verify_limiter as _verify_limiter,
-    content_update_check_limiter as _content_update_check_limiter,
-    content_update_apply_limiter as _content_update_apply_limiter,
-    content_update_apply_min_interval as _content_update_apply_min_interval,
     SESSION_TTL as _SESSION_TTL,
     grant_credential_unlock as _grant_credential_unlock,
     validate_credential_unlock as _validate_credential_unlock,
@@ -232,57 +225,9 @@ def _require_credential_unlock(request: Request) -> JSONResponse | None:
     return None
 
 
-# ── Vendor 文件管理 ──
-
-_HERE = os.path.dirname(__file__)
 VENDOR_DIR = str(get_vendor_dir())
 STATIC_DIR = str(get_static_dir())
-VENDOR_SOURCES = {
-    'tailwind.css': 'https://cdn.tailwindcss.com',
-    'vue.global.prod.js': 'https://unpkg.com/vue@3/dist/vue.global.prod.js',
-    'element-plus.css': 'https://unpkg.com/element-plus/dist/index.css',
-    'element-plus.full.js': 'https://unpkg.com/element-plus/dist/index.full.js',
-    'ansi_up.min.js': 'https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.min.js',
-    'font-awesome.min.css': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css',
-    'fonts/fontawesome-webfont.woff2': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/fonts/fontawesome-webfont.woff2',
-    'fonts/fontawesome-webfont.woff': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/fonts/fontawesome-webfont.woff',
-    'fonts/fontawesome-webfont.ttf': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/fonts/fontawesome-webfont.ttf',
-}
-
-
-def _ensure_vendor_files():
-    """确保 vendor 目录和字体子目录存在；缺失文件放到后台线程下载，不阻塞启动。"""
-    try:
-        os.makedirs(VENDOR_DIR, exist_ok=True)
-        os.makedirs(os.path.join(VENDOR_DIR, 'fonts'), exist_ok=True)
-    except Exception as e:
-        logger.warning("ensure vendor dir failed: %s", e)
-        return
-    missing = []
-    for name, url in VENDOR_SOURCES.items():
-        fpath = os.path.join(VENDOR_DIR, name)
-        os.makedirs(os.path.dirname(fpath), exist_ok=True)
-        if os.path.exists(fpath) and os.path.getsize(fpath) > 1024:
-            continue
-        missing.append((name, url, fpath))
-    if not missing:
-        return
-    import threading
-    def _download_missing():
-        for name, url, fpath in missing:
-            try:
-                logger.info("downloading vendor: %s", url)
-                with urllib.request.urlopen(url, timeout=10) as resp, open(fpath, 'wb') as f:
-                    shutil.copyfileobj(resp, f)
-            except Exception as e:
-                try:
-                    if os.path.exists(fpath) and os.path.getsize(fpath) <= 1024:
-                        os.remove(fpath)
-                except Exception:
-                    pass
-                logger.warning("download vendor failed: %s -> %s (%s)", url, fpath, e)
-    t = threading.Thread(target=_download_missing, daemon=True)
-    t.start()
+WEBAPP_ICON_PATH = os.path.join(str(get_app_root()), "webapp", "icon.png")
 
 
 # ── 辅助函数 ──
@@ -351,10 +296,7 @@ app = FastAPI(title="AutoScriptor WebUI")
 def _scope_header(scope: dict, name: bytes) -> str:
     for key, value in scope.get("headers", []) or []:
         if key.lower() == name:
-            try:
-                return value.decode("latin-1")
-            except Exception:
-                return ""
+            return value.decode("latin-1")
     return ""
 
 
@@ -367,7 +309,7 @@ def _scope_cookie(scope: dict, name: str) -> str | None:
         cookie.load(raw)
         morsel = cookie.get(name)
         return morsel.value if morsel is not None else None
-    except Exception:
+    except CookieError:
         return None
 
 
@@ -445,12 +387,20 @@ async def auth_api(request: Request):
 
 
 # 编辑器 API 路由
-from services.webui.routes.editor import router as editor_router
+from services.webui.routes.editor import (
+    configure_editor_custom_task_save_controls,
+    configure_editor_execution_controls,
+    router as editor_router,
+)
+configure_editor_execution_controls(
+    request_cancel=TASK_MANAGER.request_cancel,
+    reset_cancel=TASK_MANAGER.reset_cancel,
+    runtime_busy=runtime_controller.is_busy,
+)
+configure_editor_custom_task_save_controls(
+    reload_custom_tasks=lambda: lifecycle_service.reload_all(reason="save editor custom task"),
+)
 app.include_router(editor_router)
-
-# 画布 API 路由
-from services.webui.routes.canvas import router as canvas_router
-app.include_router(canvas_router)
 
 # 资讯 API 路由
 from services.webui.routes.news import router as news_router
@@ -525,28 +475,26 @@ async def websocket_logs(websocket: WebSocket):
 async def _log_broadcaster():
     """后台协程：从线程安全的日志队列取数据，广播给所有 WebSocket 客户端。"""
     while True:
-        try:
-            batch: list[str] = []
-            while True:
+        batch: list[str] = []
+        while True:
+            try:
+                batch.append(log_queue.get_nowait())
+            except Empty:
+                break
+        if batch:
+            payload = json.dumps({"data": "\n".join(batch)})
+            dead: set[WebSocket] = set()
+            for ws in ws_clients.copy():
                 try:
-                    batch.append(log_queue.get_nowait())
-                except Empty:
-                    break
-            if batch:
-                payload = json.dumps({"data": "\n".join(batch)})
-                dead: set[WebSocket] = set()
-                for ws in ws_clients.copy():
-                    try:
-                        await ws.send_text(payload)
-                    except Exception:
-                        dead.add(ws)
-                ws_clients.difference_update(dead)
-        except Exception:
-            pass
+                    await ws.send_text(payload)
+                except Exception:
+                    dead.add(ws)
+            ws_clients.difference_update(dead)
         await asyncio.sleep(0.5)
 
 
 _init_done = False
+_init_error = ""
 
 
 @app.on_event("startup")
@@ -557,12 +505,13 @@ async def _on_startup():
 
 async def _deferred_heavy_init():
     """在 uvicorn 已开始监听后，后台执行任务注册等轻量初始化。"""
-    global _init_done
+    global _init_done, _init_error
     loop = asyncio.get_event_loop()
+    _init_done = False
+    _init_error = ""
     try:
         logger.info("后台初始化：运行时/任务加载（不启动设备）...")
         await loop.run_in_executor(None, _do_heavy_init)
-        _init_done = True
         if cfg.get("scheduler.auto_start", False):
             if cfg.has_decrypted_credentials():
                 scheduler.activate()
@@ -570,31 +519,28 @@ async def _deferred_heavy_init():
                 logger.info("Scheduler auto-started from config")
             else:
                 logger.info("Scheduler auto-start is enabled but account is not verified yet")
+        _init_done = True
         logger.info("后台初始化完成")
     except Exception as e:
-        logger.error("后台初始化失败: %s", e)
-        _init_done = True
+        _init_error = str(e)
+        logger.exception("后台初始化失败")
 
 
 def _do_heavy_init():
     """同步版初始化：只做不触碰模拟器的准备工作。"""
-    try:
-        from services.core.runtime_context import runtime_ctx
-        runtime_ctx.init_bg()
-        runtime_ctx.init_vlm()
-    except Exception as e:
-        logger.error("运行时上下文初始化失败: %s", e)
+    from services.core.runtime_context import runtime_ctx
 
-    try:
-        TASK_MANAGER.reload_tasks()
-        read_config()
-    except Exception as e:
-        logger.error("任务加载失败: %s", e)
+    runtime_ctx.init_bg()
+    TASK_MANAGER.reload_tasks()
+    read_config()
 
 
 @app.get("/api/init-status")
 async def init_status():
-    return {"ready": _init_done}
+    payload = {"ready": _init_done}
+    if _init_error:
+        payload["error"] = _init_error
+    return payload
 
 
 @app.on_event("shutdown")
@@ -614,6 +560,15 @@ async def favicon():
     path = os.path.join(STATIC_DIR, 'favicon.ico')
     if os.path.exists(path):
         return FileResponse(path)
+    if os.path.exists(WEBAPP_ICON_PATH):
+        return FileResponse(WEBAPP_ICON_PATH, media_type="image/png")
+    return JSONResponse(status_code=404, content={})
+
+
+@app.get("/favicon.png")
+async def favicon_png():
+    if os.path.exists(WEBAPP_ICON_PATH):
+        return FileResponse(WEBAPP_ICON_PATH, media_type="image/png")
     return JSONResponse(status_code=404, content={})
 
 
@@ -637,11 +592,41 @@ async def reload_tasks_api():
     if busy is not None:
         return busy
     try:
-        lifecycle_service.reload_tasks()
+        lifecycle_service.reload_task_state(reason="reload tasks")
         return make_public_config()
     except Exception as e:
         logger.error("reload_tasks error: %s", e)
         return api_error(500, str(e), code="reload_tasks_failed")
+
+
+@app.post("/api/config/sync")
+async def sync_config_api(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    security_key = data.get("security_key")
+    try:
+        version = lifecycle_service.sync_all_config(security_key, reason="sync config")
+        return api_ok(status="ok", config_version=version)
+    except Exception as e:
+        logger.error("sync_config error: %s", e)
+        return api_error(500, str(e), code="sync_config_failed")
+
+
+@app.post("/api/tasks/reload-all")
+async def reload_all_tasks_api():
+    busy = _guard_runtime_idle("reload all tasks")
+    if busy is not None:
+        return busy
+    try:
+        lifecycle_service.reload_all(reason="reload all")
+        return make_public_config()
+    except Exception as e:
+        logger.error("reload_all_tasks error: %s", e)
+        return api_error(500, str(e), code="reload_all_tasks_failed")
 
 
 @app.post("/api/config")
@@ -795,7 +780,7 @@ async def run_tasks_api(request: Request):
         scheduler.run_direct(ts)
         logger.info("========== 所有任务执行完成 ==========")
 
-    runtime_controller.start_direct(_run, sorted_tasks, _set_thread_high_priority)
+    runtime_controller.start_direct(_run, sorted_tasks)
     return api_ok(status='ok', tasks=sorted_tasks, mode='direct')
 
 
@@ -821,7 +806,7 @@ def _gift_redeem_character_options() -> list[dict[str, Any]]:
                 raw_chars = payload.get("characters") or {}
                 if isinstance(raw_chars, dict):
                     characters = raw_chars
-            except Exception:
+            except (OSError, json.JSONDecodeError):
                 characters = {}
 
         roles: list[dict[str, str]] = []
@@ -940,7 +925,7 @@ async def news_gift_code_redeem_api(request: Request):
         from AutoScriptor.utils.task_registry import task_registry
 
         if not task_registry.has_task(_GIFT_REDEEM_TASK_PATH):
-            lifecycle_service.reload_tasks(reason="reload redeem task")
+            lifecycle_service.reload_all(reason="reload redeem task")
         if not task_registry.has_task(_GIFT_REDEEM_TASK_PATH):
             return api_error(
                 404,
@@ -965,7 +950,7 @@ async def news_gift_code_redeem_api(request: Request):
         scheduler.run_direct_sequence(runs, force_login=True)
         logger.info("========== 兑换码任务执行完成，共 %d 个 ==========", len(redeem_codes))
 
-    runtime_controller.start_direct(_run, task_runs, _set_thread_high_priority)
+    runtime_controller.start_direct(_run, task_runs)
     resp = JSONResponse(content=api_ok(
         status="ok",
         mode="direct",
@@ -1122,36 +1107,35 @@ async def enum_options_api(request: Request):
         else:
             task_path = None
         if not isinstance(paths, list):
-            return JSONResponse(status_code=400, content={'error': 'paths must be a list'})
+            return api_error(400, 'paths must be a list', code='invalid_payload')
         result = {}
         for p in paths:
-            try:
-                module_name, class_name = p.rsplit('.', 1)
-                mod = importlib.import_module(module_name)
-                EnumClass = getattr(mod, class_name)
-                opts = []
-                for m in EnumClass:
-                    if isinstance(m.value, str):
-                        label = m.value
-                    elif isinstance(m.value, int):
-                        label = str(m.value)
-                    else:
-                        label = m.name
-                    if (
-                        task_path
-                        and EnumClass.__name__ == 'BattleFlowName'
-                        and isinstance(m.value, str)
-                        and not _battle_flow_allowed_for_task(m.value, task_path)
-                    ):
-                        continue
-                    opts.append({"value": m.name, "label": label})
-                result[p] = opts
-            except Exception:
-                result[p] = []
+            if not isinstance(p, str) or '.' not in p:
+                return api_error(400, f'invalid enum path: {p!r}', code='invalid_payload')
+            module_name, class_name = p.rsplit('.', 1)
+            mod = importlib.import_module(module_name)
+            EnumClass = getattr(mod, class_name)
+            opts = []
+            for m in EnumClass:
+                if isinstance(m.value, str):
+                    label = m.value
+                elif isinstance(m.value, int):
+                    label = str(m.value)
+                else:
+                    label = m.name
+                if (
+                    task_path
+                    and EnumClass.__name__ == 'BattleFlowName'
+                    and isinstance(m.value, str)
+                    and not _battle_flow_allowed_for_task(m.value, task_path)
+                ):
+                    continue
+                opts.append({"value": m.name, "label": label})
+            result[p] = opts
         return result
     except Exception as e:
         logger.error("enum_options error: %s", e)
-        return JSONResponse(status_code=500, content={'error': str(e)})
+        return api_error(500, str(e), code='enum_options_failed')
 
 
 @app.get("/api/ocr-status")
@@ -1160,17 +1144,11 @@ async def ocr_status_api():
         import paddle
         from AutoScriptor.recognition.ocr_rec import ocr_manager
 
-        def _safe(call, default):
-            try:
-                return call()
-            except Exception:
-                return default
-
         cfg_use_gpu = bool((cfg.get("ocr") or {}).get("use_gpu", cfg.get("ocr.use_gpu", False)))
-        compiled_with_cuda = _safe(lambda: paddle.device.is_compiled_with_cuda(), False)
-        gpu_count = _safe(lambda: paddle.device.cuda.device_count(), 0)
-        current_device = _safe(lambda: paddle.get_device(), "unknown")
-        engine_ready = _safe(lambda: ocr_manager.is_ready(), False)
+        compiled_with_cuda = paddle.device.is_compiled_with_cuda()
+        gpu_count = paddle.device.cuda.device_count()
+        current_device = paddle.get_device()
+        engine_ready = ocr_manager.is_ready()
         return {
             "cfg_use_gpu": cfg_use_gpu,
             "compiled_with_cuda": compiled_with_cuda,
@@ -1180,7 +1158,7 @@ async def ocr_status_api():
         }
     except Exception as e:
         logger.error("ocr_status error: %s", e)
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return api_error(500, str(e), code="ocr_status_failed")
 
 
 @app.get("/api/scheduler/status")
@@ -1373,65 +1351,6 @@ async def update_run_api():
     ok = updater.run_update()
     return {"success": ok, **updater.get_status()}
 
-
-# ── 内容增量更新（bsdiff / manifest，与 Git 更新独立）──
-
-@app.get("/api/content-update/status")
-async def content_update_status_api():
-    from services.core.content_delta_update import content_delta_updater
-    return content_delta_updater.get_status()
-
-
-@app.post("/api/content-update/check")
-async def content_update_check_api(request: Request):
-    client_ip = request.client.host if request.client else "unknown"
-    if not _content_update_check_limiter.allow(client_ip):
-        return JSONResponse(
-            status_code=429,
-            content={"error": "检查更新过于频繁，请稍后再试"},
-        )
-    from services.core.content_delta_update import content_delta_updater
-    has_update, message = content_delta_updater.check_has_update()
-    return {
-        "has_update": has_update,
-        "message": message,
-        **content_delta_updater.get_status(),
-    }
-
-
-@app.post("/api/content-update/apply")
-async def content_update_apply_api(request: Request):
-    client_ip = request.client.host if request.client else "unknown"
-    from services.core.content_delta_update import content_delta_updater
-
-    rem_cd = content_delta_updater.apply_cooldown_remaining_sec()
-    if rem_cd > 0:
-        return JSONResponse(
-            status_code=429,
-            content={
-                "error": f"全机冷却中，约 {int(rem_cd) + 1} 秒后再试",
-                "apply_cooldown_remaining_sec": round(rem_cd, 1),
-            },
-        )
-    if not _content_update_apply_min_interval.allow(client_ip):
-        return JSONResponse(
-            status_code=429,
-            content={"error": "操作过于频繁，请稍后再试"},
-        )
-    if not _content_update_apply_limiter.allow(client_ip):
-        return JSONResponse(
-            status_code=429,
-            content={"error": "应用更新过于频繁，请稍后再试"},
-        )
-    if content_delta_updater.requires_credential_unlock():
-        cred_err = _require_credential_unlock(request)
-        if cred_err is not None:
-            return cred_err
-    ok = content_delta_updater.apply_manifest()
-    return {"success": ok, **content_delta_updater.get_status()}
-
-
-# ── 远程访问 API ──
 
 @app.get("/api/remote-access")
 async def remote_access_status_api():
@@ -1869,7 +1788,6 @@ def run_webui(restart_event=None):
     global _server
     import uvicorn
 
-    _ensure_vendor_files()
     read_config()
     _apply_webui_log_level_from_config()
     _print_banner()
@@ -1917,7 +1835,6 @@ def shutdown_webui():
 
     _silent(scheduler.deactivate)
     _silent(lambda: scheduler.stop(timeout=3))
-    _silent(lambda: __import__("AutoScriptor.utils.perf", fromlist=["unboost"]).unboost())
     _silent(_shutdown_runtime)
     _silent(lambda: setattr(_server, "should_exit", True) if _server else None)
 
@@ -1932,12 +1849,4 @@ def _shutdown_runtime():
 if __name__ == '__main__':
     from services.single_instance import ensure_single_instance
     ensure_single_instance()
-
-    try:
-        run_webui()
-    except Exception as e:
-        logger.error("Error: %s", e)
-        traceback.print_exc()
-        logger.info("程序已退出")
-    finally:
-        shutdown_webui()
+    run_webui()

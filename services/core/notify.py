@@ -34,9 +34,13 @@ def handle_notify(config_yaml: str, title: str = "", content: str = "") -> bool:
     try:
         config = {}
         for item in yaml.safe_load_all(config_yaml):
-            if item:
-                config.update(item)
-    except Exception:
+            if item is None:
+                continue
+            if not isinstance(item, dict):
+                logger.error("通知配置必须是 YAML 映射，跳过发送")
+                return False
+            config.update(item)
+    except yaml.YAMLError:
         logger.error("通知配置解析失败，跳过发送")
         return False
 
@@ -90,12 +94,8 @@ def handle_notify(config_yaml: str, title: str = "", content: str = "") -> bool:
 
 def notify_from_config(title: str, content: str) -> bool:
     """从全局配置读取通知设置并发送"""
-    try:
-        from AutoScriptor.utils.app_config import cfg
-        if not cfg.get("notify.enabled", False):
-            return False
-        config_yaml = cfg.get("notify.config_yaml", "provider: null")
-        return handle_notify(config_yaml, title=title, content=content)
-    except Exception as e:
-        logger.debug(f"notify_from_config 失败: {e}")
+    from AutoScriptor.utils.app_config import cfg
+    if not cfg.get("notify.enabled", False):
         return False
+    config_yaml = cfg.get("notify.config_yaml", "provider: null")
+    return handle_notify(config_yaml, title=title, content=content)

@@ -15,10 +15,9 @@ _EXPORTS: dict[str, tuple[str, str]] = {
 _MODULE_EXPORTS = {
     "api": "AutoScriptor.control.MumuAdaptor.api",
     "constant": "AutoScriptor.control.MumuAdaptor.constant",
-    "control": "AutoScriptor.control.MumuAdaptor.control",
 }
 
-__all__ = ["Mumu", "constant", "utils", "api", "control", "AndroidKey"]
+__all__ = ["Mumu", "constant", "utils", "api", "AndroidKey"]
 
 
 def __getattr__(name: str) -> Any:

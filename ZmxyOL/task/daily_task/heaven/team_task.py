@@ -1,11 +1,8 @@
-
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.errors import TaskRequireReTry
 from ZmxyOL.battle.tasks import get_task_table
 from time import time
-
 
 
 @register_task
@@ -47,13 +44,3 @@ def zudui_task(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
     click(B(1050,50,30,30),delay=1.5)
     click(B(1200,30,30,30))
     wait_for_disappear(I("加载中"))
-
-
-if __name__ == "__main__":
-    try:
-        zudui_task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

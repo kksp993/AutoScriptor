@@ -1,9 +1,7 @@
-import traceback
 from enum import IntEnum
 
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
 
 
 class ShituolingDiff(IntEnum):
@@ -50,7 +48,8 @@ def task(
             callback=lambda: bg.set_signal("try_exit", True),
             once=True
         )
-        h.set(True,3).battle_loop(battle_weight=0)
+        flow_name = getattr(battle_flow, "value", battle_flow)
+        h.set(True,3).battle_loop(flow_name=flow_name)
     click(T("确认", box=Box(572,474,135,78).margin()))
     wait_for_appear(T("恐怖加工厂", box=Box(520,16,239,58).margin()))
     click(B(274,671,105,39))
@@ -59,12 +58,3 @@ def task(
     click(B(1188,25,71,54))
     wait_for_appear(T("挑战", box=Box(561,18,195,79).margin()))
     click(B(1204,14,58,55))
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

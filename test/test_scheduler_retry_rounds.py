@@ -11,6 +11,9 @@ class FakeRoundTaskManager:
         self._cancel_event = Event()
         self.outcomes = outcomes
         self.calls = []
+        self.reload_calls = 0
+        self.character_switches = []
+        self.full_character_reload_switches = []
 
     def execute_tasks(self, tasks, *, max_attempts=None, attempt_offset=0):
         task = tasks[0]
@@ -19,7 +22,15 @@ class FakeRoundTaskManager:
         return outcome
 
     def reload_tasks(self):
+        self.reload_calls += 1
         return None
+
+    def switch_character(self, server, character):
+        self.character_switches.append((server, character))
+
+    def switch_character_and_reload(self, server, character):
+        self.full_character_reload_switches.append((server, character))
+        self.reload_tasks()
 
 
 class TestSchedulerRetryRounds(unittest.TestCase):
@@ -44,33 +55,112 @@ class TestSchedulerRetryRounds(unittest.TestCase):
 
         sched = Scheduler()
         sched.set_task_manager(tm)
-        with patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}):
-            with patch.object(cfg, "save_config"):
-                with patch("services.core.scheduler.runtime_ctx.refresh"):
-                    with patch("AutoScriptor.utils.perf.boost"):
-                        with patch("AutoScriptor.utils.perf.unboost"):
-                            with patch("services.core.scheduler.notify_from_config"):
-                                with patch.object(sched, "_maybe_daily_restart"):
-                                    with patch.object(sched, "_ensure_character_logged_in"):
-                                        with patch.object(sched, "_post_execution_action"):
-                                            sched._run_task_pipeline(explicit_tasks=["A", "B"])
+        with (
+            patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}),
+            patch.object(cfg, "save_config") as save_config,
+            patch("services.core.scheduler.runtime_ctx.refresh"),
+            patch("services.core.scheduler.notify_from_config"),
+            patch.object(sched, "_maybe_daily_restart"),
+            patch.object(sched, "_ensure_character_logged_in"),
+            patch.object(sched, "_post_execution_action"),
+        ):
+            sched._run_task_pipeline(explicit_tasks=["A", "B"])
+        return sched, save_config
 
     def _run_scheduled_with_fake_manager(self, sched, due_tasks):
         from services.core.scheduler import SchedulerState
 
         sched.state = SchedulerState.RUNNING
-        with patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}):
-            with patch.object(cfg, "save_config"):
-                with patch.object(sched, "_collect_due_cross_character", return_value=due_tasks):
-                    with patch("services.core.scheduler.runtime_ctx.refresh"):
-                        with patch("AutoScriptor.utils.perf.boost"):
-                            with patch("AutoScriptor.utils.perf.unboost"):
-                                with patch("services.core.scheduler.notify_from_config"):
-                                    with patch.object(sched, "_maybe_daily_restart"):
-                                        with patch.object(sched, "_ensure_character_logged_in"):
-                                            with patch.object(sched, "_post_execution_action"):
-                                                with patch.object(sched, "_return_to_first_dispatch_character"):
-                                                    sched._run_task_pipeline(explicit_tasks=None)
+        with (
+            patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}),
+            patch.object(cfg, "save_config") as save_config,
+            patch.object(sched, "_collect_due_cross_character", return_value=due_tasks),
+            patch("services.core.scheduler.runtime_ctx.refresh"),
+            patch("services.core.scheduler.notify_from_config"),
+            patch.object(sched, "_maybe_daily_restart"),
+            patch.object(sched, "_ensure_character_logged_in"),
+            patch.object(sched, "_post_execution_action"),
+            patch.object(sched, "_return_to_first_dispatch_character"),
+        ):
+            sched._run_task_pipeline(explicit_tasks=None)
+        return save_config
+
+    def test_explicit_pipeline_saves_config_without_full_reload(self):
+        tm = FakeRoundTaskManager({
+            ("A", 0): (1, 0),
+            ("B", 0): (1, 0),
+        })
+
+        _, save_config = self._run_with_fake_manager(tm)
+
+        self.assertEqual(save_config.call_count, 2)
+        self.assertEqual(tm.reload_calls, 0)
+
+    def test_scheduled_pipeline_saves_config_without_full_reload(self):
+        from services.core.scheduler import Scheduler
+
+        tm = FakeRoundTaskManager({("A", 0): (1, 0)})
+        sched = Scheduler()
+        sched.set_task_manager(tm)
+
+        save_config = self._run_scheduled_with_fake_manager(sched, ["A"])
+
+        self.assertEqual(save_config.call_count, 1)
+        self.assertEqual(tm.reload_calls, 0)
+
+    def test_deferred_reload_still_uses_full_reload(self):
+        from services.core.scheduler import Scheduler
+
+        tm = FakeRoundTaskManager({("A", 0): (1, 0)})
+        sched = Scheduler()
+        sched.set_task_manager(tm)
+        sched._reload_deferred.set()
+
+        with (
+            patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}),
+            patch.object(cfg, "save_config") as save_config,
+            patch("services.core.scheduler.runtime_ctx.refresh"),
+            patch("services.core.scheduler.notify_from_config"),
+            patch.object(sched, "_maybe_daily_restart"),
+            patch.object(sched, "_ensure_character_logged_in"),
+            patch.object(sched, "_post_execution_action"),
+        ):
+            sched._run_task_pipeline(explicit_tasks=["A"])
+
+        self.assertEqual(save_config.call_count, 0)
+        self.assertEqual(tm.reload_calls, 1)
+        self.assertFalse(sched._reload_deferred.is_set())
+
+    def test_collect_due_cross_character_uses_lightweight_switch(self):
+        from services.core.scheduler import Scheduler
+
+        current = {"server": "s1", "name": "first"}
+
+        class SwitchingTaskManager(FakeRoundTaskManager):
+            def switch_character(self, server, character):
+                super().switch_character(server, character)
+                current.update({"server": server, "name": character})
+
+            def switch_character_and_reload(self, server, character):
+                super().switch_character_and_reload(server, character)
+                current.update({"server": server, "name": character})
+
+        tm = SwitchingTaskManager({})
+        sched = Scheduler()
+        sched.set_task_manager(tm)
+        dispatch_order = [("s1", "first"), ("s2", "second")]
+
+        with (
+            patch.object(cfg, "active_character", side_effect=lambda: dict(current)),
+            patch.object(sched, "_iter_characters_schedule_order", return_value=iter(dispatch_order)),
+            patch.object(sched, "_collect_due", side_effect=[[], ["A"]]),
+        ):
+            due = sched._collect_due_cross_character()
+
+        self.assertEqual(due, ["A"])
+        self.assertEqual(tm.character_switches, [("s2", "second")])
+        self.assertEqual(tm.full_character_reload_switches, [])
+        self.assertEqual(tm.reload_calls, 0)
 
     def test_failed_task_retries_after_other_tasks_finish_round(self):
         tm = FakeRoundTaskManager({
@@ -132,9 +222,15 @@ class TestSchedulerRetryRounds(unittest.TestCase):
                 super().__init__({("A", 0): (1, 0)})
                 self._current = current
                 self.switches = []
+                self.full_switches = []
+
+            def switch_character(self, server, character):
+                self.switches.append((server, character))
+                self._current.update({"server": server, "name": character})
 
             def switch_character_and_reload(self, server, character):
-                self.switches.append((server, character))
+                self.full_switches.append((server, character))
+                self.reload_tasks()
                 self._current.update({"server": server, "name": character})
 
         current = {"server": "s2", "name": "last"}
@@ -148,21 +244,23 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         def record_login(_cfg):
             ensure_seen.append(dict(current))
 
-        with patch.object(cfg, "active_character", side_effect=lambda: dict(current)):
-            with patch("services.core.scheduler.iter_dispatch_characters", side_effect=lambda _cfg: iter(dispatch_order)):
-                with patch.object(cfg, "save_config"):
-                    with patch.object(sched, "_collect_due_cross_character", return_value=["A"]):
-                        with patch("services.core.scheduler.runtime_ctx.refresh"):
-                            with patch("AutoScriptor.utils.perf.boost"):
-                                with patch("AutoScriptor.utils.perf.unboost"):
-                                    with patch("services.core.scheduler.notify_from_config"):
-                                        with patch.object(sched, "_maybe_daily_restart"):
-                                            with patch.object(sched, "_ensure_character_logged_in", side_effect=record_login):
-                                                with patch.object(sched, "_post_execution_action"):
-                                                    sched._run_task_pipeline(explicit_tasks=None)
+        with (
+            patch.object(cfg, "active_character", side_effect=lambda: dict(current)),
+            patch("services.core.scheduler.iter_dispatch_characters", side_effect=lambda _cfg: iter(dispatch_order)),
+            patch.object(cfg, "save_config"),
+            patch.object(sched, "_collect_due_cross_character", return_value=["A"]),
+            patch("services.core.scheduler.runtime_ctx.refresh"),
+            patch("services.core.scheduler.notify_from_config"),
+            patch.object(sched, "_maybe_daily_restart"),
+            patch.object(sched, "_ensure_character_logged_in", side_effect=record_login),
+            patch.object(sched, "_post_execution_action"),
+        ):
+            sched._run_task_pipeline(explicit_tasks=None)
 
         self.assertEqual(tm.calls, [("A", 0)])
         self.assertEqual(tm.switches, [("s1", "first")])
+        self.assertEqual(tm.full_switches, [])
+        self.assertEqual(tm.reload_calls, 0)
         self.assertEqual(ensure_seen, [
             {"server": "s2", "name": "last"},
             {"server": "s1", "name": "first"},

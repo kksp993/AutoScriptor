@@ -4,13 +4,9 @@
 # @Author : wlkjyy
 # @File : gui.py
 # @Software: PyCharm
-import json
-import time
-
 import cv2
 import numpy
-from adbutils import adb
-import threading
+
 from AutoScriptor.utils.box import Box
 from AutoScriptor.recognition.ocr_rec import get_ocr_engine
 

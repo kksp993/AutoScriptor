@@ -39,7 +39,6 @@ class WebUILifecycleService:
         "app",
         "emulator",
         "ocr",
-        "llm",
         "scheduler",
         "tasks",
         "deploy",
@@ -57,6 +56,8 @@ class WebUILifecycleService:
         refresh_order_map: Callable[[], None],
         mark_config_changed: Callable[[str], int],
         apply_log_level: Callable[[], None] | None = None,
+        clear_background: Callable[[], None] | None = None,
+        reload_ui_map: Callable[[], None] | None = None,
     ):
         self.cfg = cfg
         self.task_manager = task_manager
@@ -65,11 +66,27 @@ class WebUILifecycleService:
         self.refresh_order_map = refresh_order_map
         self.mark_config_changed = mark_config_changed
         self.apply_log_level = apply_log_level
+        self.clear_background = clear_background
+        self.reload_ui_map = reload_ui_map
 
     def reload_tasks(self, security_key: str | None = None, *, reason: str = "reload tasks") -> int:
-        self.task_manager.reload_tasks(security_key)
+        return self.reload_all(security_key, reason=reason)
+
+    def reload_task_state(self, *, reason: str = "reload tasks") -> int:
+        self._clear_background()
+        return self._refresh_task_projection(reason)
+
+    def sync_all_config(self, security_key: str | None = None, *, reason: str = "sync config") -> int:
+        self.cfg.reload_preserving_decrypted_credentials(security_key)
         self.refresh_order_map()
+        self._apply_log_level()
         return self.mark_config_changed(reason)
+
+    def reload_all(self, security_key: str | None = None, *, reason: str = "reload all") -> int:
+        self.task_manager.reload_tasks(security_key)
+        self._reload_ui_map_cache()
+        self._clear_background()
+        return self._refresh_task_projection(reason)
 
     def save_runtime_config(self, data: dict[str, Any]) -> int:
         missing = [key for key in ("app", "emulator", "ocr") if key not in data]
@@ -90,24 +107,20 @@ class WebUILifecycleService:
         with self.task_manager.config_transaction():
             self.cfg._config["tasks"] = cleaned
             self.cfg.save_config()
-            self.task_manager.reload_tasks()
         self.scheduler.wake()
-        self.refresh_order_map()
-        return self.mark_config_changed("save tasks")
+        return self._refresh_task_projection("save tasks")
 
     def switch_character(self, server: str, character: str, *, reason: str = "switch character") -> int:
-        self.task_manager.switch_character_and_reload(server, character)
+        with self.task_manager.config_transaction():
+            self.cfg.switch_character(server, character)
         self.scheduler.invalidate_login()
-        self.refresh_order_map()
-        return self.mark_config_changed(reason)
+        return self._refresh_task_projection(reason)
 
     def switch_account(self, name: str, security_key: str) -> int:
         with self.task_manager.config_transaction():
             self.cfg.switch_account(name, security_key)
-            self.task_manager.reload_tasks(security_key)
         self.scheduler.invalidate_login()
-        self.refresh_order_map()
-        return self.mark_config_changed("switch account")
+        return self._refresh_task_projection("switch account")
 
     def save_dispatch_queue(self, raw_queue) -> tuple[list[dict[str, str]], int]:
         queue = self.task_tree_service.normalize_dispatch_queue(raw_queue)
@@ -134,16 +147,8 @@ class WebUILifecycleService:
         with self.task_manager.config_transaction():
             self.cfg.add_account(name, account, password, server, character_name, security_key)
             self.cfg.switch_account(name, security_key)
-            try:
-                self.task_manager.reload_tasks(security_key)
-            except Exception as e:
-                logger.warning("账号已创建并切换，但任务重载失败: %s", e)
         self.scheduler.invalidate_login()
-        try:
-            self.refresh_order_map()
-        except Exception as e:
-            logger.warning("账号已创建并切换，但任务顺序刷新失败: %s", e)
-        return self.mark_config_changed("add account")
+        return self._refresh_task_projection("add account")
 
     def delete_account(self, name: str) -> int:
         with self.task_manager.config_transaction():
@@ -166,7 +171,7 @@ class WebUILifecycleService:
         return self.mark_config_changed("delete character")
 
     def reload_verified_account(self, security_key: str) -> str:
-        self.task_manager.reload_tasks(security_key)
+        self.cfg.reload_preserving_decrypted_credentials(security_key)
         character_name = self.ensure_active_character_in_game()
         self.refresh_order_map()
         return character_name
@@ -174,9 +179,7 @@ class WebUILifecycleService:
     def update_account_credentials(self, account: str, password: str, security_key: str) -> tuple[str, int]:
         with self.task_manager.config_transaction():
             self.cfg.update_current_account_credentials(account, password, security_key)
-            self.task_manager.reload_tasks(security_key)
-        self.refresh_order_map()
-        version = self.mark_config_changed("update account credentials")
+        version = self._refresh_task_projection("update account credentials")
         character_name = self.cfg._config.get("game", {}).get("character_name", "")
         return character_name, version
 
@@ -206,7 +209,7 @@ class WebUILifecycleService:
                     value = self.task_tree_service.strip_runtime_fields(value)
                 self.cfg._config[key] = value
             self.cfg.save_config()
-            self.task_manager.reload_tasks()
+        self._mark_tasks_updated()
         self.refresh_order_map()
         self._apply_log_level()
         return self.mark_config_changed("import config")
@@ -240,6 +243,36 @@ class WebUILifecycleService:
     def _apply_log_level(self) -> None:
         if self.apply_log_level is not None:
             self.apply_log_level()
+
+    def _clear_background(self) -> None:
+        if self.clear_background is not None:
+            self.clear_background()
+            return
+        from AutoScriptor.core.background import bg
+
+        bg.clear(clear_signals=True)
+
+    def _reload_ui_map_cache(self) -> None:
+        if self.reload_ui_map is not None:
+            self.reload_ui_map()
+            return
+        from AutoScriptor.utils.ui_map import reload_ui_map
+
+        reload_ui_map()
+
+    def _mark_tasks_updated(self) -> None:
+        marker = getattr(self.scheduler, "mark_tasks_updated", None)
+        if callable(marker):
+            marker()
+            return
+        event = getattr(self.scheduler, "_tasks_updated", None)
+        if event is not None and hasattr(event, "set"):
+            event.set()
+
+    def _refresh_task_projection(self, reason: str) -> int:
+        self._mark_tasks_updated()
+        self.refresh_order_map()
+        return self.mark_config_changed(reason)
 
     def _save_global_config(self) -> None:
         saver = getattr(self.cfg, "save_global_config", None)

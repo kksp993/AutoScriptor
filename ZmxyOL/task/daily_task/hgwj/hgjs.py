@@ -1,19 +1,21 @@
 from calendar import weekday
 import datetime
-import traceback
 
 from AutoScriptor.utils.logger import logger
 
 from ZmxyOL.nav.api import locate_region
 from ZmxyOL import *
 from AutoScriptor import *
-from ZmxyOL.battle.character.hero import h
+from AutoScriptor.battle_character.hero import h
+
+
 def get_week_number():
     today = datetime.date.today()
     epoch = datetime.date(1, 1, 1)
     delta_days = (today - epoch).days
     week_number = delta_days // 7 + 1  # 第一周是1
     return week_number
+
 
 def get_weekday_number():
     today = datetime.date.today()
@@ -35,13 +37,3 @@ def task():
     click(B(30,30,30,30),until=lambda: ui_T((T("荒古万界"),I("导航-菜单"),T("世界地图"))))
     click(B(1200,30,30,30))
     locate_region()
-
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

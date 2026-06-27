@@ -1,5 +1,5 @@
 """
-跨进程单例：保证 AutoScriptor 主入口（WebUI / CLI）全局只运行一个实例。
+跨进程单例：保证 AutoScriptor 源码 WebUI / Electron 主入口全局只运行一个实例。
 
 放在 services/ 下，避免 import AutoScriptor 包时执行其 __init__ 拉起重依赖。
 
@@ -36,7 +36,7 @@ def _release() -> None:
                 import ctypes
 
                 ctypes.windll.kernel32.CloseHandle(h)
-            except Exception:
+            except (AttributeError, OSError, ValueError):
                 pass
         _state["handle"] = None
     elif kind == "posix":
@@ -46,11 +46,11 @@ def _release() -> None:
                 import fcntl
 
                 fcntl.flock(fp.fileno(), fcntl.LOCK_UN)
-            except Exception:
+            except (ImportError, OSError, ValueError):
                 pass
             try:
                 fp.close()
-            except Exception:
+            except OSError:
                 pass
         _state["fp"] = None
     _state["kind"] = None
@@ -104,7 +104,7 @@ def ensure_single_instance(lock_name: str = "autoscriptor", *, exit_code: int = 
         except BlockingIOError:
             try:
                 fp.close()
-            except Exception:
+            except OSError:
                 pass
             print(
                 "AutoScriptor 已在运行，请勿重复启动。\n"

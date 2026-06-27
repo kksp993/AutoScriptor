@@ -4,6 +4,11 @@
  * 左侧 1/4：图片编辑器控件 + 遥控器
  * 右侧 3/4：横向图 → Canvas 上 + 代码区下；纵向图 → Canvas 右 + 代码区左
  */
+const EDITOR_DRAFT_CACHE = {
+  recordedCode: '',
+  customExecCode: '',
+};
+
 const EditorPanel = {
   name: 'EditorPanel',
   components: { EditorCanvas, EditorControls },
@@ -13,6 +18,7 @@ const EditorPanel = {
   },
   emits: ['imported'],
   template: `
+<div class="h-full min-h-0">
 <div class="flex flex-col lg:flex-row gap-3 h-full min-h-0">
   <!-- 左侧：上下分栏 -->
   <div class="lg:w-1/4 flex flex-col gap-3 min-h-0">
@@ -146,15 +152,16 @@ const EditorPanel = {
             placeholder="如 locate(T(&quot;确定&quot;))；最后一行为表达式则返回其值；为赋值（如 info = extract_info(...)）则返回左侧变量。也可用 __result__ = …"
             class="editor-custom-exec-input" />
           <div class="flex gap-1.5">
-            <el-button size="small" plain
-              @click="validateCustomCode"
-              :disabled="!customExecCode.trim()"
+            <el-button size="small" plain type="danger"
+              @click="stopCustomCodeExecution"
+              :loading="stopCustomLoading"
+              :disabled="!execCustomLoading || stopCustomLoading"
               class="flex-1 min-w-0">
-              <i class="fa fa-check-circle-o mr-1"></i>校验
+              <i class="fa fa-stop-circle-o mr-1"></i>终止执行
             </el-button>
             <el-button size="small"
               @click="executeCustomCode" :loading="execCustomLoading"
-              :disabled="!customExecCode.trim()"
+              :disabled="!customExecCode.trim() || execCustomLoading"
               class="flex-1 min-w-0 editor-custom-exec-run-btn">
               <i class="fa fa-terminal mr-1"></i>执行
             </el-button>
@@ -199,14 +206,15 @@ const EditorPanel = {
           </h2>
           <span class="text-xs text-gray-400">{{ recordedLines.length }} 行</span>
         </div>
-        <el-input type="textarea" v-model="recordedCode" class="flex-1 editor-code-textarea"
+        <el-input type="textarea" v-model="recordedCode" ref="recordedCodeInput" class="flex-1 editor-code-textarea"
                   :autosize="false" resize="none"
+                  @keydown="onRecordedCodeKeydown"
                   placeholder="操作后代码将自动生成…" />
       </div>
       <div class="flex shrink-0 editor-recorder-actions"
            :class="isLandscape ? 'flex-col gap-2 justify-start' : 'flex-row flex-wrap gap-2 justify-end items-center'"
            :style="isLandscape ? 'width:120px' : ''">
-        <el-tooltip placement="top" :show-after="0">
+        <el-tooltip placement="left" :show-after="0">
           <template #content>
             <div class="max-w-[260px] text-xs leading-relaxed text-left">将录制区<strong>全部代码</strong>复制到剪贴板，便于粘贴到任务脚本。</div>
           </template>
@@ -214,7 +222,18 @@ const EditorPanel = {
             <i class="fa fa-copy mr-1"></i>复制代码
           </el-button></span>
         </el-tooltip>
-        <el-tooltip placement="top" :show-after="0">
+        <el-tooltip placement="left" :show-after="0">
+          <template #content>
+            <div class="max-w-[260px] text-xs leading-relaxed text-left">将录制区与自定义执行区内容发送给后端，保存到 data/custom_task 下作为自定义脚本。</div>
+          </template>
+          <span class="inline-flex"><el-button size="small" type="primary" plain
+            @click="saveCustomScript"
+            :loading="saveScriptLoading"
+            :disabled="saveScriptDisabled">
+            <i class="fa fa-save mr-1"></i>保存脚本
+          </el-button></span>
+        </el-tooltip>
+        <el-tooltip placement="left" :show-after="0">
           <template #content>
             <div class="max-w-[260px] text-xs leading-relaxed text-left">清空录制区文本，不影响画布与左侧选区。</div>
           </template>
@@ -222,7 +241,7 @@ const EditorPanel = {
             <i class="fa fa-trash-o mr-1"></i>清空
           </el-button></span>
         </el-tooltip>
-        <el-tooltip placement="top" :show-after="0">
+        <el-tooltip placement="left" :show-after="0">
           <template #content>
             <div class="max-w-[260px] text-xs leading-relaxed text-left space-y-1">
               <p>在当前画面上查找左侧名称对应的 <strong>T / I 目标</strong>，返回 <strong>Box</strong> 或 None（不阻塞等待出现，可与超时配合）。</p>
@@ -233,7 +252,18 @@ const EditorPanel = {
             定位
           </el-button></span>
         </el-tooltip>
-        <el-tooltip placement="top" :show-after="0">
+        <el-tooltip placement="left" :show-after="0">
+          <template #content>
+            <div class="max-w-[260px] text-xs leading-relaxed text-left space-y-1">
+              <p>插入存在判断代码片段；有当前框选时复用点击生成的 T / I / B 目标，否则光标停在括号内。</p>
+              <p class="font-mono text-[11px] opacity-90">if ui_T(目标):</p>
+            </div>
+          </template>
+          <span class="inline-flex"><el-button size="small" plain @click="appendUiExists">
+            判断存在
+          </el-button></span>
+        </el-tooltip>
+        <el-tooltip placement="left" :show-after="0">
           <template #content>
             <div class="max-w-[260px] text-xs leading-relaxed text-left space-y-1">
               <p>阻塞直到左侧名称对应的 <strong>T / I 目标</strong>在画面上出现（依赖当前选区与名称）。</p>
@@ -244,7 +274,7 @@ const EditorPanel = {
             等待出现
           </el-button></span>
         </el-tooltip>
-        <el-tooltip placement="top" :show-after="0">
+        <el-tooltip placement="left" :show-after="0">
           <template #content>
             <div class="max-w-[260px] text-xs leading-relaxed text-left space-y-1">
               <p>阻塞直到该目标从画面上消失。</p>
@@ -255,7 +285,7 @@ const EditorPanel = {
             等待消失
           </el-button></span>
         </el-tooltip>
-        <el-tooltip placement="top" :show-after="0">
+        <el-tooltip placement="left" :show-after="0">
           <template #content>
             <div class="max-w-[288px] text-xs leading-relaxed text-left space-y-2">
               <p class="font-mono text-[11px] opacity-90 leading-snug">extract_info(B(…), post_process=…, ensure_not_empty=…)</p>
@@ -269,7 +299,7 @@ const EditorPanel = {
             提取信息
           </el-button></span>
         </el-tooltip>
-        <el-tooltip placement="top" :show-after="0">
+        <el-tooltip placement="left" :show-after="0">
           <template #content>
             <div class="max-w-[300px] text-xs leading-relaxed text-left space-y-1">
               <p>生成数字角标/库存格子的批量提取模板。</p>
@@ -280,7 +310,7 @@ const EditorPanel = {
             数字网格
           </el-button></span>
         </el-tooltip>
-        <el-tooltip placement="top" :show-after="0">
+        <el-tooltip placement="left" :show-after="0">
           <template #content>
             <div class="max-w-[260px] text-xs leading-relaxed text-left space-y-1">
               <p>暂停脚本执行约 1 秒</p>
@@ -295,6 +325,61 @@ const EditorPanel = {
     </div>
 
   </div>
+</div>
+
+<el-dialog v-model="saveScriptDialogVisible" title="保存脚本" width="min(760px, calc(100vw - 32px))" append-to-body>
+  <el-form label-position="top" class="space-y-3" @submit.prevent>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <el-form-item label="文件名称">
+        <el-input v-model="saveScriptForm.filename" placeholder="custom_task.py" />
+      </el-form-item>
+      <el-form-item label="脚本名称">
+        <el-input v-model="saveScriptForm.taskPathTail" placeholder="示例/操作设置">
+          <template #prepend>自定义任务/</template>
+        </el-input>
+      </el-form-item>
+    </div>
+    <el-form-item label="description（描述）">
+      <el-input v-model="saveScriptForm.description" placeholder="一句话描述" />
+    </el-form-item>
+    <el-form-item label="task_docs">
+      <el-input type="textarea" v-model="saveScriptForm.taskDoc" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="补充说明正文" />
+    </el-form-item>
+    <div>
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-sm font-medium text-slate-700">参数设置</span>
+        <el-button size="small" @click="addSaveScriptParam"><i class="fa fa-plus mr-1"></i>添加参数</el-button>
+      </div>
+      <div v-for="(param, index) in saveScriptForm.params" :key="index" class="border border-slate-200 rounded-md p-3 mb-2">
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-2">
+          <el-form-item label="字段名称" class="md:col-span-3 !mb-0">
+            <el-input v-model="param.name" placeholder="times" />
+          </el-form-item>
+          <el-form-item label="字段类型" class="md:col-span-3 !mb-0">
+            <el-select v-model="param.type" class="w-full">
+              <el-option v-for="item in saveScriptParamTypes" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="字段解释" class="md:col-span-5 !mb-0">
+            <el-input v-model="param.description" placeholder="参数说明" />
+          </el-form-item>
+          <div class="md:col-span-1 flex items-end justify-end">
+            <el-button circle size="small" type="danger" plain @click="removeSaveScriptParam(index)">
+              <i class="fa fa-trash-o"></i>
+            </el-button>
+          </div>
+        </div>
+        <el-form-item v-if="saveScriptParamIsEnum(param.type)" label="Enum 选项" class="!mb-0 mt-2">
+          <el-input type="textarea" v-model="param.enum_options" :autosize="{ minRows: 2, maxRows: 5 }" placeholder="[&quot;xxx&quot;,&quot;xxx&quot;,&quot;xxx&quot;]" />
+        </el-form-item>
+      </div>
+    </div>
+  </el-form>
+  <template #footer>
+    <el-button @click="saveScriptDialogVisible = false">取消</el-button>
+    <el-button type="primary" :loading="saveScriptLoading" @click="submitSaveCustomScript">保存</el-button>
+  </template>
+</el-dialog>
 </div>`,
 
   setup(props, { emit }) {
@@ -335,13 +420,42 @@ const EditorPanel = {
     // ── remote control state ──
     const swipeDir = ref('down');
     const remoteLoading = ref(false);
-    const customExecCode = ref('');
+    const customExecCode = ref(EDITOR_DRAFT_CACHE.customExecCode || '');
     const execCustomLoading = ref(false);
+    const stopCustomLoading = ref(false);
     const extractPreviewLoading = ref(false);
+    const saveScriptLoading = ref(false);
+    const saveScriptDialogVisible = ref(false);
+    const saveScriptForm = ref({
+      filename: 'custom_task.py',
+      taskPathTail: '',
+      description: '',
+      taskDoc: '',
+      params: [],
+    });
+    const saveScriptParamTypes = [
+      { label: 'str', value: 'str' },
+      { label: 'int', value: 'int' },
+      { label: 'float', value: 'float' },
+      { label: 'bool', value: 'bool' },
+      { label: 'Enum(单选)', value: 'enum' },
+      { label: 'Enum(多选)', value: 'enum_multi' },
+    ];
 
     // ── recorded code ──
-    const recordedCode = ref('');
+    const recordedCodeInput = ref(null);
+    const recordedCode = ref(EDITOR_DRAFT_CACHE.recordedCode || '');
     const recordedLines = computed(() => recordedCode.value.split('\n').filter(l => l.trim()));
+    const saveScriptDisabled = computed(
+      () => saveScriptLoading.value || (!recordedCode.value.trim() && !customExecCode.value.trim()),
+    );
+
+    watch(recordedCode, (value) => {
+      EDITOR_DRAFT_CACHE.recordedCode = value || '';
+    });
+    watch(customExecCode, (value) => {
+      EDITOR_DRAFT_CACHE.customExecCode = value || '';
+    });
 
     // ── layout ──
     const isLandscape = computed(() => imgWidth.value >= imgHeight.value);
@@ -423,6 +537,24 @@ const EditorPanel = {
       })).json();
     }
 
+    function apiErrorMessage(data, fallback) {
+      if (!data) return fallback;
+      if (typeof data === 'string') return data;
+      const raw = data.message || data.error || data.detail;
+      if (Array.isArray(raw)) {
+        return raw.map((item) => {
+          if (!item) return '';
+          if (typeof item === 'string') return item;
+          if (item.msg) return item.msg;
+          try { return JSON.stringify(item); } catch (_) { return String(item); }
+        }).filter(Boolean).join('；') || fallback;
+      }
+      if (raw && typeof raw === 'object') {
+        try { return JSON.stringify(raw); } catch (_) { return String(raw); }
+      }
+      return raw ? String(raw) : fallback;
+    }
+
     // ── code generation helpers ──
     function buildTarget() {
       const b = effectiveBox();
@@ -439,20 +571,47 @@ const EditorPanel = {
       const tgt = buildTarget();
       if (!tgt) return null;
       const b = optimizedSel.value;
-      if (!b) return `click(B(${x},${y},1,1))`;
+      if (!b) return `click(B(${x},${y}))`;
       if (tgt.startsWith('B(')) return `click(${tgt})`;
       const cx = Math.floor((b.left + b.right) / 2);
       const cy = Math.floor((b.top + b.bottom) / 2);
       const dx = x - cx;
       const dy = y - cy;
       const offsetPart = (dx || dy) ? `, offset=(${dx},${dy})` : '';
-      return `click(${tgt}${offsetPart}, timeout=3)`;
+      return `click(${tgt}${offsetPart})`;
     }
 
     function appendCode(line) {
       if (!line) return;
       const cur = recordedCode.value;
       recordedCode.value = cur ? cur + '\n' + line : line;
+    }
+
+    function recordedTextareaElement() {
+      const input = recordedCodeInput.value;
+      if (!input) return null;
+      return input.textarea || (input.$el ? input.$el.querySelector('textarea') : null);
+    }
+
+    function appendRecordedSnippet(line, cursorOffset = null) {
+      if (!line) return;
+      const cur = recordedCode.value || '';
+      const prefix = cur && !cur.endsWith('\n') ? '\n' : '';
+      const insertStart = cur.length + prefix.length;
+      recordedCode.value = cur + prefix + line;
+      if (cursorOffset == null) return;
+      Vue.nextTick(() => {
+        const ta = recordedTextareaElement();
+        if (!ta) return;
+        const pos = insertStart + cursorOffset;
+        ta.focus();
+        ta.setSelectionRange(pos, pos);
+      });
+    }
+
+    function clearSelection() {
+      selection.value = null;
+      optimizedSel.value = null;
     }
 
     /** 需有名称以生成 T/I；纯框选 B 不可用 */
@@ -479,6 +638,13 @@ const EditorPanel = {
       if (!r.ok) return;
       appendCode(`locate(${r.tgt})`);
       ElementPlus.ElMessage.success('已添加「定位」');
+    }
+
+    function appendUiExists() {
+      const tgt = buildTarget();
+      const line = tgt ? `if ui_T(${tgt}):` : 'if ui_T():';
+      appendRecordedSnippet(line, tgt ? null : line.indexOf('(') + 1);
+      ElementPlus.ElMessage.success('已添加「判断存在」');
     }
 
     function appendWaitAppear() {
@@ -830,9 +996,11 @@ const EditorPanel = {
 
     /** 画布右键单击：同遥控器点击，坐标为像素点 */
     async function onCanvasRemoteClick({ x, y }) {
-      appendCode(buildClickCodeAt(x, y) || `click(B(${x},${y},1,1))`);
+      clearSelection();
+      const line = buildClickCodeAt(x, y) || `click(B(${x},${y}))`;
       if (virtualRemoteOnly.value) {
         virtualClickMarkers.value = [...virtualClickMarkers.value, { x, y }];
+        appendCode(line);
         ElementPlus.ElMessage.success(`虚拟点击 (${x}, ${y})（未下发模拟器）`);
         return;
       }
@@ -840,7 +1008,7 @@ const EditorPanel = {
       try {
         const res = await apiPost('/remote/click', { x, y });
         if (res.error) { ElementPlus.ElMessage.error(res.error); }
-        else { ElementPlus.ElMessage.success(`右键点击 (${x}, ${y})`); }
+        else { ElementPlus.ElMessage.success(`右键点击 (${x}, ${y})`); appendCode(line); }
       } catch (e) {
         ElementPlus.ElMessage.error('点击失败: ' + e);
       } finally {
@@ -851,9 +1019,11 @@ const EditorPanel = {
 
     /** 画布右键拖拽滑动：起止点与遥控器 swipe API 一致 */
     async function onCanvasRemoteSwipe({ x1, y1, x2, y2 }) {
-      appendCode(`swipe(B(${x1},${y1},1,1), B(${x2},${y2},1,1), duration_s=1)`);
+      clearSelection();
+      const line = `swipe(B(${x1},${y1}), B(${x2},${y2}), duration_s=1)`;
       if (virtualRemoteOnly.value) {
         virtualSwipeLines.value = [...virtualSwipeLines.value, { x1, y1, x2, y2 }];
+        appendCode(line);
         ElementPlus.ElMessage.success('虚拟滑动（未下发模拟器）');
         return;
       }
@@ -861,7 +1031,7 @@ const EditorPanel = {
       try {
         const res = await apiPost('/remote/swipe', { x1, y1, x2, y2, duration_s: 1 });
         if (res.error) { ElementPlus.ElMessage.error(res.error); }
-        else { ElementPlus.ElMessage.success('右键滑动'); }
+        else { ElementPlus.ElMessage.success('右键滑动'); appendCode(line); }
       } catch (e) {
         ElementPlus.ElMessage.error('滑动失败: ' + e);
       } finally {
@@ -885,7 +1055,7 @@ const EditorPanel = {
       const pts = dirMap[swipeDir.value];
 
       // generate code in parallel
-      appendCode(`swipe(B(${pts.x1},${pts.y1},1,1), B(${pts.x2},${pts.y2},1,1), duration_s=1)`);
+      appendCode(`swipe(B(${pts.x1},${pts.y1}), B(${pts.x2},${pts.y2}), duration_s=1)`);
 
       if (virtualRemoteOnly.value) {
         virtualSwipeLines.value = [...virtualSwipeLines.value, {
@@ -946,40 +1116,142 @@ const EditorPanel = {
       );
     }
 
-    /** 自定义代码：不写入操作录制区；以返回值 repr 为主展示，失败才提示错误 */
-    async function validateCustomCode() {
-      const code = (customExecCode.value || '').trim();
-      if (!code) { ElementPlus.ElMessage.warning('请输入代码'); return; }
+    function buildSaveScriptCode() {
+      const hasRecordedCode = !!(recordedCode.value || '').trim();
+      const hasCustomExecCode = !!(customExecCode.value || '').trim();
+      const sections = [];
+      if (hasRecordedCode) sections.push((recordedCode.value || '').trim());
+      if (hasCustomExecCode) sections.push((customExecCode.value || '').trim());
+      return sections.join('\n\n');
+    }
+
+    function normalizeSaveScriptFilename(raw) {
+      let filename = String(raw || '').trim() || 'custom_task.py';
+      filename = filename.replace(/[\\/:*?"<>|]+/g, '_');
+      if (!filename.toLowerCase().endsWith('.py')) filename += '.py';
+      return filename;
+    }
+
+    function normalizeSaveScriptTaskPath() {
+      const tail = String(saveScriptForm.value.taskPathTail || '').trim().replace(/^自定义任务[\\/]+/, '');
+      if (!tail) {
+        ElementPlus.ElMessage.warning('请填写脚本名称');
+        return null;
+      }
+      return `自定义任务/${tail}`;
+    }
+
+    function saveScriptParamIsEnum(type) {
+      return type === 'enum' || type === 'enum_multi';
+    }
+
+    function addSaveScriptParam() {
+      saveScriptForm.value.params.push({
+        name: '',
+        type: 'str',
+        description: '',
+        enum_options: '',
+      });
+    }
+
+    function removeSaveScriptParam(index) {
+      saveScriptForm.value.params.splice(index, 1);
+    }
+
+    function buildSaveScriptParamPayload() {
+      const params = [];
+      for (const param of saveScriptForm.value.params) {
+        const name = String(param.name || '').trim();
+        if (!name) continue;
+        const type = String(param.type || 'str').trim() || 'str';
+        const item = {
+          name,
+          type,
+          description: String(param.description || '').trim(),
+        };
+        if (saveScriptParamIsEnum(type)) {
+          const raw = String(param.enum_options || '').trim();
+          let parsed;
+          try {
+            parsed = JSON.parse(raw || '[]');
+          } catch (_) {
+            ElementPlus.ElMessage.warning('Enum 选项请输入 JSON 数组，例如 ["xxx","xxx","xxx"]');
+            return null;
+          }
+          if (!Array.isArray(parsed)) {
+            ElementPlus.ElMessage.warning('Enum 选项请输入 JSON 数组，例如 ["xxx","xxx","xxx"]');
+            return null;
+          }
+          const enum_options = parsed.map(item => String(item).trim()).filter(Boolean);
+          if (!enum_options.length) {
+            ElementPlus.ElMessage.warning('Enum 参数至少需要一个选项');
+            return null;
+          }
+          item.enum_options = enum_options;
+        }
+        params.push(item);
+      }
+      return params;
+    }
+
+    async function saveCustomScript() {
+      if (!buildSaveScriptCode().trim()) {
+        ElementPlus.ElMessage.warning('请先输入要保存的脚本内容');
+        return;
+      }
+      saveScriptForm.value.filename = normalizeSaveScriptFilename(saveScriptForm.value.filename);
+      saveScriptDialogVisible.value = true;
+    }
+
+    async function submitSaveCustomScript() {
+      const code = buildSaveScriptCode();
+      if (!code.trim()) {
+        ElementPlus.ElMessage.warning('请先输入要保存的脚本内容');
+        return;
+      }
+      const filename = normalizeSaveScriptFilename(saveScriptForm.value.filename);
+      const taskPath = normalizeSaveScriptTaskPath();
+      if (!taskPath) return;
+      const params = buildSaveScriptParamPayload();
+      if (params === null) return;
+
+      saveScriptForm.value.filename = filename;
+      saveScriptLoading.value = true;
       try {
-        const res = await apiPost('/validate-code', { code });
-        if (!res || res.ok === false) {
-          const err = (res && res.error) ? String(res.error) : '校验失败';
-          ElementPlus.ElMessage.error(err.length > 800 ? err.slice(0, 800) + '…' : err);
+        const form = saveScriptForm.value;
+        const payload = {
+          filename: filename,
+          task_path: taskPath,
+          description: String(form.description || '').trim(),
+          task_doc: String(form.taskDoc || '').trim(),
+          params: params,
+          code,
+        };
+        const res = await apiPost('/save-custom-task', payload);
+        if (!res || res.ok === false || res.error || res.detail) {
+          ElementPlus.ElMessage.error(apiErrorMessage(res, '保存脚本失败'));
           return;
         }
-        const warnings = Array.isArray(res.warnings) ? res.warnings : [];
-        const msg = warnings.length ? `语法通过；提示：${warnings.join('；')}` : '语法通过';
-        ElementPlus.ElMessage({
-          message: msg,
-          type: warnings.length ? 'warning' : 'success',
-          duration: warnings.length ? 5200 : 2600,
-          showClose: Boolean(warnings.length),
-        });
+        saveScriptDialogVisible.value = false;
+        ElementPlus.ElMessage.success(res.message || '脚本已保存');
       } catch (e) {
-        ElementPlus.ElMessage.error('校验请求失败: ' + e);
+        ElementPlus.ElMessage.error('保存脚本失败: ' + e);
+      } finally {
+        saveScriptLoading.value = false;
       }
     }
 
-    function onCustomExecKeydown(e) {
+    function handleTextareaTab(e, modelRef) {
       if (e.key !== 'Tab') return;
       e.preventDefault();
       const ta = e.target;
       if (!ta || typeof ta.selectionStart !== 'number') return;
-      const value = customExecCode.value || '';
+      const value = modelRef.value || '';
       const start = ta.selectionStart;
       const end = ta.selectionEnd;
+      const hasSelection = end > start;
       const lineStart = value.lastIndexOf('\n', start - 1) + 1;
-      const lineEnd = end > start ? value.indexOf('\n', end - 1) : -1;
+      const lineEnd = hasSelection ? value.indexOf('\n', end - 1) : value.indexOf('\n', start);
       const blockEnd = lineEnd === -1 ? value.length : lineEnd;
       const before = value.slice(0, lineStart);
       const block = value.slice(lineStart, blockEnd);
@@ -995,22 +1267,50 @@ const EditorPanel = {
           removedTotal += remove;
           return remove ? line.slice(remove) : line;
         });
-        customExecCode.value = before + nextLines.join('\n') + after;
+        modelRef.value = before + nextLines.join('\n') + after;
         Vue.nextTick(() => {
           const nextStart = Math.max(lineStart, start - removedBeforeStart);
           const nextEnd = Math.max(nextStart, end - removedTotal);
+          ta.focus();
           ta.setSelectionRange(nextStart, nextEnd);
         });
         return;
       }
 
       const nextBlock = lines.map((line) => '    ' + line).join('\n');
-      customExecCode.value = before + nextBlock + after;
+      modelRef.value = before + nextBlock + after;
       Vue.nextTick(() => {
+        ta.focus();
         ta.setSelectionRange(start + 4, end + 4 * lines.length);
       });
     }
 
+    function onRecordedCodeKeydown(e) {
+      handleTextareaTab(e, recordedCode);
+    }
+
+    function onCustomExecKeydown(e) {
+      handleTextareaTab(e, customExecCode);
+    }
+
+    async function stopCustomCodeExecution() {
+      stopCustomLoading.value = true;
+      try {
+        const res = await apiPost('/execute-code/stop', {});
+        if (!res || res.ok === false) {
+          const err = (res && (res.message || res.error || res.detail)) ? String(res.message || res.error || res.detail) : '终止请求失败';
+          ElementPlus.ElMessage.error(err.length > 800 ? err.slice(0, 800) + '…' : err);
+          return;
+        }
+        ElementPlus.ElMessage.success(res.message || '已发送终止执行请求');
+      } catch (e) {
+        ElementPlus.ElMessage.error('终止请求失败: ' + e);
+      } finally {
+        stopCustomLoading.value = false;
+      }
+    }
+
+    /** 自定义代码：不写入操作录制区；以返回值 repr 为主展示，失败才提示错误 */
     async function executeCustomCode() {
       const code = (customExecCode.value || '').trim();
       if (!code) { ElementPlus.ElMessage.warning('请输入代码'); return; }
@@ -1076,17 +1376,19 @@ const EditorPanel = {
       selection, optimizedSel, locateBoxes,
       name, freezeName, freeX, freeY, useImage, onlyOcr, lockColor, threshold,
       centerText, boxText, tCode, iCode, colorText, nameOk, imageOk,
-      swipeDir, remoteLoading, customExecCode, execCustomLoading, extractPreviewLoading,
+      swipeDir, remoteLoading, customExecCode, execCustomLoading, stopCustomLoading, extractPreviewLoading,
+      saveScriptLoading, saveScriptDisabled, saveScriptDialogVisible, saveScriptForm, saveScriptParamTypes,
+      saveScriptParamIsEnum, addSaveScriptParam, removeSaveScriptParam, submitSaveCustomScript,
       virtualRemoteOnly, virtualClickMarkers, virtualSwipeLines,
-      recordedCode, recordedLines, isLandscape, canvasCellStyle,
+      recordedCodeInput, recordedCode, recordedLines, isLandscape, canvasCellStyle,
       canvasDropActive, clearVirtualOverlays,
       refreshScreenshot,
       onCanvasDragOver, onCanvasDragLeave, onCanvasDrop,
       onSelectionChange, onThresholdRelease,
       saveSelection, onCopy, remoteClick, remoteSwipe,
       onCanvasRemoteClick, onCanvasRemoteSwipe,
-      copyRecordedCode, validateCustomCode, onCustomExecKeydown, executeCustomCode,
-      appendLocate, appendWaitAppear, appendWaitDisappear, appendSleepWait, appendExtractInfo, appendExtractGridInfo,
+      copyRecordedCode, saveCustomScript, stopCustomCodeExecution, onRecordedCodeKeydown, onCustomExecKeydown, executeCustomCode,
+      appendLocate, appendUiExists, appendWaitAppear, appendWaitDisappear, appendSleepWait, appendExtractInfo, appendExtractGridInfo,
     };
   },
 };

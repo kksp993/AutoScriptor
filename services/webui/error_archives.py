@@ -4,11 +4,8 @@
 """
 from __future__ import annotations
 
-import importlib
-import importlib.util
 import io
 import os
-import sys
 import re
 import shutil
 import zipfile
@@ -16,28 +13,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-
-def _load_paths_module():
-    """加载 paths：开发模式可读源码文件；Nuitka 打包后磁盘上无 paths.py，须用已加载模块或 importlib。"""
-    repo = Path(__file__).resolve().parents[2]
-    pfile = repo / "AutoScriptor" / "utils" / "paths.py"
-    if pfile.is_file():
-        try:
-            spec = importlib.util.spec_from_file_location("as_paths_webui", pfile)
-            mod = importlib.util.module_from_spec(spec)
-            assert spec.loader is not None
-            spec.loader.exec_module(mod)
-            return mod
-        except Exception:
-            pass
-    m = sys.modules.get("AutoScriptor.utils.paths")
-    if m is not None:
-        return m
-    return importlib.import_module("AutoScriptor.utils.paths")
-
-
-_pm = _load_paths_module()
-get_error_archives_dir = _pm.get_error_archives_dir
+from AutoScriptor.utils.paths import get_error_archives_dir
 
 _RE_SAFE_FOLDER = re.compile(r"^[\w\u4e00-\u9fff.\-]+$")
 _RE_FOLDER_META = re.compile(r"^(\d{6})_(\d{6})_(.+)$")
@@ -56,20 +32,6 @@ _RE_DBG_SHOT = re.compile(
 _RE_TIMED_SHOT = re.compile(r"^timed_screenshot_(\d+)\.png$", re.IGNORECASE)
 
 
-def _legacy_errors_roots() -> List[Path]:
-    """兼容旧版 cwd/logs/errors 与统一后的 data/logs/errors。"""
-    roots: List[Path] = []
-    primary = get_error_archives_dir()
-    roots.append(primary)
-    try:
-        legacy = Path(os.getcwd()) / "logs" / "errors"
-        if legacy.is_dir() and legacy.resolve() != primary.resolve():
-            roots.append(legacy)
-    except OSError:
-        pass
-    return roots
-
-
 def _safe_folder_name(name: str) -> Optional[str]:
     if not name or ".." in name or "/" in name or "\\" in name:
         return None
@@ -82,14 +44,14 @@ def _resolve_archive_dir(folder: str) -> Optional[Path]:
     s = _safe_folder_name(folder)
     if not s:
         return None
-    for root in _legacy_errors_roots():
-        p = (root / s).resolve()
-        try:
-            root_r = root.resolve()
-        except OSError:
-            continue
-        if p.is_dir() and (p == root_r or root_r in p.parents):
-            return p
+    root = get_error_archives_dir()
+    p = (root / s).resolve()
+    try:
+        root_r = root.resolve()
+    except OSError:
+        return None
+    if p.is_dir() and (p == root_r or root_r in p.parents):
+        return p
     return None
 
 
@@ -113,18 +75,13 @@ def _parse_folder_display(folder: str) -> Tuple[str, str, str]:
 
 
 def list_error_archives() -> Dict[str, Any]:
-    seen: set[str] = set()
     items: List[Dict[str, Any]] = []
-    for root in _legacy_errors_roots():
-        if not root.is_dir():
-            continue
+    root = get_error_archives_dir()
+    if root.is_dir():
         for entry in os.scandir(root):
             if not entry.is_dir():
                 continue
             name = entry.name
-            if name in seen:
-                continue
-            seen.add(name)
             try:
                 st = entry.stat()
                 mtime = st.st_mtime

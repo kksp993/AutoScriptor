@@ -6,14 +6,12 @@
 # @Software: PyCharm
 
 import subprocess
-from contextlib import nullcontext
-from typing import Union, List
+from typing import Union
 
 
 class utils:
     __VM_INDEX = None
     __OPERATE = None
-    __MUMU_ROOT_OBJECT = None
 
     def set_vm_index(self, vm_index):
         """
@@ -33,18 +31,6 @@ class utils:
         """
         self.__OPERATE = operate
 
-    def set_mumu_root_object(self, mumu_root_object):
-        """
-        设置mumu_root_object
-        :param mumu_root_object:
-        :return:
-        """
-        self.__MUMU_ROOT_OBJECT = mumu_root_object
-        return self
-
-    def get_mumu_root_object(self):
-        return self.__MUMU_ROOT_OBJECT
-
     def get_vm_id(self):
         return self.__VM_INDEX
 
@@ -55,48 +41,36 @@ class utils:
         :param command:
         :return:
         """
-        try:
-            if mumu:
-                from AutoScriptor.utils.app_config import cfg
-                command_extend = [cfg["emulator"]["emu_path"]]
+        if mumu:
+            from AutoScriptor.utils.app_config import cfg
+            command_extend = [cfg["emulator"]["emu_path"]]
 
-                if self.__OPERATE is not None:
-                    if isinstance(self.__OPERATE, list):
-                        command_extend.extend(self.__OPERATE)
-                    else:
-                        command_extend.append(self.__OPERATE)
+            if self.__OPERATE is not None:
+                if isinstance(self.__OPERATE, list):
+                    command_extend.extend(self.__OPERATE)
+                else:
+                    command_extend.append(self.__OPERATE)
 
-                if self.__VM_INDEX is not None:
-                    command_extend.extend(['-v', self.__VM_INDEX])
+            if self.__VM_INDEX is not None:
+                command_extend.extend(['-v', self.__VM_INDEX])
 
-                command_extend.extend(command)
-            else:
-                command_extend = command
-            result = None
-            ctx = nullcontext()
-            if mumu:
-                from AutoScriptor.utils.perf import mumu_safe_subprocess
-                ctx = mumu_safe_subprocess()
-            with ctx:
-                for _ in range(repeat):
-                    result = subprocess.run(
-                        command_extend,
-                        shell=False,
-                        check=False,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        encoding='utf-8',
-                        creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0,
-                    )
-            ret_code = result.returncode
-            retval = result.stdout
-            if ret_code != 0 and result.stderr:
-                retval = f"{retval}\n{result.stderr}".strip()
+            command_extend.extend(command)
+        else:
+            command_extend = command
+        result = None
+        for _ in range(repeat):
+            result = subprocess.run(
+                command_extend,
+                shell=False,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                encoding='utf-8',
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0,
+            )
+        ret_code = result.returncode
+        retval = result.stdout
+        if ret_code != 0 and result.stderr:
+            retval = f"{retval}\n{result.stderr}".strip()
 
-            return ret_code, retval
-
-        except subprocess.CalledProcessError as e:
-            ret_code = e.returncode
-            retval = e.stderr
-
-            return ret_code, retval
+        return ret_code, retval

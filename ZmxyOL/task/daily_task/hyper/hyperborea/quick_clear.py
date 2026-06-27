@@ -1,7 +1,6 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
+
 
 @register_task
 def task():
@@ -15,13 +14,3 @@ def task():
         click(T("不使用祝福"), until=lambda: ui_T(T("碾压奖励")))
         click(B(1040,170,30,30), until= lambda: ui_F(I("暂无可以碾压的关卡")))
     ensure_in("极北",-1)
-
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

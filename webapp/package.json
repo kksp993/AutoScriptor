@@ -6,28 +6,15 @@
   "author": "Kksp993",
   "private": true,
   "scripts": {
-    "postinstall": "node ../scripts/npm-postinstall.js",
-    "prebuild": "node scripts/ensure-ico.cjs",
-    "start": "node scripts/start-dev.cjs",
-    "test:installer": "node scripts/test-install-packaged.cjs",
-    "test:release-update": "node scripts/test-release-update.cjs",
-    "prepare-release-shell": "node scripts/prepare-release-shell.cjs",
-    "verify-pack": "node scripts/verify-pack.cjs",
-    "build": "electron-builder build --win --config electron-builder.config.js",
-    "build:portable": "electron-builder build --win portable --config electron-builder.config.js"
+    "start": "node scripts/start-dev.cjs"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   },
   "dependencies": {
-    "tree-kill": "^1.2.2",
-    "yauzl": "^3.3.0"
+    "tree-kill": "^1.2.2"
   },
   "devDependencies": {
-    "electron": "^41.1.0",
-    "electron-builder": "^26.8.1",
-    "html-minifier-terser": "^7.2.0",
-    "javascript-obfuscator": "^4.1.1",
-    "png-to-ico": "^3.0.1"
-  },
-  "overrides": {
-    "minimatch": "10.2.4"
+    "electron": "^42.4.1"
   }
 }

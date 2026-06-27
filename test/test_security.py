@@ -220,8 +220,8 @@ class TestReplayProtection(unittest.TestCase):
     def test_future_request(self):
         self.assertFalse(check_request_freshness({"_timestamp": time.time() + 120}))
 
-    def test_no_timestamp_backward_compat(self):
-        self.assertTrue(check_request_freshness({}))
+    def test_missing_timestamp_rejected(self):
+        self.assertFalse(check_request_freshness({}))
 
     def test_invalid_timestamp(self):
         self.assertFalse(check_request_freshness({"_timestamp": "not_a_number"}))
@@ -368,7 +368,7 @@ class TestAttackScenarios(unittest.TestCase):
         self.assertNotIn(pwd, hashed)
 
     def test_profile_encryption_prevents_file_theft(self):
-        """config.json 被盗时，加密的档案数据无法被读取"""
+        """data/config.json 被盗时，加密的档案数据无法被读取"""
         try:
             ConfigManager = load_config_manager_for_test()
         except ImportError:

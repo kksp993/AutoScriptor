@@ -4,6 +4,7 @@ import os
 import sys
 import time
 from functools import wraps
+from threading import RLock
 
 import cv2
 import numpy as np
@@ -124,7 +125,7 @@ class CaptureStd:
     def _flush_stream(stream):
         try:
             stream.flush()
-        except Exception:
+        except (AttributeError, OSError, ValueError):
             pass
 
     def _redirect_stdout(self, to):
@@ -535,9 +536,11 @@ class NemuIpcImpl:
 
 class NemuIpc():
     _screenshot_interval = Timer(0.1)
+    _native_ipc_lock = RLock()
 
     def __init__(self, serial: str = '127.0.0.1:16416'):
         self.serial = serial
+        self._ipc_lock = self._native_ipc_lock
 
     @cached_property
     def nemu_ipc(self) -> NemuIpcImpl:
@@ -571,7 +574,7 @@ class NemuIpc():
             f'mumu_folder={folder}, '
             f'serial_to_id={index}. '
             f'请检查: 1) 模拟器是否已启动  '
-            f'2) config.json 中 mumu_folder 路径是否正确  '
+            f'2) data/config.json 中 mumu_folder 路径是否正确  '
             f'3) adb_addr 是否与模拟器实例匹配'
         )
         raise NemuIpcError('NemuIpc initialization failed')
@@ -648,59 +651,70 @@ class NemuIpc():
         return False
 
     def nemu_ipc_release(self):
-        if has_cached_property(self, 'nemu_ipc'):
-            self.nemu_ipc.disconnect()
-        del_cached_property(self, 'nemu_ipc')
+        with self._ipc_lock:
+            if has_cached_property(self, 'nemu_ipc'):
+                self.nemu_ipc.disconnect()
+            del_cached_property(self, 'nemu_ipc')
         logger.info('nemu_ipc released')
 
     def screenshot_nemu_ipc(self):
-        image = self.nemu_ipc.screenshot()
+        with self._ipc_lock:
+            image = self.nemu_ipc.screenshot()
 
-        image = cv2.cvtColor(image, cv2.COLOR_BGRA2RGB)
-        cv2.flip(image, 0, dst=image)
-        return image
+            image = cv2.cvtColor(image, cv2.COLOR_BGRA2RGB)
+            cv2.flip(image, 0, dst=image)
+            return image
 
     def click_nemu_ipc(self, x, y):
-        down = ensure_time((0.010, 0.020))
-        self.nemu_ipc.down(x, y)
-        time.sleep(down)
-        self.nemu_ipc.up()
-        time.sleep(0.050 - down)
+        with self._ipc_lock:
+            down = ensure_time((0.010, 0.020))
+            self.nemu_ipc.down(x, y)
+            time.sleep(down)
+            self.nemu_ipc.up()
+            time.sleep(0.050 - down)
 
     def long_click_nemu_ipc(self, x, y, duration=1.0):
-        self.nemu_ipc.down(x, y)
-        time.sleep(duration)
-        self.nemu_ipc.up()
-        time.sleep(0.050)
+        with self._ipc_lock:
+            self.nemu_ipc.down(x, y)
+            time.sleep(duration)
+            self.nemu_ipc.up()
+            time.sleep(0.050)
 
     def swipe_nemu_ipc(self, p1, p2, speed:float=0.1):
-        # 生成插值滑动路径
-        points = insert_swipe(p0=p1, p3=p2)
+        with self._ipc_lock:
+            # 生成插值滑动路径
+            points = insert_swipe(p0=p1, p3=p2)
 
-        for point in points:
-            # 确保坐标为 Python int，避免 ctypes 转换错误
-            x = int(point[0])
-            y = int(point[1])
-            self.nemu_ipc.down(x, y)
-            time.sleep(0.010 / speed)
+            for point in points:
+                # 确保坐标为 Python int，避免 ctypes 转换错误
+                x = int(point[0])
+                y = int(point[1])
+                self.nemu_ipc.down(x, y)
+                time.sleep(0.010 / speed)
 
-        # 结束触摸
-        self.nemu_ipc.up()
-        time.sleep(0.050 / speed)
+            # 结束触摸
+            self.nemu_ipc.up()
+            time.sleep(0.050 / speed)
 
     def drag_nemu_ipc(self, p1, p2, point_random=(-10, -10, 10, 10), speed:float=0.2):
-        p1 = np.array(p1) - random_rectangle_point(point_random)
-        p2 = np.array(p2) - random_rectangle_point(point_random)
-        points = insert_swipe(p0=p1, p3=p2, speed=20)
+        with self._ipc_lock:
+            p1 = np.array(p1) - random_rectangle_point(point_random)
+            p2 = np.array(p2) - random_rectangle_point(point_random)
+            points = insert_swipe(p0=p1, p3=p2, speed=20)
 
-        for point in points:
-            self.nemu_ipc.down(*point)
-            time.sleep(0.010/speed)
+            for point in points:
+                self.nemu_ipc.down(*point)
+                time.sleep(0.010/speed)
 
-        self.nemu_ipc.down(*p2)
-        time.sleep(0.140/speed)
-        self.nemu_ipc.down(*p2)
-        time.sleep(0.140/speed)
+            self.nemu_ipc.down(*p2)
+            time.sleep(0.140/speed)
+            self.nemu_ipc.down(*p2)
+            time.sleep(0.140/speed)
 
-        self.nemu_ipc.up()
-        time.sleep(0.050/speed)
+            self.nemu_ipc.up()
+            time.sleep(0.050/speed)
+
+    def release_touch_nemu_ipc(self):
+        with self._ipc_lock:
+            if has_cached_property(self, 'nemu_ipc'):
+                self.nemu_ipc.up()

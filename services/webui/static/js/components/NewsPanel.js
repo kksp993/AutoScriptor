@@ -78,11 +78,16 @@ const NewsPanel = {
     async refreshGiftCodes() {
       this.giftLoading = true;
       try {
-        await fetch('/api/news/gift_codes?refresh=1', { credentials: 'same-origin' });
-      } catch (e) {
-        console.error('refresh gift codes failed:', e);
-      } finally {
+        const res = await fetch('/api/news/gift_codes?refresh=1', { credentials: 'same-origin' });
+        const raw = await res.text();
+        const data = raw ? JSON.parse(raw) : {};
+        if (!res.ok) throw new Error(data.detail || data.message || raw || res.statusText);
+        if (data.error) throw new Error(data.error);
         this.giftIframeKey += 1;
+      } catch (e) {
+        ElementPlus.ElMessage.error('兑换码刷新失败: ' + (e.message || e));
+      } finally {
+        this.giftLoading = false;
       }
     },
     openGiftCodes() {

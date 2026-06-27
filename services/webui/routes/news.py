@@ -19,11 +19,11 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
-from fastapi import APIRouter, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, Response
 from lxml import html as lxml_html
 
-from AutoScriptor.utils.paths import get_data_root
+from AutoScriptor.utils.paths import get_logs_root
 from services.webui.routes.news_4399_session import (
     get_cached_or_login_session,
     get_cached_session,
@@ -58,10 +58,7 @@ def _project_root() -> Path:
 
 
 def _redeem_codes_path() -> Path:
-    data_path = get_data_root() / "assets" / "redeem_codes" / "zmxy_redeem_codes.json"
-    if data_path.is_file():
-        return data_path
-    return _project_root() / "docs" / "zmxy_redeem_codes.json"
+    return get_logs_root() / "zmxy_redeem_codes.json"
 
 
 def _load_redeem_codes_payload() -> dict[str, Any]:
@@ -69,30 +66,35 @@ def _load_redeem_codes_payload() -> dict[str, Any]:
     path = _redeem_codes_path()
     if not path.is_file():
         return {"generated_at": "", "timezone": "Asia/Shanghai", "source": "", "rows": []}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        payload.setdefault("rows", [])
-        payload.setdefault("timezone", "Asia/Shanghai")
-        payload.setdefault("source", "")
-        return payload
-    except Exception:
-        return {"generated_at": "", "timezone": "Asia/Shanghai", "source": "", "rows": [], "error": "invalid_json"}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload.setdefault("rows", [])
+    payload.setdefault("timezone", "Asia/Shanghai")
+    payload.setdefault("source", "")
+    return payload
 
 
 def _refresh_gift_codes_rows() -> None:
     root = _project_root()
     script = root / "scripts" / "collect_zmxy_redeem_2026.py"
     if not script.is_file():
-        return
+        raise HTTPException(status_code=500, detail=f"Missing gift-code collector: {script}")
     try:
         subprocess.run(
             [sys.executable, str(script)],
             cwd=str(root),
             capture_output=True,
+            text=True,
             timeout=240,
+            check=True,
         )
-    except subprocess.TimeoutExpired:
-        pass
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=504, detail="Gift-code collector timed out after 240 seconds") from exc
+    except subprocess.CalledProcessError as exc:
+        message = (exc.stderr or exc.stdout or "").strip()
+        detail = f"Gift-code collector failed with exit code {exc.returncode}"
+        if message:
+            detail += f": {message}"
+        raise HTTPException(status_code=502, detail=detail) from exc
 
 
 # 从 HTML 中移除会拉起「登录 / 通行证」弹窗的外链脚本（在服务端处理，避免脚本先执行）
@@ -201,10 +203,7 @@ _HEAD_XHR_SANDBOX_JS = r"""<script data-proxy-xhr-sandbox>
 def _upstream_is_json_like(resp: requests.Response) -> bool:
     """子请求（如 profile/notice-profile ?_AJAX_=1）多为 JSON，需原样透传，不能当 HTML 注入。"""
     ct = (resp.headers.get("Content-Type") or "").lower()
-    try:
-        raw = resp.text.lstrip()
-    except Exception:
-        return False
+    raw = resp.text.lstrip()
     if ("text/html" in ct or "application/xhtml" in ct) and not (
         raw.startswith("{") or raw.startswith("[")
     ):
@@ -609,7 +608,7 @@ async def get_redeem_codes(request: Request, force: int = Query(0, description="
 
 @router.get("/gift_codes")
 def get_gift_codes(refresh: int = Query(0, description="传 1 时先执行采集脚本再返回")):
-    """未过期兑换码列表（JSON），优先读取 data-root 运行时副本。"""
+    """未过期兑换码列表（JSON），读取 logs/ 运行态副本。"""
     if refresh:
         _refresh_gift_codes_rows()
     return _load_redeem_codes_payload()

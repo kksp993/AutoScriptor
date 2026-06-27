@@ -1,15 +1,15 @@
 # 错误归档当前基线
 
-错误归档用于任务失败后保存足够还原现场的信息。当前目录由 `AutoScriptor.utils.paths.get_error_archives_dir()` 决定：源码模式通常是仓库 `logs/errors/`，发行/Electron 模式通常是 `install.json.dataRoot/logs/errors/`。WebUI 会兼容读取旧位置。
+错误归档用于任务失败后保存足够还原现场的信息。当前 `src` 分支只保留源码运行路径，归档目录由 `AutoScriptor.utils.paths.get_error_archives_dir()` 决定，通常是仓库 `logs/errors/`。
 
 ## 产生位置
 
-`TaskManager._execute_single_task()` 捕获普通异常时调用 `archive_error()`。以下情况不会作为普通错误归档：
+`TaskManager._execute_single_task()` 捕获普通异常时调用 `archive_error()`。以下情况不作为普通错误归档：
 
 - `RequestHumanTakeover`：属于人工接管分支。
 - `TaskRequireReTry`：属于 retry 分支。
 - `TaskCancelled`：用户停止。
-- debug_mode 失败恢复被跳过，但普通异常仍会先归档。
+- debug mode 失败恢复会跳过归档，但普通异常仍会先归档。
 
 ## 归档内容
 
@@ -20,7 +20,7 @@
 | `timed_screenshot_1.png` ~ `timed_screenshot_3.png` | 后续每秒一张 |
 | `click_screenshots/` | 本任务调试截图副本 |
 
-调试截图来自 `get_logs_root()/debug_screenshot/`，任务开始前会清空，归档后也会清空，保证归档里的截图属于本任务。
+调试截图来自 `get_logs_root()/debug_screenshot/`。任务开始前会清空，归档后也会清空，保证归档里的截图属于本任务。
 
 ## 调试截图命名
 
@@ -51,20 +51,10 @@ YYMMDD_HHMMSS_micro_e.png   # OCR/提取信息截图
 - `bg_active_callbacks`
 - `bg_signals`
 - `bg_event_history`
-- `code_coverage`
 - `python_version`
 - `error_timestamp`
 
-如果担心错误处理中再次触发识别，可关闭部分项：
-
-```python
-from AutoScriptor.utils.log_archiver import set_default_context_config
-
-set_default_context_config({
-    "locate_region_result": False,
-    "code_coverage": False,
-})
-```
+当前不再保留运行时覆盖率追踪和默认上下文开关。需要追加业务信息时，在调用 `archive_error()` 时传入 `extra_context`。
 
 ## 手动归档
 
@@ -81,8 +71,6 @@ except Exception as e:
         extra_context={"stage": "after_click"},
     )
 ```
-
-兼容入口 `archive_error_with_log()`、`dump_error_and_log()` 仍保留。
 
 ## WebUI 错误归档页
 

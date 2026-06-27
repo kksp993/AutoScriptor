@@ -1,8 +1,7 @@
-import traceback
 from enum import Enum
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
+
 
 class Method(Enum):
     """消费点券的完成方式（WebUI 下拉展示为 value，配置中仍保存成员名）"""
@@ -13,6 +12,7 @@ class Method(Enum):
     # SHUIFAYIN = "购买水法印"
     # HUOFAYIN = "购买火法印"
     # TUFAYIN = "购买土法印"
+
 
 @register_task
 def task(method:Method=Method.YAOSHI):
@@ -54,14 +54,3 @@ def task(method:Method=Method.YAOSHI):
         click(B(1199,25,58,49))
     else:   
         raise ValueError(f"不支持的方法: {method}") 
-
-
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

@@ -59,24 +59,20 @@ class App:
         """
         logger.info(f"正在安装应用: {apk_path}")
 
-        try:
-            if not os.path.exists(apk_path):
-                raise FileNotFoundError(f"apk文件不存在: {apk_path}")
+        if not os.path.exists(apk_path):
+            raise FileNotFoundError(f"apk文件不存在: {apk_path}")
 
-            if not os.path.isfile(apk_path):
-                raise FileNotFoundError(f"指定路径不是文件: {apk_path}")
+        if not os.path.isfile(apk_path):
+            raise FileNotFoundError(f"指定路径不是文件: {apk_path}")
 
-            self.utils.set_operate('control')
-            ret_code, retval = self.utils.run_command(['app', 'install', '-apk', apk_path])
+        self.utils.set_operate('control')
+        ret_code, retval = self.utils.run_command(['app', 'install', '-apk', apk_path])
 
-            if ret_code == 0:
-                logger.info(f"应用安装成功: {apk_path}")
-                return True
+        if ret_code == 0:
+            logger.info(f"应用安装成功: {apk_path}")
+            return True
 
-            raise RuntimeError(retval)
-        except Exception as e:
-            logger.error(f"应用安装失败: {str(e)}")
-            raise
+        raise RuntimeError(retval)
 
     def uninstall(self, package: str) -> bool:
         """

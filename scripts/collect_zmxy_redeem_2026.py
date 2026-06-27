@@ -4,7 +4,7 @@ The WebUI news list already pulls the official announcement stream. This
 collector uses the same source, inspects at most the newest posts from the last
 few days, and persists checked post ids in the single authoritative file:
 
-    docs/zmxy_redeem_codes.json
+    logs/zmxy_redeem_codes.json
 
 Only entries whose expiry is known and still in the future are written.
 """
@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from AutoScriptor.utils.paths import get_config_path, get_logs_root  # noqa: E402
 from services.webui.routes.news import (  # noqa: E402
     _fetch_proxy_with_adaptive_login,
     _is_login_wall_response,
@@ -41,7 +42,7 @@ from services.webui.routes.news_4399_session import (  # noqa: E402
 
 TZ_CN = timezone(timedelta(hours=8))
 FORUM_URL = "https://bbs.4399.cn/forums-kind-id-1493-order-dl"
-DEFAULT_OUTPUT = Path("docs/zmxy_redeem_codes.json")
+DEFAULT_OUTPUT = get_logs_root() / "zmxy_redeem_codes.json"
 DEFAULT_USERNAME = PUBLIC_NEWS_ACCOUNT
 DEFAULT_PASSWORD = PUBLIC_NEWS_PASSWORD
 DEFAULT_MAX_AGE_DAYS = 10
@@ -80,11 +81,23 @@ def now_cn() -> datetime:
 def parse_dt(value: str) -> datetime | None:
     try:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except Exception:
+    except ValueError:
         return None
     if dt.tzinfo is None:
         return dt.replace(tzinfo=TZ_CN)
     return dt.astimezone(TZ_CN)
+
+
+def _load_json_object(path: Path, label: str, *, missing_ok: bool = False) -> dict[str, Any]:
+    if missing_ok and not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{label} JSON 无效: {path}: {exc.msg}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"{label} JSON 顶层必须是对象: {path}")
+    return data
 
 
 def load_credentials(config_path: Path) -> tuple[str, str]:
@@ -92,11 +105,10 @@ def load_credentials(config_path: Path) -> tuple[str, str]:
     pwd = os.environ.get("ZMXY4399_PASSWORD", "")
     if user and pwd:
         return user, pwd
-    try:
-        data = json.loads(config_path.read_text(encoding="utf-8"))
-    except Exception:
-        data = {}
+    data = _load_json_object(config_path, "配置", missing_ok=True)
     news = data.get("news") or {}
+    if not isinstance(news, dict):
+        raise ValueError(f"配置 news 必须是对象: {config_path}")
     user = (news.get("account") or "").strip()
     pwd = news.get("password") or ""
     if user and pwd:
@@ -511,20 +523,17 @@ def build_entries(
     return dedupe_entries(entries), inspected, new_checked_ids, new_checked_urls
 
 
-def _row_to_entry(row: dict[str, Any]) -> RedeemEntry | None:
-    try:
-        return RedeemEntry(
-            title=str(row.get("title") or ""),
-            code=str(row.get("code") or ""),
-            expires_at=str(row.get("expires_at") or ""),
-            url=str(row.get("url") or ""),
-            source=str(row.get("source") or FORUM_SOURCE),
-            kind=str(row.get("kind") or "public_code"),
-            status=str(row.get("status") or "active"),
-            note=str(row.get("note") or ""),
-        )
-    except Exception:
-        return None
+def _row_to_entry(row: dict[str, Any]) -> RedeemEntry:
+    return RedeemEntry(
+        title=str(row.get("title") or ""),
+        code=str(row.get("code") or ""),
+        expires_at=str(row.get("expires_at") or ""),
+        url=str(row.get("url") or ""),
+        source=str(row.get("source") or FORUM_SOURCE),
+        kind=str(row.get("kind") or "public_code"),
+        status=str(row.get("status") or "active"),
+        note=str(row.get("note") or ""),
+    )
 
 
 def active_entries_from_payload(payload: dict[str, Any], current: datetime | None = None) -> list[RedeemEntry]:
@@ -534,8 +543,6 @@ def active_entries_from_payload(payload: dict[str, Any], current: datetime | Non
         if not isinstance(row, dict):
             continue
         entry = _row_to_entry(row)
-        if entry is None:
-            continue
         exp = parse_dt(entry.expires_at)
         if exp and exp > current and entry.code:
             out.append(entry)
@@ -557,12 +564,7 @@ def dedupe_entries(entries: list[RedeemEntry]) -> list[RedeemEntry]:
 
 
 def load_payload(path: Path) -> dict[str, Any]:
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        payload = {}
-    if not isinstance(payload, dict):
-        payload = {}
+    payload = _load_json_object(path, "兑换码缓存", missing_ok=True)
     payload.setdefault("rows", [])
     payload.setdefault("inspected_posts", [])
     return payload
@@ -663,7 +665,7 @@ def collect_incremental(
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="从 4399 官方论坛近 10 天公告增量采集仍有效的造梦西游 OL 兑换码")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="唯一输出 JSON 文件")
-    parser.add_argument("--config", type=Path, default=ROOT / "config.json", help="读取 news.account/news.password")
+    parser.add_argument("--config", type=Path, default=get_config_path(), help="读取 news.account/news.password")
     parser.add_argument("--username", default="", help="覆盖 4399 账号")
     parser.add_argument("--password", default="", help="覆盖 4399 密码")
     parser.add_argument("--max-age-days", type=int, default=DEFAULT_MAX_AGE_DAYS, help="只检查发布于最近 N 天的帖子")

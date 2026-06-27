@@ -1,7 +1,11 @@
 import time
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
-from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import NemuIpc
+from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import (
+    NemuIpc,
+    NemuIpcError,
+    RequestHumanTakeover,
+)
 from AutoScriptor.recognition.rec import locate_on_screen
 from AutoScriptor.utils.box import Box
 from AutoScriptor.utils.tracer import save_debug_screenshot
@@ -63,11 +67,8 @@ class NemuIpcControl(BaseMumuControl):
     def release_all_keys(self)->None:
         """释放所有按键（触摸和键盘）"""
         try:
-            # NemuIpcImpl 的 up() 方法可以释放触摸按键
-            # self.nemu_ipc 是 NemuIpc 实例，self.nemu_ipc.nemu_ipc 是 NemuIpcImpl 实例
-            if hasattr(self.nemu_ipc, 'nemu_ipc') and self.nemu_ipc.nemu_ipc is not None:
-                self.nemu_ipc.nemu_ipc.up()
-        except (AttributeError, Exception) as e:
+            self.nemu_ipc.release_touch_nemu_ipc()
+        except (AttributeError, NemuIpcError, RequestHumanTakeover, RuntimeError) as e:
             logger.debug(f"释放NemuIpc按键失败: {e}")
 
 class MixControl(BaseMumuControl):
@@ -124,11 +125,7 @@ class MixControl(BaseMumuControl):
 
     def release_all_keys(self)->None:
         """释放所有按键（主要是触摸按键）"""
-        # 使用 NemuIpc 的 up() 方法释放触摸按键
-        try:
-            self.nemu_control.release_all_keys()
-        except Exception as e:
-            logger.debug(f"释放按键失败: {e}")
+        self.nemu_control.release_all_keys()
 
 
 

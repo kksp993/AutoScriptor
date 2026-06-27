@@ -1,14 +1,19 @@
 # Runtime Lifecycle 当前基线
 
-本文记录 WebUI、调度器、设备会话、配置和热重载的当前边界。任何改动这些模块的任务都要同步更新本文件。
+本文记录 WebUI、调度器、设备会话、配置和热重载的当前边界。任何改动这些模块的任务都要同步更新本文档。
 
 ## 启动边界
 
-- WebUI 启动后只做静态服务、日志 WebSocket、任务注册、后台监控代理和可选 VLM 初始化。
+- Source Electron configures Chromium render mode before `app.whenReady()`. `AUTOSCRIPTOR_ELECTRON_RENDER_MODE` supports `software` (default, hardware acceleration disabled plus GPU composition/raster/zero-copy switches), `d3d11` (GPU kept with ANGLE D3D11), and `default` (no Electron render switches for comparison). The shell logs the render mode and GPU feature status; browser access to `http://127.0.0.1:5000` is unchanged.
+- WebUI 启动后只做静态服务、日志 WebSocket、任务注册和后台监控代理。
+- 后台初始化必须完成运行时上下文、任务重载和配置读取后才把 `/api/init-status` 标记为 `ready=true`；失败时保留 `ready=false` 和错误信息，不伪装成已完成。
 - 启动、刷新、普通轮询和默认诊断不应主动创建 `mixctrl/mumu`。
 - 设备会话由明确需要实时设备的入口创建：任务执行、实时截图、遥控点击/滑动、无缓存定位、真实代码执行。
-- `RuntimeContext` 是唯一运行态对象中心，负责 `mixctrl`、`mumu`、`bg`、`vlm_client` 和兼容全局变量同步。
-- Electron portable 启动必须先创建可见加载窗口，再执行端口清理和 Python 后端启动。加载页要持续显示阶段日志，包括运行目录检查、端口检查、Python 进程创建、WebUI 模块导入、等待本地 WebUI 响应；不要让首次运行长时间无输出。
+- `RuntimeContext` 是唯一运行态对象中心，负责 `mixctrl`、`mumu`、`bg` 和兼容全局变量同步。
+- 长生命周期模块不要保存 `from AutoScriptor import *` 或 `from AutoScriptor import mixctrl` 得到的 `mixctrl/mumu` 快照；需要运行态对象时从 `runtime_ctx` 或 `AutoScriptor.core.api` 读取当前值。
+- 源码 Electron 启动必须先创建可见加载窗口，再执行端口清理和 Python 后端启动。加载页要持续显示阶段日志，包括运行目录检查、端口检查、Python 进程创建、WebUI 模块导入、等待本地 WebUI 响应；不要让首次运行长时间无输出。
+- Electron 不修改 Windows 控制台 code page。后端编码通过 `-X utf8`、`PYTHONUTF8=1` 和 `PYTHONIOENCODING=utf-8` 保证。
+- 端口 `5000` 清理只会杀本项目目录匹配到的旧进程；清理失败必须写 `startup.log` 并显示在加载页，不能静默吞掉。
 
 ## 设备会话
 
@@ -21,12 +26,11 @@
 
 `ensure_app_running()` 会：
 
-1. 在启动 MuMuManager 前 `unboost()`，避免子进程继承高优先级。
-2. 依据 `cfg["app"]["auto_start"]` 或显式参数启动模拟器和 App。
-3. 解析 `app_to_start`，必要时写回配置。
-4. 创建 `MixControl(mumu, serial=adb_addr)`。
-5. 通过测试点击确认模拟器响应。
-6. 按 `run_in_background` 隐藏窗口。
+1. 依据调用方传入的 `start_emulator` / `launch_app` 启动模拟器和 App；`MuMuManager launch` 返回成功只代表启动命令已被接受，`Power.start()` 必须等到配置的 ADB 设备重新连上且 Android boot complete 后，才允许解析包名和启动 App。
+2. 解析 `app_to_start`，必要时写回配置。
+3. 创建 `MixControl(mumu, serial=adb_addr)`。
+4. 通过测试点击确认模拟器响应。
+5. 按 `run_in_background` 隐藏窗口。
 
 ## 设备通道
 
@@ -35,6 +39,7 @@
 - ADB 是点击、滑动、输入、按键、App 启停和包状态的稳定路径；高频输入优先直接走 `adb.exe`。
 - MuMu TCP ADB 地址（如 `127.0.0.1:16384`）不会因为 `adb start-server` 自动出现在 `adb devices`；`DeviceFacade` 在 `get-state` 失败时会先 `adb connect <adb_addr>` 并重试，再判断端口错误或设备未启动。
 - NemuIpc 仍是截图主路径。默认诊断不做截图探测；用户点击“截图探测”才检查该层。
+- NemuIpc 原生连接按单通道使用：截图、点击、长按、滑动、拖拽、释放触摸和 disconnect 必须通过 `NemuIpc` 公开方法串行进入，不能在运行期直接调用底层 `nemu_ipc.nemu_ipc.*`。后台检测线程和战斗移动线程共享同一连接时，用串行化解决确定性争用，不用扩大重试或吞掉超时。
 
 ## WebUI 运行状态
 
@@ -51,19 +56,25 @@
 - `Scheduler.request_stop()`
 - `Scheduler.invalidate_login()`
 
+`/api/stop` 只负责发出协作式取消信号并返回轻量 runtime 状态，前端应立即使用该状态呈现停止中/待运行，不在按钮回调里同步等待完整任务树快照或配置刷新；完整 `/api/runtime/snapshot` 由后台刷新和常规轮询补齐，避免调度收尾写状态时把 UI 操作卡住。总览、调度页、每日/每周/通用/自定义任务页必须统一走总览 `stop-dispatch` / `stopDispatch()` 前端入口。
+
 任务脚本必须使用可取消 API，例如 `AutoScriptor.sleep()`。
+
+Editor 自定义代码执行由 `/api/editor/execute-code` 拥有独立的 WebUI 执行状态：接口会拒绝与 direct run / scheduler 并行运行，执行体放入工作线程，避免阻塞 FastAPI 事件循环；前端“终止执行”调用 `POST /api/editor/execute-code/stop`，后端复用 `TaskManager.request_cancel()` 触发 `AutoScriptor.sleep()`、`click()`、`locate()` 等协作式取消点。执行结束后会清理本次 editor 执行状态和取消标记。
 
 ## 配置与账号
 
-- 全局配置：开发模式 `config.json`；发行版 `install.json.dataRoot/config.json`。
-- 账号配置：`dataRoot/accounts/*.json`。
-- 发行版或 Electron 指定 `AUTOSCRIPTOR_DATA_DIR` 时，旧配置里的绝对 `accounts.dir` 会迁移/归一到 `dataRoot/accounts`，避免继续写旧安装目录或 Program Files。
-- 配置/账号保存优先使用同目录临时文件加原子替换；默认不强制 `fsync`，避免低内存、杀毒扫描或慢盘把小 JSON 写入拖成秒级阻塞。需要严格刷盘时设置 `AUTOSCRIPTOR_STRICT_FSYNC=1`。
-- 纯全局配置保存（如基础配置、deploy、notify、update、remote_access）只写 `config.json`，不重写当前账号 JSON。任务、状态、账号、角色变更才写 `accounts/*.json`。
-- 若 Windows ACL 允许写入但拒绝替换/删除（`WinError 5`），保存层会降级为直接写目标文件并记录 warning。完全不可写时仍返回包含 `dataRoot/config_path/accounts_dir` 的错误诊断。
+- 全局配置：源码运行使用 `data/config.json`。
+- 账号配置：`data/accounts/*.json`。
+- 自定义任务：`data/custom_task/`。
+- 职业脚本：`data/battle_character/`。
+- 日志与错误归档：`logs/`。
+- 配置/账号保存只使用同目录临时文件加原子替换；默认不强制 `fsync`，避免低内存、杀毒扫描或慢盘把小 JSON 写入拖成秒级阻塞。需要严格刷盘时设置 `AUTOSCRIPTOR_STRICT_FSYNC=1`。
+- 纯全局配置保存（如基础配置、deploy、notify、update、remote_access）只写 `data/config.json`，不重写当前账号 JSON。任务、状态、账号、角色变更才写 `accounts/*.json`。
+- 若 Windows ACL 允许写入但拒绝替换/删除（`WinError 5`），保存层直接失败并交给 WebUI 返回包含 `dataRoot/config_path/accounts_dir` 的错误诊断，不再直接覆写目标文件。
 - 当前角色的 `tasks` / `status` / `game_profession` 被展开到运行态 `cfg`。
 - 写 JSON 使用同目录临时文件加 `os.replace()`。
-- `WebUILifecycleService` 负责配置副作用顺序：修改内存、保存、重载任务、刷新 order map、唤醒调度、递增 `config_version`。新增账号完成写入和切换后，任务重载失败只记录 warning，不回滚创建结果。
+- `WebUILifecycleService` 负责配置副作用顺序：修改内存、保存、按场景选择配置同步/轻量 reload/完整 reload、刷新 order map、唤醒调度、递增 `config_version`。新增账号完成写入和切换后，投影刷新失败会沿 API 返回错误，不再把不完整生命周期上报为成功。
 
 WebUI 公开配置必须剥离账号、密码、加密块、运行时任务字段和 `_due` 等后端投影字段。
 
@@ -71,12 +82,24 @@ WebUI 公开配置必须剥离账号、密码、加密块、运行时任务字�
 
 调度器 `ConfigWatcher` 监听：
 
-- 当前 `config.json`
+- 当前 `data/config.json`
 - 当前账号文件
 - `data/custom_task/`
 - `data/battle_character/`
 
-如果未在执行任务，直接 `TaskManager.reload_tasks()`。如果正在执行，先 `cfg.reload_preserving_decrypted_credentials()` 同步磁盘变更，设置 `_reload_deferred`，等任务安全边界再重建任务注册表和职业脚本。
+如果未在执行任务，直接 `TaskManager.reload_tasks()`。如果正在执行，则先 `cfg.reload_preserving_decrypted_credentials()` 同步磁盘变更，设置 `_reload_deferred`，等任务安全边界再重建任务注册表和职业脚本。
+
+调度器自己写入任务状态、进度或 `next_exec_time` 时，也会更新 `data/config.json` 或当前账号文件。此类内部持久化只用于同步 WebUI 展示，不应在下一轮被误判为外部配置变更并再次触发 `TaskManager.reload_tasks()`；调度循环会把已处理的配置/账号 JSON 写入标记为已见。`data/custom_task/` 和 `data/battle_character/` 的脚本变更仍按热重载处理。
+
+WebUI reload 分三类：
+
+1. 轻量 reload：`POST /api/tasks/reload` 要求 runtime idle，执行 `bg.clear(clear_signals=True)`，刷新调度器任务更新标记、任务树投影、order map 和公开配置；不重新加载 `cfg`，不清 `ZmxyOL.*` 模块，不重载职业脚本，不调用 `force_reload_tasks()`。
+2. 配置同步：`POST /api/config/sync` 执行 `cfg.reload_preserving_decrypted_credentials(security_key)`，刷新 order map，应用 WebUI log level，并递增 `config_version`；它不属于 reload，不清 `bg`，不重载任务注册表。
+3. 完整 reload：`POST /api/tasks/reload-all`、Editor 保存自定义任务、启动初始化、调度器安全边界处理脚本变更，以及兑换码任务注册缺失兜底，走 `TaskManager.reload_tasks()`，并刷新 `AutoScriptor.utils.ui_map` 模块级 `ui` 缓存。所有 reload 类操作最终都要清 `bg`；配置同步不清 `bg`。
+
+保存任务、切换账号/角色、账号解锁、更新账号凭据和普通配置导入只保存或同步配置并刷新投影/order/config_version，不重建职业脚本和任务注册表。
+
+自动跨角色调度、重试轮切换角色和执行后回切首个调度角色也使用 `TaskManager.switch_character()` 或 `cfg.switch_character()` 做轻量切换；这些路径只刷新登录状态和 WebUI 投影，不走完整 reload。
 
 `TaskManager.reload_tasks()` 会：
 
@@ -88,19 +111,19 @@ WebUI 公开配置必须剥离账号、密码、加密块、运行时任务字�
 
 ## 性能边界
 
-- 首次真正使用 `click()`、`locate()`、`swipe()` 等 API 时会温和 boost Python 进程。
-- 调度任务执行前先 `unboost()` 启动设备，设备就绪后 `boost(process_priority=ABOVE_NORMAL_PRIORITY_CLASS)`。
-- 默认不提升 MuMu 进程；`boost_mumu=True` 只保留为显式选项。
-- MuMuManager subprocess 调用使用 `mumu_safe_subprocess()` 临时恢复普通优先级。
-- `app.cpu_cores` 可限制 Python 进程 CPU 亲和性，退出时恢复。
+- 源码运行不修改 Windows 电源策略、CPU 亲和性、Python 进程优先级、任务线程优先级或 MuMu 进程优先级。
+- `AutoScriptor.utils.perf` 已移除；不要用兼容壳、重试或兜底恢复主机级 boost。
+- 调度器、WebUI 直接运行和 MuMuManager subprocess 都按普通系统调度运行，不围绕任务生命周期切换 boost/unboost。
+- 性能排查优先看截图/OCR频率、截图复用、ADB 连接、NemuIpc 串行化和任务循环，不用主机级优先级兜底。
+- `Hero.way_to_exit()` 的出口检测交给 bg 监听；主线程只做分阶段移动、停顿确认和失败微调。出口需要驻留触发，检测慢半拍时不能继续大步移动；不要把私有检测线程、OCR 节流或复杂目标分类塞回离开关卡逻辑。
 
 ## 执行后动作
 
-`config.json -> emulator.post_execution` 支持：
+`data/config.json -> emulator.post_execution` 支持：
 
 | 值 | 行为 |
 |----|------|
-| `none` / `null` | 不额外处理 |
+| `none` / `null` | 不额外关闭游戏或模拟器 |
 | `close_game_only` | 只关闭游戏 App |
 | `close_mumu` | 安全关闭游戏和模拟器 |
 | `goto_main` | 尝试回到主界面 |

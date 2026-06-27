@@ -112,7 +112,6 @@ class TestCfgSaveClean(unittest.TestCase):
             "app": {},
             "ocr": {},
             "emulator": {},
-            "llm": {},
             "scheduler": {},
             "deploy": {},
             "notify": {},

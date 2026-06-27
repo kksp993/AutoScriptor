@@ -82,9 +82,8 @@ class TestLocateSignature(unittest.TestCase):
 class TestLocatePassthrough(unittest.TestCase):
     """验证 screenshot 经由 locate → _locate_all → mixctrl.locate 完整透传"""
 
-    @patch("AutoScriptor.core.api._ensure_boosted")
     @patch("AutoScriptor.core.api.mixctrl")
-    def test_screenshot_reaches_mixctrl(self, mock_ctrl, _mock_boost):
+    def test_screenshot_reaches_mixctrl(self, mock_ctrl):
         mock_ctrl.locate.return_value = [None]
 
         from AutoScriptor.core.api import locate
@@ -96,9 +95,8 @@ class TestLocatePassthrough(unittest.TestCase):
         _, kwargs = mock_ctrl.locate.call_args
         self.assertIs(kwargs.get("screenshot"), fake)
 
-    @patch("AutoScriptor.core.api._ensure_boosted")
     @patch("AutoScriptor.core.api.mixctrl")
-    def test_none_screenshot_default(self, mock_ctrl, _mock_boost):
+    def test_none_screenshot_default(self, mock_ctrl):
         mock_ctrl.locate.return_value = [None]
 
         from AutoScriptor.core.api import locate

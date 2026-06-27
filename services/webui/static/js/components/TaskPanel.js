@@ -9,7 +9,7 @@ const TaskPanel = {
     executionBusy: { type: Boolean, default: false },
   },
   emits: [
-    'edit-task', 'expanded-change', 'start-run', 'stop-run',
+    'edit-task', 'expanded-change', 'start-run', 'stop-dispatch',
     'save-tasks',
     'clear-logs', 'refresh-config', 'reset-scheduler', 'run-task',
   ],
@@ -44,7 +44,7 @@ const TaskPanel = {
                 class="px-4 py-2.5 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium shrink-0 disabled:opacity-50 disabled:pointer-events-none">
           <i class="fa fa-play mr-1.5"></i>开始运行
         </button>
-        <button class="px-4 py-2.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors text-sm font-medium shrink-0" @click="$emit('stop-run')">
+        <button class="px-4 py-2.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors text-sm font-medium shrink-0" @click="$emit('stop-dispatch')">
           <i class="fa fa-stop mr-1.5"></i>终止执行
         </button>
         <button class="px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium shrink-0 disabled:opacity-50 disabled:pointer-events-none"

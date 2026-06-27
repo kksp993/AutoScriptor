@@ -33,6 +33,7 @@ def way():
     click(I("导航-挑战"))
     while ui_F(I("挑战-昆仑山")):
         swipe(B(1000, 300), B(700, 300), duration_s=0.5)
+        sleep(0.5)
     click(I("挑战-昆仑山"))
     wait_for_disappear(I("加载中"))
     wait_for_appear(T("夺回昆仑山"))

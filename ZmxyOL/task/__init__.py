@@ -2,7 +2,7 @@ from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.task_registry import task_registry
 from ZmxyOL.task.pkg_utils import (
     gather_py_files, sort_py_files, import_modules,
-    sort_tasks, update_order_files, normalize_cfg_tasks_to_cn,
+    sort_tasks, normalize_cfg_tasks_to_cn,
     migrate_hgwj_daily_task_leaf_to_wanjiefuben,
     migrate_remove_daily_login_task,
 )
@@ -37,7 +37,6 @@ def load_tasks():
     migrate_hgwj_daily_task_leaf_to_wanjiefuben(cfg["tasks"])
     prune_stale_custom_tasks()
     sort_tasks(cfg["tasks"])
-    update_order_files(sorted_files)
     cfg.save_config()
 
 

@@ -16,8 +16,15 @@ from AutoScriptor.crypto.config_manager import ConfigManager as CryptoConfigMana
 from AutoScriptor.utils.game_profession import DEFAULT_GAME_PROFESSION, normalize_game_profession
 from AutoScriptor.utils.logger import logger
 
+_DECRYPT_ERRORS = getattr(
+    CryptoConfigManager,
+    "DECRYPT_ERRORS",
+    (KeyError, TypeError, ValueError),
+)
+_SECURITY_KEY_CHECK_ERRORS = (OSError, AttributeError) + _DECRYPT_ERRORS
+
 _GLOBAL_KEYS = (
-    "app", "ocr", "emulator", "llm", "scheduler", "deploy", "notify",
+    "app", "ocr", "emulator", "scheduler", "deploy", "notify",
     "update", "remote_access", "accounts",
 )
 
@@ -47,31 +54,15 @@ def _atomic_write_json(path: Path, data: Any) -> None:
             f.flush()
             if _strict_json_fsync_enabled():
                 os.fsync(f.fileno())
-        try:
-            os.replace(tmp_path, path)
-        except PermissionError as e:
-            logger.warning(
-                "原子替换失败，降级为直接写入: target=%s temp=%s error=%s",
-                path,
-                tmp_path,
-                e,
-            )
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=4)
-                f.write("\n")
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except Exception:
-                pass
+        os.replace(tmp_path, path)
         elapsed = time.perf_counter() - start
         if elapsed >= 1.0:
             logger.warning("JSON 保存耗时 %.2fs: %s", elapsed, path)
-    except Exception:
+    finally:
         try:
             tmp_path.unlink(missing_ok=True)
-        except Exception:
+        except OSError:
             pass
-        raise
 
 
 def _strict_json_fsync_enabled() -> bool:
@@ -209,7 +200,7 @@ class Account:
                     "password": dec.get("password", ""),
                 }
                 return True
-            except Exception as e:
+            except _DECRYPT_ERRORS as e:
                 logger.error(f"解密账号 {self.account_name} 失败: {e}")
         return False
 
@@ -256,10 +247,10 @@ class ConfigManager:
     def __init__(self):
         if hasattr(self, "_initialized"):
             return
-        from AutoScriptor.utils.paths import get_accounts_dir, get_data_root
-        self.data_root = Path(get_data_root())
+        from AutoScriptor.utils.paths import get_accounts_dir, get_config_path, get_editable_data_root
+        self.data_root = Path(get_editable_data_root())
         self.default_accounts_dir = Path(get_accounts_dir())
-        self._config_path: Path = self.data_root / "config.json"
+        self._config_path: Path = Path(get_config_path())
         self.global_cfg: dict[str, Any] = {}
         self.current_acc: Account | None = None
         self._initialized = True
@@ -281,9 +272,7 @@ class ConfigManager:
             return False
 
     def _force_default_accounts_dir(self) -> bool:
-        from AutoScriptor.utils.paths import is_compiled
-
-        return bool(os.environ.get("AUTOSCRIPTOR_DATA_DIR") or is_compiled())
+        return bool(os.environ.get("AUTOSCRIPTOR_DATA_DIR"))
 
     def _migrate_external_accounts_dir(self, source: Path) -> None:
         if not source.is_dir():
@@ -306,7 +295,7 @@ class ConfigManager:
         if p.is_absolute() and self._force_default_accounts_dir() and not self._is_under_path(p, self.data_root):
             self._migrate_external_accounts_dir(p)
             accounts["dir"] = ""
-            logger.warning("发行版账号目录已切回 dataRoot/accounts: %s -> %s", p, self.default_accounts_dir)
+            logger.warning("账号目录已切回 dataRoot/accounts: %s -> %s", p, self.default_accounts_dir)
 
     def resolved_accounts_dir(self) -> Path:
         raw = (self.global_cfg.get("accounts") or {}).get("dir") or ""
@@ -342,14 +331,9 @@ class ConfigManager:
         acc_dir = self.resolved_accounts_dir()
         path = acc_dir / f"{name}.json"
         if not path.exists():
-            try:
-                acc_dir.mkdir(parents=True, exist_ok=True)
-                _atomic_write_json(path, self._default_account_payload(name))
-                logger.info(f"已创建默认账号文件: {path}")
-            except OSError as e:
-                logger.warning(f"账号文件不存在且创建失败: {path} ({e})")
-                self.current_acc = None
-                return
+            acc_dir.mkdir(parents=True, exist_ok=True)
+            _atomic_write_json(path, self._default_account_payload(name))
+            logger.info(f"已创建默认账号文件: {path}")
         with open(path, "r", encoding="utf-8-sig") as f:
             data = json.load(f)
         self.current_acc = Account(name, data)
@@ -448,9 +432,8 @@ class AutoConfig:
     def __init__(self):
         if hasattr(self, "_initialized"):
             return
-        from AutoScriptor.utils.paths import get_accounts_dir, get_data_root
-        data_root = str(get_data_root())
-        self.CONFIG_PATH = os.path.join(data_root, "config.json")
+        from AutoScriptor.utils.paths import get_accounts_dir, get_config_path
+        self.CONFIG_PATH = str(get_config_path())
         self.ACCOUNTS_DIR = str(get_accounts_dir())
         self._mgr = cfg_manager
         self._config: dict[str, Any] = {}
@@ -547,7 +530,7 @@ class AutoConfig:
                 return True
             dec = CryptoConfigManager.decrypt_data(enc, security_key)
             return bool(dec.get("account") and dec.get("password"))
-        except Exception:
+        except _SECURITY_KEY_CHECK_ERRORS:
             return False
 
     def __setitem__(self, key, value):
