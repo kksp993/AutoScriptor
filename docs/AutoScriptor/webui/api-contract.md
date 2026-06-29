@@ -81,7 +81,9 @@ Reload 边界：所有 reload 类操作都会清 `bg`；纯配置同步 `POST /a
 
 | 接口 | 设备会话 |
 |------|----------|
-| `GET /api/device/diagnostics?screenshot=false` | 默认不截图，不初始化 OCR/UI Map |
+| `GET /api/device/diagnostics?screenshot=false` | 默认不截图，不初始化 OCR/UI Map；附带只读 MuMu 路径发现建议 |
+| `GET /api/device/discover?probe_adb=true` | 只读发现 MuMu 安装目录、MuMuManager、adb.exe 和可用 ADB 设备，不写配置 |
+| `POST /api/device/discover/apply` | 运行空闲时应用已确认的发现结果到 `emulator` 全局配置并刷新 `config_version` |
 | `GET /api/ocr-status` | 读取 Paddle/OCR 状态；探测异常返回 500，不合成 `false/0/unknown` |
 | `/api/editor/ingest-image`、`ocr`、`color`、`save`、`store-template`、`locate-image` | 使用缓存截图/导入图，不启动模拟器 |
 | `/api/editor/screenshot`、无缓存 `locate`、`remote/click`、`remote/swipe`、真实 `execute-code`、无缓存 `preview-extract` | 需要 `runtime_ctx.ensure_device_session()` |
@@ -89,6 +91,8 @@ Reload 边界：所有 reload 类操作都会清 `bg`；纯配置同步 `POST /a
 | `POST /api/editor/save-custom-task` | Editor 保存脚本入口；不需要设备会话，接收保存表单和编辑器合并后的代码内容，写入 `data/custom_task` 并注册为 `自定义任务/...` |
 
 Editor 真实设备动作需要 credential unlock；模拟执行且已有缓存图时应使用虚拟 `mixctrl`，不触碰真实设备。
+
+MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和常见安装目录，并从安装目录推导 `mumu_folder`、`emu_path`、`adb_path`，可选探测已连接 ADB 设备。运行热路径仍依赖已持久化配置，不能在任务执行时临时扫盘。
 
 `POST /api/editor/save-custom-task` 请求体约定：
 

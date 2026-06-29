@@ -101,6 +101,8 @@ const app = createApp({
           return;
         }
         applyRuntimeSnapshotPayload(payload);
+        await refreshConfig(true);
+        await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
         ElementPlus.ElMessage.success('职业已保存');
       } catch (e) {
         ElementPlus.ElMessage.error('保存职业失败: ' + e);
@@ -263,20 +265,27 @@ const app = createApp({
       } catch (e) { console.error('Refresh failed:', e); }
     }
 
+    let _runtimeSnapshotPromise = null;
     async function fetchRuntimeSnapshot({ refreshConfigIfChanged = true } = {}) {
-      const publicVersion = Number(configData.config_version || 0);
-      try {
-        const data = await API.get('/runtime/snapshot');
-        if (!applyRuntimeSnapshotPayload(data)) return false;
-        const nextVersion = Number(data.config_version || 0);
-        if (refreshConfigIfChanged && nextVersion && nextVersion !== publicVersion) {
-          await refreshConfig(true);
+      if (_runtimeSnapshotPromise) return _runtimeSnapshotPromise;
+      _runtimeSnapshotPromise = (async () => {
+        const publicVersion = Number(configData.config_version || 0);
+        try {
+          const data = await API.get('/runtime/snapshot');
+          if (!applyRuntimeSnapshotPayload(data)) return false;
+          const nextVersion = Number(data.config_version || 0);
+          if (refreshConfigIfChanged && nextVersion && nextVersion !== publicVersion) {
+            await refreshConfig(true);
+          }
+          return true;
+        } catch (e) {
+          console.error('runtime snapshot failed:', e);
+          return false;
+        } finally {
+          _runtimeSnapshotPromise = null;
         }
-        return true;
-      } catch (e) {
-        console.error('runtime snapshot failed:', e);
-        return false;
-      }
+      })();
+      return _runtimeSnapshotPromise;
     }
 
     let _postStopRefreshTimer = null;
@@ -552,6 +561,7 @@ const app = createApp({
         }
         Object.assign(schedulerStatus, data);
         Object.assign(overviewData.scheduler, data);
+        await fetchRuntimeSnapshot({ refreshConfigIfChanged: true });
         ElementPlus.ElMessage.success('调度器已恢复');
       } catch (e) { ElementPlus.ElMessage.error('恢复失败: ' + e); }
     }
@@ -792,19 +802,34 @@ const app = createApp({
       } catch (e) { ElementPlus.ElMessage.error('保存失败: ' + e); }
     }
 
-    async function saveSettings() {
-      if (!ensureIdle('执行中不能保存设置，请先终止当前任务')) return;
+    async function saveSettings(options = {}) {
+      const silent = !!options.silent;
+      const done = typeof options.done === 'function' ? options.done : null;
+      if (!ensureIdle('执行中不能保存设置，请先终止当前任务')) {
+        if (done) done(false);
+        return;
+      }
       try {
         applyTheme();
         const { ok, data } = await API.request('POST', '/config', configData);
         if (!ok) {
           ElementPlus.ElMessage.error('保存失败: ' + API.errorMessage(data, '未知错误'));
+          if (done) done(false);
           return;
         }
-        ElementPlus.ElMessage.success('保存成功');
+        await refreshConfig(true);
+        await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
+        if (!silent) ElementPlus.ElMessage.success('保存成功');
+        if (done) done(true);
       } catch (e) {
         ElementPlus.ElMessage.error('保存失败: ' + e);
+        if (done) done(false);
       }
+    }
+
+    async function refreshAfterDeviceDiscovery() {
+      await refreshConfig(true);
+      await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
     }
 
     function clearLogs() {
@@ -971,6 +996,8 @@ const app = createApp({
         const { ok, data } = await API.request('POST', '/accounts/add', { name, account, password, server, character_name, security_key });
         if (ok) {
           applyRuntimeSnapshotPayload(data);
+          await refreshConfig(true);
+          await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
           accountDialogVisible.value = false;
           Object.assign(newAccountForm, { name: '', account: '', password: '', server: '', character_name: '', security_key: '' });
           ElementPlus.ElMessage.success('账号已创建');
@@ -989,6 +1016,8 @@ const app = createApp({
         const { ok, data } = await API.request('POST', '/accounts/delete', { name });
         if (ok) {
           applyRuntimeSnapshotPayload(data);
+          await refreshConfig(true);
+          await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
           ElementPlus.ElMessage.success('账号已删除');
         } else {
           showApiError(data, '删除失败');
@@ -1059,6 +1088,7 @@ const app = createApp({
           return false;
         }
         applyRuntimeSnapshotPayload({ dispatch_queue: data.queue });
+        await fetchRuntimeSnapshot({ refreshConfigIfChanged: true });
         return true;
       } catch (e) {
         ElementPlus.ElMessage.error('保存调度队列失败: ' + e);
@@ -1157,7 +1187,7 @@ const app = createApp({
       startRun, runSingleTask, verifyAccount, resetScheduler,
       openEditModal, enumParamIsMultiple, saveTask, addListItem, removeListItem,
       isTableParam, getTableRows, getTableColumns, getTableColumnLabel, getTableEnumOptions, tableRowsCache,
-      saveTasks, saveSettings, clearLogs, reloadTasks,
+      saveTasks, saveSettings, refreshAfterDeviceDiscovery, clearLogs, reloadTasks,
       submitAddAccount,
       isElectron, minimizeToTray, navigateTo,
       pendingEditorImportUrl, goToEditorWithImage, onEditorImported,

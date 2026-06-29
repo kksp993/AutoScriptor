@@ -59,10 +59,12 @@
 
 ## 设备诊断
 
-1. 打开“启动诊断”页。
+1. 打开设置页中的“启动诊断”。
 2. 默认刷新只检查 Manager、ADB、App、OCR、UI Map 状态，不触发 NemuIpc 截图。
 3. 点击“截图探测”后才检查 NemuIpc。
 4. MuMuManager `version` 失败但 ADB 可用时，Manager 显示 warning，整体按 ADB/App/NemuIpc 结果判断。
+5. 当 MuMu 路径仍是 `YOUR_*` 或无效路径时，点击设置页“自动定位 MuMu”；找到完整路径后写入全局配置，页面刷新后显示真实路径。
+6. 自动定位未找到完整路径时只提示手动填写，不覆盖用户已有有效路径。
 
 ## Editor 离线与实时
 

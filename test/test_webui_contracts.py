@@ -557,6 +557,32 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
         self.assertNotIn("bg_clear", self.calls)
         self.assertNotIn(("reload_tasks", "key"), self.calls)
 
+    def test_add_character_switches_reload_tasks_and_refreshes_projection(self):
+        cfg = SimpleNamespace(
+            _config={},
+            _account_data={},
+            add_character=lambda server, character: self.calls.append(("add_character", server, character)),
+            switch_character=lambda server, character: self.calls.append(("switch_character", server, character)),
+        )
+        service, _cfg = self._service(cfg=cfg)
+
+        version = service.add_character("server", "hero")
+
+        self.assertEqual(version, 42)
+        self.assertEqual(
+            self.calls,
+            [
+                "lock",
+                ("add_character", "server", "hero"),
+                ("switch_character", "server", "hero"),
+                ("reload_tasks", None),
+                "invalidate_login",
+                "mark_tasks_updated",
+                "read_config",
+                ("bump", "add character"),
+            ],
+        )
+
     def test_reload_all_uses_full_task_reload_refreshes_ui_map_and_clears_background(self):
         service, _cfg = self._service()
 
@@ -971,6 +997,25 @@ class TestConfigLifecycleContract(unittest.TestCase):
 
             self.assertEqual(module.cfg._config["app"]["name"], "ZmxyOL")
 
+    def test_config_load_merges_template_defaults_for_sparse_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module = import_app_config_for_test(tmp)
+            config_path = Path(tmp) / "config.json"
+            template_path = Path(tmp) / "config.template.json"
+            template_path.write_text(json.dumps({
+                "app": {"app_to_start": "org.yjmobile.zmxy", "max_retry": 2},
+                "emulator": {"adb_addr": "127.0.0.1:16384"},
+                "ocr": {"use_gpu": False},
+            }), encoding="utf-8")
+            config_path.write_text(json.dumps({"app": {}, "emulator": {}, "current_account": ""}), encoding="utf-8")
+
+            module.cfg.load_config()
+
+            self.assertEqual(module.cfg._config["app"]["app_to_start"], "org.yjmobile.zmxy")
+            self.assertEqual(module.cfg._config["app"]["max_retry"], 2)
+            self.assertEqual(module.cfg._config["emulator"]["adb_addr"], "127.0.0.1:16384")
+            self.assertFalse(module.cfg._config["ocr"]["use_gpu"])
+
     def test_relative_accounts_dir_keeps_data_accounts_compatibility(self):
         with tempfile.TemporaryDirectory() as tmp:
             module = import_app_config_for_test(tmp)
@@ -1075,6 +1120,8 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertIn("MuMu 多开编号", content)
         self.assertIn("MuMuManager 路径", content)
         self.assertIn("只负责启动、关闭、窗口等官方管理动作", content)
+        self.assertIn("自动定位 MuMu", content)
+        self.assertIn("/device/discover?probe_adb=true", content)
         self.assertIn("<diagnostics-panel embedded", content)
         self.assertIn("post_execution", content)
         self.assertIn("value: 'goto_main'", content)
@@ -1362,6 +1409,8 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("diagnostics", content)
         self.assertIn("NemuIpc", content)
         self.assertIn("/api/device/diagnostics", server)
+        self.assertIn("/api/device/discover", server)
+        self.assertIn("discover_mumu_setup", server)
 
     def test_mumu_manager_remains_lifecycle_channel_not_high_frequency_input(self):
         app_core = (ROOT / "AutoScriptor/control/MumuAdaptor/api/core/app.py").read_text(encoding="utf-8")

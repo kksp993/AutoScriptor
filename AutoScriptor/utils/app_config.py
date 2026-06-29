@@ -274,6 +274,24 @@ class ConfigManager:
     def _force_default_accounts_dir(self) -> bool:
         return bool(os.environ.get("AUTOSCRIPTOR_DATA_DIR"))
 
+    def _load_default_global_config(self) -> dict[str, Any]:
+        template = self.config_path.with_name("config.template.json")
+        if not template.exists():
+            return {k: {} for k in _GLOBAL_KEYS}
+        with open(template, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {k: {} for k in _GLOBAL_KEYS}
+
+    def _merge_global_defaults(self) -> None:
+        def merge(dst: dict[str, Any], src: dict[str, Any]) -> None:
+            for key, value in src.items():
+                if key not in dst:
+                    dst[key] = copy.deepcopy(value)
+                elif isinstance(dst[key], dict) and isinstance(value, dict):
+                    merge(dst[key], value)
+
+        merge(self.global_cfg, self._load_default_global_config())
+
     def _migrate_external_accounts_dir(self, source: Path) -> None:
         if not source.is_dir():
             return
@@ -341,10 +359,11 @@ class ConfigManager:
 
     def load_all(self, pwd: str = "") -> None:
         if not self.config_path.exists():
-            self.global_cfg = {k: {} for k in _GLOBAL_KEYS}
+            self.global_cfg = self._load_default_global_config()
         else:
             with open(self.config_path, "r", encoding="utf-8-sig") as f:
                 self.global_cfg = json.load(f)
+            self._merge_global_defaults()
         self.global_cfg.setdefault("tasks", {})
         self.global_cfg.setdefault("status", {})
         self.global_cfg.setdefault("game", {})
@@ -352,6 +371,8 @@ class ConfigManager:
         self.global_cfg["scheduler"].setdefault("auto_start", False)
         self.global_cfg.setdefault("accounts", {})
         self.global_cfg["accounts"].setdefault("dir", "")
+        self.global_cfg.setdefault("ocr", {})
+        self.global_cfg["ocr"].setdefault("use_gpu", False)
         self._normalize_accounts_dir_config()
         acc_name = self.global_cfg.get("current_account", "")
         if acc_name:

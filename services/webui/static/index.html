@@ -192,7 +192,8 @@
         <settings-panel v-if="activeTab==='settings'"
           :filtered-config="filteredConfig"
           :execution-busy="executionBusy"
-          @save-settings="saveSettings"></settings-panel>
+          @settings-change="saveSettings"
+          @discovery-applied="refreshAfterDeviceDiscovery"></settings-panel>
 
         <about-panel v-if="activeTab==='about'"></about-panel>
 

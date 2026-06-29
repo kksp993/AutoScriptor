@@ -102,6 +102,19 @@ class WebUILifecycleService:
         self._apply_log_level()
         return self.mark_config_changed("save config")
 
+    def apply_discovered_emulator_config(self, emulator: dict[str, Any]) -> int:
+        if not isinstance(emulator, dict):
+            raise ValueError("invalid emulator payload")
+        allowed = {"index", "adb_addr", "mumu_folder", "emu_path", "adb_path", "post_execution"}
+        next_emulator = deepcopy(self.cfg["emulator"])
+        for key in allowed:
+            if key in emulator:
+                next_emulator[key] = emulator[key]
+        with self.task_manager.config_transaction():
+            self.cfg["emulator"] = normalize_emulator_config(next_emulator)
+            self._save_global_config()
+        return self.mark_config_changed("apply device discovery")
+
     def save_tasks(self, tasks: dict[str, Any]) -> int:
         cleaned = self.task_tree_service.strip_runtime_fields(tasks)
         with self.task_manager.config_transaction():
@@ -158,7 +171,10 @@ class WebUILifecycleService:
     def add_character(self, server: str, character: str) -> int:
         with self.task_manager.config_transaction():
             self.cfg.add_character(server, character)
-        return self.mark_config_changed("add character")
+            self.cfg.switch_character(server, character)
+            self.task_manager.reload_tasks()
+        self.scheduler.invalidate_login()
+        return self._refresh_task_projection("add character")
 
     def delete_character(self, server: str, character: str) -> int:
         with self.task_manager.config_transaction():

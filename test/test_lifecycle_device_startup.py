@@ -508,6 +508,71 @@ class TestMuMuAdbLifecycle(unittest.TestCase):
                 patch.object(module, "configured_adb_host_port", return_value=("127.0.0.1", "16416")):
             self.assertEqual(module.Adb(FakeUtils()).get_connect_info(), ("127.0.0.1", "16416"))
 
+    def test_mumu_manager_command_reads_replace_bad_bytes(self):
+        module_name = "mumu_utils_under_test"
+        spec = importlib.util.spec_from_file_location(
+            module_name,
+            ROOT / "AutoScriptor/control/MumuAdaptor/utils.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        with patch.object(module.subprocess, "run", return_value=SimpleNamespace(returncode=1, stdout="", stderr="bad")) as run:
+            ret_code, retval = module.utils().run_command(["MuMuManager.exe", "info"])
+
+        self.assertEqual(ret_code, 1)
+        self.assertEqual(retval, "bad")
+        self.assertEqual(run.call_args.kwargs.get("encoding"), "utf-8")
+        self.assertEqual(run.call_args.kwargs.get("errors"), "replace")
+
+
+class TestMumuDiscovery(unittest.TestCase):
+    def test_derive_paths_from_nx_main_folder(self):
+        from AutoScriptor.utils.mumu_discovery import derive_paths_from_folder, discover_mumu_setup
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "MuMu"
+            nx = root / "nx_main"
+            nx.mkdir(parents=True)
+            manager = nx / "MuMuManager.exe"
+            adb = nx / "adb.exe"
+            manager.write_text("", encoding="utf-8")
+            adb.write_text("", encoding="utf-8")
+
+            paths = derive_paths_from_folder(root)
+
+            self.assertEqual(paths["mumu_folder"], str(root))
+            self.assertEqual(paths["emu_path"], str(manager))
+            self.assertEqual(paths["adb_path"], str(adb))
+            with patch("AutoScriptor.utils.mumu_discovery.search_mumu_folders", return_value=[root]):
+                report = discover_mumu_setup({
+                    "mumu_folder": "YOUR_MUMU_FOLDER",
+                    "emu_path": "YOUR_EMU_PATH",
+                    "adb_path": "YOUR_ADB_PATH",
+                    "adb_addr": "127.0.0.1:16384",
+                }, probe_adb=False)
+
+            self.assertFalse(report["needs_manual_paths"])
+            self.assertEqual(report["emulator"]["mumu_folder"], str(root))
+            self.assertEqual(report["emulator"]["emu_path"], str(manager))
+            self.assertEqual(report["emulator"]["adb_path"], str(adb))
+
+    def test_discovery_subprocess_reads_replace_bad_bytes(self):
+        from AutoScriptor.utils import mumu_discovery
+
+        adb = Path("C:/MuMu/adb.exe")
+        manager = Path("C:/MuMu/MuMuManager.exe")
+        with patch.object(Path, "is_file", return_value=True), \
+                patch.object(mumu_discovery.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="", stderr="")) as run:
+            mumu_discovery._adb_device_rows(str(adb))
+            mumu_discovery._mumu_info_rows(str(manager))
+
+        self.assertTrue(run.called)
+        for call in run.call_args_list:
+            self.assertEqual(call.kwargs.get("encoding"), "utf-8")
+            self.assertEqual(call.kwargs.get("errors"), "replace")
+
 
 class TestDeviceFacadeDiagnostics(unittest.TestCase):
     def _facade(self, module, adb_path: str, emu_path: str):
