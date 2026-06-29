@@ -512,7 +512,7 @@ def click(
     if isinstance(target, list): target = tuple(target)
     if isinstance(target, BoxTarget): box = target.box
     else:
-        box = locate(target, timeout if not if_exist else max(2, timeout) if timeout != 30 else 2, assure_stable)    # 至少2s
+        box = locate(target, timeout if not if_exist else max(1, timeout) if timeout != 30 else 1, assure_stable)    # 至少1s
     if if_exist and first(box) is None: return False
     if first(box) is None:
         try:

@@ -15,7 +15,7 @@ $PythonVersion = "3.10.15"
 $NodeMinimumVersion = [version]"22.12.0"
 
 function Refresh-ProcessPath {
-    $paths = @(
+    $pathValues = @(
         [Environment]::GetEnvironmentVariable("Path", "Machine"),
         [Environment]::GetEnvironmentVariable("Path", "User"),
         $env:Path,
@@ -24,7 +24,14 @@ function Refresh-ProcessPath {
         (Join-Path $env:USERPROFILE ".local\bin"),
         (Join-Path $env:ProgramFiles "Git\cmd"),
         (Join-Path $env:ProgramFiles "nodejs")
-    ) | Where-Object { $_ -and $_.Trim() }
+    )
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $paths = foreach ($value in $pathValues) {
+        foreach ($entry in ($value -split ";")) {
+            $entry = $entry.Trim()
+            if ($entry -and $seen.Add($entry)) { $entry }
+        }
+    }
 
     $env:Path = ($paths -join ";")
 }

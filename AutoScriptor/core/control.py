@@ -1,4 +1,5 @@
 import time
+from collections import defaultdict
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import (
@@ -78,6 +79,17 @@ class MixControl(BaseMumuControl):
         self.mode="mumu"
         self.last_screenshot_time=0
         self.screenshot_interval=5
+        self._last_action_log = defaultdict(float)
+        self._action_log_interval = 1.0
+
+    def _log_action(self, action: str, detail: str) -> None:
+        msg = f"【{self.mode}】{action}: {detail}"
+        logger.debug(msg)
+        now = time.monotonic()
+        key = (self.mode, action)
+        if now - self._last_action_log[key] >= self._action_log_interval:
+            self._last_action_log[key] = now
+            logger.info(msg)
 
     def switch_to_mumu(self)->None:
         logger.info("切换到mumu")
@@ -88,14 +100,14 @@ class MixControl(BaseMumuControl):
         self.mode="nemu"
 
     def click(self, x, y)->None:
-        logger.info(f"【{self.mode}】Click: {x}, {y}")
+        self._log_action("Click", f"{x}, {y}")
         if self.mode=="mumu":
             self.mumu.adb.click(x, y)
         else:
             self.nemu_control.click(x, y)
 
     def swipe(self, x1, y1, x2, y2, duration_s=1)->None:
-        logger.info(f"【{self.mode}】Swipe: ({x1},{y1}) -> ({x2},{y2})")
+        self._log_action("Swipe", f"({x1},{y1}) -> ({x2},{y2})")
         if self.mode=="mumu":
             self.mumu.adb.swipe(x1, y1, x2, y2, int(duration_s*1000))
         else:
@@ -118,7 +130,7 @@ class MixControl(BaseMumuControl):
 
     
     def long_click(self, x, y, duration=1.0)->None:
-        logger.info(f"【{self.mode}】LongClick: {x}, {y} % {duration:0.3f}sec")
+        self._log_action("LongClick", f"{x}, {y} % {duration:0.3f}sec")
         # mumu 长按不支持，连续长按会造成RuntimeError，所以使用nemu_control.long_click
         # self.mumu.adb.swipe(x, y, x, y, int(duration*1000))
         self.nemu_control.long_click(x, y, duration)

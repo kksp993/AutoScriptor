@@ -23,6 +23,7 @@ from AutoScriptor.utils.logger import logger, _TaskFilter as _LogTaskFilter
 from AutoScriptor.control.MumuAdaptor.device_facade import get_device_facade
 from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.game_profession import GAME_PROFESSIONS
+from AutoScriptor.utils.mumu_discovery import discover_mumu_setup
 from services.core.task_manager import TaskManager
 from services.core.banner import _print_banner
 from services.core.scheduler import scheduler, SchedulerState
@@ -1300,10 +1301,37 @@ async def device_diagnostics_api(screenshot: bool = False, require_app: bool = F
             include_screenshot=screenshot,
             require_app=require_app,
         )
+        diagnostics["discovery"] = discover_mumu_setup(cfg["emulator"], probe_adb=False)
         return api_ok(diagnostics=diagnostics)
     except Exception as e:
         logger.error("device diagnostics error: %s", e)
         return api_error(500, str(e), code="device_diagnostics_failed")
+
+
+@app.get("/api/device/discover")
+async def device_discover_api(probe_adb: bool = True):
+    try:
+        return api_ok(discovery=discover_mumu_setup(cfg["emulator"], probe_adb=probe_adb))
+    except Exception as e:
+        logger.error("device discovery error: %s", e)
+        return api_error(500, str(e), code="device_discovery_failed")
+
+
+@app.post("/api/device/discover/apply")
+async def device_discover_apply_api(request: Request):
+    busy = _guard_runtime_idle("apply device discovery")
+    if busy is not None:
+        return busy
+    try:
+        data = await request.json()
+        emulator = data.get("emulator", data) if isinstance(data, dict) else {}
+        version = lifecycle_service.apply_discovered_emulator_config(emulator)
+        return api_ok(config_version=version, discovery=discover_mumu_setup(cfg["emulator"], probe_adb=False))
+    except (KeyError, ValueError) as e:
+        return api_error(400, str(e), code="invalid_payload")
+    except Exception as e:
+        logger.error("device discovery apply error: %s", e)
+        return api_error(500, str(e), code="device_discovery_apply_failed")
 
 
 # ── 通知 API ──

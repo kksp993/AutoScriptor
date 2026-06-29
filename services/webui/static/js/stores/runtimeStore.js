@@ -30,6 +30,10 @@
       if (!state.configData.game) state.configData.game = {};
       state.configData.game.character_name = state.characterName.value;
     }
+    if (payload.game && typeof payload.game === 'object') {
+      if (!state.configData.game) state.configData.game = {};
+      Object.assign(state.configData.game, payload.game);
+    }
     const characters = payload.characters || payload.characters_summary;
     if (characters) {
       replaceReactiveObject(state.charactersTree, characters);
