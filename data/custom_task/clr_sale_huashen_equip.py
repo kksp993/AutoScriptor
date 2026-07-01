@@ -26,7 +26,7 @@ def test_task():
         click(T("批量出售", box=Box(808,613,114,65).margin()))
         click(T("全选", box=Box(529,602,136,87).margin()))
         click(T("键出售", box=Box(808,613,113,65).margin()))
-        click(T("确定", box=Box(964,568,165,87).margin(), if_exists= (info == 1) ));sleep(1)
+        click(T("确定", box=Box(964,568,165,87).margin()), if_exist= (info == 1) );sleep(1)
         if info == 1: break
     click(B(1199,10,51,68));sleep(1)
     click(B(1165,12,83,63));sleep(1)

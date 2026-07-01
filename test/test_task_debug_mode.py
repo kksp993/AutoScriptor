@@ -18,12 +18,13 @@ class TestTaskDebugMode(unittest.TestCase):
         cfg._config = self._cfg_backup
         task_registry._tasks = self._reg_backup
 
-    def _install_task_config(self, *, debug_mode: bool = False):
+    def _install_task_config(self, *, debug_mode: bool = False, app_debug_mode: bool = False):
         cfg._config = {
             "app": {
                 "app_to_start": "com.test.app",
                 "max_retry": 1,
                 "restart_on_error": True,
+                "debug_mode": app_debug_mode,
             },
             "emulator": {"post_execution": "close_game_only"},
             "ocr": {"use_gpu": False},
@@ -53,12 +54,28 @@ class TestTaskDebugMode(unittest.TestCase):
         mixctrl = SimpleNamespace(release_all_keys=lambda: None)
 
         with patch.object(tm_mod.runtime_ctx, "mixctrl", mixctrl):
-            with patch.object(tm, "_archive_error") as archive_error:
-                with patch.object(tm, "_try_recover_app") as recover_app:
-                    self.assertFalse(tm._execute_single_task("测试/任务"))
+            with patch.object(tm_mod, "new_task_video_recorder", return_value=None):
+                with patch.object(tm, "_archive_error") as archive_error:
+                    with patch.object(tm, "_try_recover_app") as recover_app:
+                        self.assertFalse(tm._execute_single_task("测试/任务"))
 
         archive_error.assert_called_once()
         recover_app.assert_not_called()
+
+    def test_task_video_uses_global_app_debug_mode(self):
+        from services.core import task_manager as tm_mod
+        from services.core.task_manager import TaskManager
+
+        self._install_task_config(app_debug_mode=True)
+        tm = TaskManager()
+        mixctrl = SimpleNamespace(release_all_keys=lambda: None)
+
+        with patch.object(tm_mod.runtime_ctx, "mixctrl", mixctrl):
+            with patch.object(tm_mod, "new_task_video_recorder", return_value=None) as recorder:
+                with patch.object(tm, "_archive_error"):
+                    self.assertFalse(tm._execute_single_task("测试/任务"))
+
+        recorder.assert_called_once_with("测试/任务", True)
 
     def test_scheduler_debug_task_skips_login_restart_and_post_action(self):
         from services.core import scheduler as scheduler_mod

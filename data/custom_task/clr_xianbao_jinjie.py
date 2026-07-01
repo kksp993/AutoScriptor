@@ -20,8 +20,8 @@ def test_task(xianbao_idx=1):
     tbs=[B(212,646,84,29),B(311,644,84,33),B(410,644,85,33),B(515,640,84,37)]
     click(tbs[xianbao_idx])
     click(T("进阶",box=Box(0,655,720,65)))
-    click(T("批量进阶", box=Box(886,582,152,62).margin()))
     for _ in range(4):
+        click(T("批量进阶", box=Box(886,582,152,62).margin()))
         click(T("选择全部", box=Box(578,582,174,62).margin()))
         click(T("确定进阶", box=Box(269,574,240,89).margin()));sleep(2)
         click(B(71,261))

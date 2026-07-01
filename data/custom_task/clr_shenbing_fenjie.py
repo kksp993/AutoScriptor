@@ -19,12 +19,12 @@ def task():
         wait_for_appear(T("神兵选择", box=Box(543,31,248,67).margin()))
         click(B(892,114,41,45),delay=0.5)
         click(T(quality, box=Box(752,171,133,239).margin()))
-        click(T("一键选择", box=Box(459,557,168,69).margin()))
+        click(T("键选择", box=Box(464,565,152,56).margin()))
         count=15
         while count%15==0 and count>0:
             swipe(B(868,327), B(418,327), duration_s=1)
             click(T("取消选择", box=Box(459,557,168,69).margin()))
-            click(T("一键选择", box=Box(459,557,168,69).margin()));sleep(1)
+            click(T("键选择", box=Box(464,565,152,56).margin()));sleep(1)
             count=extract_info(B(687,530,164,44), post_process=lambda s: int(s.strip().replace("：",":").split(":")[1]), ensure_not_empty=True)
         logger.info(count)
         if count==0 :

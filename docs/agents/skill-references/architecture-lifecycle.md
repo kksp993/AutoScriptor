@@ -50,7 +50,7 @@ Useful docs:
 - `allow_concurrent` callbacks scan before ordinary priority-sorted callbacks.
 - `ui_T`/`locate` support screenshot reuse.
 - `click(..., until=...)` owns the default 0.5 second polling interval when callers omit `interval`; do not spread that default through task scripts. Plain `click()` remains immediate by default.
-- `Hero.way_to_exit()` should keep exit detection in `bg.scope()` and keep movement in the main thread: reach the far right, move left near the exit, check for an immediate hit, pulse-search, hold briefly on an exit sign, and micro-adjust only after a failed hold. Do not move OCR throttling, target classification, or private detector threads back into this method.
+- `Hero.way_to_exit()` should keep exit detection in `bg.scope()` and keep movement in the main thread: reach the far right, move left near the exit, register the `战斗-离开标记` countdown marker only after positioning, pulse-search, hold on the countdown `秒`, and micro-adjust only after a failed hold. Use `mumu` for these exit long-press movements and switch back to `nemu` after each movement for recognition. Do not use `还有`/`秒` as the completion `until`, and do not move OCR throttling, target classification, or private detector threads back into this method.
 - Avoid per-box OCR loops when batch extraction can preserve shape.
 
 Useful docs:

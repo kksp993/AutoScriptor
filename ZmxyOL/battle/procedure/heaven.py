@@ -104,7 +104,6 @@ def battle_task(
                     until=(
                         I("加载中"),
                         I("极北-加载中"),
-                        T("还有"),
                         T("抽牌", box=Box(514,513,253,97)),
                     ),
                     exit_loc=exit_loc,
@@ -228,7 +227,7 @@ def heaven_battle(
 
         # 组队本里队友可能已经触发抽牌；看见抽牌就不再强行走出口。
         if not ui_T(T("抽牌", box=Box(514,513,253,97)), timeout=1):
-            self.way_to_exit(until=(T("抽牌", box=Box(514,513,253,97)), T("还有")), exit_loc=exit_loc)
+            self.way_to_exit(until=T("抽牌", box=Box(514,513,253,97)), exit_loc=exit_loc)
         self.heaven_draw_card_exit()
         switch_base("mumu")
         sleep(4)
