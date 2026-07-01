@@ -3,7 +3,8 @@ import threading
 import time
 from typing import Callable
 from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
-from AutoScriptor.core.control import MixControl
+from AutoScriptor.core.control import MixControl, ControlModeProxy
+from AutoScriptor.core.background import bg
 from AutoScriptor.core.targets import Target, B
 from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget
 from AutoScriptor.recognition.ocr_rec import ocr_for_box
@@ -268,6 +269,14 @@ def switch_base(base: str):
         raise ValueError(f"Invalid base: {base}")
 
 
+def _current_control():
+    return mixctrl
+
+
+ctrl_nemu = ControlModeProxy("nemu", _current_control)
+ctrl_mumu = ControlModeProxy("mumu", _current_control)
+
+
 def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=None, image_first: bool = False)->list[list[Box]]:
     """Locate all targets on the current screen.
 
@@ -512,7 +521,7 @@ def click(
     if isinstance(target, list): target = tuple(target)
     if isinstance(target, BoxTarget): box = target.box
     else:
-        box = locate(target, timeout if not if_exist else max(1, timeout) if timeout != 30 else 1, assure_stable)    # 至少1s
+        box = locate(target, timeout if not if_exist else max(1, timeout) if timeout != 30 else 2, assure_stable)    # 至少1s
     if if_exist and first(box) is None: return False
     if first(box) is None:
         try:
@@ -654,6 +663,30 @@ def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), re
 
 def sleep(seconds: float):
     cancellable_sleep(seconds)
+
+
+def wait_for_signal(
+    signal: str,
+    expected: bool = True,
+    seconds: float = 0,
+    *,
+    timeout: float | None = None,
+    start: float | None = None,
+) -> bool:
+    start = time.time() if start is None else start
+    end = time.time() + max(seconds, 0)
+    while True:
+        check_cancel_raise()
+        now = time.time()
+        if timeout is not None and now - start > timeout:
+            raise RuntimeError(f"等待信号 {signal!r} 超时: {timeout}秒, 条件 {repr(expected)} 未满足")
+        if bool(bg.signal(signal, False)) is expected:
+            return True
+        remaining = end - now
+        if remaining <= 0:
+            return False
+        sleep(min(0.05, remaining))
+
 
 def detect_floating_window(debug: bool = False) -> dict:
     """

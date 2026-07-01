@@ -273,7 +273,7 @@ def _on_quick_login(ctx):
         _fill_account_password(ctx)
     else:
         logger.warning("未能切换到账号密码页，尝试快速登录")
-        click(T("登录", color="绿色"), if_exist=True)
+        click(T("登录", box=Box(23,487,674,62).margin()))
     _handle_post_login_popups()
 
 # 当乐

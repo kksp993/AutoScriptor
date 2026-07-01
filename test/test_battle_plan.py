@@ -84,7 +84,7 @@ class FakeBg:
         return value
 
     def signal(self, key, default=None):
-        if str(key).startswith("way_to_exit:"):
+        if str(key).startswith("way_to_exit_done:"):
             self.polls += 1
             if self.polls >= self.trigger_after:
                 self.signals[key] = True
@@ -353,6 +353,12 @@ class TestBattlePlan(unittest.TestCase):
         default = inspect.signature(Hero.way_to_exit).parameters["monitor_interval"].default
         self.assertIsNone(default)
 
+    def test_way_to_exit_rejects_callable_until(self):
+        hero = FakeHero()
+
+        with self.assertRaisesRegex(AssertionError, "Target/tuple/list"):
+            hero.way_to_exit(until=lambda: True)
+
     def test_way_to_exit_uses_bg_and_three_speed_search_step(self):
         from AutoScriptor.battle_character import hero as hero_mod
         from AutoScriptor.core.targets import T
@@ -367,6 +373,7 @@ class TestBattlePlan(unittest.TestCase):
             patch.object(hero_mod, "bg", fake_bg),
             patch.object(hero_mod, "time", clock),
             patch.object(hero_mod, "sleep", lambda seconds: None),
+            patch.object(hero_mod, "switch_base", lambda base: None),
         ):
             hero.way_to_exit(
                 until=target,
@@ -376,7 +383,9 @@ class TestBattlePlan(unittest.TestCase):
                 timeout=10,
             )
 
+        self.assertEqual(fake_bg.added[0][0], "离开完成")
         self.assertEqual(fake_bg.added[0][1], target)
+        self.assertIn("@[200,250,600,200]", repr(fake_bg.added[1][1]))
         self.assertEqual(fake_bg.intervals[-1], 0.01)
         self.assertEqual(hero.actions[:2], [
             ("move_right", 900, True),
@@ -397,6 +406,7 @@ class TestBattlePlan(unittest.TestCase):
             patch.object(hero_mod, "bg", fake_bg),
             patch.object(hero_mod, "time", clock),
             patch.object(hero_mod, "sleep", lambda seconds: None),
+            patch.object(hero_mod, "switch_base", lambda base: None),
         ):
             hero.way_to_exit(
                 until=T("还有"),
@@ -409,17 +419,21 @@ class TestBattlePlan(unittest.TestCase):
 
     def test_way_to_exit_holds_when_initial_move_already_hits_exit(self):
         from AutoScriptor.battle_character import hero as hero_mod
+        from AutoScriptor.core.targets import T
 
         hero = FakeHero()
         hero.speed_x = 3
+        fake_bg = FakeBg(trigger_after=1)
         clock = FastClock()
 
         with (
+            patch.object(hero_mod, "bg", fake_bg),
             patch.object(hero_mod, "time", clock),
             patch.object(hero_mod, "sleep", lambda seconds: None),
+            patch.object(hero_mod, "switch_base", lambda base: None),
         ):
             hero.way_to_exit(
-                until=lambda: True,
+                until=T("加载中"),
                 exit_loc=25,
                 initial_wait=0,
                 timeout=10,
@@ -432,28 +446,32 @@ class TestBattlePlan(unittest.TestCase):
 
     def test_way_to_exit_adjusts_after_seen_but_not_held(self):
         from AutoScriptor.battle_character import hero as hero_mod
+        from AutoScriptor.core.targets import T
 
         hero = FakeHero()
         hero.speed_x = 3
+        fake_bg = FakeBg(trigger_after=20)
         clock = FastClock()
-        calls = {"n": 0}
 
-        def until():
-            calls["n"] += 1
-            return calls["n"] == 2 or calls["n"] >= 40
+        def signal(key, default=None):
+            if str(key).startswith("way_to_exit_mark:"):
+                return True
+            return FakeBg.signal(fake_bg, key, default)
 
         with (
+            patch.object(hero_mod, "bg", fake_bg),
+            patch.object(fake_bg, "signal", signal),
             patch.object(hero_mod, "time", clock),
             patch.object(hero_mod, "sleep", lambda seconds: None),
+            patch.object(hero_mod, "switch_base", lambda base: None),
         ):
             hero.way_to_exit(
-                until=until,
+                until=T("加载中"),
                 initial_wait=0,
                 monitor_interval=0.01,
-                timeout=10,
+                timeout=30,
             )
 
-        self.assertIn(("move_left", 70, True), hero.actions)
         self.assertIn(("move_right", 20, True), hero.actions)
 
     def test_battle_loop_timeout_is_checked_while_paused(self):

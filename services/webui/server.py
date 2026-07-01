@@ -1721,7 +1721,7 @@ async def error_archives_file_api(folder: str, path: str):
         if not p:
             return JSONResponse(status_code=404, content={"error": "not found"})
         suffix = p.suffix.lower()
-        media = "image/png" if suffix == ".png" else "image/jpeg" if suffix in (".jpg", ".jpeg") else "application/octet-stream"
+        media = "image/png" if suffix == ".png" else "image/jpeg" if suffix in (".jpg", ".jpeg") else "video/mp4" if suffix == ".mp4" else "application/octet-stream"
         return FileResponse(p, media_type=media, filename=p.name)
     except Exception as e:
         logger.exception("error-archives file failed")

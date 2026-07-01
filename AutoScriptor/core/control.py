@@ -1,5 +1,7 @@
 import time
 from collections import defaultdict
+from functools import wraps
+from typing import Callable
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import (
@@ -139,5 +141,32 @@ class MixControl(BaseMumuControl):
         """释放所有按键（主要是触摸按键）"""
         self.nemu_control.release_all_keys()
 
+class ControlModeProxy:
+    """临时切换 mixctrl.mode，执行 fn(*args)，再恢复原 mode。"""
 
+    def __init__(self, base: str, control_getter: Callable):
+        self._base = base
+        self._control_getter = control_getter
+
+    def __call__(self, fn: Callable):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            mixctrl = self._control_getter()
+            previous = getattr(mixctrl, "mode", None)
+            self._switch(mixctrl, self._base)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                if previous and previous != getattr(mixctrl, "mode", None):
+                    self._switch(mixctrl, previous)
+        return wrapper
+
+    @staticmethod
+    def _switch(mixctrl, base: str):
+        if base == "mumu":
+            mixctrl.switch_to_mumu()
+        elif base == "nemu":
+            mixctrl.switch_to_nemu()
+        else:
+            raise ValueError(f"Invalid base: {base}")
 

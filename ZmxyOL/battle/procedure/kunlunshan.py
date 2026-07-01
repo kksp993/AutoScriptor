@@ -32,7 +32,7 @@ def kls_yxd_callback(registry=bg):
             h.battle()
         [h.move_right(5, directly=True) for _ in range(2)]
         h.move_left(1280)
-        h.way_to_exit(until=(I("加载中"), T("还有")), exit_loc=300)
+        h.way_to_exit(until=I("加载中"), exit_loc=300)
         wait_for_disappear(I("加载中"))
         registry.add(
             name="玉虚殿-战斗结束",
@@ -152,7 +152,7 @@ def kunlunshan_battle(num: int = 5, flow_name: str | None = None, equipment: str
                     sleep(1)
                     if bg.signal("kunlunshan_hidden_seen", False):
                         xumiding(equipment=equipment)
-                    h.way_to_exit(until=(I("加载中"), T("还有")), exit_loc=0)
+                    h.way_to_exit(until=I("加载中"), exit_loc=0)
                     wait_for_disappear(I("加载中"))
                     logger.info("昆仑山轮次 %d/%d 结束", round_idx, num)
                 finally:

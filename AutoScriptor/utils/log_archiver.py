@@ -295,6 +295,7 @@ def archive_error(
     mixctrl=None,
     include_click_screenshots: bool = True,
     extra_context: Optional[Dict[str, Any]] = None,
+    video_path: str | Path | None = None,
 ) -> Optional[str]:
     """Archive a task error with recent logs, context and screenshots."""
     try:
@@ -306,6 +307,10 @@ def archive_error(
         _save_screenshots(archive_dir, mixctrl)
         if include_click_screenshots:
             _copy_click_screenshots(archive_dir)
+        if video_path:
+            from AutoScriptor.utils.task_video_recorder import copy_video_to_archive
+
+            copy_video_to_archive(video_path, archive_dir)
 
         logger.info("error archived: %s", archive_dir)
         return str(archive_dir)

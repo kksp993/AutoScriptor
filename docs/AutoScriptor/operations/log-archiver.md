@@ -19,8 +19,9 @@
 | `current_screenshot.png` | 捕获异常时的当前画面 |
 | `timed_screenshot_1.png` ~ `timed_screenshot_3.png` | 后续每秒一张 |
 | `click_screenshots/` | 本任务调试截图副本 |
+| `task_record.mp4` | 任务级 `debug_mode` 下失败保留的 ADB 录屏；任务成功或取消时删除 |
 
-调试截图来自 `get_logs_root()/debug_screenshot/`。任务开始前会清空，归档后也会清空，保证归档里的截图属于本任务。
+调试截图来自 `get_logs_root()/debug_screenshot/`。任务开始前会清空，归档后也会清空，保证归档里的截图属于本任务。任务录屏由 `AutoScriptor.utils.task_video_recorder` 挂载在 `TaskManager`，顶部硬编码开关可临时关闭或删除工具卸载。
 
 ## 调试截图命名
 

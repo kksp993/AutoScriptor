@@ -34,6 +34,7 @@ from AutoScriptor.utils.task_state import (
 )
 from AutoScriptor.utils.paths import get_logs_root
 from services.core.runtime_context import runtime_ctx
+from AutoScriptor.utils.task_video_recorder import new_task_video_recorder
 
 
 # ── 下次执行时间计算 ──
@@ -261,6 +262,7 @@ class TaskManager:
             if self._cancel_event.is_set():
                 return False
             has_local_retry = attempt + 1 in attempt_numbers
+            task_video = None
 
             set_current_task(task.rsplit("/", 1)[-1])
             set_current_task_path(task)
@@ -274,10 +276,15 @@ class TaskManager:
                 assert runtime_ctx.mixctrl is not None, "mixctrl 未初始化，请先调用 runtime_ctx.init()"
                 runtime_ctx.mixctrl.release_all_keys()
                 clear_task_status("progress", task_path=task, save=False)
+                record_video = cfg["app"].get("debug_mode") or is_task_debug_mode(task)
+                task_video = new_task_video_recorder(task, bool(record_video))
                 fn(**kwargs)
                 if self._task_progress_incomplete(task):
                     label = self._task_progress_label(task)
                     raise TaskRequireReTry(f"任务进度未完成: {label}")
+                if task_video:
+                    task_video.stop(keep=False)
+                    task_video = None
                 logger.info(f"▶️  执行成功: {task}")
                 with self._cfg_lock:
                     clear_task_status("progress", task_path=task, save=False)
@@ -317,7 +324,11 @@ class TaskManager:
                         self._mark_human_takeover(task, e)
                     return False
                 logger.error("❌ 执行失败: %s，错误: %r", task, e)
-                self._archive_error(task, e)
+                video_path = task_video.stop(keep=True) if task_video else None
+                self._archive_error(task, e, video_path=video_path)
+                if task_video:
+                    task_video.cleanup_local()
+                    task_video = None
                 if is_task_debug_mode(task):
                     logger.info("🔄 debug_mode: 跳过失败恢复，不关闭/重启游戏: %s", task)
                     return False
@@ -335,6 +346,8 @@ class TaskManager:
                 return False
 
             finally:
+                if task_video:
+                    task_video.stop(keep=False)
                 set_current_task_path(None)
                 set_current_task(None)
                 logger.info(f"Task [END] {task}")
@@ -584,10 +597,10 @@ class TaskManager:
 
     # ── 工具 ──
 
-    def _archive_error(self, task: str, exc: Exception):
+    def _archive_error(self, task: str, exc: Exception, video_path=None):
         from AutoScriptor.utils.log_archiver import archive_error
         try:
-            archive_error(task, exc, mixctrl=runtime_ctx.mixctrl, include_click_screenshots=True)
+            archive_error(task, exc, mixctrl=runtime_ctx.mixctrl, include_click_screenshots=True, video_path=video_path)
         except Exception as e:
             logger.error(f"归档错误失败: {e}")
 

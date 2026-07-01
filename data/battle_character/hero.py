@@ -23,6 +23,8 @@ from typing import Any
 
 from AutoScriptor import *
 from AutoScriptor.battle_character.plan import BattlePlan, battle_plan
+from AutoScriptor.core.api import ctrl_mumu, ui_T
+import AutoScriptor.core.api as core_api
 from AutoScriptor.core.background import BG_PRIORITY_BUILTIN_ADVANCE, BG_SIGNALS
 from AutoScriptor.core.targets import Target
 from AutoScriptor.utils.cancel import check_cancel_raise
@@ -460,155 +462,95 @@ class Hero:
         exit_loc: float = 0,
         timeout: float = 180,
         *,
-        initial_wait: float | None = None,
         step_delay: float | None = None,
         monitor_interval: float | None = None,
-        ocr_interval: float = 1.0,
     ):
-        """走向出口并离开关卡。
+        """走向出口并离开关卡。"""
+        assert until is not None, "way_to_exit 需要 until 条件或目标"
+        assert isinstance(until, (Target, tuple, list)), f"way_to_exit until 需要 Target/tuple/list，收到 {type(until).__name__}"
 
-        `until` 可以是 Target、Target 容器，或返回 bool 的 callable。普通
-        目标交给 bg 监听；主线程只负责按节奏移动、停顿和确认，避免检测
-        慢半拍时继续冲过出口。
-        """
-        if until is None:
-            raise ValueError("way_to_exit 需要 until 条件或目标")
-
-        if not callable(until) and not isinstance(until, (Target, tuple, list)):
-            raise TypeError(f"way_to_exit until 需要 Target/tuple/list/callable，收到 {type(until).__name__}")
-
-        if self.speed_x >= 3:
-            search_step = 70
-            search_wait = 0.35
-            hold_time = 1.4
-        else:
-            search_step = 110
-            search_wait = 0.5
-            hold_time = 1.9
-
-        if monitor_interval is not None:
-            search_wait = monitor_interval
-        if step_delay is not None:
-            search_wait = step_delay
-        if initial_wait is None:
-            initial_wait = search_wait
-        _ = ocr_interval  # 兼容旧调用；离开关卡不再自行做 OCR 节流。
+        # 向左搜索步伐
+        search_step = step_delay or (30 if self.speed_x >= 3 else 50)
+        # 向左搜索等待时间
+        search_wait = monitor_interval or (0.35 if self.speed_x >= 3 else 0.5)
+        # 等待出口标记出现时间
+        hold_time = 1.4 if self.speed_x >= 3 else 1.9
 
         start = time()
-        exit_done_signal = f"way_to_exit_done:{id(self)}:{int(start * 1000)}"
+        # 站在了出口标记上 退出信号
         exit_mark_signal = f"way_to_exit_mark:{id(self)}:{int(start * 1000)}"
+        # 离开了关卡
+        exit_done_signal = f"way_to_exit_done:{id(self)}:{int(start * 1000)}"
 
-        def label() -> str:
-            return getattr(until, "__name__", repr(until))
-
-        def check_timeout():
-            if time() - start > timeout:
-                raise RuntimeError(f"离开关卡 超时: {timeout}秒, 条件 {label()} 未满足")
-
-        def done() -> bool:
-            if callable(until):
-                return bool(until())
-            return bool(bg.signal(exit_done_signal, False))
-
-        def wait_done(seconds: float) -> bool:
-            end = time() + max(seconds, 0)
-            while True:
-                check_cancel_raise()
-                check_timeout()
-                if done():
-                    return True
-                remaining = end - time()
-                if remaining <= 0:
-                    return False
-                sleep(min(0.05, remaining))
-
-        def seen_exit() -> bool:
-            return bool(bg.signal(exit_mark_signal, False))
-
-        def wait_exit(seconds: float) -> bool:
-            end = time() + max(seconds, 0)
-            while True:
-                check_cancel_raise()
-                check_timeout()
-                if seen_exit():
-                    return True
-                remaining = end - time()
-                if remaining <= 0:
-                    return False
-                sleep(min(0.05, remaining))
-
-        def hold_exit() -> bool:
-            end = time() + hold_time
-            while True:
-                check_cancel_raise()
-                check_timeout()
-                if done():
-                    return True
-                remaining = end - time()
-                if remaining <= 0:
-                    return done()
-                sleep(min(0.05, remaining))
-
-        def adjust_exit() -> bool:
-            while True:
-                check_cancel_raise()
-                check_timeout()
-                bg.set_signal(exit_mark_signal, False)
-                self.move_right(20, directly=True)
-                if wait_done(search_wait):
-                    return True
-                if wait_exit(0) and hold_exit():
-                    return True
-
-        @contextmanager
-        def watch_exit():
-            with bg.scope("离开关卡") as scope, bg.interval(search_wait):
-                scope.add(
-                    "出口标记",
-                    T(key="战斗-离开关卡"),
-                    callback=lambda: bg.set_signal(exit_mark_signal, True),
-                    once=False,
-                    throttle=search_wait,
-                )
-                if not callable(until):
-                    scope.add(
-                        "离开完成",
-                        until,
-                        callback=lambda: bg.set_signal(exit_done_signal, True),
-                        once=False,
-                        throttle=search_wait,
-                    )
-                yield
-
-        with watch_exit():
-            if not callable(until):
-                bg.set_signal(exit_done_signal, False)
-
-            # 先冲到最右侧，再按经验值回拉到出口附近。
-            self.move_right(900, directly=True)
+        with bg.scope("离开关卡") as scope, bg.interval(search_wait):
+            bg.set_signal(exit_done_signal, False)
             bg.set_signal(exit_mark_signal, False)
-            if exit_loc:
-                self.move_left(exit_loc, directly=True)
+            scope.add(
+                "离开完成",
+                until, 
+                callback=lambda: bg.set_signal(exit_done_signal, True),
+                once=False,
+                throttle=search_wait,
+            )
+            logger.info("离开关卡 1: 向右移动到最远处")
+            self.move_right(900, directly=True)
+            logger.info("离开关卡 2: 向左移动到出口旁 exit_loc=%s", exit_loc)
+            self.move_left(exit_loc, directly=True)
+            
 
-            # 回拉后可能已经直接离开；否则看到出口标记就先驻留。
-            if wait_done(initial_wait):
-                return self
-            if wait_exit(0):
-                if hold_exit() or adjust_exit():
-                    return self
+            scope.add(
+                "出口标记",
+                T(key="战斗-离开标记"),
+                callback=lambda: bg.set_signal(exit_mark_signal, True),
+                once=False,
+                throttle=search_wait,
+            )
+            step3_start = time()
+            if wait_for_signal(exit_done_signal, True, 0):
+                logger.info("离开关卡 3.1: 已满足离开条件，直接返回")
+                return self.sleep(1)
 
-            # 没离开就小步左移搜索出口标记；驻留失败后只向右小步微调。
+            if ui_T(T(key="战斗-离开标记"), timeout=1):
+                logger.info("离开关卡 3.2: 已在出口标记上，等待离开")
+                wait_for_signal(exit_done_signal, True, hold_time)
+                return self.sleep(1)
+
+            logger.info("离开关卡 3.3: 开始左走搜索出口")
+            cnt = 0
+            # 以防万一出不去，设置一个最多走20步的限制
+            while cnt < 20:
+                check_cancel_raise()
+                if time() - step3_start > timeout:
+                    raise RuntimeError(f"离开关卡 超时: {timeout}秒, 条件 {repr(until)} 未满足")
+                self.move_left(100, directly=True)
+                core_api.mixctrl.release_all_keys()
+                if not wait_for_signal(exit_mark_signal, True, search_wait):
+                    logger.debug("离开关卡 3.3: 未见出口标记，继续左走")
+                    cnt += 1
+                    continue
+                if ui_T(T(key="战斗-离开标记")):
+                    logger.info("离开关卡 3.3: 左走后站在出口上，等待离开")
+                    wait_for_signal(exit_done_signal, True, hold_time)
+                    return self.sleep(1)
+                logger.info("离开关卡 3.3: 走过出口，进入右走回退")
+                break
+
+            logger.info("离开关卡 3.4: 开始右走微调")
             while True:
                 check_cancel_raise()
-                check_timeout()
-                self.move_left(search_step, directly=True)
-                if wait_done(search_wait):
-                    return self
-                if wait_exit(0):
-                    if hold_exit() or adjust_exit():
-                        return self
-        sleep(0.5)
-        return self
+                if time() - step3_start > timeout:
+                    raise RuntimeError(f"离开关卡 超时: {timeout}秒, 条件 {repr(until)} 未满足")
+
+                self.move_right(20, directly=True)
+                core_api.mixctrl.release_all_keys()
+                if not ui_T(T(key="战斗-离开标记")):
+                    logger.debug("离开关卡 3.4: 未见出口标记，继续右走")
+                    continue
+                logger.info("离开关卡 3.4: 重新对准出口，等待离开")
+                wait_for_signal(exit_done_signal, True, hold_time)
+                return self.sleep(1)
+
+
 
     # ═══════════════ 竞技场 (兼容接口) ═══════════════
 

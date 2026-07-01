@@ -119,6 +119,15 @@ def _collect_image_paths(archive_dir: Path) -> List[str]:
     return rels
 
 
+def _collect_video_paths(archive_dir: Path) -> List[str]:
+    rels: List[str] = []
+    for p in archive_dir.glob("*.mp4"):
+        if p.is_file():
+            rels.append(p.name)
+    rels.sort()
+    return rels
+
+
 def _extract_summary_from_log(text: str) -> str:
     lines = text.splitlines()
     exc_type = ""
@@ -338,6 +347,7 @@ def get_archive_detail(folder: str) -> Optional[Dict[str, Any]]:
             log_text = ""
     summary = _extract_summary_from_log(log_text)
     images = _collect_image_paths(adir)
+    videos = _collect_video_paths(adir)
     segments, unmatched_images = build_log_segments(log_text, adir, folder)
 
     return {
@@ -347,6 +357,7 @@ def get_archive_detail(folder: str) -> Optional[Dict[str, Any]]:
         "segments": segments,
         "unmatchedImages": unmatched_images,
         "images": images,
+        "videos": videos,
     }
 
 
