@@ -2,7 +2,11 @@ from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
 
-@register_task
+@register_task(
+    path_cn="每日任务/村庄/仙盟建设",
+    description="完成仙盟建设并领取每日任务奖励。",
+    task_doc="完成仙盟建设+每日任务【仙盟建设1】。",
+)
 def daily_alliance_task():
     logger.info("====仙盟贡献====")
     ensure_in("仙盟")

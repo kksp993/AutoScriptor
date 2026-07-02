@@ -3,7 +3,11 @@ from ZmxyOL import *
 
 from AutoScriptor.utils.logger import logger
 
-@register_task
+@register_task(
+    path_cn="活动任务/烘炉+机缘",
+    description="依次处理造化烘炉和机缘大集。",
+    task_doc="【未完成】依次处理造化烘炉和机缘大集。",
+)
 def task(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
     from AutoScriptor.battle_character.hero import h
     from ZmxyOL.battle.tasks import JIYUAN_TASK_TABLE

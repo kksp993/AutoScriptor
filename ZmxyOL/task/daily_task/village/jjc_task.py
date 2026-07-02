@@ -3,7 +3,12 @@ from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
 
 
-@register_task
+@register_task(
+    path_cn="每日任务/村庄/竞技场",
+    description="执行每日竞技场挑战。",
+    task_doc="【弃用】该任务保留旧每日竞技场挑战流程。",
+    deprecated=True,
+)
 def daily_arena_task(
     battle_flow: BattleFlowName = DEFAULT_JJC_BATTLE_FLOW,
 ):

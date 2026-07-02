@@ -57,7 +57,10 @@ _DEFAULT_BATTLE_CONFIG = TableParam(
 )
 
 
-@register_task
+@register_task(
+    description="根据配置挑战极寒深渊副本。",
+    path_cn="每日任务/极北/极寒深渊/极渊副本",
+)
 def task(
     lingqi_priority: tuple[LingQi, ...] = _DEFAULT_LINGQI_PRIORITY,
     battle_config: TableParam = _DEFAULT_BATTLE_CONFIG,

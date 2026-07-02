@@ -31,7 +31,11 @@ LINGPAI_MAP = {
 }
 
 
-@register_task
+@register_task(
+    path_cn="每日任务/村庄/联盟悬赏",
+    description="完成联盟悬赏任务。",
+    task_doc="【未完成】联盟悬赏流程仍未完整验证。",
+)
 def lianmengxuanshang():
     ensure_in("联盟", 1)
     click(T("联盟悬赏"),offset=(-50,0))

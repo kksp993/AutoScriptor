@@ -1,7 +1,10 @@
 from ZmxyOL import *
 from AutoScriptor import *
 
-@register_task
+@register_task(
+    description="领取极光天诏任务奖励。",
+    path_cn="每日任务/极北/极北村庄/极光天诏",
+)
 def task():
     ensure_in("极北村庄")
     while(ui_F((I("青莲炎"),T("青莲炎")))):

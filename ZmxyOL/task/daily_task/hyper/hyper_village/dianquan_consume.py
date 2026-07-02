@@ -14,7 +14,11 @@ class Method(Enum):
     # TUFAYIN = "购买土法印"
 
 
-@register_task
+@register_task(
+    description="按配置完成极北村庄点券消费。",
+    task_doc="【谨慎】会按配置购买指定点券道具。",
+    path_cn="每日任务/极北/极北村庄/消费点券",
+)
 def task(method:Method=Method.YAOSHI):
     if method == Method.YAOSHI:
         ensure_in("极北村庄")

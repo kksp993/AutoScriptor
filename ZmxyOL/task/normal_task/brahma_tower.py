@@ -68,7 +68,10 @@ def FTT_TianMo():
     battle()
     wait_for_appear(T("入劫"))
 
-@register_task
+@register_task(
+    path_cn="一般任务/梵天塔",
+    description="挑战梵天塔，按配置处理天魔和层数。",
+)
 def fanTianTa(
     battle_times=50, 
     difficulty=FFT_difficulty.past, 

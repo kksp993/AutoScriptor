@@ -7,7 +7,6 @@ from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.task_registry import task_registry
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.table_param import TableParam
-from ZmxyOL.task.default_descriptions import get_default_task_description
 from ZmxyOL.task.translations import normalize_cfg_key, normalize_to_cn
 from ZmxyOL.nav.api import locate_region
 
@@ -42,6 +41,14 @@ def _remove_empty_cfg_branches(root: dict, keys: list[str]) -> None:
         if child:
             break
         del parent[key]
+
+
+def _drop_cfg_leaf(keys: list[str]) -> None:
+    parent, leaf = _find_cfg_leaf(cfg["tasks"], keys)
+    if parent is None or leaf is None:
+        return
+    del parent[keys[-1]]
+    _remove_empty_cfg_branches(cfg["tasks"], keys[:-1])
 
 
 def _migrate_custom_cfg_leaf(legacy_keys: list[str] | None, normalized_keys: list[str]) -> None:
@@ -82,6 +89,7 @@ def register_task(
     task_doc=None,
     description=None,
     debug_mode=False,
+    deprecated=False,
     **task_kwargs,
 ):
     """
@@ -89,7 +97,7 @@ def register_task(
 
     注册数据分两处存储：
       - cfg["tasks"]（用户配置，持久化到 JSON）：on、next_exec_time、params、next_exec_offset_hours 等
-      - TaskRegistry（运行时数据，不持久化）：fn、order、param_meta、param_keys、beta、custom、doc_flow、description、debug_mode
+      - TaskRegistry（运行时数据，不持久化）：fn、order、param_meta、param_keys、beta、custom、doc_flow、description、debug_mode、deprecated
 
     支持以下可选参数（仅对指定任务生效）：
       - default_offset_hours (int): 任务执行后延迟 N 小时再调度
@@ -98,6 +106,7 @@ def register_task(
       - description (str): 可选。WebUI 任务简介（一句话）；不传则按任务名自动生成占位简介
       - debug_mode (bool): 调试直跑模式；执行时不强制回登录页重登，失败时不关闭/重启游戏，
         若本轮只执行 debug 任务，也跳过 post_execution 收尾动作。也兼容 debug=True 短写。
+      - deprecated (bool): 弃用任务。源码和注册元数据保留，但不写入 cfg、不出现在 WebUI 或调度列表。
       - path_cn (str): **仅 custom_task 目录下脚本必填**。斜杠分隔的 cfg 任务路径（中文键），
         custom_task 脚本最终都会归一到「自定义任务」根节点；省略首段时会自动补齐。
         示例：path_cn="自定义任务/示例/hello_custom"
@@ -126,6 +135,7 @@ def register_task(
                 task_doc=task_doc,
                 description=description,
                 debug_mode=debug_mode,
+                deprecated=deprecated,
                 **task_kwargs,
             )
         return wrapper
@@ -133,6 +143,7 @@ def register_task(
     registration_counter += 1
     reg_order = registration_counter  # 当前注册顺序
     debug_mode = bool(debug_mode or task_kwargs.pop("debug", False))
+    deprecated = bool(deprecated)
     module = inspect.getmodule(func)
     if module is not None and not hasattr(module, "ensure_in"):
         # 注入导航相关的符号
@@ -166,8 +177,8 @@ def register_task(
     task_name, _ = os.path.splitext(filename)
     keys[-1] = task_name
 
+    raw_cn = path_cn.strip() if isinstance(path_cn, str) else ""
     if is_custom:
-        raw_cn = path_cn.strip() if isinstance(path_cn, str) else ""
         if not raw_cn:
             raise ValueError(
                 "custom_task 下的任务必须传入 path_cn，例如 "
@@ -181,25 +192,37 @@ def register_task(
             legacy_keys = list(keys)
             keys.insert(0, _CUSTOM_TASK_ROOT_KEY)
         _migrate_custom_cfg_leaf(legacy_keys, keys)
+    elif raw_cn:
+        keys = [normalize_cfg_key(p) for p in raw_cn.split("/") if p.strip()]
+        if not keys:
+            raise ValueError(f"path_cn 解析后为空: {path_cn!r}")
     else:
         keys = [normalize_to_cn(key) for key in keys]
 
-    current_level = cfg["tasks"]
-    for key in keys[:-1]:
-        current_level = current_level.setdefault(key, {})
-
-    # cfg["tasks"] 只存用户配置（on、next_exec_time、params 等）
-    # 首次写入某任务叶节点时默认关闭，避免新建账号/角色时空任务树被全部点亮
     last_key = keys[-1]
-    if last_key not in current_level:
-        current_level[last_key] = {"on": False, "next_exec_time": 0}
+    task_path = "/".join(keys)
+
+    # cfg["tasks"] 只存用户配置（on、next_exec_time、params 等）。
+    # deprecated 任务源码保留，但不创建/保留配置叶子，避免进入 WebUI 和调度。
+    task_cfg = None
+    if deprecated:
+        _drop_cfg_leaf(keys)
     else:
-        current_level[last_key].setdefault("on", True)
-        current_level[last_key].setdefault("next_exec_time", 0)
-    if default_offset_hours is not None:
-        current_level[last_key]["next_exec_offset_hours"] = default_offset_hours
-    for key, value in task_kwargs.items():
-        current_level[last_key][key] = value
+        current_level = cfg["tasks"]
+        for key in keys[:-1]:
+            current_level = current_level.setdefault(key, {})
+
+        # 首次写入某任务叶节点时默认关闭，避免新建账号/角色时空任务树被全部点亮
+        if last_key not in current_level:
+            current_level[last_key] = {"on": False, "next_exec_time": 0}
+        else:
+            current_level[last_key].setdefault("on", True)
+            current_level[last_key].setdefault("next_exec_time", 0)
+        if default_offset_hours is not None:
+            current_level[last_key]["next_exec_offset_hours"] = default_offset_hours
+        for key, value in task_kwargs.items():
+            current_level[last_key][key] = value
+        task_cfg = current_level[last_key]
 
     doc_flow = ""
     if task_doc is not None and str(task_doc).strip():
@@ -231,19 +254,16 @@ def register_task(
         else:
             defaults[name] = default
 
-    # params 是用户可编辑配置，留在 cfg
-    task_cfg = current_level[last_key]
-    existing_params = task_cfg.get("params", {})
-    merged_params = defaults.copy()
-    merged_params.update(existing_params)
-    # 仅保留当前签名中的参数名，丢弃已迁移的旧键（如独立难度、battle_flow 等）
-    task_cfg["params"] = {k: merged_params[k] for k in defaults}
+    if task_cfg is not None:
+        # params 是用户可编辑配置，留在 cfg
+        existing_params = task_cfg.get("params", {})
+        merged_params = defaults.copy()
+        merged_params.update(existing_params)
+        # 仅保留当前签名中的参数名，丢弃已迁移的旧键（如独立难度、battle_flow 等）
+        task_cfg["params"] = {k: merged_params[k] for k in defaults}
 
     # fn / order / param_meta 注册到 TaskRegistry（运行时数据，不写入 JSON）
-    task_path = "/".join(keys)
     desc = (description or "").strip() if description is not None else ""
-    if not desc:
-        desc = get_default_task_description(task_path)
     if not desc:
         desc = f"自动执行「{last_key}」相关流程。"
     task_registry.register(
@@ -257,6 +277,7 @@ def register_task(
         doc_flow=doc_flow,
         description=desc,
         debug_mode=debug_mode,
+        deprecated=deprecated,
     )
 
     # The decorator must return the original function

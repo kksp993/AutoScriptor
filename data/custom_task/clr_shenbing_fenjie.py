@@ -4,7 +4,12 @@ from ZmxyOL.nav.envs.decorators import *
 from ZmxyOL.task.task_register import register_task
 
 
-@register_task(path_cn='自定义任务/背包清空/神兵分解', description="从编辑器保存的自定义脚本")
+@register_task(
+    path_cn='自定义任务/背包清空/神兵分解',
+    description='分解普通、精良、史诗品质神兵以清空背包',
+    task_doc='会依次选择普通、精良、史诗品质神兵并执行批量分解，请确认背包中没有需要保留的神兵。',
+    debug_mode=True,
+)
 def task():
     ensure_in("荒古村庄")
     idx = ui_idx((T('莫邪'),T('干将')),timeout=2)

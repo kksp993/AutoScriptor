@@ -5,8 +5,9 @@ from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 @register_task(
     path_cn='自定义任务/编辑器保存/异兽入侵',
-    description='从编辑器保存的自定义脚本',
-    task_doc='',
+    description='进入异兽入侵并阻击相柳',
+    task_doc='从荒古万界进入异兽入侵，选择荒古·邪·相柳并完成阻击流程。',
+    debug_mode=True,
 )
 def task():
     ensure_in("荒古万界")

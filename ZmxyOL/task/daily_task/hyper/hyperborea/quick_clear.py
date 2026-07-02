@@ -2,7 +2,11 @@ from ZmxyOL import *
 from AutoScriptor import *
 
 
-@register_task
+@register_task(
+    description="执行极北一键碾压。",
+    task_doc="【bug】注意不会消耗祝福，如果有需求不要开启。",
+    path_cn="每日任务/极北/极北地区/一键碾压",
+)
 def task():
     ensure_in("极北",-1)
     click(B(40,400,40,40))

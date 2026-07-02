@@ -23,7 +23,11 @@ class ShituolingDiff(IntEnum):
     D15 = 15
 
 
-@register_task(allowed_weekdays=[6, 7])
+@register_task(
+    path_cn="每周任务/狮驼岭",
+    description="在周末执行狮驼岭任务。",
+    allowed_weekdays=[6, 7],
+)
 def task(
     diff: ShituolingDiff = ShituolingDiff.D15,
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,

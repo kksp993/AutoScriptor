@@ -49,7 +49,10 @@ def bingku_battle():
             else: sleep(0.5)
     switch_base("mumu")
 
-@register_task
+@register_task(
+    path_cn="每周任务/幽冥冰窟",
+    description="完成幽冥冰窟每周流程。",
+)
 def task(
     Bingku_WuQi=WuQi.风虎之怒,
     Bingku_YiFu=YiFu.风虎潮流,

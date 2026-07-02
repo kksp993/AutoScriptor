@@ -6,7 +6,8 @@ from ZmxyOL import *
 
 
 @register_task(
-    description="进入兑换豪礼的礼品兑换页，输入兑换码并记录返回提示。",
+    path_cn="一般任务/活动/兑换豪礼礼品兑换",
+    description="输入兑换码并记录兑换返回提示。",
     debug_mode=True,
 )
 def task(redeem_code: str | list[str] = "1111"):

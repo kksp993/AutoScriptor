@@ -38,7 +38,11 @@ def make_more_for_destory(nums: int=1):
     
 
 
-@register_task
+@register_task(
+    description="执行仙宝炼化 A/B。",
+    task_doc="材料不够会自行合成。",
+    path_cn="每日任务/极北/极北村庄/仙宝炼化",
+)
 def lianqishi_destory():
     ensure_in("炼器师")
     res = extract_info(B(1000,430,130,42), lambda x: x)

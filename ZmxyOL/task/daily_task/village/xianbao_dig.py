@@ -2,7 +2,11 @@ from ZmxyOL import *
 from AutoScriptor import *
 
 
-@register_task
+@register_task(
+    path_cn="每日任务/村庄/仙宝挖掘",
+    description="自动进行两个遗迹的仙宝挖掘。",
+    task_doc="必须解锁仙宝挖掘，会自动进行两个地的挖掘。",
+)
 def daily_fxiang_task():
     ensure_in("法相")
     sleep(2)

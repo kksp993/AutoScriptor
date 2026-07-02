@@ -36,7 +36,10 @@ _DEFAULT_BATTLE_CONFIG = TableParam(
 _DIFF_ORDER = {"初难": 1, "灾厄": 2, "浩劫": 3}
 
 
-@register_task
+@register_task(
+    path_cn="每日任务/荒古万界/遗境副本",
+    description="完成遗境副本挑战，根据配置自行选择挑战难度和关卡。",
+)
 def task(
     battle_config: TableParam = _DEFAULT_BATTLE_CONFIG,
     **kwargs,

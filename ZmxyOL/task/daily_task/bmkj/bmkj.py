@@ -5,7 +5,10 @@ from AutoScriptor import *
 from AutoScriptor.battle_character.hero import h
 
 
-@register_task
+@register_task(
+    path_cn="每日任务/本命空间/本命空间",
+    description="完成本命空间每日流程，领取任务奖励，合成本命法宝。",
+)
 def task(clear_all=False, lianbao=False):
     ensure_in(HAS_SHEZHI)
     while ui_F(T("仙盟",box=Box(16,30,924,400)), 3):
