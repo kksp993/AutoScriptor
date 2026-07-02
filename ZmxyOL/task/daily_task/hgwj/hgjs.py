@@ -23,7 +23,10 @@ def get_weekday_number():
     return weekday_num
 
 
-@register_task
+@register_task(
+    path_cn="每日任务/荒古万界/荒古巨兽",
+    description="双周领取荒古巨兽的每日任务奖励。",
+)
 def task():
     if not(get_week_number() %2 == 0 and get_weekday_number() <= 4):
         logger.info(f"今天不是双周的周一至周四，不进行荒古巨兽奖励领取挑战")

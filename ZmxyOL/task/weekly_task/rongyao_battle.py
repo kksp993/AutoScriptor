@@ -2,7 +2,10 @@ from ZmxyOL import *
 from AutoScriptor import *
 
 
-@register_task
+@register_task(
+    path_cn="每周任务/荣耀之战",
+    description="执行荣耀之战每周流程。",
+)
 def task(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):

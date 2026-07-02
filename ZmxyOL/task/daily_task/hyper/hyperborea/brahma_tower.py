@@ -51,7 +51,10 @@ def FTT_battle_one_round():
         wait_for_appear(T("入劫"))
 
 
-@register_task
+@register_task(
+    description="领取梵天塔每日 5 张度牒并扫荡梵天塔。",
+    path_cn="每日任务/极北/极北地区/梵天塔",
+)
 def fanTianTa(
     battle_times=1,
     claim_past=True,

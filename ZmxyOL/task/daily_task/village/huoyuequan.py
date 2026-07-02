@@ -9,7 +9,11 @@ def buy_item(item_name: str):
         click(B(box),offset=(0,240),delay=0.5)
         sleep(4)
 
-@register_task
+@register_task(
+    path_cn="每日任务/村庄/活跃券",
+    description="通过荣耀商店购置并使用活跃福利券。",
+    task_doc="通过荣耀商店购置活跃券。【bug】活跃券使用可能有异常，建议自行确认是否使用成功。",
+)
 def task():
     logger.info("====活跃券====")
     ensure_in(["村庄"])

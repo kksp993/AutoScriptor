@@ -14,7 +14,10 @@ def buy(item):
         sleep(4)
 
 
-@register_task
+@register_task(
+    path_cn="每周任务/冰窟商店",
+    description="处理冰窟商店每周兑换。",
+)
 def task():
     switch_base("mumu")
     ensure_in("幽冥冰窟")

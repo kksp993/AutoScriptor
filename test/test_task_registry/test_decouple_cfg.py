@@ -76,6 +76,53 @@ class TestCfgNodeShape(unittest.TestCase):
         self.assertIn("next_exec_time", node)
         self.assertIn("params", node)
 
+
+    def test_builtin_path_cn_defines_cfg_and_registry_path(self):
+        import ZmxyOL.task.task_register as task_register_mod
+
+        old_counter = task_register_mod.registration_counter
+        try:
+            def fn(level=1):
+                pass
+
+            fake_file = os.path.join(
+                os.path.dirname(__file__), "..", "..", "ZmxyOL", "task", "daily_task", "village", "no_translation_task.py"
+            )
+            with patch("inspect.getfile", return_value=fake_file):
+                task_register_mod.register_task(
+                    fn,
+                    path_cn="每日任务/村庄/无映射任务",
+                    description="无映射任务",
+                )
+
+            self.assertIn("无映射任务", cfg._config["tasks"]["每日任务"]["村庄"])
+            self.assertTrue(task_registry.has_task("每日任务/村庄/无映射任务"))
+            self.assertNotIn("no_translation_task", cfg._config["tasks"]["每日任务"]["村庄"])
+        finally:
+            task_register_mod.registration_counter = old_counter
+
+
+    def test_deprecated_register_is_not_visible_or_written_to_cfg(self):
+        import ZmxyOL.task.task_register as task_register_mod
+
+        old_counter = task_register_mod.registration_counter
+        cfg._config["tasks"] = {"每日任务": {"村庄": {"仙盟建设": {"on": True, "next_exec_time": 1}}}}
+        try:
+            def fn():
+                pass
+
+            fake_file = os.path.join(
+                os.path.dirname(__file__), "..", "..", "ZmxyOL", "task", "daily_task", "village", "alliance_build.py"
+            )
+            with patch("inspect.getfile", return_value=fake_file):
+                task_register_mod.register_task(fn, path_cn="每日任务/村庄/仙盟建设", deprecated=True, description="旧任务")
+
+            self.assertNotIn("每日任务", cfg._config["tasks"])
+            self.assertFalse(task_registry.has_task("每日任务/村庄/仙盟建设"))
+            self.assertTrue(task_registry.get_deprecated("每日任务/村庄/仙盟建设"))
+        finally:
+            task_register_mod.registration_counter = old_counter
+
     def test_registry_has_fn(self):
         fn = lambda: "work"
         self._simulate_register(["cat", "task"], fn, order=7)

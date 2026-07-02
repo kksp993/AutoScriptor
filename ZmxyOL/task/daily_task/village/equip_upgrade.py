@@ -2,7 +2,12 @@ from ZmxyOL import *
 from AutoScriptor import *
 
 
-@register_task
+@register_task(
+    path_cn="每日任务/村庄/强化装备",
+    description="打开炼器炉并按配置强化装备。",
+    task_doc="【弃用】该任务已不推荐使用，保留旧强化装备流程。",
+    deprecated=True,
+)
 def daily_qianghua_task():
     ensure_in("村庄")
     if ui_T(T("仙盟",box=Box(16,30,924,400)), 3):

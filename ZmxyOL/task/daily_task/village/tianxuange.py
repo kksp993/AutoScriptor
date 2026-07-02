@@ -14,7 +14,11 @@ def reset_task():
     return True
 
 
-@register_task
+@register_task(
+    path_cn="每日任务/村庄/天选阁",
+    description="处理天选阁每日领取或挑战。",
+    task_doc="【bug】云端模式暂不会自动操作，需要手动处理。",
+)
 def task(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):

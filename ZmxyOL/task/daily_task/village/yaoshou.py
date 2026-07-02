@@ -2,7 +2,13 @@ from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
 
-@register_task(sched_window_hours=(10, 22))
+@register_task(
+    path_cn="每日任务/村庄/妖兽",
+    description="在开放时段挑战灵域妖兽。",
+    task_doc="【注意】需要解锁法相，只在周五至周日的开放时段挑战灵域妖兽。",
+    sched_window_hours=(10, 22),
+    allowed_weekdays=[5, 6, 7],
+)
 def task(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):

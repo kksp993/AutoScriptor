@@ -5,7 +5,10 @@ from ZmxyOL.battle.tasks import get_task_table
 from time import time
 
 
-@register_task
+@register_task(
+    path_cn="每日任务/天庭/组队任务",
+    description="完成东天王殿组队流程。",
+)
 def zudui_task(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
     ensure_in("天庭",-1)
     click(ui["彩虹楼"].i)

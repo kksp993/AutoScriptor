@@ -3,7 +3,12 @@ from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
 
 
-@register_task(default_offset_hours=12)
+@register_task(
+    default_offset_hours=12,
+    description="挑战极北厄难副本。",
+    task_doc="目前只打冰狗。",
+    path_cn="每日任务/极北/极北地区/厄难副本",
+)
 def eunan_fuBen(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):

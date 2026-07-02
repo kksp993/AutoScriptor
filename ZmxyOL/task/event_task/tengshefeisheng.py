@@ -1,7 +1,11 @@
 from AutoScriptor import *
 from ZmxyOL import *
 
-@register_task
+@register_task(
+    path_cn="活动任务/腾蛇飞升",
+    description="完成腾蛇飞升活动流程。",
+    task_doc="【未完成】完成腾蛇飞升活动流程。",
+)
 def task():
     ensure_in("村庄")
     while ui_T(T("仙盟",box=Box(16,30,924,400))):

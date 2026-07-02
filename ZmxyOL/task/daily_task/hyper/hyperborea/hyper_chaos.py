@@ -5,7 +5,10 @@ from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
 
-@register_task
+@register_task(
+    description="按灵气和难度选择极北混沌并挑战。",
+    path_cn="每日任务/极北/极北地区/极北混沌",
+)
 def task(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):

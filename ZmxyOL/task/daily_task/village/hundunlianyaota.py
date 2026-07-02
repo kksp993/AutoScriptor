@@ -6,7 +6,12 @@ from ZmxyOL import register_task
 from ZmxyOL.task.time import next_Mon, next_month
 
 
-@register_task(last_buy_time=0)
+@register_task(
+    path_cn="每日任务/村庄/混沌炼狱塔",
+    description="领取混沌炼妖塔挂机奖励并按周期购买商店物品。",
+    task_doc="领取混沌炼妖塔挂机奖励，并且自动购置功绩、6级灵域。",
+    last_buy_time=0,
+)
 def hundunlianyaota():
     ensure_in("联盟")
     click(T("魔渊之界"))

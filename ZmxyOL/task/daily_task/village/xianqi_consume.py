@@ -1,7 +1,12 @@
 from ZmxyOL import *
 from AutoScriptor import *
 
-@register_task
+@register_task(
+    path_cn="每日任务/村庄/仙气消耗",
+    description="找小龙女消耗仙气。",
+    task_doc="【弃用】该任务保留旧仙气消耗流程。",
+    deprecated=True,
+)
 def task():
     ensure_in("仙盟")
     ensure_in("村庄")
