@@ -20,13 +20,15 @@ _CLICK_TARGETS = {
     "虎神之崖": T("虎神之崖", box=Box(106, 389, 94, 37).margin()),
     "苍龙幽谷": T("苍龙幽谷", box=Box(183, 598, 116, 73).margin()),
     "溟海之渊": T("溟海之渊", box=Box(557, 332, 218, 95).margin()),
+    "雀炎之地": T("雀炎之地", box=Box(713,601,134,81).margin())
 }
 
 _DEFAULT_BATTLE_CONFIG = TableParam(
     {
-        "虎神之崖": {"difficulty": YijingNandu.不打, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
-        "苍龙幽谷": {"difficulty": YijingNandu.不打, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
-        "溟海之渊": {"difficulty": YijingNandu.不打, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
+        "虎神之崖": {"difficulty": YijingNandu.灾厄, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
+        "苍龙幽谷": {"difficulty": YijingNandu.灾厄, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
+        "溟海之渊": {"difficulty": YijingNandu.灾厄, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
+        "雀炎之地": {"difficulty": YijingNandu.灾厄, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
     },
     column_labels={"difficulty": "难度", "cancel_on_failed": "不用点券复活", "battle_flow": "战斗招式"},
 )

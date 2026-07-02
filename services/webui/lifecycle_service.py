@@ -100,7 +100,7 @@ class WebUILifecycleService:
             self.cfg["ocr"] = deepcopy(data["ocr"])
             self._save_global_config()
         self._apply_log_level()
-        return self.mark_config_changed("save config")
+        return self.reload_all(reason="save config")
 
     def apply_discovered_emulator_config(self, emulator: dict[str, Any]) -> int:
         if not isinstance(emulator, dict):
@@ -113,7 +113,7 @@ class WebUILifecycleService:
         with self.task_manager.config_transaction():
             self.cfg["emulator"] = normalize_emulator_config(next_emulator)
             self._save_global_config()
-        return self.mark_config_changed("apply device discovery")
+        return self.reload_all(reason="apply device discovery")
 
     def save_tasks(self, tasks: dict[str, Any]) -> int:
         cleaned = self.task_tree_service.strip_runtime_fields(tasks)

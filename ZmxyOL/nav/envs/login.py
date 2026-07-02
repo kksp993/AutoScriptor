@@ -200,8 +200,9 @@ def _fill_account_password(ctx_or_account, password = None):
 
 def _handle_post_login_popups():
     """Dismiss popups that appear between login and character selection."""
-    click(T("同意并登录", color="青色", box=Box(160, 707, 442, 95)), if_exist=True, timeout=3)
+    click(T("登录", box=Box(23,487,674,62).margin()))
     click(T("授权并登录"), if_exist=True, timeout=3)
+    wait_for_appear(T("进入游戏", box=Box(543,586,190,62).margin()), timeout=3)
 
 
 def _select_character():
@@ -218,7 +219,7 @@ def _select_character():
     # 部分客户端，需要每次请求才给登录
     if first(get_colors(B(277,686,6,13))) != "绿色": click(B(277,686,6,13))
 
-    click(T("进入游戏", color="橙色"), timeout=10)
+    click(T("进入游戏", box=Box(543,586,190,62).margin()), timeout=10)
 
     if ui_T(T("确定"), 3):
         click(T("确定"))
@@ -240,7 +241,7 @@ def _select_character():
 _login = PageRouter()
 
 
-@_login.page("角色选择", T("进入游戏", color="橙色"))
+@_login.page("角色选择", T("进入游戏", box=Box(543,586,190,62).margin()))
 def _on_character_select(ctx):
     _select_character()
     ctx.done = True
@@ -269,11 +270,7 @@ def _on_password_login(ctx):
 def _on_quick_login(ctx):
     click(T("账号登录"), if_exist=True)
     sleep(1)
-    if ui_T(T("账号密码登录"), 5) or ui_T(T("请输入手机号或用户名"), 5):
-        _fill_account_password(ctx)
-    else:
-        logger.warning("未能切换到账号密码页，尝试快速登录")
-        click(T("登录", box=Box(23,487,674,62).margin()))
+    _fill_account_password(ctx)
     _handle_post_login_popups()
 
 # 当乐
@@ -354,11 +351,11 @@ def ensure_server(server_name:str):
 
 def ensure_character(character_name:str):
     click(B(104,16,60,26))
-    if ui_F(T(character_name, box=Box(17,54,254,433).margin())):
+    for _ in range(2):
+        if ui_T(T(character_name, box=Box(17,54,254,433).margin())):
+            return click(T(character_name, box=Box(17,54,254,433).margin()))
         click(B(104,516,63,26))
-    if ui_F(T(character_name, box=Box(17,54,254,433).margin())):
-        raise Exception(f"角色{character_name}不存在,请检查账户服务器是否正确")
-    click(T(character_name, box=Box(17,54,254,433).margin()))
+    raise Exception(f"角色{character_name}不存在,请检查账户服务器是否正确")
 
 
 

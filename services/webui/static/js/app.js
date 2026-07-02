@@ -827,10 +827,6 @@ const app = createApp({
       }
     }
 
-    async function refreshAfterDeviceDiscovery() {
-      await refreshConfig(true);
-      await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
-    }
 
     function clearLogs() {
       logs.value.length = 0;
@@ -1187,7 +1183,7 @@ const app = createApp({
       startRun, runSingleTask, verifyAccount, resetScheduler,
       openEditModal, enumParamIsMultiple, saveTask, addListItem, removeListItem,
       isTableParam, getTableRows, getTableColumns, getTableColumnLabel, getTableEnumOptions, tableRowsCache,
-      saveTasks, saveSettings, refreshAfterDeviceDiscovery, clearLogs, reloadTasks,
+      saveTasks, saveSettings, clearLogs, reloadTasks,
       submitAddAccount,
       isElectron, minimizeToTray, navigateTo,
       pendingEditorImportUrl, goToEditorWithImage, onEditorImported,

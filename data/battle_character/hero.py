@@ -522,7 +522,7 @@ class Hero:
                 check_cancel_raise()
                 if time() - step3_start > timeout:
                     raise RuntimeError(f"离开关卡 超时: {timeout}秒, 条件 {repr(until)} 未满足")
-                self.move_left(100, directly=True)
+                self.move_left(100, directly=True);sleep(0.1)
                 core_api.mixctrl.release_all_keys()
                 if not wait_for_signal(exit_mark_signal, True, search_wait):
                     logger.debug("离开关卡 3.3: 未见出口标记，继续左走")
@@ -541,7 +541,7 @@ class Hero:
                 if time() - step3_start > timeout:
                     raise RuntimeError(f"离开关卡 超时: {timeout}秒, 条件 {repr(until)} 未满足")
 
-                self.move_right(20, directly=True)
+                self.move_right(20, directly=True);sleep(0.1)
                 core_api.mixctrl.release_all_keys()
                 if not ui_T(T(key="战斗-离开标记")):
                     logger.debug("离开关卡 3.4: 未见出口标记，继续右走")

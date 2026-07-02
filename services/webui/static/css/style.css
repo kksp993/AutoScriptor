@@ -477,7 +477,6 @@ html.light .app-body {
   line-height: 1.5;
   resize: none !important;
 }
-
 /* 录制区按钮面板 */
 .editor-recorder-actions {
   min-height: 0;
@@ -490,6 +489,98 @@ html.light .app-body {
 .editor-recorder-actions .el-button {
   width: 100%;
   min-width: 0 !important;
+}
+.editor-menu-wrap {
+  position: relative;
+  width: 100%;
+}
+.editor-menu-trigger,
+.editor-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.25;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+}
+.editor-menu-trigger {
+  min-height: 28px;
+  padding: 5px 9px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  background: #ffffff;
+}
+.editor-menu-trigger:hover,
+.editor-menu-item:hover {
+  background: #f0fdf4;
+  color: #15803d;
+}
+.editor-menu-panel {
+  position: absolute;
+  z-index: 30;
+  min-width: 148px;
+  padding: 5px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+}
+.editor-menu-panel--left {
+  top: 0;
+  right: calc(100% + 6px);
+}
+.editor-menu-panel--up {
+  right: 0;
+  bottom: calc(100% + 6px);
+}
+.editor-menu-group + .editor-menu-group {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid #f1f5f9;
+}
+.editor-menu-group-title {
+  padding: 4px 8px 3px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 700;
+}
+.editor-menu-item {
+  min-height: 27px;
+  padding: 5px 8px;
+  border-radius: 6px;
+}
+.editor-menu-item i:first-child {
+  width: 14px;
+  color: #64748b;
+  text-align: center;
+}
+.editor-menu-item.is-disabled,
+.editor-menu-item:disabled {
+  color: #cbd5e1;
+  cursor: not-allowed;
+}
+.editor-menu-item.is-disabled i,
+.editor-menu-item:disabled i {
+  color: #cbd5e1;
+}
+.editor-menu-subwrap {
+  position: relative;
+}
+.editor-menu-subpanel {
+  top: 0;
+  left: calc(100% + 6px);
+}
+.editor-recorder-quick-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
 }
 
 .editor-custom-exec-input .el-textarea__inner {

@@ -230,7 +230,7 @@ def _write_error_log(
         if exc.__traceback__ is not None:
             tb = traceback.TracebackException.from_exception(
                 exc,
-                capture_locals=True,
+                capture_locals=False,
                 lookup_lines=True,
             )
             handle.write("".join(tb.format()))

@@ -25,7 +25,7 @@ def task():
             swipe(B(868,327), B(418,327), duration_s=1)
             click(T("取消选择", box=Box(459,557,168,69).margin()))
             click(T("键选择", box=Box(464,565,152,56).margin()));sleep(1)
-            count=extract_info(B(687,530,164,44), post_process=lambda s: int(s.strip().replace("：",":").split(":")[1]), ensure_not_empty=True)
+            count=extract_info(B(684,518,222,51), post_process=lambda s: int(s.strip().replace("：",":").split(":")[1]), ensure_not_empty=True)
         logger.info(count)
         if count==0 :
             click(B(933,51,61,58));continue

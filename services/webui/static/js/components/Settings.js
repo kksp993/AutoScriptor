@@ -18,15 +18,13 @@ const SettingsPanel = {
     filteredConfig: { type: Object, required: true },
     executionBusy: { type: Boolean, default: false },
   },
-  emits: ['settings-change', 'discovery-applied'],
+  emits: ['settings-change'],
   data() {
     return {
       MUMU_ADB_BASE_PORT: 16384,
       MUMU_ADB_PORT_STEP: 32,
       serverPackages: SETTINGS_SERVER_PACKAGES,
       postExecutionOptions: SETTINGS_POST_EXECUTION_OPTIONS,
-      saveTimer: null,
-      hydrated: false,
       saving: false,
       savedAt: 0,
       discovering: false,
@@ -69,19 +67,6 @@ const SettingsPanel = {
         this.ensureDefaultAdbAddr();
       },
     },
-    filteredConfig: {
-      deep: true,
-      handler() {
-        if (!this.hydrated) {
-          this.hydrated = true;
-          return;
-        }
-        this.queueSave();
-      },
-    },
-  },
-  beforeUnmount() {
-    if (this.saveTimer) clearTimeout(this.saveTimer);
   },
   methods: {
     defaultAdbAddrForIndex(index) {
@@ -145,22 +130,18 @@ const SettingsPanel = {
         this.discoveryMessage = discovery.adb_device && discovery.adb_device.connected
           ? `已定位 MuMu，并连接 ${discovery.adb_device.serial}`
           : '已定位 MuMu 路径，启动模拟器后可刷新诊断';
+        this.savedAt = Date.now();
         ElementPlus.ElMessage.success(this.discoveryMessage);
-        this.$emit('discovery-applied');
       } catch (e) {
         ElementPlus.ElMessage.error('自动定位失败: ' + e);
       } finally {
         this.discovering = false;
       }
     },
-    queueSave() {
-      if (this.executionBusy) return;
-      if (this.saveTimer) clearTimeout(this.saveTimer);
-      this.saveTimer = setTimeout(() => {
-        this.saveTimer = null;
-        this.saving = true;
-        this.$emit('settings-change', { silent: true, done: this.onSaved });
-      }, 500);
+    saveSettings() {
+      if (this.executionBusy || this.saving) return;
+      this.saving = true;
+      this.$emit('settings-change', { done: this.onSaved });
     },
     onSaved(ok) {
       this.saving = false;

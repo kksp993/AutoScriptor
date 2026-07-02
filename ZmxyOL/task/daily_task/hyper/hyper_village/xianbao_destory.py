@@ -41,16 +41,18 @@ def make_more_for_destory(nums: int=1):
 @register_task
 def lianqishi_destory():
     ensure_in("炼器师")
-    remains = extract_info(B(1000,430,130,42), lambda x: int(x.split("/")[1][:-1])-int(x.split("/")[0]))
-    remains = 0 if not isinstance(remains, int) else remains
+    res = extract_info(B(1000,430,130,42), lambda x: x)
+    cur, limit = int(res.split("/")[0]), int(res.split("/")[1][:-1])
     click(I('炼器炉'))
     wait_for_appear(T("选择仙器法宝"))
-    while remains > 0:
+    while cur < limit:
         if ui_T((I("A"), I("B")),2):
             destory_item()
-            remains -= 1
+            cur += 1
         else:
-            make_more_for_destory(remains*2)
+            try:
+                make_more_for_destory((limit-cur)*2)
+            except RequestHumanTakeover:
+                raise RequestHumanTakeover(f"材料不足，无法炼化({cur}/{limit})")
     click(B(890,50,30,30))
-
 

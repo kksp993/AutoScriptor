@@ -14,12 +14,12 @@ def task(redeem_code: str | list[str] = "1111"):
     ensure_in("村庄")
     click(T("活动", box=Box(690,65,135,49).margin()), timeout=3)
     sleep(1)
-    while ui_F(T("兑换豪礼", box=Box(600, 110, 260, 120).margin()), 1):
+    while ui_F(T("兑换豪礼", box=Box(220,109,814,103).margin()), 1):
         swipe(B(1030, 160, 1, 1), B(260, 160, 1, 1), duration_s=1)
         sleep(0.5)
     result = "未识别"
     for code in redeem_codes:
-        click(T("兑换豪礼", box=Box(600, 110, 260, 120).margin()))
+        click(T("兑换豪礼", box=Box(220,109,814,103).margin()), offset=(0,-30))
         click(T("礼品兑换", box=Box(174,240,262,438).margin()), timeout=3)
         swipe(B(780, 625, 1, 1), B(780, 500, 1, 1), duration_s=1)
         click(B(500, 575, 350, 55))
