@@ -12,8 +12,13 @@
   <link href="/vendor/font-awesome.min.css" rel="stylesheet" />
   <script src="/vendor/vue.global.prod.js"></script>
   <link rel="stylesheet" href="/vendor/element-plus.css" />
+  <link rel="stylesheet" href="/vendor/codemirror/codemirror.css" />
   <script src="/vendor/element-plus.full.js"></script>
   <script src="/vendor/ansi_up.min.js"></script>
+  <script src="/vendor/codemirror/codemirror.js"></script>
+  <script src="/vendor/codemirror/mode/python/python.js"></script>
+  <script src="/vendor/codemirror/addon/edit/matchbrackets.js"></script>
+  <script src="/vendor/codemirror/addon/edit/closebrackets.js"></script>
   <script>
     (function(){
       if (typeof window.AnsiUp === 'undefined') {
@@ -192,8 +197,7 @@
         <settings-panel v-if="activeTab==='settings'"
           :filtered-config="filteredConfig"
           :execution-busy="executionBusy"
-          @settings-change="saveSettings"
-          @discovery-applied="refreshAfterDeviceDiscovery"></settings-panel>
+          @settings-change="saveSettings"></settings-panel>
 
         <about-panel v-if="activeTab==='about'"></about-panel>
 
@@ -455,7 +459,8 @@
   <script src="/static/js/components/UpdatePanel.js?v=1"></script>
   <script src="/static/js/components/editor/EditorCanvas.js?v=10"></script>
   <script src="/static/js/components/editor/EditorControls.js?v=14"></script>
-  <script src="/static/js/components/editor/EditorPanel.js?v=30"></script>
+  <script src="/static/js/components/editor/PythonCodeEditor.js?v=2"></script>
+  <script src="/static/js/components/editor/EditorPanel.js?v=31"></script>
   <script src="/static/js/components/DiagnosticsPanel.js?v=2"></script>
   <script src="/static/js/components/ErrorArchivesPanel.js?v=4"></script>
   <script src="/static/js/task_help_docs.js?v=1"></script>

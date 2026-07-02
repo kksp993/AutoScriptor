@@ -137,9 +137,6 @@ def kunlunshan_battle(num: int = 5, flow_name: str | None = None, equipment: str
                 scope.add(
                     name="战斗结束",
                     identifier=(T("站在这里"),
-                        # 会误判，但是目前这样可能玉虚殿会出问题
-                        # B(803,546,46,19, color="白色"),
-                        # B(1022,535,7,27, color="白色")
                     ),
                     callback=lambda: [
                         h.set(has_cd=False, speed_x=1 if ui_T((B(803,546,46,19, color="白色"),B(1022,535,7,27, color="白色")),2) else 3),

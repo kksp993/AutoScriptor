@@ -22,7 +22,7 @@ from AutoScriptor.utils.cancel import TaskCancelled
 from AutoScriptor.utils.logger import logger
 
 from services.core.runtime_context import runtime_ctx
-from services.core.notify import notify_from_config
+from services.core.notify import notify_runtime_event
 
 
 class SchedulerState(Enum):
@@ -269,7 +269,7 @@ class Scheduler:
     def mark_error(self):
         logger.error("📅 连续失败 %d 次，进入 ERROR 状态", self._consecutive_errors)
         self._transition(SchedulerState.ERROR)
-        notify_from_config(
+        notify_runtime_event(
             title="AutoScriptor 调度器错误",
             content=f"连续失败 {self._consecutive_errors} 次，调度器已暂停"
         )
@@ -897,11 +897,11 @@ class Scheduler:
 
         if total_success > 0 or total_failed > 0:
             logger.info("📅 执行完成: 成功 %d, 失败 %d", total_success, total_failed)
-            if total_failed > 0:
-                notify_from_config(
-                    title="AutoScriptor 任务失败",
-                    content=f"执行完成: 成功 {total_success}, 失败 {total_failed}"
-                )
+            title = "AutoScriptor 任务失败" if total_failed > 0 else "AutoScriptor 任务完成"
+            notify_runtime_event(
+                title=title,
+                content=f"执行完成: 成功 {total_success}, 失败 {total_failed}"
+            )
             if only_debug_tasks_executed:
                 logger.info("📅 debug_mode: 跳过 post_execution 收尾动作")
             else:

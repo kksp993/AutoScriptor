@@ -141,7 +141,7 @@ else:
   │    ├─ 普通失败且仍有 retry：放入下一轮 retry 队列
   │    └─ retry 耗尽：计入失败，调度周期内跳过该任务
   ├─ 每个任务后保存配置并标记任务投影更新；若存在 _reload_deferred，则应用完整延迟重载
-  └─ 有真实执行结果时先回到首个调度角色，再执行 post_execution 收尾
+  └─ 有真实执行结果时发送 Windows 桌面/配置通知，再回到首个调度角色并执行 post_execution 收尾
 ```
 
 调度器不会在同一轮里反复撞同一个失败任务。失败任务会等本轮其他任务结束后进入下一 retry 轮；达到 `max_retry` 后，在本次调度激活周期内跳过，直到重新启动调度或 reset 清理 retry exhaustion。
@@ -192,7 +192,7 @@ clear_task_status("progress")
 - `RequestHumanTakeover` 或进度未完成后被标记为人工接管冷却。
 - 用户手动停止导致的 cooperative cancel。
 
-连续错误达到 3 后进入 `error`，调度暂停。必须先调用 `reset()` 或通过 WebUI “恢复调度”按钮恢复；单纯调用 `activate()` 不会从 `error` 自动恢复。
+连续错误达到 3 后进入 `error`，调度暂停，并同步发送 Windows 桌面/配置通知。必须先调用 `reset()` 或通过 WebUI “恢复调度”按钮恢复；单纯调用 `activate()` 不会从 `error` 自动恢复。
 
 ## 人工接管与进度
 
@@ -243,7 +243,7 @@ clear_task_status("progress")
 | `close_mumu` | 关闭游戏并关闭模拟器 |
 | `goto_main` | 尝试回到主界面 |
 
-收尾只在本次 pipeline 有真实成功或失败统计时触发一次。若本轮只执行 debug 任务，则跳过 `post_execution`，方便保留现场调试。
+收尾和任务完成通知只在本次 pipeline 有真实成功或失败统计时触发一次；失败标题为“任务失败”，全成功标题为“任务完成”。若本轮只执行 debug 任务，则跳过 `post_execution`，方便保留现场调试。
 
 ## 维护检查清单
 

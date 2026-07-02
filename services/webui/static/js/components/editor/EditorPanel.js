@@ -11,7 +11,7 @@ const EDITOR_DRAFT_CACHE = {
 
 const EditorPanel = {
   name: 'EditorPanel',
-  components: { EditorCanvas, EditorControls },
+  components: { EditorCanvas, EditorControls, PythonCodeEditor },
   props: {
     /** 由错误汇总等页设置：切换到编辑器后从此 URL 拉取图片并走 /ingest-image */
     pendingImportUrl: { type: String, default: '' },
@@ -213,114 +213,54 @@ const EditorPanel = {
       </div>
       <div class="flex shrink-0 editor-recorder-actions"
            :class="isLandscape ? 'flex-col gap-2 justify-start' : 'flex-row flex-wrap gap-2 justify-end items-center'"
-           :style="isLandscape ? 'width:120px' : ''">
-        <el-tooltip placement="left" :show-after="0">
-          <template #content>
-            <div class="max-w-[260px] text-xs leading-relaxed text-left">将录制区<strong>全部代码</strong>复制到剪贴板，便于粘贴到任务脚本。</div>
-          </template>
-          <span class="inline-flex"><el-button size="small" @click="copyRecordedCode" :disabled="!recordedCode.trim()">
-            <i class="fa fa-copy mr-1"></i>复制代码
-          </el-button></span>
-        </el-tooltip>
-        <el-tooltip placement="left" :show-after="0">
-          <template #content>
-            <div class="max-w-[260px] text-xs leading-relaxed text-left">将录制区与自定义执行区内容发送给后端，保存到 data/custom_task 下作为自定义脚本。</div>
-          </template>
-          <span class="inline-flex"><el-button size="small" type="primary" plain
-            @click="saveCustomScript"
-            :loading="saveScriptLoading"
-            :disabled="saveScriptDisabled">
-            <i class="fa fa-save mr-1"></i>保存脚本
-          </el-button></span>
-        </el-tooltip>
-        <el-tooltip placement="left" :show-after="0">
-          <template #content>
-            <div class="max-w-[260px] text-xs leading-relaxed text-left">清空录制区文本，不影响画布与左侧选区。</div>
-          </template>
-          <span class="inline-flex"><el-button size="small" type="danger" plain @click="recordedCode=''" :disabled="!recordedCode.trim()">
-            <i class="fa fa-trash-o mr-1"></i>清空
-          </el-button></span>
-        </el-tooltip>
-        <el-tooltip placement="left" :show-after="0">
-          <template #content>
-            <div class="max-w-[260px] text-xs leading-relaxed text-left space-y-1">
-              <p>在当前画面上查找左侧名称对应的 <strong>T / I 目标</strong>，返回 <strong>Box</strong> 或 None（不阻塞等待出现，可与超时配合）。</p>
-              <p class="font-mono text-[11px] opacity-90">locate(目标)</p>
+           :style="isLandscape ? 'width:128px' : ''">
+        <div class="editor-menu-wrap" ref="recorderMenuRef">
+          <button type="button" class="editor-menu-trigger" @click="toggleRecorderMenu">
+            <i class="fa fa-bars mr-1"></i>操作菜单
+            <i class="fa fa-angle-down ml-auto"></i>
+          </button>
+          <div v-if="recorderMenuOpen" class="editor-menu-panel" :class="isLandscape ? 'editor-menu-panel--left' : 'editor-menu-panel--up'">
+            <div v-for="group in recorderMenuGroups" :key="group.label" class="editor-menu-group">
+              <div class="editor-menu-group-title">{{ group.label }}</div>
+              <template v-for="item in group.items" :key="item.key">
+                <div v-if="item.children" class="editor-menu-subwrap">
+                  <button type="button" class="editor-menu-item" @click="toggleRecorderSubmenu(item.key)">
+                    <i :class="item.icon"></i><span>{{ item.label }}</span><i class="fa fa-angle-right ml-auto"></i>
+                  </button>
+                  <div v-if="recorderSubmenuOpen === item.key" class="editor-menu-panel editor-menu-subpanel">
+                    <button v-for="child in item.children" :key="child.key" type="button"
+                            class="editor-menu-item" :class="{ 'is-disabled': child.disabled && child.disabled() }"
+                            :disabled="child.disabled && child.disabled()" @click="runRecorderMenuAction(child)">
+                      <i :class="child.icon"></i><span>{{ child.label }}</span>
+                    </button>
+                  </div>
+                </div>
+                <button v-else type="button" class="editor-menu-item" :class="{ 'is-disabled': item.disabled && item.disabled() }"
+                        :disabled="item.disabled && item.disabled()" @click="runRecorderMenuAction(item)">
+                  <i :class="item.icon"></i><span>{{ item.label }}</span>
+                </button>
+              </template>
             </div>
-          </template>
-          <span class="inline-flex"><el-button size="small" plain @click="appendLocate" :disabled="!optimizedSel">
-            定位
-          </el-button></span>
-        </el-tooltip>
-        <el-tooltip placement="left" :show-after="0">
-          <template #content>
-            <div class="max-w-[260px] text-xs leading-relaxed text-left space-y-1">
-              <p>插入存在判断代码片段；有当前框选时复用点击生成的 T / I / B 目标，否则光标停在括号内。</p>
-              <p class="font-mono text-[11px] opacity-90">if ui_T(目标):</p>
-            </div>
-          </template>
-          <span class="inline-flex"><el-button size="small" plain @click="appendUiExists">
-            判断存在
-          </el-button></span>
-        </el-tooltip>
-        <el-tooltip placement="left" :show-after="0">
-          <template #content>
-            <div class="max-w-[260px] text-xs leading-relaxed text-left space-y-1">
-              <p>阻塞直到左侧名称对应的 <strong>T / I 目标</strong>在画面上出现（依赖当前选区与名称）。</p>
-              <p class="font-mono text-[11px] opacity-90">wait_for_appear(目标)</p>
-            </div>
-          </template>
-          <span class="inline-flex"><el-button size="small" plain @click="appendWaitAppear" :disabled="!optimizedSel">
-            等待出现
-          </el-button></span>
-        </el-tooltip>
-        <el-tooltip placement="left" :show-after="0">
-          <template #content>
-            <div class="max-w-[260px] text-xs leading-relaxed text-left space-y-1">
-              <p>阻塞直到该目标从画面上消失。</p>
-              <p class="font-mono text-[11px] opacity-90">wait_for_disappear(目标)</p>
-            </div>
-          </template>
-          <span class="inline-flex"><el-button size="small" plain @click="appendWaitDisappear" :disabled="!optimizedSel">
-            等待消失
-          </el-button></span>
-        </el-tooltip>
-        <el-tooltip placement="left" :show-after="0">
-          <template #content>
-            <div class="max-w-[288px] text-xs leading-relaxed text-left space-y-2">
-              <p class="font-mono text-[11px] opacity-90 leading-snug">extract_info(B(…), post_process=…, ensure_not_empty=…)</p>
-              <ul class="list-disc pl-4 space-y-1.5 text-[11px]">
-                <li><strong>post_process</strong>：对识别出的<strong>字符串</strong>使用Python语法再加工；<code class="bg-slate-700 px-0.5 rounded">strip</code> </li>
-                <li><strong>ensure_not_empty</strong>：为真时若结果是空串/发生错误会重试截图识别，直到有字或达到重试上限。</li>
-              </ul>
-            </div>
-          </template>
-          <span class="inline-flex"><el-button size="small" plain @click="appendExtractInfo" :disabled="!optimizedSel" :loading="extractPreviewLoading">
-            提取信息
-          </el-button></span>
-        </el-tooltip>
-        <el-tooltip placement="left" :show-after="0">
-          <template #content>
-            <div class="max-w-[300px] text-xs leading-relaxed text-left space-y-1">
-              <p>生成数字角标/库存格子的批量提取模板。</p>
-              <p class="font-mono text-[11px] opacity-90 leading-snug">extract_info(make_box_grid(...), digital=True)</p>
-            </div>
-          </template>
-          <span class="inline-flex"><el-button size="small" plain @click="appendExtractGridInfo" :disabled="!optimizedSel">
-            数字网格
-          </el-button></span>
-        </el-tooltip>
-        <el-tooltip placement="left" :show-after="0">
-          <template #content>
-            <div class="max-w-[260px] text-xs leading-relaxed text-left space-y-1">
-              <p>暂停脚本执行约 1 秒</p>
-              <p class="font-mono text-[11px] opacity-90">sleep(1)</p>
-            </div>
-          </template>
-          <span class="inline-flex"><el-button size="small" plain @click="appendSleepWait">
-            阻塞等待
-          </el-button></span>
-        </el-tooltip>
+          </div>
+        </div>
+        <div class="editor-recorder-quick-actions">
+          <el-tooltip placement="left" :show-after="0">
+            <template #content>
+              <div class="max-w-[260px] text-xs leading-relaxed text-left">将录制区<strong>全部代码</strong>复制到剪贴板，便于粘贴到任务脚本。</div>
+            </template>
+            <span class="inline-flex"><el-button size="small" @click="copyRecordedCode" :disabled="!recordedCode.trim()">
+              <i class="fa fa-copy mr-1"></i>复制
+            </el-button></span>
+          </el-tooltip>
+          <el-tooltip placement="left" :show-after="0">
+            <template #content>
+              <div class="max-w-[260px] text-xs leading-relaxed text-left">清空录制区文本，不影响画布与左侧选区。</div>
+            </template>
+            <span class="inline-flex"><el-button size="small" type="danger" plain @click="recordedCode=''" :disabled="!recordedCode.trim()">
+              <i class="fa fa-trash-o mr-1"></i>清空
+            </el-button></span>
+          </el-tooltip>
+        </div>
       </div>
     </div>
 
@@ -383,7 +323,7 @@ const EditorPanel = {
 </div>`,
 
   setup(props, { emit }) {
-    const { ref, computed, watch } = Vue;
+    const { ref, computed, watch, onMounted, onBeforeUnmount } = Vue;
 
     // ── state ──
     const imageSrc = ref('');
@@ -441,6 +381,9 @@ const EditorPanel = {
       { label: 'Enum(单选)', value: 'enum' },
       { label: 'Enum(多选)', value: 'enum_multi' },
     ];
+    const recorderMenuRef = ref(null);
+    const recorderMenuOpen = ref(false);
+    const recorderSubmenuOpen = ref('');
 
     // ── recorded code ──
     const recordedCodeInput = ref(null);
@@ -583,8 +526,14 @@ const EditorPanel = {
 
     function appendCode(line) {
       if (!line) return;
-      const cur = recordedCode.value;
-      recordedCode.value = cur ? cur + '\n' + line : line;
+      const cur = recordedCode.value || '';
+      const prefix = cur && !cur.endsWith('\n') ? '\n' : '';
+      recordedCode.value = cur + prefix + line + '\n';
+    }
+
+    function appendInlineCode(snippet) {
+      if (!snippet) return;
+      recordedCode.value = (recordedCode.value || '') + snippet;
     }
 
     function recordedTextareaElement() {
@@ -593,20 +542,27 @@ const EditorPanel = {
       return input.textarea || (input.$el ? input.$el.querySelector('textarea') : null);
     }
 
+    function focusRecordedCodeAt(pos) {
+      const input = recordedCodeInput.value;
+      Vue.nextTick(() => {
+        if (input && typeof input.setSelection === 'function') {
+          input.setSelection(pos, pos);
+          return;
+        }
+        const ta = recordedTextareaElement();
+        if (!ta) return;
+        ta.focus();
+        ta.setSelectionRange(pos, pos);
+      });
+    }
+
     function appendRecordedSnippet(line, cursorOffset = null) {
       if (!line) return;
       const cur = recordedCode.value || '';
       const prefix = cur && !cur.endsWith('\n') ? '\n' : '';
       const insertStart = cur.length + prefix.length;
-      recordedCode.value = cur + prefix + line;
-      if (cursorOffset == null) return;
-      Vue.nextTick(() => {
-        const ta = recordedTextareaElement();
-        if (!ta) return;
-        const pos = insertStart + cursorOffset;
-        ta.focus();
-        ta.setSelectionRange(pos, pos);
-      });
+      recordedCode.value = cur + prefix + line + '\n';
+      if (cursorOffset != null) focusRecordedCodeAt(insertStart + cursorOffset);
     }
 
     function clearSelection() {
@@ -642,9 +598,16 @@ const EditorPanel = {
 
     function appendUiExists() {
       const tgt = buildTarget();
-      const line = tgt ? `if ui_T(${tgt}):` : 'if ui_T():';
+      const line = tgt ? `ui_T(${tgt})` : 'ui_T()';
       appendRecordedSnippet(line, tgt ? null : line.indexOf('(') + 1);
       ElementPlus.ElMessage.success('已添加「判断存在」');
+    }
+
+    function appendUiNotExists() {
+      const tgt = buildTarget();
+      const line = tgt ? `ui_F(${tgt})` : 'ui_F()';
+      appendRecordedSnippet(line, tgt ? null : line.indexOf('(') + 1);
+      ElementPlus.ElMessage.success('已添加「判断不在」');
     }
 
     function appendWaitAppear() {
@@ -661,10 +624,52 @@ const EditorPanel = {
       ElementPlus.ElMessage.success('已添加「等待消失」');
     }
 
-    /** 阻塞等待：与脚本层 sleep(1) 一致（秒） */
+    /** sleep 菜单项按用户要求追加到当前行尾，不自动换行。 */
     function appendSleepWait() {
-      appendCode('sleep(1)');
-      ElementPlus.ElMessage.success('已添加「阻塞等待」sleep(1)');
+      appendInlineCode(';sleep(1)');
+      ElementPlus.ElMessage.success('已添加「sleep」;sleep(1)');
+    }
+
+    function appendClickAction() {
+      const s = optimizedSel.value;
+      if (!s) { ElementPlus.ElMessage.warning('请先框选区域'); return; }
+      const cx = Math.floor((s.left + s.right) / 2);
+      const cy = Math.floor((s.top + s.bottom) / 2);
+      appendCode(buildClickCodeAt(cx, cy));
+      ElementPlus.ElMessage.success('已添加「点击」');
+    }
+
+    function appendSwipeAction() {
+      const s = optimizedSel.value;
+      if (!s) { ElementPlus.ElMessage.warning('请先框选区域'); return; }
+      const cx = Math.floor((s.left + s.right) / 2);
+      const cy = Math.floor((s.top + s.bottom) / 2);
+      const dirMap = {
+        up:    { x1: cx, y1: s.bottom, x2: cx, y2: s.top },
+        down:  { x1: cx, y1: s.top,    x2: cx, y2: s.bottom },
+        left:  { x1: s.right, y1: cy,  x2: s.left, y2: cy },
+        right: { x1: s.left,  y1: cy,  x2: s.right, y2: cy },
+      };
+      const pts = dirMap[swipeDir.value];
+      appendCode(`swipe(B(${pts.x1},${pts.y1}), B(${pts.x2},${pts.y2}), duration_s=1)`);
+      ElementPlus.ElMessage.success('已添加「滑动」');
+    }
+
+    function appendLongClickAction() {
+      const tgt = buildTarget();
+      if (!tgt) { ElementPlus.ElMessage.warning('请先框选区域'); return; }
+      appendCode(`click(${tgt}, long_click_duration_s=1)`);
+      ElementPlus.ElMessage.success('已添加「长按」');
+    }
+
+    function appendInputTextAction() {
+      appendRecordedSnippet("input_text('')", "input_text('".length);
+      ElementPlus.ElMessage.success('已添加「输入」');
+    }
+
+    function appendLogAction() {
+      appendRecordedSnippet("logger.info('')", "logger.info('".length);
+      ElementPlus.ElMessage.success('已添加「打印日志」');
     }
 
     /** extract_info 需 BoxTarget，代码使用当前选区 B（与 T/I 区域一致）；并请求预览结果 */
@@ -712,6 +717,63 @@ const EditorPanel = {
       appendCode(line);
       ElementPlus.ElMessage.success('已添加「数字网格」模板');
     }
+
+    const recorderMenuGroups = [
+      { label: '文件', items: [
+        { key: 'save', label: '保存脚本', icon: 'fa fa-save', action: saveCustomScript, disabled: () => saveScriptDisabled.value },
+        { key: 'load', label: '加载脚本', icon: 'fa fa-folder-open-o', action: () => ElementPlus.ElMessage.info('加载脚本暂未实现') },
+        { key: 'save-as', label: '另存为', icon: 'fa fa-files-o', action: () => ElementPlus.ElMessage.info('另存为暂未实现') },
+      ] },
+      { label: '操作', items: [
+        { key: 'click', label: '点击', icon: 'fa fa-mouse-pointer', action: appendClickAction, disabled: () => !optimizedSel.value },
+        { key: 'swipe', label: '滑动', icon: 'fa fa-hand-pointer-o', action: appendSwipeAction, disabled: () => !optimizedSel.value },
+        { key: 'long-click', label: '长按', icon: 'fa fa-hand-rock-o', action: appendLongClickAction, disabled: () => !optimizedSel.value },
+        { key: 'input', label: '输入', icon: 'fa fa-keyboard-o', action: appendInputTextAction },
+        { key: 'wait', label: '等待', icon: 'fa fa-clock-o', children: [
+          { key: 'sleep', label: 'sleep', icon: 'fa fa-hourglass-half', action: appendSleepWait },
+          { key: 'wait-appear', label: 'waitforappear', icon: 'fa fa-eye', action: appendWaitAppear, disabled: () => !optimizedSel.value },
+          { key: 'wait-disappear', label: 'waitfordisappear', icon: 'fa fa-eye-slash', action: appendWaitDisappear, disabled: () => !optimizedSel.value },
+        ] },
+        { key: 'extract', label: '提取', icon: 'fa fa-scissors', action: appendExtractInfo, disabled: () => !optimizedSel.value || extractPreviewLoading.value },
+      ] },
+      { label: '定位', items: [
+        { key: 'locate', label: '定位坐标', icon: 'fa fa-crosshairs', action: appendLocate, disabled: () => !optimizedSel.value },
+        { key: 'ui-t', label: '判断存在', icon: 'fa fa-check-circle-o', action: appendUiExists },
+        { key: 'ui-f', label: '判断不在', icon: 'fa fa-times-circle-o', action: appendUiNotExists },
+      ] },
+      { label: '工具', items: [
+        { key: 'grid', label: '数字网格', icon: 'fa fa-th', action: appendExtractGridInfo, disabled: () => !optimizedSel.value },
+        { key: 'log', label: '打印日志（log）', icon: 'fa fa-commenting-o', action: appendLogAction },
+      ] },
+    ];
+
+    function closeRecorderMenu() {
+      recorderMenuOpen.value = false;
+      recorderSubmenuOpen.value = '';
+    }
+
+    function toggleRecorderMenu() {
+      recorderMenuOpen.value = !recorderMenuOpen.value;
+      recorderSubmenuOpen.value = '';
+    }
+
+    function toggleRecorderSubmenu(key) {
+      recorderSubmenuOpen.value = recorderSubmenuOpen.value === key ? '' : key;
+    }
+
+    async function runRecorderMenuAction(item) {
+      if (item.disabled && item.disabled()) return;
+      closeRecorderMenu();
+      await item.action();
+    }
+
+    function onRecorderDocumentClick(e) {
+      const el = recorderMenuRef.value;
+      if (el && !el.contains(e.target)) closeRecorderMenu();
+    }
+
+    onMounted(() => document.addEventListener('click', onRecorderDocumentClick));
+    onBeforeUnmount(() => document.removeEventListener('click', onRecorderDocumentClick));
 
     // ── actions ──
     /** 与 GET /screenshot、POST /ingest-image 返回结构一致时更新画布与校验状态 */
@@ -1381,6 +1443,7 @@ const EditorPanel = {
       saveScriptParamIsEnum, addSaveScriptParam, removeSaveScriptParam, submitSaveCustomScript,
       virtualRemoteOnly, virtualClickMarkers, virtualSwipeLines,
       recordedCodeInput, recordedCode, recordedLines, isLandscape, canvasCellStyle,
+      recorderMenuRef, recorderMenuOpen, recorderSubmenuOpen, recorderMenuGroups,
       canvasDropActive, clearVirtualOverlays,
       refreshScreenshot,
       onCanvasDragOver, onCanvasDragLeave, onCanvasDrop,
@@ -1388,7 +1451,8 @@ const EditorPanel = {
       saveSelection, onCopy, remoteClick, remoteSwipe,
       onCanvasRemoteClick, onCanvasRemoteSwipe,
       copyRecordedCode, saveCustomScript, stopCustomCodeExecution, onRecordedCodeKeydown, onCustomExecKeydown, executeCustomCode,
-      appendLocate, appendUiExists, appendWaitAppear, appendWaitDisappear, appendSleepWait, appendExtractInfo, appendExtractGridInfo,
+      closeRecorderMenu, toggleRecorderMenu, toggleRecorderSubmenu, runRecorderMenuAction,
+      appendLocate, appendUiExists, appendUiNotExists, appendWaitAppear, appendWaitDisappear, appendSleepWait, appendExtractInfo, appendExtractGridInfo,
     };
   },
 };
