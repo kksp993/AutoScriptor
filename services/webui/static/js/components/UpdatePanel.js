@@ -79,7 +79,7 @@ const UpdatePanel = {
     async readJson(res) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.error || data.last_error || `HTTP ${res.status}`);
+        throw new Error(data.message || data.error || data.last_error || `HTTP ${res.status}`);
       }
       return data;
     },

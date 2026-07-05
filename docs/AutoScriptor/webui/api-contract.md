@@ -26,6 +26,7 @@ WebUI 后端是 FastAPI；静态前端位于 `services/webui/static/`，源码 E
 - `deploy.password` 非空时，所有 `/api/*` 默认需要 `auth_token` Cookie 或 `X-Auth-Token`，豁免 `/api/auth` 和 `/api/deploy`。
 - `/api/auth` 成功后写 `auth_token`，并清除旧 credential unlock token。
 - 账号密码、真实设备动作等敏感操作使用 credential unlock cookie；主动重新验证会吊销旧 unlock。
+- `POST /api/credential/revoke` 要求 runtime idle；运行中返回 `409 runtime_busy`，前端不能先乐观清空“已验证”状态。
 - 登录和安全密码验证有频率限制。
 
 ## 核心状态
@@ -46,7 +47,7 @@ WebUI 后端是 FastAPI；静态前端位于 `services/webui/static/`，源码 E
 | 接口 | 说明 |
 |------|------|
 | `POST /api/config` | 保存 `app/emulator/ocr`，可包含 `scheduler` |
-| `POST /api/config/sync` | 同步所有配置并刷新 order map/log level/config_version；不清 `bg`，不重载任务注册表 |
+| `POST /api/config/sync` | 要求 runtime idle；同步所有配置并刷新 order map/log level/config_version；不清 `bg`，不重载任务注册表 |
 | `POST /api/tasks` | 保存任务树，后端剥离运行时字段并刷新任务投影/order/config_version；不重载任务注册表 |
 | `POST /api/tasks/reload` | 轻量 reload：要求 runtime idle，清 `bg`，刷新任务更新标记、任务投影、order map 和公开配置 |
 | `POST /api/tasks/reload-all` | 完整 reload：要求 runtime idle，同步配置、重载职业脚本和任务注册表、刷新 UI map 缓存，并清 `bg` |
@@ -119,7 +120,7 @@ MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和�
 |------|------|
 | `GET /api/update/status` | 源码工作区 Git updater 状态；非 Git 工作区显示 `disabled`；detached HEAD 显示失败原因；返回 `remote_branch`、`ahead_count`、`behind_count`、`action_taken`、`restart_supported`、`restart_triggered` |
 | `POST /api/update/check` | 单次 `git fetch origin main` 并比较 `HEAD` 与 `origin/main`；远端领先时 `state=available` 并返回更新日志，本地一致时 `state=up_to_date`，本地领先时 `state=ahead` |
-| `POST /api/update/run` | 工作区有本地改动时拒绝执行；否则 `fetch origin main`，只在当前检出分支可快进时执行 `pull --ff-only origin main`；未拉取时 `action_taken=none`，快进时 `action_taken=fast_forward`，完成后按运行模式通知后端重启 |
+| `POST /api/update/run` | 要求 runtime idle；工作区有本地改动时拒绝执行；否则 `fetch origin main`，只在当前检出分支可快进时执行 `pull --ff-only origin main`；未拉取时 `action_taken=none`，快进时 `action_taken=fast_forward`，完成后按运行模式通知后端重启 |
 
 更新页只保留源码 Git 通道。非 Git 工作区或非源码运行环境必须显示为 disabled，不要引导用户执行不可用更新。检查目标固定为远端 `main` 分支；若本地相对 `origin/main` 既领先又落后，状态为 failed 并提示用户手动处理分叉。本地领先不是“已更新”，必须显示为 `ahead`，表示远端没有可拉取提交但本地含额外提交。Git stderr、timeout、启动失败必须进入 `last_error`，不能改写成空输出或泛化错误。更新器不安装 Python/npm 依赖；依赖文件变化后用户单独运行 `scripts\install.bat`。
 
@@ -130,7 +131,7 @@ MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和�
 | `/api/error-archives*` | 列表、详情、文件读取、批量删除、zip 导入 |
 | `/api/news/*` | 4399 资讯、礼包码、代理页面 |
 | `GET/POST /api/remote-access` | 远程访问配置和状态 |
-| `POST /api/notify/test/save` | 通知测试与保存 |
+| `POST /api/notify/test` / `POST /api/notify/save` | 通知测试与保存；保存要求 runtime idle |
 
 错误归档路径必须经过安全文件名校验，zip 导入解压到新目录，不覆盖任意路径。
 

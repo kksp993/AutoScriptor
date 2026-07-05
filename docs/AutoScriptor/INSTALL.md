@@ -170,7 +170,7 @@ git pull --ff-only origin main
 
 更新要求当前目录是 Git 工作区、当前检出状态不是 detached HEAD、工作区没有本地改动。Git stderr、timeout 或启动失败会直接显示为失败原因。
 
-WebUI 的 `/api/update/status`、`/api/update/check`、`/api/update/run` 使用同一条源码 Git 更新通道；`check` 只做单次 `fetch origin main` 和提交比较，`run` 只做 fast-forward pull。WebUI 状态会区分 `up_to_date`、`ahead`、`available`、`updated`、`restarting` 和 `failed`；`ahead` 表示本地领先远端但未执行拉取，不等同于刚完成更新。WebUI 更新不会安装 Python/npm 依赖。
+WebUI 的 `/api/update/status`、`/api/update/check`、`/api/update/run` 使用同一条源码 Git 更新通道；`check` 只做单次 `fetch origin main` 和提交比较，`run` 要求 runtime idle 且只做 fast-forward pull。WebUI 状态会区分 `up_to_date`、`ahead`、`available`、`updated`、`restarting` 和 `failed`；`ahead` 表示本地领先远端但未执行拉取，不等同于刚完成更新。WebUI 更新不会安装 Python/npm 依赖。
 
 ## MuMu 检查
 

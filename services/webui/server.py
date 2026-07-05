@@ -604,6 +604,9 @@ async def reload_tasks_api():
 
 @app.post("/api/config/sync")
 async def sync_config_api(request: Request):
+    busy = _guard_runtime_idle("sync config")
+    if busy is not None:
+        return busy
     try:
         data = await request.json()
     except Exception:
@@ -990,6 +993,9 @@ async def credential_status_api(request: Request):
 @app.post("/api/credential/revoke")
 async def credential_revoke_api(request: Request):
     """用户主动「重新验证」时吊销解锁令牌并清除 Cookie。"""
+    busy = _guard_runtime_idle("revoke credentials")
+    if busy is not None:
+        return busy
     old = _credential_unlock_from_request(request)
     _revoke_credential_unlock(old)
     cfg.clear_decrypted_credentials()
@@ -1352,6 +1358,9 @@ async def notify_test_api(request: Request):
 
 @app.post("/api/notify/save")
 async def notify_save_api(request: Request):
+    busy = _guard_runtime_idle("save notify settings")
+    if busy is not None:
+        return busy
     data = await request.json()
     version = lifecycle_service.save_notify_settings(
         data.get("enabled", False),
@@ -1377,6 +1386,9 @@ async def update_check_api():
 
 @app.post("/api/update/run")
 async def update_run_api():
+    busy = _guard_runtime_idle("run source update")
+    if busy is not None:
+        return busy
     from services.core.updater import updater
     ok = updater.run_update()
     return {"success": ok, **updater.get_status()}

@@ -43,7 +43,7 @@ Component convention:
 - Source deployment Git updater uses `/api/update/*`.
 - `GET /api/update/status` returns `kind: "source-git"` and disables itself outside a Git working tree or non-source runtime.
 - `POST /api/update/check` fetches `origin main` once and compares `HEAD` with `origin/main`.
-- `POST /api/update/run` refuses dirty worktrees, fetches `origin main`, pulls the current checked-out branch with `--ff-only origin main`, and triggers backend restart when available. Dependency changes are handled by `scripts\install.*`, not the updater.
+- `POST /api/update/run` requires runtime idle, refuses dirty worktrees, fetches `origin main`, pulls the current checked-out branch with `--ff-only origin main`, and triggers backend restart when available. Dependency changes are handled by `scripts\install.*`, not the updater.
 - Detached HEAD is rejected, and Git stderr/timeout/start failures must be surfaced through `last_error`.
 - The update panel must not show secondary desktop update choices.
 

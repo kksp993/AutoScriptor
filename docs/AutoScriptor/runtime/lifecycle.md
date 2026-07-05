@@ -51,7 +51,7 @@
 | scheduler | 调度器后台执行 |
 | editor | Editor `/api/editor/execute-code` 自定义代码执行 |
 
-保存配置、保存任务、切换账号/角色、重载任务等会先走 `guard_idle()`。运行中请求会返回 `409 runtime_busy`。停止按钮会同时：
+保存配置、同步配置、保存通知设置、保存任务、切换账号/角色、重载任务、重新验证/吊销凭据、源码更新执行等会先走 `guard_idle()`。运行中请求会返回 `409 runtime_busy`。停止按钮会同时：
 
 - `TaskManager.request_cancel()`
 - `Scheduler.request_stop()`
