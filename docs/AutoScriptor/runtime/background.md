@@ -13,6 +13,7 @@
 | 普通回调 | `allow_concurrent=False`，按 `priority` 从高到低扫描 |
 | 并发回调 | `allow_concurrent=True`，优先扫描；普通回调执行期间会由 `BG-Concurrent` 子线程继续扫描 |
 | 事件历史 | `get_event_history()` 返回最近 50 条回调、信号、clear 记录 |
+| 运行期异常 | 截图或识别异常会写入事件历史并限频 warning；监控线程继续运行 |
 | 信号 | `set_signal()` / `signal()` / `wait_signal()` 线程安全 |
 
 ## 注册与清理
@@ -106,4 +107,4 @@ bg.wait_signal(BG_SIGNALS.TRY_EXIT, True, timeout=60)
 - 会修改共享状态、切换地图或执行长流程的监听保持普通回调，并设置清晰的 `priority`。
 - 回调中仍应使用 `AutoScriptor.sleep()` / `click()`，保持可取消。
 - 不要在局部任务中随手 `bg.clear()`；用 `bg.scope()` 表达生命周期。
-- 排查时先看错误归档里的 `bg_event_history`、`bg_active_callbacks`、`bg_signals`。
+- 排查时先看错误归档里的 `bg_event_history`、`bg_active_callbacks`、`bg_signals`；若出现 `bg截图异常`、`bg常规识别异常` 或 `bg并发识别异常`，优先检查设备会话、NemuIpc、OCR/目标数据，而不是只看任务超时。

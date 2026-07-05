@@ -391,12 +391,14 @@ async def auth_api(request: Request):
 from services.webui.routes.editor import (
     configure_editor_custom_task_save_controls,
     configure_editor_execution_controls,
+    editor_execution_status,
     router as editor_router,
 )
+runtime_controller.set_external_status_getter("editor", editor_execution_status)
 configure_editor_execution_controls(
     request_cancel=TASK_MANAGER.request_cancel,
     reset_cancel=TASK_MANAGER.reset_cancel,
-    runtime_busy=runtime_controller.is_busy,
+    runtime_busy=lambda: runtime_controller.busy_reason() in ("direct_run", "scheduler"),
 )
 configure_editor_custom_task_save_controls(
     reload_custom_tasks=lambda: lifecycle_service.reload_all(reason="save editor custom task"),

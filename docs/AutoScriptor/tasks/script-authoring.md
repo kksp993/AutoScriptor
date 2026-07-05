@@ -25,6 +25,8 @@ WebUI Editor 的“保存脚本”接口 `/api/editor/save-custom-task` 也必�
 
 编辑器保存裸片段时会按表单生成 `@register_task(path_cn="自定义任务/...", description=..., task_doc=...)`，并把参数设置转换为函数签名、本地 `enum.Enum` 类和默认值；如果传入的是完整自定义任务文件，文件内的 `@register_task` 必须显式提供 `path_cn`，已有装饰器元数据由文件自身负责。只落盘未注册的 Python 片段不会出现在 WebUI 任务树中。
 
+自定义任务导入失败会记录到 WebUI 公开配置的 `custom_task_load_errors`，并在本轮加载中跳过 stale 自定义任务配置清理和 `cfg.save_config()`。修复脚本语法或导入错误后重新加载即可恢复；不要因为任务临时消失就手动清空 `自定义任务` 配置分支。
+
 例如兑换码礼品兑换是内置一般任务，注册路径为 `一般任务/活动/兑换豪礼礼品兑换`，源码位于 `ZmxyOL/task/normal_task/huodong/redeem_gift.py`。
 
 ## register_task 元数据

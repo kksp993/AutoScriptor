@@ -33,10 +33,13 @@ const UpdatePanel = {
       const map = {
         disabled: { label: '不可用', type: 'info' },
         idle: { label: '待检查', type: 'info' },
+        up_to_date: { label: '已同步', type: 'success' },
+        ahead: { label: '本地领先', type: 'warning' },
         checking: { label: '检查中', type: 'warning' },
         available: { label: '有更新', type: 'danger' },
         updating: { label: '更新中', type: 'warning' },
         done: { label: '已完成', type: 'success' },
+        updated: { label: '已更新', type: 'success' },
         restarting: { label: '重启中', type: 'warning' },
         failed: { label: '失败', type: 'danger' },
       };
@@ -63,8 +66,9 @@ const UpdatePanel = {
       }
       if (this.sourceStatus.last_error) return this.sourceStatus.last_error;
       if (this.sourceStatus.has_update) return `远端 ${this.remoteBranch} 有 ${this.behindCount} 个新提交，可拉取后重启后端。`;
-      if (this.aheadCount > 0 && this.behindCount === 0) return `源码仓库已是最新，本地比远端 ${this.remoteBranch} 新 ${this.aheadCount} 个提交。`;
-      if (this.sourceStatus.state === 'done') return '源码仓库已是最新状态。';
+      if (this.sourceStatus.state === 'ahead' || (this.aheadCount > 0 && this.behindCount === 0)) return `远端没有可拉取的新提交；本地比远端 ${this.remoteBranch} 领先 ${this.aheadCount} 个提交。`;
+      if (this.sourceStatus.state === 'updated') return this.sourceStatus.restart_supported ? '源码已快进更新，后端将尝试重启。' : '源码已快进更新；当前运行模式未触发自动重启，请按需手动重启。';
+      if (this.sourceStatus.state === 'up_to_date' || this.sourceStatus.state === 'done') return '本地源码与远端目标一致。';
       return '源码模式通过 Git 拉取更新；请在源码仓库内执行检查和拉取。';
     },
   },
@@ -105,10 +109,10 @@ const UpdatePanel = {
           ElementPlus.ElMessage.warning(data.unavailable_reason || data.last_error || '源码更新不可用');
         } else if (data.has_update) {
           ElementPlus.ElMessage.info(`远端 ${remoteBranch} 有 ${behindCount} 个新提交`);
-        } else if (aheadCount > 0 && behindCount === 0) {
-          ElementPlus.ElMessage.success(`源码仓库已是最新，本地比远端 ${remoteBranch} 新 ${aheadCount} 个提交`);
+        } else if (data.state === 'ahead' || (aheadCount > 0 && behindCount === 0)) {
+          ElementPlus.ElMessage.warning(`远端没有可拉取的新提交；本地比远端 ${remoteBranch} 领先 ${aheadCount} 个提交`);
         } else {
-          ElementPlus.ElMessage.success('源码仓库已是最新');
+          ElementPlus.ElMessage.success('本地源码与远端目标一致');
         }
       } catch (e) {
         this.sourceStatus = { ...this.sourceStatus, state: 'failed', last_error: e.message };
@@ -120,7 +124,7 @@ const UpdatePanel = {
     async runSourceUpdate() {
       try {
         await ElementPlus.ElMessageBox.confirm(
-          '将执行 Git fetch/pull --ff-only。完成后后端会尝试重启；如果依赖文件变更，请再运行 scripts\\install.bat。',
+          '将执行 Git fetch/pull --ff-only。若当前运行模式支持，完成后会尝试重启后端；如果依赖文件变更，请再运行 scripts\\install.bat。',
           '执行源码更新',
           { confirmButtonText: '立即更新', cancelButtonText: '取消', type: 'warning' },
         );
@@ -139,12 +143,14 @@ const UpdatePanel = {
         if (data.state === 'restarting') {
           ElementPlus.ElMessage.success('源码更新完成，后端正在重启');
           this.waitForSourceRestart();
-        } else if (data.success && aheadCount > 0 && behindCount === 0) {
-          ElementPlus.ElMessage.success(`源码仓库已是最新，本地比远端 ${remoteBranch} 新 ${aheadCount} 个提交`);
-        } else if (data.success && !wasUpdatingFromRemote && behindCount === 0) {
-          ElementPlus.ElMessage.success('源码仓库已是最新');
+        } else if (data.success && (data.state === 'ahead' || (aheadCount > 0 && behindCount === 0))) {
+          ElementPlus.ElMessage.warning(`未执行拉取：本地比远端 ${remoteBranch} 领先 ${aheadCount} 个提交`);
+        } else if (data.success && data.state === 'up_to_date') {
+          ElementPlus.ElMessage.success('本地源码与远端目标一致');
+        } else if (data.success && !wasUpdatingFromRemote && behindCount === 0 && data.action_taken === 'none') {
+          ElementPlus.ElMessage.success('本地源码与远端目标一致');
         } else if (data.success) {
-          ElementPlus.ElMessage.success('源码更新完成，建议重启应用');
+          ElementPlus.ElMessage.success(data.restart_supported ? '源码更新完成，后端将尝试重启' : '源码更新完成，请按需手动重启应用');
         } else {
           ElementPlus.ElMessage.error('源码更新失败：' + (data.last_error || '未知错误'));
         }

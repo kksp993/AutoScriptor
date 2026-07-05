@@ -14,7 +14,7 @@ from services.core.scheduler import Scheduler, SchedulerState
 from services.core.task_manager import TaskManager
 from services.webui.api_response import api_error
 
-RuntimeReason = Literal["direct_run", "scheduler"]
+RuntimeReason = Literal["direct_run", "scheduler", "editor"]
 
 
 class RuntimeController:
@@ -24,6 +24,16 @@ class RuntimeController:
         self._lock = Lock()
         self._direct_thread: Thread | None = None
         self._stop_requested = False
+        self._external_status_getters: dict[RuntimeReason, Callable[[], dict[str, Any]]] = {}
+
+    def set_external_status_getter(self, reason: RuntimeReason, getter: Callable[[], dict[str, Any]]) -> None:
+        """Register a runtime participant owned outside RuntimeController.
+
+        Editor execution is intentionally implemented in its route module, but
+        config mutation guards still need a single busy projection.
+        """
+        with self._lock:
+            self._external_status_getters[reason] = getter
 
     def direct_run_alive(self) -> bool:
         with self._lock:
@@ -40,11 +50,28 @@ class RuntimeController:
             or getattr(self.scheduler, "is_executing", False)
         )
 
+    def _external_statuses(self) -> dict[RuntimeReason, dict[str, Any]]:
+        with self._lock:
+            status_getters = dict(self._external_status_getters)
+        statuses: dict[RuntimeReason, dict[str, Any]] = {}
+        for reason, status_getter in status_getters.items():
+            try:
+                status = status_getter()
+            except Exception as exc:
+                logger.warning("runtime external status getter failed for %s: %s", reason, exc, exc_info=True)
+                continue
+            if isinstance(status, dict):
+                statuses[reason] = status
+        return statuses
+
     def busy_reason(self) -> RuntimeReason | None:
         if self.direct_run_alive():
             return "direct_run"
         if self.scheduler_busy():
             return "scheduler"
+        for reason, status in self._external_statuses().items():
+            if status.get("busy") or status.get("running"):
+                return reason
         return None
 
     def is_busy(self) -> bool:
@@ -54,23 +81,31 @@ class RuntimeController:
         scheduler_status = self.scheduler.status_dict()
         direct_running = self.direct_run_alive()
         scheduler_busy = self.scheduler_busy()
-        reason = "direct_run" if direct_running else "scheduler" if scheduler_busy else None
+        external_statuses = self._external_statuses()
+        external_reason = None
+        for candidate_reason, external_status in external_statuses.items():
+            if external_status.get("busy") or external_status.get("running"):
+                external_reason = candidate_reason
+                break
+        reason = "direct_run" if direct_running else "scheduler" if scheduler_busy else external_reason
         if reason is None:
             with self._lock:
                 self._stop_requested = False
-        stopping = bool(reason and self._stop_requested)
+        external_stopping = bool(external_statuses.get(reason, {}).get("stopping")) if reason else False
+        stopping = bool(reason and (self._stop_requested or external_stopping))
         return {
             "running": reason is not None,
             "busy": reason is not None,
             "stopping": stopping,
             "reason": reason,
             "direct_running": direct_running,
+            "external": external_statuses,
             "scheduler": scheduler_status,
         }
 
     def busy_response(self, action: str = "modify runtime config"):
         reason = self.busy_reason() or "runtime"
-        reason_label = {"direct_run": "直接执行任务", "scheduler": "调度器"}.get(reason, "运行任务")
+        reason_label = {"direct_run": "直接执行任务", "scheduler": "调度器", "editor": "编辑器代码"}.get(reason, "运行任务")
         return api_error(
             409,
             f"当前{reason_label}正在运行，请先点击「终止执行」再继续操作。",
@@ -112,12 +147,16 @@ class RuntimeController:
     def request_stop(self) -> str:
         direct_alive = self.direct_run_alive()
         scheduler_alive = self.scheduler_busy()
+        external_alive = any(
+            status.get("busy") or status.get("running")
+            for status in self._external_statuses().values()
+        )
         with self._lock:
-            self._stop_requested = direct_alive or scheduler_alive
+            self._stop_requested = direct_alive or scheduler_alive or external_alive
 
         self.task_manager.request_cancel()
         self.scheduler.request_stop()
         self.scheduler.invalidate_login()
 
         logger.info("⏹ 已发送终止信号，等待任务协作退出")
-        return "stopping" if (direct_alive or scheduler_alive) else "idle"
+        return "stopping" if (direct_alive or scheduler_alive or external_alive) else "idle"

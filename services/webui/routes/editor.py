@@ -179,6 +179,18 @@ def _request_editor_execution_stop() -> dict:
     )
 
 
+def editor_execution_status() -> dict:
+    """Return editor execute-code state for the shared runtime projection."""
+    with _editor_exec_lock:
+        running = _editor_exec_running
+        stopping = _editor_exec_stopping
+    return {
+        "running": running,
+        "busy": running,
+        "stopping": stopping,
+    }
+
+
 def _ignore_cancel() -> None:
     return None
 

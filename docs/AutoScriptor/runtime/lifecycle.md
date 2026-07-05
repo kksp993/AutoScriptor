@@ -43,12 +43,13 @@
 
 ## WebUI 运行状态
 
-`RuntimeController` 合并两类执行状态：
+`RuntimeController` 合并运行互斥状态：
 
 | 状态来源 | 说明 |
 |----------|------|
 | direct_run | WebUI 直接执行指定任务 |
 | scheduler | 调度器后台执行 |
+| editor | Editor `/api/editor/execute-code` 自定义代码执行 |
 
 保存配置、保存任务、切换账号/角色、重载任务等会先走 `guard_idle()`。运行中请求会返回 `409 runtime_busy`。停止按钮会同时：
 
@@ -60,7 +61,7 @@
 
 任务脚本必须使用可取消 API，例如 `AutoScriptor.sleep()`。
 
-Editor 自定义代码执行由 `/api/editor/execute-code` 拥有独立的 WebUI 执行状态：接口会拒绝与 direct run / scheduler 并行运行，执行体放入工作线程，避免阻塞 FastAPI 事件循环；前端“终止执行”调用 `POST /api/editor/execute-code/stop`，后端复用 `TaskManager.request_cancel()` 触发 `AutoScriptor.sleep()`、`click()`、`locate()` 等协作式取消点。执行结束后会清理本次 editor 执行状态和取消标记。
+Editor 自定义代码执行由 `/api/editor/execute-code` 拥有路由内执行状态，并通过 `RuntimeController` 的 `editor` 外部状态投影进入统一 busy/stop/status：接口会拒绝与 direct run / scheduler 并行运行，运行期间配置保存、任务保存、账号/角色切换和 reload 也会被 `guard_idle()` 拦截。执行体放入工作线程，避免阻塞 FastAPI 事件循环；前端“终止执行”调用 `POST /api/editor/execute-code/stop`，后端复用 `TaskManager.request_cancel()` 触发 `AutoScriptor.sleep()`、`click()`、`locate()` 等协作式取消点。执行结束后会清理本次 editor 执行状态和取消标记。
 
 ## 配置与账号
 
@@ -96,6 +97,8 @@ WebUI reload 分三类：
 1. 轻量 reload：`POST /api/tasks/reload` 要求 runtime idle，执行 `bg.clear(clear_signals=True)`，刷新调度器任务更新标记、任务树投影、order map 和公开配置；不重新加载 `cfg`，不清 `ZmxyOL.*` 模块，不重载职业脚本，不调用 `force_reload_tasks()`。
 2. 配置同步：`POST /api/config/sync` 执行 `cfg.reload_preserving_decrypted_credentials(security_key)`，刷新 order map，应用 WebUI log level，并递增 `config_version`；它不属于 reload，不清 `bg`，不重载任务注册表。
 3. 完整 reload：`POST /api/tasks/reload-all`、Editor 保存自定义任务、启动初始化、调度器安全边界处理脚本变更，以及兑换码任务注册缺失兜底，走 `TaskManager.reload_tasks()`，并刷新 `AutoScriptor.utils.ui_map` 模块级 `ui` 缓存。所有 reload 类操作最终都要清 `bg`；配置同步不清 `bg`。
+
+自定义任务导入失败会记录到公开配置的 `custom_task_load_errors`。本轮自定义任务存在导入错误时，任务加载会跳过 stale 自定义任务配置清理和本轮 `cfg.save_config()`，避免把临时坏脚本误判为已删除任务并持久化清空用户配置。
 
 保存任务、切换账号/角色、账号解锁、更新账号凭据和普通配置导入只保存或同步配置并刷新投影/order/config_version，不重建职业脚本和任务注册表。
 

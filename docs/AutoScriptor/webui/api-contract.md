@@ -90,7 +90,7 @@ Reload 边界：所有 reload 类操作都会清 `bg`；纯配置同步 `POST /a
 | `POST /api/editor/execute-code/stop` | Editor 自定义代码执行中的终止入口；前端“终止执行”按钮只发送该请求，不再调用语法校验 |
 | `POST /api/editor/save-custom-task` | Editor 保存脚本入口；不需要设备会话，接收保存表单和编辑器合并后的代码内容，写入 `data/custom_task` 并注册为 `自定义任务/...` |
 
-Editor 真实设备动作需要 credential unlock；模拟执行且已有缓存图时应使用虚拟 `mixctrl`，不触碰真实设备。
+Editor 真实设备动作需要 credential unlock；模拟执行且已有缓存图时应使用虚拟 `mixctrl`，不触碰真实设备。`/api/editor/execute-code` 的 running/stopping 状态会通过 `RuntimeController` 投影为 `reason="editor"`，因此运行期间配置、任务、账号、角色和 reload 类接口都应返回 `409 runtime_busy`。
 
 MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和常见安装目录，并从安装目录推导 `mumu_folder`、`emu_path`、`adb_path`，可选探测已连接 ADB 设备。运行热路径仍依赖已持久化配置，不能在任务执行时临时扫盘。
 
@@ -117,11 +117,11 @@ MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和�
 
 | 接口 | 说明 |
 |------|------|
-| `GET /api/update/status` | 源码工作区 Git updater 状态；非 Git 工作区显示 `disabled`；detached HEAD 显示失败原因；返回 `remote_branch`、`ahead_count`、`behind_count` |
-| `POST /api/update/check` | 单次 `git fetch origin main` 并比较 `HEAD` 与 `origin/main`；远端领先时返回更新日志，本地领先时显示已最新和领先提交数 |
-| `POST /api/update/run` | 工作区有本地改动时拒绝执行；否则 `fetch origin main`，只在当前检出分支可快进时执行 `pull --ff-only origin main`，完成后按需通知后端重启 |
+| `GET /api/update/status` | 源码工作区 Git updater 状态；非 Git 工作区显示 `disabled`；detached HEAD 显示失败原因；返回 `remote_branch`、`ahead_count`、`behind_count`、`action_taken`、`restart_supported`、`restart_triggered` |
+| `POST /api/update/check` | 单次 `git fetch origin main` 并比较 `HEAD` 与 `origin/main`；远端领先时 `state=available` 并返回更新日志，本地一致时 `state=up_to_date`，本地领先时 `state=ahead` |
+| `POST /api/update/run` | 工作区有本地改动时拒绝执行；否则 `fetch origin main`，只在当前检出分支可快进时执行 `pull --ff-only origin main`；未拉取时 `action_taken=none`，快进时 `action_taken=fast_forward`，完成后按运行模式通知后端重启 |
 
-更新页只保留源码 Git 通道。非 Git 工作区或非源码运行环境必须显示为 disabled，不要引导用户执行不可用更新。检查目标固定为远端 `main` 分支；若本地相对 `origin/main` 既领先又落后，状态为 failed 并提示用户手动处理分叉。Git stderr、timeout、启动失败必须进入 `last_error`，不能改写成空输出或泛化错误。更新器不安装 Python/npm 依赖；依赖文件变化后用户单独运行 `scripts\install.bat`。
+更新页只保留源码 Git 通道。非 Git 工作区或非源码运行环境必须显示为 disabled，不要引导用户执行不可用更新。检查目标固定为远端 `main` 分支；若本地相对 `origin/main` 既领先又落后，状态为 failed 并提示用户手动处理分叉。本地领先不是“已更新”，必须显示为 `ahead`，表示远端没有可拉取提交但本地含额外提交。Git stderr、timeout、启动失败必须进入 `last_error`，不能改写成空输出或泛化错误。更新器不安装 Python/npm 依赖；依赖文件变化后用户单独运行 `scripts\install.bat`。
 
 ## 错误归档、资讯、远程访问
 

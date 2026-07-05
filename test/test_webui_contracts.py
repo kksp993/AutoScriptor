@@ -1978,7 +1978,15 @@ class TestSourceDistributionContract(unittest.TestCase):
         for marker in ["/api/update/status", "/api/update/check", "/api/update/run", "source-git"]:
             with self.subTest(marker=marker):
                 self.assertIn(marker, panel)
-        for marker in ["remote_branch", "ahead_count", "behind_count", "本地比远端 ${remoteBranch} 新 ${aheadCount} 个提交"]:
+        for marker in [
+            "remote_branch",
+            "ahead_count",
+            "behind_count",
+            "action_taken",
+            "restart_supported",
+            "远端没有可拉取的新提交",
+            "领先 ${aheadCount} 个提交",
+        ]:
             with self.subTest(marker=marker):
                 self.assertIn(marker, panel)
         self.assertIn("Git fetch/pull --ff-only", panel)

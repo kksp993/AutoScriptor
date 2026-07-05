@@ -32,7 +32,7 @@ http://127.0.0.1:5000
 .\scripts\update.bat
 ```
 
-更新固定检查 `origin/main`，只在当前检出分支可快进时执行 `pull --ff-only`；本地领先时会显示已是最新和领先提交数。依赖变化后再运行 `.\scripts\install.bat`。
+更新固定检查 `origin/main`，只在当前检出分支可快进时执行 `pull --ff-only`；本地领先时会显示远端没有可拉取提交和领先提交数。依赖变化后再运行 `.\scripts\install.bat`。
 
 ## 主线入口
 
