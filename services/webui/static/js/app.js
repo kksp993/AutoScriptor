@@ -119,9 +119,13 @@ const app = createApp({
     /** 后台 /api/run 直接执行线程是否存活（单任务、队列逐步执行） */
     const directRunRunning = ref(false);
 
+    /** 后端 RuntimeController 的统一 busy 投影，包含 direct_run / scheduler / editor。 */
+    const runtimeStatus = reactive({ running: false, busy: false, stopping: false, reason: null, external: {} });
+
     /** 总调度 / 调度模式 / 单任务互斥：任一路径占用即禁止其它入口 */
     const executionBusy = computed(() => {
       if (directRunRunning.value) return true;
+      if (runtimeStatus.busy === true || runtimeStatus.running === true) return true;
       return schedulerStatus.state === 'running' || schedulerStatus.busy === true || schedulerStatus.executing === true;
     });
 
@@ -137,15 +141,23 @@ const app = createApp({
       overviewSecurityUnlocked.value = true;
     }
     async function clearOverviewSecurityUnlocked() {
-      overviewSecurityUnlocked.value = false;
       try {
-        await fetch('/api/credential/revoke', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ _timestamp: Date.now() / 1000 }),
-        });
-      } catch (e) { /* ignore */ }
+        const result = await API.request('POST', '/credential/revoke', {});
+        if (!result.ok) {
+          if (result.status === 409) {
+            showApiError(result.data, '执行中不能重新验证，请先终止当前任务', 'warning');
+            await refreshRuntimePanels();
+            return;
+          }
+          showApiError(result.data, '重新验证失败');
+          await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
+          return;
+        }
+        overviewSecurityUnlocked.value = false;
+      } catch (e) {
+        ElementPlus.ElMessage.error('重新验证失败: ' + e);
+        await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
+      }
     }
 
     // ── 主题（固定浅色） ──
@@ -234,6 +246,7 @@ const app = createApp({
       overviewData,
       schedulerStatus,
       directRunRunning,
+      runtimeStatus,
       overviewSecurityUnlocked,
     };
 

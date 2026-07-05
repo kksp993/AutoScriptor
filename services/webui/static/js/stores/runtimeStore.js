@@ -65,6 +65,7 @@
       assignObject(state.schedulerStatus, payload.scheduler);
     }
     if (payload.runtime) {
+      if (state.runtimeStatus) assignObject(state.runtimeStatus, payload.runtime);
       state.directRunRunning.value = !!payload.runtime.direct_running;
       if (payload.runtime.scheduler) assignObject(state.schedulerStatus, payload.runtime.scheduler);
     }
