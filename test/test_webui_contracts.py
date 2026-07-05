@@ -239,6 +239,26 @@ class TestTaskTreeServiceContract(unittest.TestCase):
             self.assertNotIn(key, leaf)
         self.assertIn("param_meta", tasks["每日任务"]["任务A"], "strip_runtime_fields must not mutate input")
 
+    def test_collect_task_reset_paths_detects_reenable_and_error_clear(self):
+        old = {
+            "group": {
+                "off": {"on": False, "next_exec_time": 0},
+                "err": {"on": True, "next_exec_time": 200, "human_takeover_error": "需要人工"},
+                "ok": {"on": True, "next_exec_time": 0},
+            },
+        }
+        new = {
+            "group": {
+                "off": {"on": True, "next_exec_time": 0},
+                "err": {"on": True, "next_exec_time": 0},
+                "ok": {"on": True, "next_exec_time": 0},
+            },
+        }
+
+        paths = self.service.collect_task_reset_paths(old, new)
+
+        self.assertEqual(sorted(paths), ["group/err", "group/off"])
+
     def test_public_task_projection_hides_unregistered_leaf_tasks(self):
         tasks = {
             "registered": {
@@ -621,6 +641,53 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
             self.calls,
             ["lock", "save_config", "wake", "mark_tasks_updated", "read_config", ("bump", "save tasks")],
         )
+
+    def test_save_tasks_clears_status_for_reactivated_or_error_reset_paths(self):
+        from services.webui.task_tree_service import TaskTreeService
+
+        class FakeTaskManager:
+            cleared = []
+
+            @contextmanager
+            def config_transaction(inner_self):
+                self.calls.append("lock")
+                yield
+
+            def _clear_human_takeover_state(inner_self, path):
+                inner_self.cleared.append(path)
+
+        task_manager = FakeTaskManager()
+        cfg = SimpleNamespace(
+            _config={
+                "tasks": {
+                    "group": {
+                        "task": {
+                            "on": True,
+                            "next_exec_time": 200,
+                            "human_takeover_error": "需要人工",
+                        },
+                    },
+                },
+                "status": {"tasks": {"group/task": {"progress": "3/6"}}},
+            },
+            _account_data={},
+            save_config=lambda: self.calls.append("save_config"),
+        )
+        service, _cfg = self._service(
+            cfg=cfg,
+            task_manager=task_manager,
+            task_tree_service=TaskTreeService(),
+        )
+
+        cleared = []
+        with patch("AutoScriptor.utils.task_state.clear_task_status", side_effect=lambda *a, **k: cleared.append((a, k))):
+            service.save_tasks({"group": {"task": {"on": True, "next_exec_time": 0}}})
+
+        self.assertEqual(task_manager.cleared, ["group/task"])
+        self.assertEqual(len(cleared), 1)
+        self.assertIsNone(cleared[0][0][0])
+        self.assertEqual(cleared[0][1]["task_path"], "group/task")
+        self.assertFalse(cleared[0][1]["save"])
 
     def test_save_runtime_config_normalizes_placeholder_adb_addr(self):
         class FakeConfig:

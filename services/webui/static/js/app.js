@@ -27,6 +27,8 @@ const app = createApp({
     const editTaskData = ref({});
     const editTaskPath = ref('');
     const editTaskKey = ref('');
+    const editModalSaveOnClose = ref(false);
+    const overviewEditContext = ref(null);
     const activeGroupPath = ref('');
     const paramEnumOptions = reactive({});
     const PARAM_KEY_LABELS = {
@@ -597,7 +599,7 @@ const app = createApp({
       cloned.params = next;
     }
 
-    function openEditModal(key, data, path) {
+    function openEditModal(key, data, path, options = {}) {
       const cloned = JSON.parse(JSON.stringify(data));
       if (cloned.params && typeof cloned.params === 'object') {
         delete cloned.params.profession;
@@ -615,6 +617,8 @@ const app = createApp({
       editTaskData.value = cloned;
       editTaskPath.value = path || key;
       editTaskKey.value = key;
+      editModalSaveOnClose.value = !!options.saveOnClose;
+      overviewEditContext.value = options.overviewContext || null;
       Object.keys(paramEnumOptions).forEach(k => delete paramEnumOptions[k]);
       Object.keys(tableRowsCache).forEach(k => delete tableRowsCache[k]);
       const paths = Object.values(meta).map(_enumMetaPath).filter(Boolean);
@@ -626,6 +630,7 @@ const app = createApp({
         }
       }
       const uniquePaths = [...new Set(paths)];
+      const openDialog = () => { _initTableRowsCache(meta); editModalVisible.value = true; };
       if (uniquePaths.length) {
         API.request('POST', '/enum-options', { paths: uniquePaths, task_path: editTaskPath.value || '' }).then(({ ok, data: map }) => {
           if (!ok) {
@@ -633,9 +638,9 @@ const app = createApp({
             return;
           }
           const requireOptions = (enumPath) => {
-            const options = map && map[enumPath];
-            if (!Array.isArray(options)) throw new Error(`枚举选项缺失: ${enumPath}`);
-            return options;
+            const optionsList = map && map[enumPath];
+            if (!Array.isArray(optionsList)) throw new Error(`枚举选项缺失: ${enumPath}`);
+            return optionsList;
           };
           Object.entries(meta).forEach(([pk, ep]) => {
             if (ep && typeof ep === 'object' && ep.type === 'table' && ep.columns) {
@@ -649,13 +654,189 @@ const app = createApp({
               if (p) paramEnumOptions[pk] = requireOptions(p);
             }
           });
-          _initTableRowsCache(meta);
-          editModalVisible.value = true;
+          openDialog();
         }).catch((e) => {
           const message = e && e.message ? e.message : String(e || '');
           ElementPlus.ElMessage.error(message ? `加载参数选项失败: ${message}` : '加载参数选项失败');
         });
-      } else { _initTableRowsCache(meta); editModalVisible.value = true; }
+      } else { openDialog(); }
+    }
+
+    async function openOverviewTaskEditor({ server, name, task }) {
+      if (!ensureIdle('执行中不能修改任务配置，请先终止当前任务')) return;
+      const path = task && task.path;
+      if (!server || !name || !path) return;
+      const overviewOpts = {
+        saveOnClose: true,
+        overviewContext: { server, name, path, status: task.status, human_takeover_error: task.human_takeover_error },
+      };
+      const ac = activeCharacter;
+      if (ac.server === server && ac.name === name) {
+        const slot = _taskSlotByPath(configData.tasks || {}, path);
+        if (slot && slot.parent[slot.key] && typeof slot.parent[slot.key] === 'object') {
+          openEditModal(path.split('/').pop(), slot.parent[slot.key], path, overviewOpts);
+          return;
+        }
+      }
+      try {
+        const q = new URLSearchParams({ server, character: name, path });
+        const { ok, data } = await API.request('GET', `/characters/task?${q.toString()}`);
+        if (!ok || !data || !data.task) {
+          showApiError(data, '加载任务失败');
+          return;
+        }
+        openEditModal(path.split('/').pop(), data.task, path, overviewOpts);
+      } catch (e) {
+        ElementPlus.ElMessage.error('加载任务失败: ' + e);
+      }
+    }
+
+    function editTaskStatusLabel() {
+      const item = editTaskData.value || {};
+      if (!item.on) return '未启用';
+      if (item.error) return '错误';
+      if ((item.human_takeover || item.human_takeover_error) && !item._due) return '错误';
+      return item._due ? '待执行' : '已完成';
+    }
+
+    function editTaskStatusClass() {
+      const map = {
+        disabled: 'bg-gray-200 text-gray-600',
+        pending: 'bg-yellow-200 text-yellow-600',
+        scheduled: 'bg-green-200 text-green-600',
+        error: 'bg-red-200 text-red-600',
+      };
+      const item = editTaskData.value || {};
+      let key = 'scheduled';
+      if (!item.on) key = 'disabled';
+      else if (item.error || ((item.human_takeover || item.human_takeover_error) && !item._due)) key = 'error';
+      else if (item._due) key = 'pending';
+      return map[key];
+    }
+
+    function getEditTaskStatusKey() {
+      const item = editTaskData.value || {};
+      if (!item.on) return 'disabled';
+      if (item.error || ((item.human_takeover || item.human_takeover_error) && !item._due)) return 'error';
+      return item._due ? 'pending' : 'scheduled';
+    }
+
+    async function handleEditTaskStatusClick() {
+      if (executionBusy.value) {
+        ElementPlus.ElMessage.warning('执行中不能修改任务状态，请先终止当前任务');
+        return;
+      }
+      const item = editTaskData.value;
+      if (!item || typeof item !== 'object') return;
+      if (getEditTaskStatusKey() === 'error' && item.on) {
+        const detail = item.human_takeover_error ? `\n${item.human_takeover_error}` : '';
+        try {
+          await ElementPlus.ElMessageBox.confirm(
+            `关闭并重新开启此任务，将清除错误状态并设为待执行。${detail}`,
+            '重新开启任务',
+            { confirmButtonText: '重新开启', cancelButtonText: '取消', type: 'warning' },
+          );
+        } catch { return; }
+        item.on = false;
+        resetTaskActivationFields(item);
+        item.on = true;
+        return;
+      }
+      item.on = !item.on;
+      if (item.on) resetTaskActivationFields(item);
+      else item._due = false;
+    }
+
+    function _buildTaskSavePayload() {
+      const meta = editTaskData.value?.param_meta || {};
+      for (const [pk, mp] of Object.entries(meta)) {
+        if (mp && typeof mp === 'object' && mp.type === 'table') {
+          _syncTableRowsToParams(pk);
+        }
+      }
+      const payload = _deepClone(editTaskData.value);
+      _filterParamsToRegisteredKeys(payload);
+      if (payload.params && typeof payload.params === 'object') {
+        delete payload.params.profession;
+      }
+      if (payload.param_meta && typeof payload.param_meta === 'object') {
+        delete payload.param_meta.profession;
+      }
+      return payload;
+    }
+
+    async function _persistTaskPayload(payload, overviewCtx) {
+      const fullPath = _editTaskFullPath();
+      const ac = activeCharacter;
+      const isActiveChar = overviewCtx
+        && overviewCtx.server === ac.server
+        && overviewCtx.name === ac.name;
+      if (overviewCtx && !isActiveChar) {
+        const { ok, data } = await API.request('POST', '/characters/task', {
+          server: overviewCtx.server,
+          character: overviewCtx.name,
+          path: fullPath,
+          task: payload,
+        });
+        if (!ok) {
+          showApiError(data, '保存失败');
+          return false;
+        }
+        if (data && data.tasks) {
+          if (!applyPublicConfigPayload(data)) {
+            ElementPlus.ElMessage.error('保存失败: 服务端返回配置不完整');
+            return false;
+          }
+        } else {
+          await fetchRuntimeSnapshot({ refreshConfigIfChanged: true });
+        }
+        ElementPlus.ElMessage.success('任务已保存');
+        return true;
+      }
+      const tasksDraft = _deepClone(configData.tasks || {});
+      const slot = _taskSlotByPath(tasksDraft, fullPath);
+      if (!slot || !slot.parent[slot.key] || typeof slot.parent[slot.key] !== 'object') {
+        ElementPlus.ElMessage.error('保存失败: 找不到任务路径 ' + fullPath);
+        return false;
+      }
+      const previous = slot.parent[slot.key];
+      const next = { ...previous, ...payload };
+      if (next.on && !previous.on) {
+        resetTaskActivationFields(next);
+      } else if (!next.on) {
+        next._due = false;
+      }
+      slot.parent[slot.key] = next;
+      return persistTasks(tasksDraft, overviewCtx ? '任务已保存' : '任务已保存');
+    }
+
+    async function saveTask(options = {}) {
+      if (!editTaskKey.value) return false;
+      if (!ensureIdle('执行中不能修改任务配置，请先终止当前任务')) return false;
+      const payload = _buildTaskSavePayload();
+      const overviewCtx = options.overview || overviewEditContext.value;
+      try {
+        const ok = await _persistTaskPayload(payload, overviewCtx);
+        if (ok && options.closeAfter !== false && !editModalSaveOnClose.value) {
+          editModalVisible.value = false;
+        }
+        return ok;
+      } catch (e) {
+        ElementPlus.ElMessage.error('保存失败: ' + e);
+        return false;
+      }
+    }
+
+    async function onEditModalClose() {
+      if (!editModalSaveOnClose.value || !editTaskKey.value) return;
+      await saveTask({ overview: overviewEditContext.value, closeAfter: false });
+      editModalSaveOnClose.value = false;
+      overviewEditContext.value = null;
+    }
+
+    function onEditModalClosed() {
+      editModalSaveOnClose.value = false;
+      overviewEditContext.value = null;
     }
 
     function _initTableRowsCache(meta) {
@@ -709,6 +890,17 @@ const app = createApp({
       return JSON.parse(JSON.stringify(value || {}));
     }
 
+    function resetTaskActivationFields(taskItem) {
+      delete taskItem.human_takeover;
+      delete taskItem.human_takeover_error;
+      delete taskItem.human_takeover_at;
+      delete taskItem.error;
+      delete taskItem.progress;
+      delete taskItem.progress_display;
+      taskItem.next_exec_time = 0;
+      taskItem._due = true;
+    }
+
     function _editTaskFullPath() {
       const path = editTaskPath.value || editTaskKey.value || '';
       const prefix = activeTabLabel.value || '';
@@ -744,47 +936,8 @@ const app = createApp({
       return true;
     }
 
-    async function saveTask() {
-      if (!editTaskKey.value) return;
-      if (!ensureIdle('执行中不能修改任务配置，请先终止当前任务')) return;
-      const meta = editTaskData.value?.param_meta || {};
-      for (const [pk, mp] of Object.entries(meta)) {
-        if (mp && typeof mp === 'object' && mp.type === 'table') {
-          _syncTableRowsToParams(pk);
-        }
-      }
-      const payload = _deepClone(editTaskData.value);
-      _filterParamsToRegisteredKeys(payload);
-      if (payload.params && typeof payload.params === 'object') {
-        delete payload.params.profession;
-      }
-      if (payload.param_meta && typeof payload.param_meta === 'object') {
-        delete payload.param_meta.profession;
-      }
-      const tasksDraft = _deepClone(configData.tasks || {});
-      const slot = _taskSlotByPath(tasksDraft, _editTaskFullPath());
-      if (!slot || !slot.parent[slot.key] || typeof slot.parent[slot.key] !== 'object') {
-        ElementPlus.ElMessage.error('保存失败: 找不到任务路径 ' + _editTaskFullPath());
-        return;
-      }
-      const previous = slot.parent[slot.key];
-      const next = { ...previous, ...payload };
-      if (next.on && !previous.on) {
-        delete next.human_takeover;
-        delete next.human_takeover_error;
-        delete next.human_takeover_at;
-        next.next_exec_time = 0;
-        next._due = true;
-      } else if (!next.on) {
-        next._due = false;
-      }
-      slot.parent[slot.key] = next;
-      try {
-        const ok = await persistTasks(tasksDraft);
-        if (ok) editModalVisible.value = false;
-      } catch (e) {
-        ElementPlus.ElMessage.error('保存失败: ' + e);
-      }
+    async function saveTaskFromDialog() {
+      await saveTask({ closeAfter: true });
     }
 
     function addListItem(key) {
@@ -795,10 +948,12 @@ const app = createApp({
       if (Array.isArray(editTaskData.value.params[key])) editTaskData.value.params[key].splice(idx, 1);
     }
 
-    async function saveTasks() {
+    async function saveTasks(options = {}) {
       if (!ensureIdle('执行中不能保存任务配置，请先终止当前任务')) return;
+      const silent = !!options.silent;
+      const successMessage = options.successMessage || '任务已保存';
       try {
-        await persistTasks(configData.tasks || {});
+        await persistTasks(configData.tasks || {}, successMessage);
       } catch (e) { ElementPlus.ElMessage.error('保存失败: ' + e); }
     }
 
@@ -1164,7 +1319,7 @@ const app = createApp({
     return {
       configData, activeTab, newsRefreshKey, logs, characterName, filteredConfig, currentTasks,
       schedulerStatus, overviewData, activeGroupPath, pageTitle,
-      editModalVisible, editTaskData, editTaskPath, paramEnumOptions, paramLabel,
+      editModalVisible, editTaskData, editTaskPath, editModalSaveOnClose, overviewEditContext, paramEnumOptions, paramLabel,
       addDialogVisible, addForm,
       accounts, currentAccount, accountDialogVisible, newAccountForm,
       activeCharacter, charactersTree, characterDialogVisible, newCharacterForm,
@@ -1181,8 +1336,11 @@ const app = createApp({
       setActiveGroup: path => { activeGroupPath.value = path; },
       refreshOverviewPanel,
       startRun, runSingleTask, verifyAccount, resetScheduler,
-      openEditModal, enumParamIsMultiple, saveTask, addListItem, removeListItem,
+      openEditModal, openOverviewTaskEditor, enumParamIsMultiple, saveTaskFromDialog, saveTask,
+      editTaskStatusLabel, editTaskStatusClass, getEditTaskStatusKey, handleEditTaskStatusClick,
+      onEditModalClose, onEditModalClosed,
       isTableParam, getTableRows, getTableColumns, getTableColumnLabel, getTableEnumOptions, tableRowsCache,
+      addListItem, removeListItem,
       saveTasks, saveSettings, clearLogs, reloadTasks,
       submitAddAccount,
       isElectron, minimizeToTray, navigateTo,

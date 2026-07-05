@@ -148,6 +148,104 @@ class TaskTreeService:
             else:
                 self.strip_runtime_fields_inplace(val)
 
+    def collect_task_reset_paths(self, old_node: dict, new_node: dict, prefix: str = "") -> list[str]:
+        from services.core.task_tree import TaskTree
+
+        paths: list[str] = []
+        for key, new_val in (new_node or {}).items():
+            if not isinstance(new_val, dict):
+                continue
+            path = f"{prefix}/{key}" if prefix else key
+            old_val = (old_node or {}).get(key) if isinstance(old_node, dict) else None
+            if TaskTree.is_leaf(new_val):
+                if not isinstance(old_val, dict):
+                    old_val = {}
+                was_on = bool(old_val.get("on"))
+                now_on = bool(new_val.get("on"))
+                if not now_on:
+                    continue
+                had_error = bool(
+                    old_val.get("human_takeover")
+                    or old_val.get("human_takeover_error")
+                    or old_val.get("error")
+                )
+                cleared_error = had_error and not (
+                    new_val.get("human_takeover")
+                    or new_val.get("human_takeover_error")
+                    or new_val.get("error")
+                )
+                if not was_on or cleared_error:
+                    paths.append(path)
+            else:
+                old_sub = old_val if isinstance(old_val, dict) else {}
+                paths.extend(self.collect_task_reset_paths(old_sub, new_val, path))
+        return paths
+
+    @staticmethod
+    def task_leaf_needs_reset(old_leaf: dict, new_leaf: dict) -> bool:
+        if not isinstance(new_leaf, dict) or not new_leaf.get("on"):
+            return False
+        if not isinstance(old_leaf, dict):
+            old_leaf = {}
+        was_on = bool(old_leaf.get("on"))
+        had_error = bool(
+            old_leaf.get("human_takeover")
+            or old_leaf.get("human_takeover_error")
+            or old_leaf.get("error")
+        )
+        cleared_error = had_error and not (
+            new_leaf.get("human_takeover")
+            or new_leaf.get("human_takeover_error")
+            or new_leaf.get("error")
+        )
+        return not was_on or cleared_error
+
+    def get_character_task_public(self, server: str, char_name: str, task_path: str) -> dict | None:
+        import dpath
+        from dpath.exceptions import PathNotFound
+        from AutoScriptor.utils.task_registry import task_registry
+        from services.core.task_tree import TaskTree
+
+        path = (task_path or "").strip().replace("\\", "/")
+        if not path or not task_registry.has_task(path):
+            return None
+        tree = self._character_tasks_tree(server, char_name)
+        if not tree:
+            return None
+        try:
+            node = dpath.get(tree, path)
+        except PathNotFound:
+            return None
+        if not isinstance(node, dict) or not TaskTree.is_leaf(node):
+            return None
+        mini: dict = {}
+        dpath.new(mini, path, deepcopy(node))
+        self.inject_public_task_fields(mini)
+        try:
+            return dpath.get(mini, path)
+        except PathNotFound:
+            return None
+
+    def apply_character_task_leaf(self, tree: dict, task_path: str, task_data: dict) -> dict:
+        import dpath
+        from dpath.exceptions import PathNotFound
+        from services.core.task_tree import TaskTree
+
+        path = (task_path or "").strip().replace("\\", "/")
+        try:
+            old_leaf = dpath.get(tree, path)
+        except PathNotFound as e:
+            raise KeyError(f"任务路径不存在: {path}") from e
+        if not isinstance(old_leaf, dict) or not TaskTree.is_leaf(old_leaf):
+            raise ValueError(f"无效任务路径: {path}")
+        cleaned = deepcopy(task_data)
+        if isinstance(cleaned, dict):
+            for field in self.RUNTIME_TASK_FIELDS:
+                cleaned.pop(field, None)
+        next_leaf = {**old_leaf, **cleaned}
+        dpath.set(tree, path, next_leaf)
+        return next_leaf
+
     def characters_summary(self) -> dict:
         tree = cfg.list_characters()
         return {srv: list(chars.keys()) for srv, chars in tree.items()} if tree else {}

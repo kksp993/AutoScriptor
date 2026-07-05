@@ -117,11 +117,65 @@ class WebUILifecycleService:
 
     def save_tasks(self, tasks: dict[str, Any]) -> int:
         cleaned = self.task_tree_service.strip_runtime_fields(tasks)
+        old_tasks = deepcopy(self.cfg._config.get("tasks", {}))
+        reset_paths = self.task_tree_service.collect_task_reset_paths(old_tasks, cleaned)
         with self.task_manager.config_transaction():
             self.cfg._config["tasks"] = cleaned
+            if reset_paths:
+                from AutoScriptor.utils.task_state import clear_task_status
+
+                for path in reset_paths:
+                    self.task_manager._clear_human_takeover_state(path)
+                    clear_task_status(None, task_path=path, save=False)
             self.cfg.save_config()
         self.scheduler.wake()
         return self._refresh_task_projection("save tasks")
+
+    def save_character_task(self, server: str, character: str, task_path: str, task_data: dict[str, Any]) -> int:
+        server = (server or "").strip()
+        character = (character or "").strip()
+        task_path = (task_path or "").strip().replace("\\", "/")
+        if not server or not character or not task_path:
+            raise ValueError("invalid character task payload")
+        chars = self.cfg._account_data.get("characters", {})
+        if server not in chars or character not in chars[server]:
+            raise KeyError(f"角色 '{server}/{character}' 不存在")
+
+        import dpath
+
+        char_node = chars[server][character]
+        tree = deepcopy(char_node.get("tasks") or {})
+        old_leaf = deepcopy(dpath.get(tree, task_path))
+        self.task_tree_service.apply_character_task_leaf(tree, task_path, task_data)
+        cleaned_tree = self.task_tree_service.strip_runtime_fields(tree)
+        new_leaf = dpath.get(cleaned_tree, task_path)
+        reset_paths = [task_path] if self.task_tree_service.task_leaf_needs_reset(old_leaf, new_leaf) else []
+        if reset_paths:
+            for key in ("human_takeover", "human_takeover_error", "human_takeover_at", "error"):
+                new_leaf.pop(key, None)
+            new_leaf["next_exec_time"] = 0
+            dpath.set(cleaned_tree, task_path, new_leaf)
+
+        with self.task_manager.config_transaction():
+            char_node["tasks"] = cleaned_tree
+            ac = self.cfg.active_character()
+            if ac.get("server") == server and ac.get("name") == character:
+                self.cfg._config["tasks"] = cleaned_tree
+                if reset_paths:
+                    from AutoScriptor.utils.task_state import clear_task_status
+
+                    for path in reset_paths:
+                        self.task_manager._clear_human_takeover_state(path)
+                        clear_task_status(None, task_path=path, save=False)
+                self.cfg.save_config()
+            else:
+                if reset_paths:
+                    status_tasks = char_node.setdefault("status", {}).setdefault("tasks", {})
+                    for path in reset_paths:
+                        status_tasks.pop(path, None)
+                self.cfg._save_account_file()
+        self.scheduler.wake()
+        return self._refresh_task_projection("save character task")
 
     def switch_character(self, server: str, character: str, *, reason: str = "switch character") -> int:
         with self.task_manager.config_transaction():

@@ -59,11 +59,13 @@ def task(
             task_idx = 1
             logger.info(f"当前关卡状态: {task_arr}")
             if "灰色" in task_arr:
-                task_idx = task_arr.index("灰色")
+                task_idx = task_arr.index("灰色") + 1
             else:
                 task_idx = len(task_arr)
         else:
             task_idx += 1
+        if task_idx > 5:
+            break
         logger.info(f"准备开始第{task_idx}关")
         swipe(B(800,300,),B(200,300)) if task_idx>3 else None
         sleep(2)
@@ -73,7 +75,7 @@ def task(
             wait_for_appear(T("得分记录", box=Box(493,29,292,73).margin()))
             click(B(1028,39,38,45))
         click(T(f"第{task_idx}关"), offset=(120, 120), resize=(80, 80))
-        if task_idx==5 and ui_F(I("加载中"),2):
+        if task_idx==5:
             if not reset_task(): break
             not_finish = False
             continue
@@ -81,7 +83,7 @@ def task(
         with bg.scope("天选阁") as scope:
             scope.add(
                 name="战斗结束",
-                identifier=(T("胜利", box=Box(568,30,161,85).margin()),T("确定"),T("联赛排行"),T("回家")),
+                identifier=(T("胜利", box=Box(568,30,161,85).margin()),T("确定", box=Box(571,509,135,66).margin()),T("联赛排行"),T("回家")),
                 callback=lambda : [
                     logger.info("战斗结束"),
                     bg.set_signal("try_exit", True),

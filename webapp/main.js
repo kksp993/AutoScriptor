@@ -283,6 +283,48 @@ function autoScriptorKillRoots(extraRoots = []) {
   return [...roots];
 }
 
+function killAutoScriptorProcessResidue(extraRoots = []) {
+  if (process.platform !== 'win32') return;
+  const roots = autoScriptorKillRoots(extraRoots);
+  if (roots.length === 0) return;
+
+  const ps = `
+$ownPid = ${process.pid}
+$roots = @(${roots.map(psQuote).join(',')})
+Get-CimInstance Win32_Process | ForEach-Object {
+  try {
+    $pidValue = [int]$_.ProcessId
+    if ($pidValue -eq $ownPid) { return }
+    $exe = [string]$_.ExecutablePath
+    $cmd = [string]$_.CommandLine
+    $owned = $false
+    foreach ($r in $roots) {
+      if ($exe -and $exe.StartsWith($r, [System.StringComparison]::OrdinalIgnoreCase)) { $owned = $true; break }
+      if ($cmd -and $cmd.IndexOf($r, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $owned = $true; break }
+    }
+    if ($owned) {
+      & taskkill.exe /PID $pidValue /T /F 2>$null 1>$null
+      Write-Output ("killed:" + $pidValue + ":" + $_.Name)
+    }
+  } catch {
+    Write-Output ("error:" + $_.ProcessId + ":" + $_.Exception.Message)
+  }
+}
+`;
+  try {
+    const result = execFileSync(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps],
+      { encoding: 'utf8', windowsHide: true, timeout: 30000 },
+    );
+    for (const line of String(result || '').split(/\r?\n/).filter(Boolean)) {
+      console.log('[main] process cleanup:', line);
+    }
+  } catch (err) {
+    console.warn('[main] Process cleanup failed:', err && err.message ? err.message : String(err));
+  }
+}
+
 function killStalePort5000(extraRoots = []) {
   if (process.platform !== 'win32') return;
   try {
@@ -611,6 +653,7 @@ function finishQuit() {
   pyPid = null;
   pyProc = null;
   killStalePort5000();
+  killAutoScriptorProcessResidue();
   setTimeout(() => {
     tray?.destroy();
     app.quit();
@@ -662,3 +705,4 @@ app.on('before-quit', () => {
   app.isQuitting = true;
   globalShortcut.unregister(BOSS_KEY);
 });
+

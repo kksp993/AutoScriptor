@@ -232,6 +232,8 @@ clear_task_status("progress")
 
 `progress_display` 会显示在任务状态旁，例如红色 `5/6` 或黄色 `5/6`。这只是展示层，不替代调度判定；调度判定仍以 `progress_incomplete()`、`next_exec_time` 和人工接管冷却为准。
 
+错误态任务可在 WebUI 任务树点击状态徽章，确认后执行“关闭并重新开启”：清除 `human_takeover*`、进度状态，并将 `next_exec_time` 设为 `0` 后自动保存。普通启用切换（由关闭重新打开）也会走同样的重置逻辑。
+
 ## post_execution 收尾
 
 配置位置：`data/config.json -> emulator.post_execution`

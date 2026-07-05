@@ -26,6 +26,7 @@ const OverviewPanel = {
     'run-all-dispatch', 'stop-dispatch', 'switch-account', 'refresh-overview',
     'lock-overview-security',
     'set-game-profession',
+    'edit-overview-task',
   ],
   data() {
     return {
@@ -35,8 +36,6 @@ const OverviewPanel = {
       /** 至多展开一个角色详情：'server/name' 或 null */
       expandedDispatchKey: null,
       dragOverIndex: null,
-      taskDetailVisible: false,
-      taskDetail: null,
       loginLoading: false,
     };
   },
@@ -207,9 +206,8 @@ const OverviewPanel = {
       if (d.toDateString() === tmr.toDateString()) return `明天 ${time}`;
       return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${time}`;
     },
-    openTaskDetail(t) {
-      this.taskDetail = t;
-      this.taskDetailVisible = true;
+    openTaskDetail(char, t) {
+      this.$emit('edit-overview-task', { server: char.server, name: char.name, task: t });
     },
     formatCountdown(ts) {
       if (!ts || ts <= 0) return '';
@@ -441,7 +439,7 @@ const OverviewPanel = {
               <div v-show="isDispatchCharExpanded(char.server, char.name)" class="ov-dispatch-card-body">
                 <div class="ov-dispatch-task-grid">
                   <div v-for="(t, i) in getCharTasks(char.server, char.name)" :key="(t.path || t.name) + '-' + i" class="ov-dispatch-task-block">
-                    <div class="ov-dispatch-task-cell" @click="openTaskDetail(t)">
+                    <div class="ov-dispatch-task-cell" @click="openTaskDetail(char, t)">
                       <span class="ov-task-dot-char ov-task-dot-char--cell" :style="{ color: dotColor(t.status) }" :title="t.name + ' - ' + dotLabel(t.status)">●</span>
                       <div class="flex-1 min-w-0 flex items-center gap-1">
                         <span class="ov-dispatch-task-name ov-dispatch-task-name--cell flex-1 min-w-0">{{ t.name }}</span>
@@ -460,22 +458,5 @@ const OverviewPanel = {
       </div>
     </div>
   </transition>
-  <el-dialog v-model="taskDetailVisible" :title="taskDetail ? taskDetail.name : ''" width="520px" destroy-on-close align-center @closed="taskDetail = null">
-    <div v-if="taskDetail" class="space-y-3 text-sm">
-      <el-alert v-if="taskDetail.human_takeover_error"
-                type="error"
-                :closable="false"
-                show-icon
-                title="需要人工处理"
-                class="mb-2">
-        <div class="whitespace-pre-wrap break-words">{{ taskDetail.human_takeover_error }}</div>
-      </el-alert>
-      <p v-if="taskDetail.custom" class="task-doc-custom-line">*自定义任务：任意 Python 与主程序同进程运行；请仅使用可信来源脚本，风险自负。</p>
-      <p v-if="taskDetail.beta" class="task-doc-beta-line">*该任务为 Beta 实验功能：自动化流程、界面识别或参数含义可能随版本快速调整，不保证与当前游戏完全一致；请谨慎启用并及时反馈问题。</p>
-      <p v-if="taskDetail.task_description" class="text-gray-700 leading-relaxed">{{ taskDetail.task_description }}</p>
-      <p v-if="taskDetail.task_doc_flow" class="text-xs text-gray-500 leading-relaxed whitespace-pre-wrap">{{ taskDetail.task_doc_flow }}</p>
-      <p v-if="taskDetail.path" class="text-xs text-gray-400 font-mono break-all">路径：{{ taskDetail.path }}</p>
-    </div>
-  </el-dialog>
 </div>`,
 };

@@ -482,6 +482,13 @@ class Hero:
         # 离开了关卡
         exit_done_signal = f"way_to_exit_done:{id(self)}:{int(start * 1000)}"
 
+
+        def check_if_exit_done():
+            if bg.signal(exit_done_signal, True):
+                logger.info("离开关卡: 已满足离开条件，直接返回")
+                return True
+            return False
+        
         with bg.scope("离开关卡") as scope, bg.interval(search_wait):
             bg.set_signal(exit_done_signal, False)
             bg.set_signal(exit_mark_signal, False)
@@ -520,8 +527,10 @@ class Hero:
             # 以防万一出不去，设置一个最多走20步的限制
             while cnt < 20:
                 check_cancel_raise()
+                if check_if_exit_done(): return self.sleep(1)
                 if time() - step3_start > timeout:
                     raise RuntimeError(f"离开关卡 超时: {timeout}秒, 条件 {repr(until)} 未满足")
+                
                 self.move_left(100, directly=True);sleep(0.1)
                 core_api.mixctrl.release_all_keys()
                 if not wait_for_signal(exit_mark_signal, True, search_wait):
@@ -538,6 +547,7 @@ class Hero:
             logger.info("离开关卡 3.4: 开始右走微调")
             while True:
                 check_cancel_raise()
+                if check_if_exit_done():  return self.sleep(1)
                 if time() - step3_start > timeout:
                     raise RuntimeError(f"离开关卡 超时: {timeout}秒, 条件 {repr(until)} 未满足")
 

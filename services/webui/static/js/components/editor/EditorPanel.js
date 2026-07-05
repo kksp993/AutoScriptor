@@ -200,67 +200,61 @@ const EditorPanel = {
          :class="isLandscape ? 'flex-1 flex-row gap-3' : 'order-1 flex-col gap-3'"
          :style="!isLandscape ? 'width:45%;min-width:280px' : ''">
       <div class="flex flex-col flex-1 min-h-0 min-w-0">
-        <div class="flex items-center justify-between mb-2 shrink-0">
-          <h2 class="text-sm font-semibold text-dark">
+        <div class="editor-recorder-toolbar mb-2 shrink-0">
+          <h2 class="text-sm font-semibold text-dark shrink-0 editor-recorder-title">
             <i class="fa fa-circle text-red-400 mr-1" style="font-size:8px"></i>操作录制
           </h2>
-          <span class="text-xs text-gray-400">{{ recordedLines.length }} 行</span>
-        </div>
-        <el-input type="textarea" v-model="recordedCode" ref="recordedCodeInput" class="flex-1 editor-code-textarea"
-                  :autosize="false" resize="none"
-                  @keydown="onRecordedCodeKeydown"
-                  placeholder="操作后代码将自动生成…" />
-      </div>
-      <div class="flex shrink-0 editor-recorder-actions"
-           :class="isLandscape ? 'flex-col gap-2 justify-start' : 'flex-row flex-wrap gap-2 justify-end items-center'"
-           :style="isLandscape ? 'width:128px' : ''">
-        <div class="editor-menu-wrap" ref="recorderMenuRef">
-          <button type="button" class="editor-menu-trigger" @click="toggleRecorderMenu">
-            <i class="fa fa-bars mr-1"></i>操作菜单
-            <i class="fa fa-angle-down ml-auto"></i>
-          </button>
-          <div v-if="recorderMenuOpen" class="editor-menu-panel" :class="isLandscape ? 'editor-menu-panel--left' : 'editor-menu-panel--up'">
-            <div v-for="group in recorderMenuGroups" :key="group.label" class="editor-menu-group">
-              <div class="editor-menu-group-title">{{ group.label }}</div>
-              <template v-for="item in group.items" :key="item.key">
-                <div v-if="item.children" class="editor-menu-subwrap">
-                  <button type="button" class="editor-menu-item" @click="toggleRecorderSubmenu(item.key)">
-                    <i :class="item.icon"></i><span>{{ item.label }}</span><i class="fa fa-angle-right ml-auto"></i>
-                  </button>
-                  <div v-if="recorderSubmenuOpen === item.key" class="editor-menu-panel editor-menu-subpanel">
-                    <button v-for="child in item.children" :key="child.key" type="button"
-                            class="editor-menu-item" :class="{ 'is-disabled': child.disabled && child.disabled() }"
-                            :disabled="child.disabled && child.disabled()" @click="runRecorderMenuAction(child)">
-                      <i :class="child.icon"></i><span>{{ child.label }}</span>
+          <nav class="editor-menubar" ref="recorderMenuRef">
+            <div v-for="group in recorderMenuGroups" :key="group.label" class="editor-menu-wrap">
+              <button type="button" class="editor-menubar-item"
+                      :class="{ 'is-open': recorderOpenGroup === group.label }"
+                      @click.stop="toggleRecorderGroup(group.label)">
+                {{ group.label }}
+              </button>
+              <div v-if="recorderOpenGroup === group.label" class="editor-menu-panel editor-menu-panel--down">
+                <template v-for="item in group.items" :key="item.key">
+                  <div v-if="item.children" class="editor-menu-subwrap">
+                    <button type="button" class="editor-menu-item" @click.stop="toggleRecorderSubmenu(item.key)">
+                      <i :class="item.icon"></i><span>{{ item.label }}</span><i class="fa fa-angle-right ml-auto"></i>
                     </button>
+                    <div v-if="recorderSubmenuOpen === item.key" class="editor-menu-panel editor-menu-subpanel">
+                      <button v-for="child in item.children" :key="child.key" type="button"
+                              class="editor-menu-item" :class="{ 'is-disabled': child.disabled && child.disabled() }"
+                              :disabled="child.disabled && child.disabled()" @click="runRecorderMenuAction(child)">
+                        <i :class="child.icon"></i><span>{{ child.label }}</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
-                <button v-else type="button" class="editor-menu-item" :class="{ 'is-disabled': item.disabled && item.disabled() }"
-                        :disabled="item.disabled && item.disabled()" @click="runRecorderMenuAction(item)">
-                  <i :class="item.icon"></i><span>{{ item.label }}</span>
-                </button>
-              </template>
+                  <button v-else type="button" class="editor-menu-item" :class="{ 'is-disabled': item.disabled && item.disabled() }"
+                          :disabled="item.disabled && item.disabled()" @click="runRecorderMenuAction(item)">
+                    <i :class="item.icon"></i><span>{{ item.label }}</span>
+                  </button>
+                </template>
+              </div>
             </div>
+          </nav>
+          <div class="editor-recorder-quick-actions">
+            <el-tooltip placement="top" :show-after="0">
+              <template #content>
+                <div class="max-w-[260px] text-xs leading-relaxed text-left">将录制区<strong>全部代码</strong>复制到剪贴板，便于粘贴到任务脚本。</div>
+              </template>
+              <span class="inline-flex"><el-button size="small" @click="copyRecordedCode" :disabled="!recordedCode.trim()">
+                <i class="fa fa-copy mr-1"></i>复制
+              </el-button></span>
+            </el-tooltip>
+            <el-tooltip placement="top" :show-after="0">
+              <template #content>
+                <div class="max-w-[260px] text-xs leading-relaxed text-left">清空录制区文本，不影响画布与左侧选区。</div>
+              </template>
+              <span class="inline-flex"><el-button size="small" type="danger" plain @click="recordedCode=''" :disabled="!recordedCode.trim()">
+                <i class="fa fa-trash-o mr-1"></i>清空
+              </el-button></span>
+            </el-tooltip>
+            <span class="text-xs text-gray-400 shrink-0">{{ recordedLines.length }} 行</span>
           </div>
         </div>
-        <div class="editor-recorder-quick-actions">
-          <el-tooltip placement="left" :show-after="0">
-            <template #content>
-              <div class="max-w-[260px] text-xs leading-relaxed text-left">将录制区<strong>全部代码</strong>复制到剪贴板，便于粘贴到任务脚本。</div>
-            </template>
-            <span class="inline-flex"><el-button size="small" @click="copyRecordedCode" :disabled="!recordedCode.trim()">
-              <i class="fa fa-copy mr-1"></i>复制
-            </el-button></span>
-          </el-tooltip>
-          <el-tooltip placement="left" :show-after="0">
-            <template #content>
-              <div class="max-w-[260px] text-xs leading-relaxed text-left">清空录制区文本，不影响画布与左侧选区。</div>
-            </template>
-            <span class="inline-flex"><el-button size="small" type="danger" plain @click="recordedCode=''" :disabled="!recordedCode.trim()">
-              <i class="fa fa-trash-o mr-1"></i>清空
-            </el-button></span>
-          </el-tooltip>
-        </div>
+        <python-code-editor v-model="recordedCode" ref="recordedCodeInput" class="flex-1 editor-code-textarea"
+                            placeholder="操作后代码将自动生成…" />
       </div>
     </div>
 
@@ -382,7 +376,7 @@ const EditorPanel = {
       { label: 'Enum(多选)', value: 'enum_multi' },
     ];
     const recorderMenuRef = ref(null);
-    const recorderMenuOpen = ref(false);
+    const recorderOpenGroup = ref('');
     const recorderSubmenuOpen = ref('');
 
     // ── recorded code ──
@@ -748,12 +742,12 @@ const EditorPanel = {
     ];
 
     function closeRecorderMenu() {
-      recorderMenuOpen.value = false;
+      recorderOpenGroup.value = '';
       recorderSubmenuOpen.value = '';
     }
 
-    function toggleRecorderMenu() {
-      recorderMenuOpen.value = !recorderMenuOpen.value;
+    function toggleRecorderGroup(label) {
+      recorderOpenGroup.value = recorderOpenGroup.value === label ? '' : label;
       recorderSubmenuOpen.value = '';
     }
 
@@ -1443,7 +1437,7 @@ const EditorPanel = {
       saveScriptParamIsEnum, addSaveScriptParam, removeSaveScriptParam, submitSaveCustomScript,
       virtualRemoteOnly, virtualClickMarkers, virtualSwipeLines,
       recordedCodeInput, recordedCode, recordedLines, isLandscape, canvasCellStyle,
-      recorderMenuRef, recorderMenuOpen, recorderSubmenuOpen, recorderMenuGroups,
+      recorderMenuRef, recorderOpenGroup, recorderSubmenuOpen, recorderMenuGroups,
       canvasDropActive, clearVirtualOverlays,
       refreshScreenshot,
       onCanvasDragOver, onCanvasDragLeave, onCanvasDrop,
@@ -1451,7 +1445,7 @@ const EditorPanel = {
       saveSelection, onCopy, remoteClick, remoteSwipe,
       onCanvasRemoteClick, onCanvasRemoteSwipe,
       copyRecordedCode, saveCustomScript, stopCustomCodeExecution, onRecordedCodeKeydown, onCustomExecKeydown, executeCustomCode,
-      closeRecorderMenu, toggleRecorderMenu, toggleRecorderSubmenu, runRecorderMenuAction,
+      closeRecorderMenu, toggleRecorderGroup, toggleRecorderSubmenu, runRecorderMenuAction,
       appendLocate, appendUiExists, appendUiNotExists, appendWaitAppear, appendWaitDisappear, appendSleepWait, appendExtractInfo, appendExtractGridInfo,
     };
   },
