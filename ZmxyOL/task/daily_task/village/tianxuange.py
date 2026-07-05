@@ -59,7 +59,7 @@ def task(
             task_idx = 1
             logger.info(f"当前关卡状态: {task_arr}")
             if "灰色" in task_arr:
-                task_idx = task_arr.index("灰色") + 1
+                task_idx = task_arr.index("灰色")
             else:
                 task_idx = len(task_arr)
         else:

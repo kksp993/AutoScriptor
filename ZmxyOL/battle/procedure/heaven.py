@@ -17,7 +17,7 @@ def _collect_bonus_rewards(expected: int):
 
         if click(I("极北-关卡奖励"), timeout=2, delay=1, if_exist=True):
             sleep(1)
-            if click(T("确定"), timeout=5, if_exist=True):
+            if click(T("确定", box=Box(546,481,188,83).margin()), timeout=5, if_exist=True):
                 collected += 1
             sleep(0.5)
             continue

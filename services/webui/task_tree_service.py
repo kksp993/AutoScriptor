@@ -73,6 +73,16 @@ class TaskTreeService:
         config_data["characters_summary"] = self.characters_summary()
         config_data["game_professions_by_character"] = self.game_professions_by_character()
         config_data["game_profession_options"] = list(GAME_PROFESSIONS)
+        try:
+            from ZmxyOL.task.custom_task_loader import get_custom_task_load_errors
+
+            custom_task_load_errors = get_custom_task_load_errors()
+        except Exception:
+            custom_task_load_errors = []
+        if custom_task_load_errors:
+            config_data["custom_task_load_errors"] = custom_task_load_errors
+        else:
+            config_data.pop("custom_task_load_errors", None)
         return config_data
 
     def inject_public_task_fields(self, node: dict, prefix: str = "") -> None:

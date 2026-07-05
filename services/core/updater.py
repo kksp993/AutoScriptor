@@ -37,6 +37,8 @@ class Updater:
         self.ahead_count = 0
         self.behind_count = 0
         self.last_error = ""
+        self.action_taken = ""
+        self.restart_triggered = False
         self._restart_event = None  # multiprocessing.Event，由 services/webui/gui.py 传入
 
     def _find_git(self) -> str:
@@ -165,6 +167,8 @@ class Updater:
             self.changelog = ""
             self.ahead_count = 0
             self.behind_count = 0
+            self.action_taken = "disabled"
+            self.restart_triggered = False
             return False
 
         if self.state == "checking":
@@ -175,6 +179,8 @@ class Updater:
         self.changelog = ""
         self.ahead_count = 0
         self.behind_count = 0
+        self.action_taken = "check"
+        self.restart_triggered = False
         try:
             branch = self._ensure_attached_branch()
         except GitCommandError as e:
@@ -205,8 +211,13 @@ class Updater:
         self.ahead_count = ahead
         self.behind_count = behind
 
-        if local == remote or behind == 0:
-            self.state = "idle"
+        if local == remote:
+            self.state = "up_to_date"
+            self.changelog = ""
+            return False
+
+        if behind == 0:
+            self.state = "ahead"
             self.changelog = ""
             return False
 
@@ -238,14 +249,18 @@ class Updater:
         if not self._git_update_available():
             self.state = "disabled"
             self.last_error = self._unavailable_reason
+            self.action_taken = "disabled"
+            self.restart_triggered = False
             return False
 
-        if self.state not in ("available", "failed", "idle"):
+        if self.state not in ("available", "failed", "idle", "up_to_date", "ahead", "done", "updated"):
             return False
 
         self.state = "updating"
         self.last_error = ""
         self.changelog = ""
+        self.action_taken = "update"
+        self.restart_triggered = False
         try:
             branch = self._ensure_attached_branch()
         except GitCommandError as e:
@@ -291,8 +306,14 @@ class Updater:
             self.last_error = self._diverged_message(branch, target_ref, ahead, behind)
             return False
 
-        if local == remote or behind == 0:
-            self.state = "done"
+        if local == remote:
+            self.state = "up_to_date"
+            self.action_taken = "none"
+            return True
+
+        if behind == 0:
+            self.state = "ahead"
+            self.action_taken = "none"
             return True
 
         try:
@@ -307,13 +328,15 @@ class Updater:
         self.remote_version = remote[:8]
         self.ahead_count = 0
         self.behind_count = 0
+        self.action_taken = "fast_forward"
 
         if self._restart_event is not None:
             self.state = "restarting"
+            self.restart_triggered = True
             logger.info(f"源码更新完成: {self.current_version}，即将重启后端")
             self._trigger_restart()
         else:
-            self.state = "done"
+            self.state = "updated"
             logger.info(f"源码更新完成: {self.current_version}")
         return True
 
@@ -352,6 +375,9 @@ class Updater:
             "unavailable_reason": reason,
             "state": state,
             "has_update": available and state == "available",
+            "action_taken": self.action_taken if available else "",
+            "restart_supported": available and self._restart_event is not None,
+            "restart_triggered": available and self.restart_triggered,
             "current_version": current_version,
             "branch": branch,
             "remote_branch": self.remote_branch,
