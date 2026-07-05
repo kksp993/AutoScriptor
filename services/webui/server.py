@@ -1644,6 +1644,51 @@ async def characters_all_tasks_summary_api():
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+@app.get("/api/characters/task")
+async def get_character_task_api(server: str, character: str, path: str):
+    try:
+        node = task_tree_service.get_character_task_public(server, character, path)
+        if not node:
+            return api_error(404, "task not found", code="task_not_found")
+        return api_ok(task=node, path=path, server=server, character=character)
+    except Exception as e:
+        logger.error("get_character_task error: %s", e)
+        return api_error(500, str(e), code="get_character_task_failed")
+
+
+@app.post("/api/characters/task")
+async def save_character_task_api(request: Request):
+    busy = _guard_runtime_idle("save character task")
+    if busy is not None:
+        return busy
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            return api_error(400, "invalid payload", code="invalid_payload")
+        server = (body.get("server") or "").strip()
+        character = (body.get("character") or "").strip()
+        path = (body.get("path") or "").strip()
+        task = body.get("task")
+        if not server or not character or not path or not isinstance(task, dict):
+            return api_error(400, "invalid character task payload", code="invalid_payload")
+        lifecycle_service.save_character_task(server, character, path, task)
+        ac = cfg.active_character()
+        if ac.get("server") == server and ac.get("name") == character:
+            return make_public_config()
+        version = current_version()
+        return api_ok(config_version=version)
+    except (KeyError, ValueError) as e:
+        return api_error(400, str(e), code="invalid_payload")
+    except Exception as e:
+        logger.error("save_character_task error: %s", e)
+        return api_error(
+            500,
+            _persistence_error_message("保存任务失败", e),
+            code="save_character_task_failed",
+            diagnostics=_persistence_diagnostics(),
+        )
+
+
 # ── 调度队列 API ──
 
 @app.get("/api/dispatch/queue")

@@ -10,10 +10,6 @@ const PythonCodeEditor = {
   emits: ['update:modelValue'],
   template: `
 <div class="python-code-editor" :class="{ 'is-codemirror': usingCodeMirror }">
-  <div class="python-code-editor-toolbar">
-    <span class="python-code-editor-lang">Python</span>
-    <span class="python-code-editor-hint">{{ usingCodeMirror ? 'CodeMirror 5 / Tab 缩进' : 'Textarea fallback / Tab 缩进' }}</span>
-  </div>
   <textarea ref="textarea"
             class="python-code-editor-input"
             spellcheck="false"

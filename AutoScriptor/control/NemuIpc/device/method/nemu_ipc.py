@@ -324,13 +324,6 @@ class NemuIpcImpl:
         self.connect_id: int = 0
         self.width = 0
         self.height = 0
-        self.contact_id = 0
-        self._touch_down = getattr(self.lib, 'nemu_input_event_finger_touch_down', None)
-        self._touch_up = getattr(self.lib, 'nemu_input_event_finger_touch_up', None)
-        self._use_finger_touch = self._touch_down is not None and self._touch_up is not None
-        if not self._use_finger_touch:
-            self._touch_down = self.lib.nemu_input_event_touch_down
-            self._touch_up = self.lib.nemu_input_event_touch_up
 
     def connect(self, on_thread=True):
         if self.connect_id > 0:
@@ -495,10 +488,12 @@ class NemuIpcImpl:
 
         # x, y = self.convert_xy(x, y)
         # print(x, y)
-        args = (self.connect_id, self.display_id, self.contact_id, x, y) if self._use_finger_touch else (self.connect_id, self.display_id, x, y)
-        ret = self.run_func(self._touch_down, *args)
+        ret = self.run_func(
+            self.lib.nemu_input_event_touch_down,
+            self.connect_id, self.display_id, x, y
+        )
         if ret > 0:
-            raise NemuIpcError(f'{self._touch_down.__name__} failed')
+            raise NemuIpcError('nemu_input_event_touch_down failed')
 
     @retry
     def up(self):
@@ -508,10 +503,12 @@ class NemuIpcImpl:
         if self.connect_id == 0:
             self.connect()
 
-        args = (self.connect_id, self.display_id, self.contact_id) if self._use_finger_touch else (self.connect_id, self.display_id)
-        ret = self.run_func(self._touch_up, *args)
+        ret = self.run_func(
+            self.lib.nemu_input_event_touch_up,
+            self.connect_id, self.display_id
+        )
         if ret > 0:
-            raise NemuIpcError(f'{self._touch_up.__name__} failed')
+            raise NemuIpcError('nemu_input_event_touch_up failed')
 
     @staticmethod
     def serial_to_id(serial: str):

@@ -32,7 +32,18 @@
       theme: {
         extend: {
           colors: { primary:'#22c55e', secondary:'#64748b', dark:'#1e293b', light:'#f8fafc' },
-          fontFamily: { sans: ['Inter','system-ui','sans-serif'] },
+          fontFamily: {
+            sans: ['Segoe UI','PingFang SC','Microsoft YaHei','Noto Sans SC','system-ui','sans-serif'],
+            mono: ['ui-monospace','Cascadia Code','SF Mono','Menlo','Consolas','monospace'],
+          },
+          fontSize: {
+            xs: ['0.75rem', { lineHeight: '1.45' }],
+            sm: ['0.8125rem', { lineHeight: '1.5' }],
+            base: ['0.875rem', { lineHeight: '1.55' }],
+            lg: ['1rem', { lineHeight: '1.4' }],
+            xl: ['1.125rem', { lineHeight: '1.35' }],
+            '2xl': ['1.25rem', { lineHeight: '1.3' }],
+          },
         },
       },
     };
@@ -41,14 +52,14 @@
     @layer utilities {
       .content-auto { content-visibility: auto; }
       .task-tree-item { @apply py-2.5 px-3.5 hover:bg-primary/10 transition-colors cursor-pointer; }
-      .log-container { @apply bg-dark/5 rounded-lg p-5 overflow-auto text-sm; }
-      .log-line { font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; white-space: pre-wrap; }
-      .stat-card { @apply bg-white rounded-xl shadow-md p-6 flex flex-col items-center justify-center transition-all duration-300 hover:shadow-lg; }
-      .stat-value { @apply text-3xl font-bold; }
-      .stat-label { @apply text-base text-gray-500 mt-1.5; }
+      .log-container { @apply bg-dark/5 rounded-lg p-4 overflow-auto text-sm leading-relaxed; }
+      .log-line { font-family: ui-monospace,Cascadia Code,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; font-size: 0.8125rem; line-height: 1.5; white-space: pre-wrap; }
+      .stat-card { @apply bg-white rounded-xl shadow-md p-5 flex flex-col items-center justify-center transition-all duration-300 hover:shadow-lg; }
+      .stat-value { @apply text-2xl font-bold tracking-tight; }
+      .stat-label { @apply text-sm text-gray-500 mt-1.5; }
     }
   </style>
-  <link rel="stylesheet" href="/static/css/style.css?v=37" />
+  <link rel="stylesheet" href="/static/css/style.css?v=39" />
 </head>
 <body class="app-body overflow-hidden" style="height:100vh;">
   <div id="app" class="flex h-screen overflow-hidden">
@@ -173,7 +184,8 @@
           @run-all-dispatch="runAllDispatchTasks" @stop-dispatch="stopDispatch"
           @switch-account="switchAccount" @refresh-overview="refreshOverviewPanel"
           @lock-overview-security="clearOverviewSecurityUnlocked"
-          @set-game-profession="(srv, name, p) => setGameProfession(srv, name, p)"></overview-panel>
+          @set-game-profession="(srv, name, p) => setGameProfession(srv, name, p)"
+          @edit-overview-task="openOverviewTaskEditor"></overview-panel>
 
         <scheduler-panel v-if="activeTab==='scheduler'"
           :overview-data="overviewData" :logs="logs" :character-name="characterName"
@@ -207,6 +219,7 @@
           :scheduler-status="schedulerStatus" :execution-busy="executionBusy"
           @edit-task="openEditModal" @expanded-change="setActiveGroup"
           @start-run="startRun" @stop-dispatch="stopDispatch" @save-tasks="saveTasks"
+          @restart-task="saveTasks({ successMessage: '任务已重新开启' })"
           @clear-logs="clearLogs" @refresh-config="reloadTasks" @reset-scheduler="resetScheduler"
           @run-task="runSingleTask"></task-panel>
 
@@ -215,14 +228,39 @@
 
     <!-- 编辑任务对话框 -->
     <teleport to="body">
-      <el-dialog v-model="editModalVisible" :title="'编辑任务: '+editTaskPath" :width="Object.keys(editTaskData.params||{}).some(k => isTableParam(k)) ? '860px' : '600px'" destroy-on-close>
+      <el-dialog v-model="editModalVisible"
+                 :title="(overviewEditContext ? '' : '编辑任务: ') + (overviewEditContext ? editTaskKey : editTaskPath)"
+                 :width="Object.keys(editTaskData.params||{}).some(k => isTableParam(k)) ? '860px' : '600px'"
+                 destroy-on-close align-center
+                 @close="onEditModalClose" @closed="onEditModalClosed">
+        <div v-if="overviewEditContext" class="mb-3 text-xs text-gray-500">
+          角色：{{ overviewEditContext.server }} / {{ overviewEditContext.name }}
+        </div>
+        <el-alert v-if="editTaskData.human_takeover_error"
+                  type="error"
+                  :closable="false"
+                  show-icon
+                  title="需要人工处理"
+                  class="mb-3">
+          <div class="whitespace-pre-wrap break-words">{{ editTaskData.human_takeover_error }}</div>
+        </el-alert>
         <div v-if="editTaskData.task_description || editTaskData.task_doc_flow" class="mb-4 space-y-2 -mt-1">
           <p v-if="editTaskData.task_description" class="text-sm text-gray-600 leading-relaxed">{{ editTaskData.task_description }}</p>
           <p v-if="editTaskData.task_doc_flow" class="text-xs text-gray-500 leading-relaxed whitespace-pre-wrap">{{ editTaskData.task_doc_flow }}</p>
         </div>
         <p v-if="editTaskData.custom" class="task-doc-custom-line mb-3">*自定义任务：任意 Python 与主程序同进程运行；请仅使用可信来源脚本，风险自负。</p>
         <p v-if="editTaskData.beta" class="task-doc-beta-line mb-3">*该任务为 Beta 实验功能：自动化流程、界面识别或参数含义可能随版本快速调整，不保证与当前游戏完全一致；请谨慎启用并及时反馈问题。</p>
+        <p v-if="editTaskPath" class="text-xs text-gray-400 font-mono break-all mb-3">路径：{{ editTaskPath }}</p>
         <el-form :model="editTaskData" label-width="100px" :disabled="executionBusy">
+          <el-form-item label="任务状态">
+            <span class="task-edit-status-badge"
+                  :class="[executionBusy ? 'cursor-not-allowed opacity-50' : 'cursor-pointer', editTaskStatusClass()]"
+                  :title="executionBusy ? '执行中不能修改任务状态' : (getEditTaskStatusKey() === 'error' ? '点击关闭并重新开启，刷新为待执行' : '点击切换启用状态')"
+                  @click="handleEditTaskStatusClick">
+              {{ editTaskStatusLabel() }}
+              <span v-if="editTaskData.progress_display" class="ml-1 text-[10px] align-super">{{ editTaskData.progress_display }}</span>
+            </span>
+          </el-form-item>
           <el-form-item label="启用状态"><el-switch v-model="editTaskData.on"></el-switch></el-form-item>
           <template v-for="(val, key) in editTaskData.params" :key="key">
             <el-form-item v-if="key !== 'profession' && isTableParam(key)" :label="paramLabel(key)" label-width="80px">
@@ -270,8 +308,11 @@
           </template>
         </el-form>
         <template #footer>
-          <el-button @click="editModalVisible=false">取 消</el-button>
-          <el-button type="primary" @click="saveTask" :disabled="executionBusy">保 存</el-button>
+          <template v-if="!editModalSaveOnClose">
+            <el-button @click="editModalVisible=false">取 消</el-button>
+            <el-button type="primary" @click="saveTaskFromDialog" :disabled="executionBusy">保 存</el-button>
+          </template>
+          <p v-else class="text-xs text-gray-400 text-right w-full m-0">关闭窗口后自动保存</p>
         </template>
       </el-dialog>
     </teleport>
@@ -433,7 +474,7 @@
                  :close-on-click-modal="false" :close-on-press-escape="false" :show-close="false">
         <div style="text-align:center;margin-bottom:16px">
           <i class="fa fa-lock" style="font-size:36px;color:#22c55e"></i>
-          <p style="margin-top:8px;color:#64748b;font-size:14px">请输入访问密码</p>
+          <p style="margin-top:8px;color:#64748b;font-size:0.875rem;line-height:1.5">请输入访问密码</p>
         </div>
         <el-input v-model="loginPassword" type="password" placeholder="输入密码"
                   show-password size="large"
@@ -450,10 +491,10 @@
   <!-- Vue 组件 -->
   <script src="/static/js/components/NewsPanel.js?v=4"></script>
   <script src="/static/js/components/AppSidebar.js?v=15"></script>
-  <script src="/static/js/components/TaskTree.js?v=12"></script>
-  <script src="/static/js/components/Overview.js?v=18"></script>
+  <script src="/static/js/components/TaskTree.js?v=13"></script>
+  <script src="/static/js/components/Overview.js?v=19"></script>
   <script src="/static/js/components/SchedulerPanel.js?v=15"></script>
-  <script src="/static/js/components/TaskPanel.js?v=12"></script>
+  <script src="/static/js/components/TaskPanel.js?v=13"></script>
   <script src="/static/js/components/Settings.js?v=10"></script>
   <script src="/static/js/components/AboutPanel.js?v=1"></script>
   <script src="/static/js/components/UpdatePanel.js?v=1"></script>
@@ -466,6 +507,6 @@
   <script src="/static/js/task_help_docs.js?v=1"></script>
   <script src="/static/js/core/api.js?v=1"></script>
   <script src="/static/js/stores/runtimeStore.js?v=1"></script>
-  <script src="/static/js/app.js?v=30"></script>
+  <script src="/static/js/app.js?v=32"></script>
 </body>
 </html>

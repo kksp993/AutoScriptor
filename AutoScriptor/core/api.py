@@ -646,10 +646,7 @@ def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), re
         for i in range(len(boxes)):
             if boxes[i]:
                 for j in range(len(boxes[i])):
-                    offset_tuple = (offset[0], offset[1], 
-                                  resize[0] if resize[0] != -1 else boxes[i][j].width,
-                                  resize[1] if resize[1] != -1 else boxes[i][j].height)
-                    boxes[i][j] = boxes[i][j] + offset_tuple
+                    boxes[i][j] = boxes[i][j] + {"offset": offset, "resize": resize}
     
     colors = [[] for _ in range(len(boxes))]
     for i in range(len(boxes)):

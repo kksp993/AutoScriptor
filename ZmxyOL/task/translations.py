@@ -21,6 +21,7 @@ TRANSLATION_MAP = {
     '荒古万界': 'hgwj',
     '万界副本': 'wanjiefuben',
     '活动': 'huodong',
+    '兑换豪礼礼品兑换': 'redeem_gift',
     '联盟任务': 'lianmengrenwu',
 }
 

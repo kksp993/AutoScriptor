@@ -10,7 +10,7 @@ const TaskPanel = {
   },
   emits: [
     'edit-task', 'expanded-change', 'start-run', 'stop-dispatch',
-    'save-tasks',
+    'save-tasks', 'restart-task',
     'clear-logs', 'refresh-config', 'reset-scheduler', 'run-task',
   ],
   template: `
@@ -21,7 +21,7 @@ const TaskPanel = {
       自定义任务目录中的 Python 与主程序同进程运行，可访问本机与自动化环境；来源不可信时代码存在安全风险，请仅放入自己编写的脚本，使用后果自负。
     </p>
     <div class="flex justify-between items-center mb-4 flex-shrink-0">
-      <h2 class="text-lg font-semibold text-dark">任务列表</h2>
+      <h2 class="page-panel-title">任务列表</h2>
       <button class="text-primary hover:text-primary/80 text-sm disabled:opacity-50 disabled:pointer-events-none"
               @click="$emit('refresh-config')" :disabled="executionBusy">
         <i class="fa fa-refresh mr-1"></i>刷新
@@ -31,7 +31,8 @@ const TaskPanel = {
       <task-tree :tree-data="currentTasks" :run-task-disabled="executionBusy"
         @edit-task="(k,d,p)=>$emit('edit-task',k,d,p)"
         @expanded-change="v=>$emit('expanded-change',v)"
-        @run-task="p=>$emit('run-task',p)">
+        @run-task="p=>$emit('run-task',p)"
+        @restart-task="$emit('restart-task')">
       </task-tree>
     </div>
   </div>
@@ -67,7 +68,7 @@ const TaskPanel = {
       </div>
       <div class="flex-1 flex flex-col min-h-0">
         <div class="flex items-center justify-between mb-3 flex-shrink-0">
-          <h2 class="text-lg font-semibold text-dark"><i class="fa fa-terminal mr-2 text-primary text-lg"></i>运行日志</h2>
+          <h2 class="page-panel-title"><i class="fa fa-terminal mr-2 text-primary"></i>运行日志</h2>
           <button class="text-gray-400 hover:text-gray-600 text-sm" @click="$emit('clear-logs')"><i class="fa fa-eraser mr-1"></i>清除</button>
         </div>
         <div class="log-container flex-1" id="logContainer">

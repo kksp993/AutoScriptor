@@ -190,7 +190,7 @@ def heaven_draw_card_exit(self:Hero):
     click(B(Box(182,232,904,102)),repeat=3)
     sleep(1)
     click(B(Box(10,10,0,0)))
-    click(T("返回"), until=lambda:ui_T((T("我的队伍"), T("回家", box=Box(29,613,77,88).margin()))))
+    click(T("返回", box=Box(588,538,103,38).margin()), until=lambda:ui_T((T("我的队伍"), T("回家", box=Box(29,613,77,88).margin()))))
 
 @combo
 def heaven_battle(
