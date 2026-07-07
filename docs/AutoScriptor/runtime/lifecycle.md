@@ -74,8 +74,11 @@ Editor 自定义代码执行由 `/api/editor/execute-code` 拥有路由内执行
 - 纯全局配置保存（如基础配置、deploy、notify、update、remote_access）只写 `data/config.json`，不重写当前账号 JSON。任务、状态、账号、角色变更才写 `accounts/*.json`。
 - 若 Windows ACL 允许写入但拒绝替换/删除（`WinError 5`），保存层直接失败并交给 WebUI 返回包含 `dataRoot/config_path/accounts_dir` 的错误诊断，不再直接覆写目标文件。
 - 当前角色的 `tasks` / `status` / `game_profession` 被展开到运行态 `cfg`。
+- 全局任务排序覆盖层 `task_ordering` 存在 `data/config.json`，当前保存用户拖拽得到的可嵌套总顺序 `items`；`user_order` 是展平后的兼容投影。它不写入账号 JSON，也不改变 `cfg["tasks"]` 的树形目录。
 - 写 JSON 使用同目录临时文件加 `os.replace()`。
 - `WebUILifecycleService` 负责配置副作用顺序：修改内存、保存、按场景选择配置同步/轻量 reload/完整 reload、刷新 order map、唤醒调度、递增 `config_version`。新增账号完成写入和切换后，投影刷新失败会沿 API 返回错误，不再把不完整生命周期上报为成功。
+
+任务顺序保存只使用 `POST /api/task-ordering`：保存 `items` 分组顺序并派生 `user_order`，要求 runtime idle，并刷新 WebUI order map 与调度器投影。旧版图布局接口 `POST /api/task-ordering/layout` 仅作为兼容 no-op 保留，不再保存画布坐标或影响执行顺序。
 
 WebUI 公开配置必须剥离账号、密码、加密块、运行时任务字段和 `_due` 等后端投影字段。
 

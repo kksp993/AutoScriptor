@@ -93,12 +93,17 @@ class RuntimeController:
                 self._stop_requested = False
         external_stopping = bool(external_statuses.get(reason, {}).get("stopping")) if reason else False
         stopping = bool(reason and (self._stop_requested or external_stopping))
+        current_task_path = None
+        current_task_path_getter = getattr(self.task_manager, "current_task_path", None)
+        if reason and callable(current_task_path_getter):
+            current_task_path = current_task_path_getter()
         return {
             "running": reason is not None,
             "busy": reason is not None,
             "stopping": stopping,
             "reason": reason,
             "direct_running": direct_running,
+            "current_task_path": current_task_path,
             "external": external_statuses,
             "scheduler": scheduler_status,
         }

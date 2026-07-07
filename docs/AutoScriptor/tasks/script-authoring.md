@@ -29,6 +29,15 @@ WebUI Editor 的“保存脚本”接口 `/api/editor/save-custom-task` 也必�
 
 例如兑换码礼品兑换是内置一般任务，注册路径为 `一般任务/活动/兑换豪礼礼品兑换`，源码位于 `ZmxyOL/task/normal_task/huodong/redeem_gift.py`。
 
+## 排序与路径身份
+
+WebUI 的“任务列表”使用全局 `task_ordering` 覆盖层保存用户拖拽得到的可嵌套总顺序；任务脚本不要把用户显示顺序写进源码目录或账号 JSON。排序身份仍是规范化 slash 任务路径，例如 `每日任务/村庄/宠物培养`。
+
+- `_order.txt` 只作为内置源码导入/注册 seed，保留历史稳定性；不是用户拖拽排序的持久化位置。
+- `items` 是当前持久化的用户分组顺序，支持任务节点和嵌套分组；`user_order` 是后端由 `items` 展平生成的兼容投影和旧数据导入 seed。有效顺序先递归展开 `items`，再回退到当前任务树顺序、运行时注册顺序和路径字典序。
+- 旧版 `hard_edges`、`layout`、`group_order` 会被后端规范化忽略，不再表达偏序关系或画布布局。
+- 重命名 `path_cn` 等同于删除旧路径并新增新路径；旧排序路径会在 WebUI 诊断中显示为 stale，用户可拖拽后重新保存。
+
 ## register_task 元数据
 
 | 参数 | 说明 |

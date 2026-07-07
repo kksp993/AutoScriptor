@@ -83,6 +83,8 @@
 6. 当前星期在 `allowed_weekdays` 内；不在时会推迟 `next_exec_time`
 7. 没有在本次调度激活周期内耗尽 retry
 
+收集到的到期任务会再按全局 `task_ordering` 投影排序后执行。有效顺序来自确定性总排序：先递归展开 WebUI 拖拽保存的 `items` 分组顺序（`user_order` 是展平后的兼容投影），再回退到当前任务树顺序、运行时注册顺序和路径字典序。旧版 `hard_edges`、`layout`、`group_order` 会被规范化忽略，不再表示偏序规则或业务成功依赖。
+
 人工接管标记不是永久冻结。`human_takeover_error` 存在时：
 
 - `now < next_exec_time`：WebUI 显示红色，调度器跳过。

@@ -254,7 +254,8 @@ const EditorPanel = {
           </div>
         </div>
         <python-code-editor v-model="recordedCode" ref="recordedCodeInput" class="flex-1 editor-code-textarea"
-                            placeholder="操作后代码将自动生成…" />
+                            placeholder="操作后代码将自动生成…"
+                            @line-dblclick="openRecordedFunctionDialog" />
       </div>
     </div>
 
@@ -312,6 +313,49 @@ const EditorPanel = {
   <template #footer>
     <el-button @click="saveScriptDialogVisible = false">取消</el-button>
     <el-button type="primary" :loading="saveScriptLoading" @click="submitSaveCustomScript">保存</el-button>
+  </template>
+</el-dialog>
+
+<el-dialog v-model="functionEditorDialogVisible" :title="functionEditorDialogTitle" width="min(900px, calc(100vw - 32px))" append-to-body>
+  <div class="flex flex-col gap-3 min-h-[520px]">
+    <div class="flex items-center justify-between gap-2 flex-wrap">
+      <nav class="editor-menubar">
+        <div v-for="group in recorderMenuGroups" :key="'function-' + group.label" class="editor-menu-wrap">
+          <button type="button" class="editor-menubar-item"
+                  :class="{ 'is-open': recorderOpenGroup === group.label }"
+                  @click.stop="toggleRecorderGroup(group.label)">
+            {{ group.label }}
+          </button>
+          <div v-if="recorderOpenGroup === group.label" class="editor-menu-panel editor-menu-panel--down">
+            <template v-for="item in group.items" :key="'function-' + item.key">
+              <div v-if="item.children" class="editor-menu-subwrap">
+                <button type="button" class="editor-menu-item" @click.stop="toggleRecorderSubmenu(item.key)">
+                  <i :class="item.icon"></i><span>{{ item.label }}</span><i class="fa fa-angle-right ml-auto"></i>
+                </button>
+                <div v-if="recorderSubmenuOpen === item.key" class="editor-menu-panel editor-menu-subpanel">
+                  <button v-for="child in item.children" :key="'function-' + child.key" type="button"
+                          class="editor-menu-item" :class="{ 'is-disabled': child.disabled && child.disabled() }"
+                          :disabled="child.disabled && child.disabled()" @click="runRecorderMenuAction(child)">
+                    <i :class="child.icon"></i><span>{{ child.label }}</span>
+                  </button>
+                </div>
+              </div>
+              <button v-else type="button" class="editor-menu-item" :class="{ 'is-disabled': item.disabled && item.disabled() }"
+                      :disabled="item.disabled && item.disabled()" @click="runRecorderMenuAction(item)">
+                <i :class="item.icon"></i><span>{{ item.label }}</span>
+              </button>
+            </template>
+          </div>
+        </div>
+      </nav>
+      <span class="text-xs text-slate-500">菜单会插入到当前函数草稿；点击保存后替换主录制区中的函数块。</span>
+    </div>
+    <python-code-editor v-model="functionEditorCode" ref="functionEditorCodeInput" class="flex-1 editor-code-textarea"
+                        placeholder="def bg_listener():\n    bg.set_signal('my_signal', True)" />
+  </div>
+  <template #footer>
+    <el-button @click="functionEditorDialogVisible = false">取消</el-button>
+    <el-button type="primary" @click="applyFunctionEditorChanges">保存函数</el-button>
   </template>
 </el-dialog>
 </div>`,
@@ -378,6 +422,11 @@ const EditorPanel = {
     const recorderMenuRef = ref(null);
     const recorderOpenGroup = ref('');
     const recorderSubmenuOpen = ref('');
+    const functionEditorDialogVisible = ref(false);
+    const functionEditorDialogTitle = ref('编辑监听函数');
+    const functionEditorCode = ref('');
+    const functionEditorCodeInput = ref(null);
+    const functionEditorLineRange = ref(null);
 
     // ── recorded code ──
     const recordedCodeInput = ref(null);
@@ -518,45 +567,89 @@ const EditorPanel = {
       return `click(${tgt}${offsetPart})`;
     }
 
-    function appendCode(line) {
-      if (!line) return;
-      const cur = recordedCode.value || '';
-      const prefix = cur && !cur.endsWith('\n') ? '\n' : '';
-      recordedCode.value = cur + prefix + line + '\n';
+    function activeCodeTarget() {
+      if (functionEditorDialogVisible.value) {
+        return { model: functionEditorCode, input: functionEditorCodeInput };
+      }
+      return { model: recordedCode, input: recordedCodeInput };
     }
 
-    function appendInlineCode(snippet) {
-      if (!snippet) return;
-      recordedCode.value = (recordedCode.value || '') + snippet;
-    }
-
-    function recordedTextareaElement() {
-      const input = recordedCodeInput.value;
+    function codeTextareaElement(target) {
+      const input = target.input.value;
       if (!input) return null;
       return input.textarea || (input.$el ? input.$el.querySelector('textarea') : null);
     }
 
-    function focusRecordedCodeAt(pos) {
-      const input = recordedCodeInput.value;
+    function focusCodeTargetAt(target, pos) {
+      const input = target.input.value;
       Vue.nextTick(() => {
         if (input && typeof input.setSelection === 'function') {
           input.setSelection(pos, pos);
           return;
         }
-        const ta = recordedTextareaElement();
+        const ta = codeTextareaElement(target);
         if (!ta) return;
         ta.focus();
         ta.setSelectionRange(pos, pos);
       });
     }
 
+    function recordedTextareaElement() {
+      return codeTextareaElement({ input: recordedCodeInput });
+    }
+
+    function focusRecordedCodeAt(pos) {
+      focusCodeTargetAt({ input: recordedCodeInput }, pos);
+    }
+
+    function findInsertionMarker(value) {
+      const match = /(^|\n)([ \t]*)# 在这里[^\n]*/.exec(value || '');
+      if (!match) return null;
+      return {
+        index: match.index + match[1].length,
+        indent: match[2] || '',
+      };
+    }
+
+    function indentSnippet(snippet, indent) {
+      if (!indent) return snippet;
+      return String(snippet || '')
+        .split('\n')
+        .map(line => (line ? indent + line : line))
+        .join('\n');
+    }
+
+    function appendSnippetToActiveCode(snippet, cursorOffset = null, options = {}) {
+      if (!snippet) return;
+      const target = activeCodeTarget();
+      const current = target.model.value || '';
+      const marker = options.ignoreMarker ? null : findInsertionMarker(current);
+      if (marker) {
+        const text = indentSnippet(String(snippet).replace(/\n?$/, ''), marker.indent) + '\n';
+        target.model.value = current.slice(0, marker.index) + text + current.slice(marker.index);
+        const cursor = cursorOffset == null ? marker.index + text.length : marker.index + marker.indent.length + cursorOffset;
+        focusCodeTargetAt(target, cursor);
+        return;
+      }
+      const prefix = current && !current.endsWith('\n') ? '\n' : '';
+      const insertStart = current.length + prefix.length;
+      const text = String(snippet).replace(/\n?$/, '') + '\n';
+      target.model.value = current + prefix + text;
+      if (cursorOffset != null) focusCodeTargetAt(target, insertStart + cursorOffset);
+    }
+
+    function appendCode(line) {
+      appendSnippetToActiveCode(line);
+    }
+
+    function appendInlineCode(snippet) {
+      if (!snippet) return;
+      const target = activeCodeTarget();
+      target.model.value = (target.model.value || '') + snippet;
+    }
+
     function appendRecordedSnippet(line, cursorOffset = null) {
-      if (!line) return;
-      const cur = recordedCode.value || '';
-      const prefix = cur && !cur.endsWith('\n') ? '\n' : '';
-      const insertStart = cur.length + prefix.length;
-      recordedCode.value = cur + prefix + line + '\n';
-      if (cursorOffset != null) focusRecordedCodeAt(insertStart + cursorOffset);
+      appendSnippetToActiveCode(line, cursorOffset);
     }
 
     function clearSelection() {
@@ -712,6 +805,171 @@ const EditorPanel = {
       ElementPlus.ElMessage.success('已添加「数字网格」模板');
     }
 
+    function appendExtractColor() {
+      const b = effectiveBox();
+      if (!b) {
+        ElementPlus.ElMessage.warning('请先框选取色区域');
+        return;
+      }
+      appendCode(`colors = get_colors((B(${b.left},${b.top},${b.width},${b.height}),))`);
+      ElementPlus.ElMessage.success('已添加「颜色提取」');
+    }
+
+    function appendBgScope() {
+      const line = 'with bg.scope("后台监听") as scope:\n    # 在这里添加后台逻辑';
+      appendRecordedSnippet(line, line.indexOf('# 在这里'));
+      ElementPlus.ElMessage.success('已添加「后台声明域」');
+    }
+
+    function appendBgLambdaListener() {
+      const line = [
+        'scope.add(',
+        '    name="监听名称",',
+        '    identifier=T("目标文字"),',
+        '    callback=lambda: bg.set_signal("my_signal", True),',
+        ')',
+      ].join('\n');
+      appendRecordedSnippet(line, line.indexOf('目标文字'));
+      ElementPlus.ElMessage.success('已添加「单行表达式监听」');
+    }
+
+    function appendBgFunctionListener() {
+      const line = [
+        'def bg_listener():',
+        '    bg.set_signal("my_signal", True)',
+        '',
+        'scope.add(',
+        '    name="监听名称",',
+        '    identifier=T("目标文字"),',
+        '    callback=bg_listener,',
+        ')',
+      ].join('\n');
+      appendRecordedSnippet(line, line.indexOf('bg_listener'));
+      ElementPlus.ElMessage.success('已添加「自定义函数监听」；双击 def 行可打开子窗口');
+    }
+
+    function appendBgNewSignal() {
+      appendRecordedSnippet('bg.set_signal("my_signal", False)', 'bg.set_signal("'.length);
+      ElementPlus.ElMessage.success('已添加「新建信号量」');
+    }
+
+    function appendBgSignalIfTrue() {
+      const line = 'if bg.signal("my_signal", False):\n    # 在这里继续添加代码';
+      appendRecordedSnippet(line, line.indexOf('my_signal'));
+      ElementPlus.ElMessage.success('已添加「判断为真」');
+    }
+
+    function appendBgWaitSignalTrue() {
+      appendRecordedSnippet('wait_for_signal("my_signal", True, 10)', 'wait_for_signal("'.length);
+      ElementPlus.ElMessage.success('已添加「等待信号为真」');
+    }
+
+    function appendBgClearSignal() {
+      appendRecordedSnippet('bg.set_signal("my_signal", False)', 'bg.set_signal("'.length);
+      ElementPlus.ElMessage.success('已添加「清空信号量」');
+    }
+
+    function appendBgClearAllSignals() {
+      appendCode('bg.clear_signals()');
+      ElementPlus.ElMessage.success('已添加「清空所有信号量」');
+    }
+
+    function appendBgIntervalScope() {
+      const line = 'with bg.interval(0.5):\n    # 在这里添加后台逻辑';
+      appendRecordedSnippet(line, line.indexOf('0.5'));
+      ElementPlus.ElMessage.success('已添加「截屏间隔」');
+    }
+
+    function appendBgConcurrentListenerOption() {
+      appendCode('allow_concurrent=True, once=False, throttle=0.3');
+      ElementPlus.ElMessage.success('已添加「并发监听参数」');
+    }
+
+    function appendBgProtectClearScope() {
+      const line = 'with bg.protect_clear():\n    # 在这里添加后台逻辑';
+      appendRecordedSnippet(line, line.indexOf('# 在这里'));
+      ElementPlus.ElMessage.success('已添加「保护后台清理」');
+    }
+
+    function appendHeroAction(code, label) {
+      appendCode(code);
+      ElementPlus.ElMessage.success(`已添加「${label}」`);
+    }
+
+    function lineStartOffset(lines, lineIndex) {
+      let offset = 0;
+      for (let index = 0; index < lineIndex; index += 1) {
+        offset += lines[index].length + 1;
+      }
+      return offset;
+    }
+
+    function findFunctionRangeForLine(lineInfo) {
+      const content = recordedCode.value || '';
+      const lines = content.split('\n');
+      let clickedLine = lineInfo && Number.isInteger(lineInfo.lineNumber) ? lineInfo.lineNumber : 0;
+      clickedLine = Math.max(0, Math.min(clickedLine, lines.length - 1));
+      let defLine = clickedLine;
+      while (defLine >= 0 && !/^\s*def\s+[A-Za-z_]\w*\s*\(.*\)\s*:/.test(lines[defLine] || '')) {
+        defLine -= 1;
+      }
+      if (defLine < 0) return null;
+
+      const defIndent = ((lines[defLine] || '').match(/^\s*/) || [''])[0].length;
+      let endLine = defLine + 1;
+      while (endLine < lines.length) {
+        const line = lines[endLine] || '';
+        const lineIndent = (line.match(/^\s*/) || [''])[0].length;
+        if (line.trim() && lineIndent <= defIndent) break;
+        endLine += 1;
+      }
+
+      const start = lineStartOffset(lines, defLine);
+      const end = lineStartOffset(lines, endLine);
+      return {
+        start,
+        end,
+        code: lines.slice(defLine, endLine).join('\n'),
+        name: ((lines[defLine] || '').match(/^\s*def\s+([A-Za-z_]\w*)/) || [])[1] || '函数',
+      };
+    }
+
+    function openRecordedFunctionDialog(lineInfo) {
+      const range = findFunctionRangeForLine(lineInfo || {});
+      if (!range) {
+        ElementPlus.ElMessage.info('请双击 def 函数行或函数体以打开函数编辑窗口');
+        return;
+      }
+      functionEditorLineRange.value = { start: range.start, end: range.end };
+      functionEditorCode.value = range.code || 'def bg_listener():\n    bg.set_signal("my_signal", True)';
+      functionEditorDialogTitle.value = `编辑监听函数：${range.name}`;
+      functionEditorDialogVisible.value = true;
+      Vue.nextTick(() => {
+        if (functionEditorCodeInput.value && typeof functionEditorCodeInput.value.focus === 'function') {
+          functionEditorCodeInput.value.focus();
+        }
+      });
+    }
+
+    function applyFunctionEditorChanges() {
+      const range = functionEditorLineRange.value;
+      if (!range) {
+        functionEditorDialogVisible.value = false;
+        return;
+      }
+      const nextCode = String(functionEditorCode.value || '').trimEnd();
+      if (!/^\s*def\s+[A-Za-z_]\w*\s*\(.*\)\s*:/m.test(nextCode)) {
+        ElementPlus.ElMessage.warning('函数窗口内容需要保留 def 函数定义');
+        return;
+      }
+      const current = recordedCode.value || '';
+      const replacement = nextCode + (range.end < current.length && !nextCode.endsWith('\n') ? '\n' : '');
+      recordedCode.value = current.slice(0, range.start) + replacement + current.slice(range.end);
+      functionEditorDialogVisible.value = false;
+      functionEditorLineRange.value = null;
+      ElementPlus.ElMessage.success('已保存函数');
+    }
+
     const recorderMenuGroups = [
       { label: '文件', items: [
         { key: 'save', label: '保存脚本', icon: 'fa fa-save', action: saveCustomScript, disabled: () => saveScriptDisabled.value },
@@ -724,16 +982,70 @@ const EditorPanel = {
         { key: 'long-click', label: '长按', icon: 'fa fa-hand-rock-o', action: appendLongClickAction, disabled: () => !optimizedSel.value },
         { key: 'input', label: '输入', icon: 'fa fa-keyboard-o', action: appendInputTextAction },
         { key: 'wait', label: '等待', icon: 'fa fa-clock-o', children: [
-          { key: 'sleep', label: 'sleep', icon: 'fa fa-hourglass-half', action: appendSleepWait },
-          { key: 'wait-appear', label: 'waitforappear', icon: 'fa fa-eye', action: appendWaitAppear, disabled: () => !optimizedSel.value },
-          { key: 'wait-disappear', label: 'waitfordisappear', icon: 'fa fa-eye-slash', action: appendWaitDisappear, disabled: () => !optimizedSel.value },
+          { key: 'sleep', label: '阻塞等待', icon: 'fa fa-hourglass-half', action: appendSleepWait },
+          { key: 'wait-appear', label: '等待出现', icon: 'fa fa-eye', action: appendWaitAppear, disabled: () => !optimizedSel.value },
+          { key: 'wait-disappear', label: '等待消失', icon: 'fa fa-eye-slash', action: appendWaitDisappear, disabled: () => !optimizedSel.value },
         ] },
-        { key: 'extract', label: '提取', icon: 'fa fa-scissors', action: appendExtractInfo, disabled: () => !optimizedSel.value || extractPreviewLoading.value },
+        { key: 'extract', label: '提取', icon: 'fa fa-scissors', children: [
+          { key: 'extract-text', label: '文字', icon: 'fa fa-font', action: appendExtractInfo, disabled: () => !optimizedSel.value || extractPreviewLoading.value },
+          { key: 'extract-color', label: '颜色', icon: 'fa fa-eyedropper', action: appendExtractColor, disabled: () => !optimizedSel.value },
+        ] },
       ] },
       { label: '定位', items: [
         { key: 'locate', label: '定位坐标', icon: 'fa fa-crosshairs', action: appendLocate, disabled: () => !optimizedSel.value },
         { key: 'ui-t', label: '判断存在', icon: 'fa fa-check-circle-o', action: appendUiExists },
         { key: 'ui-f', label: '判断不在', icon: 'fa fa-times-circle-o', action: appendUiNotExists },
+      ] },
+      { label: '后台', items: [
+        { key: 'bg-scope', label: '声明域', icon: 'fa fa-object-group', action: appendBgScope },
+        { key: 'bg-listener', label: '添加监听', icon: 'fa fa-bell-o', children: [
+          { key: 'bg-listener-lambda', label: '单行表达式', icon: 'fa fa-bolt', action: appendBgLambdaListener },
+          { key: 'bg-listener-function', label: '自定义函数', icon: 'fa fa-code', action: appendBgFunctionListener },
+        ] },
+        { key: 'bg-signal', label: '信号量', icon: 'fa fa-flag-o', children: [
+          { key: 'bg-signal-new', label: '新建信号量', icon: 'fa fa-plus-circle', action: appendBgNewSignal },
+          { key: 'bg-signal-if', label: '判断为真', icon: 'fa fa-check', action: appendBgSignalIfTrue },
+          { key: 'bg-signal-wait', label: '等待为真', icon: 'fa fa-clock-o', action: appendBgWaitSignalTrue },
+          { key: 'bg-signal-clear', label: '清空信号量', icon: 'fa fa-eraser', action: appendBgClearSignal },
+        ] },
+        { key: 'bg-settings', label: '后台设置', icon: 'fa fa-sliders', children: [
+          { key: 'bg-interval', label: '截屏间隔', icon: 'fa fa-camera', action: appendBgIntervalScope },
+          { key: 'bg-listener-options', label: '监听参数', icon: 'fa fa-list', action: appendBgConcurrentListenerOption },
+          { key: 'bg-protect-clear', label: '保护清理', icon: 'fa fa-shield', action: appendBgProtectClearScope },
+        ] },
+        { key: 'bg-clear-all', label: '清空所有', icon: 'fa fa-trash-o', action: appendBgClearAllSignals },
+      ] },
+      { label: '角色技能', items: [
+        { key: 'hero-move', label: '移动', icon: 'fa fa-arrows-h', children: [
+          { key: 'hero-move-left', label: '左移', icon: 'fa fa-arrow-left', action: () => appendHeroAction('h.move_left(0)', '左移') },
+          { key: 'hero-move-right', label: '右移', icon: 'fa fa-arrow-right', action: () => appendHeroAction('h.move_right(0)', '右移') },
+        ] },
+        { key: 'hero-skill', label: '技能', icon: 'fa fa-magic', children: [
+          { key: 'hero-skill-1', label: '技能1', icon: 'fa fa-circle-o', action: () => appendHeroAction('h.skill(1)', '技能1') },
+          { key: 'hero-skill-2', label: '技能2', icon: 'fa fa-circle-o', action: () => appendHeroAction('h.skill(2)', '技能2') },
+          { key: 'hero-skill-3', label: '技能3', icon: 'fa fa-circle-o', action: () => appendHeroAction('h.skill(3)', '技能3') },
+          { key: 'hero-skill-4', label: '技能4', icon: 'fa fa-circle-o', action: () => appendHeroAction('h.skill(4)', '技能4') },
+          { key: 'hero-skill-5', label: '技能5', icon: 'fa fa-circle-o', action: () => appendHeroAction('h.skill(5)', '技能5') },
+          { key: 'hero-skill-6', label: '技能6', icon: 'fa fa-circle-o', action: () => appendHeroAction('h.skill(6)', '技能6') },
+        ] },
+        { key: 'hero-prop', label: '法宝', icon: 'fa fa-diamond', children: [
+          { key: 'hero-prop-1', label: '法宝1', icon: 'fa fa-star-o', action: () => appendHeroAction('h.prop(fb=True, xb=False, ws=False)', '法宝1') },
+          { key: 'hero-prop-2', label: '法宝2', icon: 'fa fa-star-half-o', action: () => appendHeroAction('h.prop(fb=False, xb=True, ws=False)', '法宝2') },
+          { key: 'hero-prop-burst', label: '爆', icon: 'fa fa-fire', action: () => appendHeroAction('h.prop(fb=False, xb=False, ws=True)', '爆') },
+        ] },
+        { key: 'hero-huashen', label: '化身', icon: 'fa fa-user-secret', children: [
+          { key: 'hero-huashen-click', label: '点击化身', icon: 'fa fa-user', action: () => appendHeroAction('h.huashen()', '点击化身') },
+          { key: 'hero-huashen-long', label: '玄女绝唱', icon: 'fa fa-music', action: () => appendHeroAction('h.huashen_long()', '玄女绝唱') },
+        ] },
+        { key: 'hero-zhenwu', label: '本命神', icon: 'fa fa-shield', children: [
+          { key: 'hero-zhenwu-click', label: '点击本命神', icon: 'fa fa-shield', action: () => appendHeroAction('h.zhenwu()', '点击本命神') },
+        ] },
+        { key: 'hero-zhenling', label: '合体', icon: 'fa fa-users', children: [
+          { key: 'hero-zhenling-click', label: '合体', icon: 'fa fa-users', action: () => appendHeroAction('h.zhenling()', '合体') },
+        ] },
+        { key: 'hero-wushuang', label: '无双', icon: 'fa fa-fire', children: [
+          { key: 'hero-wushuang-click', label: '无双', icon: 'fa fa-fire', action: () => appendHeroAction('h.prop(fb=False, xb=False, ws=True)', '无双') },
+        ] },
       ] },
       { label: '工具', items: [
         { key: 'grid', label: '数字网格', icon: 'fa fa-th', action: appendExtractGridInfo, disabled: () => !optimizedSel.value },
@@ -1341,10 +1653,6 @@ const EditorPanel = {
       });
     }
 
-    function onRecordedCodeKeydown(e) {
-      handleTextareaTab(e, recordedCode);
-    }
-
     function onCustomExecKeydown(e) {
       handleTextareaTab(e, customExecCode);
     }
@@ -1435,6 +1743,8 @@ const EditorPanel = {
       swipeDir, remoteLoading, customExecCode, execCustomLoading, stopCustomLoading, extractPreviewLoading,
       saveScriptLoading, saveScriptDisabled, saveScriptDialogVisible, saveScriptForm, saveScriptParamTypes,
       saveScriptParamIsEnum, addSaveScriptParam, removeSaveScriptParam, submitSaveCustomScript,
+      functionEditorDialogVisible, functionEditorDialogTitle, functionEditorCode, functionEditorCodeInput,
+      openRecordedFunctionDialog, applyFunctionEditorChanges,
       virtualRemoteOnly, virtualClickMarkers, virtualSwipeLines,
       recordedCodeInput, recordedCode, recordedLines, isLandscape, canvasCellStyle,
       recorderMenuRef, recorderOpenGroup, recorderSubmenuOpen, recorderMenuGroups,
@@ -1444,9 +1754,13 @@ const EditorPanel = {
       onSelectionChange, onThresholdRelease,
       saveSelection, onCopy, remoteClick, remoteSwipe,
       onCanvasRemoteClick, onCanvasRemoteSwipe,
-      copyRecordedCode, saveCustomScript, stopCustomCodeExecution, onRecordedCodeKeydown, onCustomExecKeydown, executeCustomCode,
+      copyRecordedCode, saveCustomScript, stopCustomCodeExecution, onCustomExecKeydown, executeCustomCode,
       closeRecorderMenu, toggleRecorderGroup, toggleRecorderSubmenu, runRecorderMenuAction,
-      appendLocate, appendUiExists, appendUiNotExists, appendWaitAppear, appendWaitDisappear, appendSleepWait, appendExtractInfo, appendExtractGridInfo,
+      appendLocate, appendUiExists, appendUiNotExists, appendWaitAppear, appendWaitDisappear, appendSleepWait,
+      appendExtractInfo, appendExtractColor, appendExtractGridInfo,
+      appendBgScope, appendBgLambdaListener, appendBgFunctionListener, appendBgNewSignal, appendBgSignalIfTrue,
+      appendBgWaitSignalTrue, appendBgClearSignal, appendBgClearAllSignals, appendBgIntervalScope,
+      appendBgConcurrentListenerOption, appendBgProtectClearScope, appendHeroAction,
     };
   },
 };

@@ -47,6 +47,13 @@
         "ssh_user": null,
         "ssh_executable": "ssh"
     },
+    "task_ordering": {
+        "schema_version": 1,
+        "user_order": [],
+        "hard_edges": [],
+        "layout": {},
+        "group_order": []
+    },
     "accounts": {
         "dir": ""
     },

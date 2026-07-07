@@ -260,6 +260,52 @@ def _first_hit_path(boxes: list, target: Target|list[Target]|tuple[Target, ...])
     return None
 
 
+def match(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, *, screenshot=None) -> dict | None:
+    """结构化匹配目标，沿用 locate 的 tuple 任一、list 全部语义。"""
+    _validate_timeout(timeout, "match")
+    check_cancel_raise()
+    is_all_match = isinstance(target, list)
+    if isinstance(target, Target):
+        normalized_targets = [target]
+        target_for_paths = target
+    elif isinstance(target, (list, tuple)):
+        normalized_targets = target
+        target_for_paths = target
+    else:
+        raise TypeError(f"match 目标必须是 Target/list/tuple，收到 {type(target)!r}: {target!r}")
+
+    boxes = locate(
+        normalized_targets,
+        timeout,
+        assure_stable=False,
+        is_simplify=False,
+        screenshot=screenshot,
+    )
+    if not boxes:
+        return None
+    if is_all_match:
+        if not full(boxes):
+            return None
+    elif first(boxes) is None:
+        return None
+
+    matched_index = index(boxes)
+    flattened_targets = _flatten_target_paths(target_for_paths)
+    if 0 <= matched_index < len(flattened_targets):
+        matched_path, matched_target = flattened_targets[matched_index]
+    else:
+        matched_path, matched_target = (matched_index,), None
+    matched_box = first([boxes[matched_index]]) if matched_index >= 0 else None
+    return {
+        "all": is_all_match,
+        "index": matched_index,
+        "path": matched_path,
+        "target": matched_target,
+        "box": matched_box,
+        "boxes": boxes,
+    }
+
+
 def switch_base(base: str):
     if base == "mumu":
         mixctrl.switch_to_mumu()
@@ -657,6 +703,33 @@ def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), re
             colors[i].append(None)
     logger.debug(f"get_colors {targets} colors: {colors}")
     return colors
+
+
+def coloris(targets: Target|tuple[Target, ...]|list[Target], color: str, timeout: float=0, *, offset: tuple = (0, 0), resize: tuple = (-1, -1))->bool:
+    """判断目标区域颜色是否匹配，tuple 任一匹配，list 全部匹配。"""
+    _validate_timeout(timeout, "coloris")
+    if hasattr(targets, '__iter__') and not isinstance(targets, (list, tuple, str)):
+        targets = list(targets)
+    is_all_match = isinstance(targets, list)
+
+    def color_matches_once() -> bool:
+        color_matrix = get_colors(targets, offset=offset, resize=resize)
+        matched_by_target = []
+        for target_colors in color_matrix:
+            matched_by_target.append(any(color_value == color for color_value in target_colors))
+        return all(matched_by_target) if is_all_match else any(matched_by_target)
+
+    first_attempt = True
+    start_time = time.time()
+    while first_attempt or time.time() - start_time < timeout:
+        check_cancel_raise()
+        first_attempt = False
+        if color_matches_once():
+            return True
+        if timeout <= 0:
+            break
+        cancellable_sleep(0.5)
+    return False
 
 def sleep(seconds: float):
     cancellable_sleep(seconds)

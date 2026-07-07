@@ -244,6 +244,83 @@ body,
   overscroll-behavior: contain;
 }
 
+.task-order-row {
+  position: relative;
+}
+
+.task-order-row-guided {
+  border-color: rgba(34, 197, 94, 0.58) !important;
+  background: rgba(240, 253, 244, 0.96) !important;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.16), 0 0 20px rgba(34, 197, 94, 0.18);
+}
+
+.task-order-row::before,
+.task-order-row::after {
+  content: "";
+  position: absolute;
+  left: 0.75rem;
+  right: 0.75rem;
+  height: 3px;
+  border-radius: 999px;
+  background: transparent;
+  pointer-events: none;
+  transition: background-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.task-order-row::before {
+  top: -3px;
+}
+
+.task-order-row::after {
+  bottom: -3px;
+}
+
+.task-order-row.task-order-drop-before::before,
+.task-order-row.task-order-drop-after::after {
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
+}
+
+.task-order-row.task-order-drop-inside {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.28), 0 10px 26px rgba(15, 23, 42, 0.08);
+}
+
+.task-enabled-row {
+  transition: transform 0.14s ease, box-shadow 0.14s ease, border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.task-enabled-row-selected {
+  transform: scale(1.02);
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2), 0 0 22px rgba(34, 197, 94, 0.28);
+}
+
+.task-enabled-row-current {
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.28), 0 0 26px rgba(34, 197, 94, 0.36);
+}
+
+.task-current-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(34, 197, 94, 0.28);
+  background: rgba(34, 197, 94, 0.14);
+  color: #15803d;
+  font-size: var(--as-text-2xs);
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.task-status-dot {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
 .task-panel-custom-warn {
   color: #b91c1c;
   font-weight: 600;
@@ -619,6 +696,11 @@ html.light .app-body {
 }
 .editor-recorder-title {
   margin: 0;
+}
+.editor-recorder-actions {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .editor-menubar {
   display: flex;

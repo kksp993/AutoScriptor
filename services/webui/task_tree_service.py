@@ -18,6 +18,11 @@ from dpath.exceptions import PathNotFound
 
 from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.game_profession import GAME_PROFESSIONS, normalize_game_profession
+from services.core.task_ordering import (
+    collect_task_paths,
+    project_task_ordering,
+    summarize_ordering_generations,
+)
 
 
 class TaskTreeService:
@@ -36,18 +41,63 @@ class TaskTreeService:
         "_due",
     )
 
+    def task_ordering_projection(self, task_tree: dict | None = None):
+        """Return the current global task-ordering projection for a task tree."""
+        source_tree = task_tree if isinstance(task_tree, dict) else cfg._config.get("tasks", {})
+        return project_task_ordering(source_tree or {}, cfg._config.get("task_ordering", {}))
+
+    def task_ordering_projection_with_overlay(self, raw_overlay: dict[str, Any], task_tree: dict | None = None):
+        """Return a projection for a candidate overlay without mutating cfg."""
+        source_tree = task_tree if isinstance(task_tree, dict) else cfg._config.get("tasks", {})
+        return project_task_ordering(source_tree or {}, raw_overlay)
+
     def read_order_map(self) -> dict[str, int]:
-        return {path: i for i, path in enumerate(self.ordered_paths(cfg._config.get("tasks", {})))}
+        return self.task_ordering_projection().order_map
 
     def ordered_paths(self, data: dict, prefix: str = "") -> list[str]:
-        paths: list[str] = []
-        for key, value in (data or {}).items():
-            current_path = f"{prefix}/{key}" if prefix else key
-            if isinstance(value, dict) and "next_exec_time" not in value:
-                paths.extend(self.ordered_paths(value, prefix=current_path))
-            else:
-                paths.append(current_path)
-        return paths
+        if prefix:
+            return collect_task_paths(data or {}, prefix)
+        return self.task_ordering_projection(data or {}).effective_order
+
+    def apply_effective_order_to_tree(self, tasks: dict) -> Any:
+        """Reorder a public task tree by effective order without changing shape."""
+        from services.core.task_tree import TaskTree
+
+        projection = self.task_ordering_projection(tasks)
+        order_map = projection.order_map
+
+        def minimum_order(node: dict, path: str) -> int | float:
+            if TaskTree.is_leaf(node):
+                return order_map.get(path, float("inf"))
+            child_orders: list[int | float] = []
+            for child_key, child_value in node.items():
+                if not isinstance(child_value, dict):
+                    continue
+                child_path = f"{path}/{child_key}" if path else str(child_key)
+                child_orders.append(minimum_order(child_value, child_path))
+            return min(child_orders) if child_orders else float("inf")
+
+        def reorder_node(node: dict, prefix: str = "") -> None:
+            for child_key, child_value in list(node.items()):
+                if not isinstance(child_value, dict) or TaskTree.is_leaf(child_value):
+                    continue
+                child_path = f"{prefix}/{child_key}" if prefix else str(child_key)
+                reorder_node(child_value, child_path)
+            sorted_items = sorted(
+                node.items(),
+                key=lambda item: (
+                    minimum_order(item[1], f"{prefix}/{item[0]}" if prefix else str(item[0]))
+                    if isinstance(item[1], dict)
+                    else float("inf"),
+                    str(item[0]),
+                ),
+            )
+            node.clear()
+            node.update(sorted_items)
+
+        if isinstance(tasks, dict):
+            reorder_node(tasks)
+        return projection
 
     def public_config(self) -> dict:
         config_data = deepcopy(cfg._config)
@@ -69,6 +119,9 @@ class TaskTreeService:
         tasks = config_data.get("tasks")
         if isinstance(tasks, dict):
             self.inject_public_task_fields(tasks)
+            ordering_projection = self.apply_effective_order_to_tree(tasks)
+            config_data["task_ordering_projection"] = ordering_projection.to_public_dict()
+            config_data["task_ordering_generations"] = summarize_ordering_generations(ordering_projection)
         config_data["active_character"] = cfg.active_character()
         config_data["characters_summary"] = self.characters_summary()
         config_data["game_professions_by_character"] = self.game_professions_by_character()

@@ -49,24 +49,13 @@ const TaskTreeTaskRow = {
     item: { type: Object, required: true },
     taskPath: { type: String, required: true },
     runTaskDisabled: { type: Boolean, default: false },
+    reorderDisabled: { type: Boolean, default: false },
   },
-  emits: ['edit-task', 'run-task', 'restart-task'],
+  emits: ['edit-task', 'run-task', 'restart-task', 'reorder-task'],
   data() {
     return {
       collapsed: false,
       resizeObserver: null,
-      statusClasses: {
-        disabled: 'bg-gray-200 text-gray-600',
-        pending: 'bg-yellow-200 text-yellow-600',
-        scheduled: 'bg-green-200 text-green-600',
-        error: 'bg-red-200 text-red-600',
-      },
-      statusLabels: {
-        disabled: '未启用',
-        pending: '待执行',
-        scheduled: '已完成',
-        error: '错误',
-      },
     };
   },
   computed: {
@@ -89,7 +78,12 @@ const TaskTreeTaskRow = {
     },
   },
   template: `
-<div class="task-tree-item bg-gray-50 px-3.5 py-2.5 rounded-lg border border-gray-200 hover:border-primary/40 hover:bg-gray-100 transition-colors flex flex-col gap-1 min-w-0 max-w-full">
+<div class="task-tree-item bg-gray-50 px-3.5 py-2.5 rounded-lg border border-gray-200 hover:border-primary/40 hover:bg-gray-100 transition-colors flex flex-col gap-1 min-w-0 max-w-full"
+     :draggable="!reorderDisabled"
+     :title="reorderDisabled ? '' : '拖拽到另一任务上方，保存为软排序'"
+     @dragstart="startTaskDrag"
+     @dragover.prevent
+     @drop.prevent="dropTaskHere">
   <div class="flex items-center gap-2 min-w-0 w-full">
     <span :class="[
             'inline-flex items-start gap-1 min-w-0 max-w-[min(46%,11rem)] shrink',
@@ -121,11 +115,11 @@ const TaskTreeTaskRow = {
       <span :class="[
               'text-sm px-3 py-0.5 rounded-full whitespace-nowrap font-medium',
               runTaskDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
-              statusClasses[getTaskStatus(item)]
+              statusTheme(item).badgeClass
             ]"
             :title="runTaskDisabled ? '执行中不能修改任务状态' : (getTaskStatus(item)==='error' ? '点击关闭并重新开启，刷新为待执行' : '点击切换启用状态')"
             @click.stop="handleStatusClick(item)">
-        {{ statusLabels[getTaskStatus(item)] }}
+        {{ statusTheme(item).label }}
         <span v-if="item.progress_display" class="ml-1 text-[10px] align-super">{{ item.progress_display }}</span>
       </span>
       <button type="button"
@@ -154,10 +148,10 @@ const TaskTreeTaskRow = {
   },
   methods: {
     getTaskStatus(taskItem) {
-      if (!taskItem.on) return 'disabled';
-      if (taskItem.error) return 'error';
-      if ((taskItem.human_takeover || taskItem.human_takeover_error) && !taskItem._due) return 'error';
-      return taskItem._due ? 'pending' : 'scheduled';
+      return window.TaskStatusTheme?.getTaskStatus(taskItem) || 'disabled';
+    },
+    statusTheme(taskItem) {
+      return window.TaskStatusTheme?.getTaskTheme(taskItem) || { label: '未知', badgeClass: 'bg-gray-200 text-gray-600' };
     },
     openTaskEditor() {
       if (this.runTaskDisabled) {
@@ -200,6 +194,17 @@ const TaskTreeTaskRow = {
       }
       this.toggleTask(taskItem);
     },
+    startTaskDrag(event) {
+      if (this.reorderDisabled) return;
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', this.taskPath);
+    },
+    dropTaskHere(event) {
+      if (this.reorderDisabled) return;
+      const sourcePath = event.dataTransfer.getData('text/plain');
+      if (!sourcePath || sourcePath === this.taskPath) return;
+      this.$emit('reorder-task', { sourcePath, targetPath: this.taskPath });
+    },
     setupResizeObserver() {
       this.resizeObserver = new ResizeObserver(() => this.measure());
       this.$nextTick(() => {
@@ -229,8 +234,9 @@ const TaskTree = {
     basePath: { type: String, default: '' },
     depth: { type: Number, default: 0 },
     runTaskDisabled: { type: Boolean, default: false },
+    reorderDisabled: { type: Boolean, default: false },
   },
-  emits: ['edit-task', 'expanded-change', 'run-task', 'restart-task'],
+  emits: ['edit-task', 'expanded-change', 'run-task', 'restart-task', 'reorder-task'],
   data() {
     return {
       expanded: {},
@@ -257,9 +263,11 @@ const TaskTree = {
       :item="treeData[key]"
       :task-path="childBasePath(key)"
       :run-task-disabled="runTaskDisabled"
+      :reorder-disabled="reorderDisabled"
       @edit-task="(childKey, item, path) => $emit('edit-task', childKey, item, path)"
       @run-task="path => $emit('run-task', path)"
-      @restart-task="$emit('restart-task')">
+      @restart-task="$emit('restart-task')"
+      @reorder-task="payload => $emit('reorder-task', payload)">
     </task-tree-task-row>
     <!-- 一级分组 (depth=0) -->
     <div v-else-if="depth === 0" class="task-group-l1">
@@ -280,10 +288,12 @@ const TaskTree = {
           <task-tree
             :tree-data="treeData[key]" :base-path="childBasePath(key)" :depth="depth + 1"
             :run-task-disabled="runTaskDisabled"
+            :reorder-disabled="reorderDisabled"
             @edit-task="(childKey, item, path) => $emit('edit-task', childKey, item, path)"
             @expanded-change="$emit('expanded-change', $event)"
             @run-task="path => $emit('run-task', path)"
-            @restart-task="$emit('restart-task')">
+            @restart-task="$emit('restart-task')"
+            @reorder-task="payload => $emit('reorder-task', payload)">
           </task-tree>
         </div>
       </transition>
@@ -307,10 +317,12 @@ const TaskTree = {
           <task-tree
             :tree-data="treeData[key]" :base-path="childBasePath(key)" :depth="depth + 1"
             :run-task-disabled="runTaskDisabled"
+            :reorder-disabled="reorderDisabled"
             @edit-task="(childKey, item, path) => $emit('edit-task', childKey, item, path)"
             @expanded-change="$emit('expanded-change', $event)"
             @run-task="path => $emit('run-task', path)"
-            @restart-task="$emit('restart-task')">
+            @restart-task="$emit('restart-task')"
+            @reorder-task="payload => $emit('reorder-task', payload)">
           </task-tree>
         </div>
       </transition>

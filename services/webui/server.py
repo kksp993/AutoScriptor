@@ -32,6 +32,7 @@ from services.webui.lifecycle_service import WebUILifecycleService
 from services.webui.runtime_controller import RuntimeController
 from services.webui.state_version import bump_version, current_version
 from services.webui.task_tree_service import task_tree_service
+from services.core.task_ordering import summarize_ordering_generations
 
 
 def _battle_flow_allowed_for_task(flow_value: str, task_path: str | None) -> bool:
@@ -675,6 +676,71 @@ async def save_tasks_api(request: Request):
             500,
             _persistence_error_message("保存任务失败", e),
             code="save_tasks_failed",
+            diagnostics=_persistence_diagnostics(),
+        )
+
+
+@app.get("/api/task-ordering")
+async def task_ordering_api():
+    try:
+        projection = task_tree_service.task_ordering_projection()
+        return api_ok(
+            config_version=current_version(),
+            projection=projection.to_public_dict(),
+            generations=summarize_ordering_generations(projection),
+            runtime=runtime_controller.status(),
+        )
+    except Exception as e:
+        logger.error("task_ordering read error: %s", e, exc_info=True)
+        return api_error(500, str(e), code="task_ordering_read_failed")
+
+
+@app.post("/api/task-ordering")
+async def save_task_ordering_api(request: Request):
+    busy = _guard_runtime_idle("save task ordering")
+    if busy is not None:
+        return busy
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            return api_error(400, "invalid task ordering payload", code="invalid_payload")
+        raw_overlay = payload.get("overlay", payload)
+        lifecycle_service.save_task_ordering(raw_overlay)
+        return make_public_config()
+    except ValueError as e:
+        return api_error(400, str(e), code="invalid_task_ordering")
+    except Exception as e:
+        logger.error("save_task_ordering error: %s", e, exc_info=True)
+        return api_error(
+            500,
+            _persistence_error_message("保存任务排序失败", e),
+            code="save_task_ordering_failed",
+            diagnostics=_persistence_diagnostics(),
+        )
+
+
+@app.post("/api/task-ordering/layout")
+async def save_task_ordering_layout_api(request: Request):
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            return api_error(400, "invalid task ordering layout payload", code="invalid_payload")
+        raw_layout = payload.get("layout", payload)
+        config_version = lifecycle_service.save_task_ordering_layout(raw_layout)
+        projection = task_tree_service.task_ordering_projection()
+        return api_ok(
+            status="ok",
+            config_version=config_version,
+            projection=projection.to_public_dict(),
+        )
+    except ValueError as e:
+        return api_error(400, str(e), code="invalid_task_ordering_layout")
+    except Exception as e:
+        logger.error("save_task_ordering_layout error: %s", e, exc_info=True)
+        return api_error(
+            500,
+            _persistence_error_message("保存任务图布局失败", e),
+            code="save_task_ordering_layout_failed",
             diagnostics=_persistence_diagnostics(),
         )
 

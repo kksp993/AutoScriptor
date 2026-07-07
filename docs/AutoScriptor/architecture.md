@@ -34,6 +34,7 @@ webui.bat / scripts\run.bat webui
 - 全局配置：`data/config.json`
 - 配置模板：`data/config.template.json`
 - 账号/角色/任务状态：`data/accounts/`
+- 全局任务排序覆盖层：`data/config.json` 的 `task_ordering`
 - 自定义任务：`data/custom_task/`
 - 用户职业脚本：`data/battle_character/`
 - 可变缓存和采集结果：`logs/`
@@ -44,10 +45,12 @@ webui.bat / scripts\run.bat webui
 
 - `TaskRegistry` 保存运行时任务数据：函数、排序、参数元数据、说明、beta/custom/debug 标记。
 - `cfg["tasks"]` 只保存用户配置：开关、下次执行时间、参数、调度窗口和星期限制。
+- `task_ordering` 保存用户排序覆盖层：当前持久化可嵌套总顺序 `items`；`user_order` 是由 `items` 展平得到的兼容投影和旧数据导入 seed。它是全局配置，不写入账号 JSON。
 - 两者用 slash 路径关联，例如 `每日任务/村庄/宠物培养`。
 - 保存配置前必须剥离 `fn`、`order`、`param_meta`、`param_keys`、`_due`、`progress_display` 等运行时字段。
 - 调度器收集到期任务时必须通过 `task_registry.has_task(path)` 过滤未注册残留叶子。
-- `ZmxyOL/task/**/_order.txt` 是显式源码排序输入；任务加载只读取它，不在运行时反写源码树。
+- `ZmxyOL/task/**/_order.txt` 是 legacy 源码导入/注册 seed；任务加载可读取它保持内置脚本稳定注册顺序，但用户显示和执行顺序由全局 `task_ordering` 投影决定，不在运行时反写源码树。
+- 有效任务顺序通过确定性总排序计算：先递归展开用户拖拽保存的 `items` 分组顺序，再回退到当前任务树顺序、运行时注册顺序和路径字典序。旧版 `hard_edges`、`layout`、`group_order` 会被规范化忽略，不再参与显示或执行顺序。
 
 ## 动态 API 边界
 

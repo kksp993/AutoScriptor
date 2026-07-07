@@ -155,6 +155,8 @@ class TaskManager:
         self._cancel_event = Event()
         bind_cancel_event(self._cancel_event)
         self._cfg_lock = RLock()
+        self._runtime_state_lock = RLock()
+        self._current_task_path: str | None = None
 
     # ── 公共接口 ──
 
@@ -163,6 +165,15 @@ class TaskManager:
 
     def reset_cancel(self):
         self._reset_cancel()
+
+    def current_task_path(self) -> str | None:
+        """Return the task currently being executed for WebUI display only."""
+        with self._runtime_state_lock:
+            return self._current_task_path
+
+    def _set_current_task_path_for_runtime(self, task_path: str | None) -> None:
+        with self._runtime_state_lock:
+            self._current_task_path = task_path
 
     def _reset_cancel(self):
         self._cancel_event.clear()
@@ -266,6 +277,7 @@ class TaskManager:
 
             set_current_task(task.rsplit("/", 1)[-1])
             set_current_task_path(task)
+            self._set_current_task_path_for_runtime(task)
             try:
                 try:
                     fn, kwargs = self._prepare_task(task, param_override=param_override)
@@ -348,6 +360,7 @@ class TaskManager:
             finally:
                 if task_video:
                     task_video.stop(keep=False)
+                self._set_current_task_path_for_runtime(None)
                 set_current_task_path(None)
                 set_current_task(None)
                 logger.info(f"Task [END] {task}")

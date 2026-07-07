@@ -10,6 +10,8 @@ from copy import deepcopy
 import logging
 from typing import Any, Callable
 
+from services.core.task_ordering import normalize_task_ordering_overlay
+
 logger = logging.getLogger(__name__)
 
 MUMU_ADB_BASE_PORT = 16384
@@ -45,6 +47,7 @@ class WebUILifecycleService:
         "notify",
         "update",
         "remote_access",
+        "task_ordering",
     )
 
     def __init__(
@@ -100,7 +103,7 @@ class WebUILifecycleService:
             self.cfg["ocr"] = deepcopy(data["ocr"])
             self._save_global_config()
         self._apply_log_level()
-        return self.reload_all(reason="save config")
+        return self.mark_config_changed("save config")
 
     def apply_discovered_emulator_config(self, emulator: dict[str, Any]) -> int:
         if not isinstance(emulator, dict):
@@ -130,6 +133,34 @@ class WebUILifecycleService:
             self.cfg.save_config()
         self.scheduler.wake()
         return self._refresh_task_projection("save tasks")
+
+    def save_task_ordering(self, raw_overlay: dict[str, Any]) -> int:
+        """Persist one global task order without rewriting account task data."""
+        if not isinstance(raw_overlay, dict):
+            raise ValueError("invalid task ordering payload")
+        next_overlay = normalize_task_ordering_overlay(raw_overlay)
+
+        projection = self.task_tree_service.task_ordering_projection(self.cfg._config.get("tasks", {}))
+        candidate_projection = self.task_tree_service.task_ordering_projection_with_overlay(next_overlay)
+        if projection.task_paths != candidate_projection.task_paths:
+            raise ValueError("task tree changed while saving ordering")
+
+        with self.task_manager.config_transaction():
+            self.cfg._config["task_ordering"] = next_overlay
+            self._save_global_config()
+        self.scheduler.wake()
+        return self._refresh_task_projection("save task ordering")
+
+    def save_task_ordering_layout(self, raw_layout: dict[str, Any]) -> int:
+        """Deprecated graph-layout endpoint; keep a no-op for older clients."""
+        if not isinstance(raw_layout, dict):
+            raise ValueError("invalid task ordering layout payload")
+        current_overlay = normalize_task_ordering_overlay(self.cfg._config.get("task_ordering", {}))
+        with self.task_manager.config_transaction():
+            self.cfg._config["task_ordering"] = current_overlay
+            self._save_global_config()
+        self.refresh_order_map()
+        return self.mark_config_changed("save task ordering layout")
 
     def save_character_task(self, server: str, character: str, task_path: str, task_data: dict[str, Any]) -> int:
         server = (server or "").strip()

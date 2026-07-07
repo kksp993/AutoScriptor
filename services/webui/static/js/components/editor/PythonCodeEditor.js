@@ -7,7 +7,7 @@ const PythonCodeEditor = {
     modelValue: { type: String, default: '' },
     placeholder: { type: String, default: '' },
   },
-  emits: ['update:modelValue'],
+  emits: ['update:modelValue', 'line-dblclick'],
   template: `
 <div class="python-code-editor" :class="{ 'is-codemirror': usingCodeMirror }">
   <textarea ref="textarea"
@@ -19,6 +19,7 @@ const PythonCodeEditor = {
             :value="modelValue"
             :placeholder="placeholder"
             @input="onInput"
+            @dblclick="onFallbackDoubleClick"
             @keydown="onFallbackKeydown"></textarea>
 </div>`,
   setup(props, { emit, expose }) {
@@ -34,6 +35,33 @@ const PythonCodeEditor = {
 
     function onInput(e) {
       if (!cm) emitValue(e.target.value || '');
+    }
+
+    function lineInfoAtIndex(index) {
+      const content = props.modelValue || '';
+      const safeIndex = Math.max(0, Math.min(index || 0, content.length));
+      const lineStart = content.lastIndexOf('\n', safeIndex - 1) + 1;
+      const nextBreak = content.indexOf('\n', safeIndex);
+      const lineEnd = nextBreak === -1 ? content.length : nextBreak;
+      const lineNumber = content.slice(0, lineStart).split('\n').length - 1;
+      return {
+        line: content.slice(lineStart, lineEnd),
+        lineNumber,
+        index: safeIndex,
+        lineStart,
+        lineEnd,
+      };
+    }
+
+    function emitLineDoubleClick(info) {
+      emit('line-dblclick', info);
+    }
+
+    function onFallbackDoubleClick(event) {
+      if (cm) return;
+      const target = event && event.target;
+      if (!target) return;
+      emitLineDoubleClick(lineInfoAtIndex(target.selectionStart || 0));
     }
 
     function applyFallbackTab(e) {
@@ -102,6 +130,19 @@ const PythonCodeEditor = {
         emitValue(editor.getValue());
         nextTick(() => { updatingFromCodeMirror = false; });
       });
+      cm.on('dblclick', (editor, event) => {
+        if (!event) return;
+        const cursor = editor.coordsChar({ left: event.clientX, top: event.clientY });
+        const lineStart = editor.indexFromPos({ line: cursor.line, ch: 0 });
+        const lineEnd = editor.indexFromPos({ line: cursor.line, ch: (editor.getLine(cursor.line) || '').length });
+        emitLineDoubleClick({
+          line: editor.getLine(cursor.line) || '',
+          lineNumber: cursor.line,
+          index: editor.indexFromPos(cursor),
+          lineStart,
+          lineEnd,
+        });
+      });
       usingCodeMirror.value = true;
       nextTick(() => cm && cm.refresh());
     }
@@ -129,6 +170,34 @@ const PythonCodeEditor = {
       setSelection(index, index);
     }
 
+    function getSelectionRange() {
+      if (cm) {
+        return {
+          start: cm.indexFromPos(cm.getCursor('from')),
+          end: cm.indexFromPos(cm.getCursor('to')),
+        };
+      }
+      const ta = textarea.value;
+      if (!ta) return null;
+      const start = ta.selectionStart || 0;
+      const end = ta.selectionEnd || start;
+      return { start, end };
+    }
+
+    function replaceRange(start, end, text) {
+      const content = props.modelValue || '';
+      const safeStart = Math.max(0, Math.min(start || 0, content.length));
+      const safeEnd = Math.max(safeStart, Math.min(end || safeStart, content.length));
+      const replacement = text || '';
+      if (cm) {
+        cm.replaceRange(replacement, cm.posFromIndex(safeStart), cm.posFromIndex(safeEnd), 'autoscriptor-menu');
+        setSelection(safeStart + replacement.length, safeStart + replacement.length);
+        return;
+      }
+      emitValue(content.slice(0, safeStart) + replacement + content.slice(safeEnd));
+      nextTick(() => setSelection(safeStart + replacement.length, safeStart + replacement.length));
+    }
+
     watch(() => props.modelValue, (value) => {
       if (!cm || updatingFromCodeMirror) return;
       const next = value || '';
@@ -143,7 +212,7 @@ const PythonCodeEditor = {
       }
     });
 
-    expose({ focus, setSelection, focusAtIndex, textarea });
-    return { textarea, usingCodeMirror, onInput, onFallbackKeydown };
+    expose({ focus, setSelection, focusAtIndex, getSelectionRange, replaceRange, textarea });
+    return { textarea, usingCodeMirror, onInput, onFallbackDoubleClick, onFallbackKeydown };
   },
 };

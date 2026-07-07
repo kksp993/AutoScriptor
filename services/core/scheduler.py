@@ -569,6 +569,17 @@ class Scheduler:
                 tasks.extend(self._collect_due(val, path, now_ts))
         return tasks
 
+    def _sort_due_paths(self, due_paths: list[str]) -> list[str]:
+        """Sort due paths by the global task ordering overlay."""
+        from AutoScriptor.utils.app_config import cfg
+        from services.core.task_ordering import sort_paths_by_task_ordering
+
+        return sort_paths_by_task_ordering(
+            due_paths,
+            cfg.get("tasks") or {},
+            cfg._config.get("task_ordering", {}),
+        )
+
     def _iter_characters_schedule_order(self):
         """调度顺序：优先账号内 dispatch_queue，其余按服务器名、角色名排序。"""
         from AutoScriptor.utils.app_config import cfg
@@ -613,6 +624,7 @@ class Scheduler:
                 self.invalidate_login()
                 due = self._collect_due(cfg.get("tasks") or {}, "", time.time())
             due = self._filter_retry_available((server, name), due)
+            due = self._sort_due_paths(due)
             if due:
                 if switched:
                     self._tasks_updated.set()

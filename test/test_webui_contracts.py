@@ -628,7 +628,10 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
             return cleaned
 
         service, cfg = self._service(
-            task_tree_service=SimpleNamespace(strip_runtime_fields=strip_runtime_fields)
+            task_tree_service=SimpleNamespace(
+                strip_runtime_fields=strip_runtime_fields,
+                collect_task_reset_paths=lambda old_tasks, new_tasks: [],
+            )
         )
         tasks = {"group": {"task": {"on": True, "next_exec_time": 0, "param_meta": {"x": "secret"}}}}
 
@@ -879,7 +882,10 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
             return cleaned
 
         service, cfg = self._service(
-            task_tree_service=SimpleNamespace(strip_runtime_fields=strip_runtime_fields)
+            task_tree_service=SimpleNamespace(
+                strip_runtime_fields=strip_runtime_fields,
+                collect_task_reset_paths=lambda old_tasks, new_tasks: [],
+            )
         )
 
         version = service.import_config({
@@ -1311,7 +1317,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         end = content.index("@app.post(\"/api/tasks/reload-all\")", start)
         sync_body = content[start:end]
         self.assertIn("lifecycle_service.sync_all_config", sync_body)
-        self.assertNotIn("_guard_runtime_idle", sync_body)
+        self.assertIn("_guard_runtime_idle", sync_body)
 
         start = content.index("@app.post(\"/api/tasks/reload-all\")")
         end = content.index("@app.post(\"/api/config\")", start)
@@ -1711,7 +1717,8 @@ print("OK")
         self.assertNotIn("apiPost('/custom-scripts'", frontend)
         self.assertNotIn("recorded_code: recordedCode.value || ''", frontend)
         self.assertNotIn("custom_exec_code: customExecCode.value || ''", frontend)
-        self.assertIn("EditorPanel.js?v=30", index)
+        self.assertIn("PythonCodeEditor.js?v=3", index)
+        self.assertIn("EditorPanel.js?v=32", index)
 
         self.assertIn('@router.post("/save-custom-task")', backend)
         self.assertIn("def _normalize_editor_custom_task_filename", backend)
@@ -1798,33 +1805,121 @@ print("OK")
         frontend = (ROOT / "services/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
         css = (ROOT / "services/webui/static/css/style.css").read_text(encoding="utf-8")
         trajectories = (ROOT / "docs/AutoScriptor/webui/user-trajectories.md").read_text(encoding="utf-8")
+        code_editor = (ROOT / "services/webui/static/js/components/editor/PythonCodeEditor.js").read_text(encoding="utf-8")
 
         self.assertIn('ref="recordedCodeInput"', frontend)
-        self.assertIn('@keydown="onRecordedCodeKeydown"', frontend)
-        self.assertIn("function handleTextareaTab(e, modelRef)", frontend)
-        self.assertIn("const hasSelection = end > start", frontend)
-        self.assertIn("if (e.shiftKey)", frontend)
-        self.assertIn("line.startsWith('    ')", frontend)
-        self.assertIn("ta.setSelectionRange(nextStart, nextEnd)", frontend)
-        self.assertIn("ta.setSelectionRange(start + 4, end + 4 * lines.length)", frontend)
-        self.assertIn("function onRecordedCodeKeydown(e)", frontend)
+        self.assertIn('@line-dblclick="openRecordedFunctionDialog"', frontend)
+        self.assertIn("function openRecordedFunctionDialog", frontend)
+        self.assertIn("function applyFunctionEditorChanges", frontend)
+        self.assertIn("functionEditorDialogVisible", frontend)
+        self.assertIn("emits: ['update:modelValue', 'line-dblclick']", code_editor)
+        self.assertIn("cm.on('dblclick'", code_editor)
+        self.assertIn("extraKeys", code_editor)
+        self.assertIn("Tab(editor)", code_editor)
+        self.assertIn("replaceSelection('    ', 'end')", code_editor)
+        self.assertIn("'Shift-Tab'(editor)", code_editor)
+        self.assertIn("indentSelection('subtract')", code_editor)
+        self.assertIn("function applyFallbackTab(e)", code_editor)
+        self.assertIn("if (e.key !== 'Tab') return false", code_editor)
+        self.assertIn("const hasSelection = end > start", code_editor)
+        self.assertIn("if (e.shiftKey)", code_editor)
+        self.assertIn("line.startsWith('    ')", code_editor)
+        self.assertIn("nextTick(() => setSelection(", code_editor)
+        self.assertIn("setSelection(start + 4, end + 4 * lines.length)", code_editor)
         self.assertIn("function onCustomExecKeydown(e)", frontend)
 
         self.assertIn("判断存在", frontend)
         self.assertIn("function appendUiExists()", frontend)
         self.assertIn("const tgt = buildTarget();", frontend)
-        self.assertIn("const line = tgt ? `if ui_T(${tgt}):` : 'if ui_T():'", frontend)
+        self.assertIn("const line = tgt ? `ui_T(${tgt})` : 'ui_T()'", frontend)
         self.assertIn("appendRecordedSnippet(line, tgt ? null : line.indexOf('(') + 1)", frontend)
         self.assertIn("recordedTextareaElement()", frontend)
         self.assertIn("ta.focus()", frontend)
         self.assertIn("appendUiExists", frontend)
+
+        self.assertIn("label: '阻塞等待'", frontend)
+        self.assertIn("label: '等待出现'", frontend)
+        self.assertIn("label: '等待消失'", frontend)
+        self.assertIn("label: '文字'", frontend)
+        self.assertIn("label: '颜色'", frontend)
+        self.assertIn("function appendExtractColor()", frontend)
+        self.assertIn("get_colors((B(", frontend)
+
+        self.assertIn("label: '后台'", frontend)
+        self.assertIn("label: '声明域'", frontend)
+        self.assertIn("label: '添加监听'", frontend)
+        self.assertIn("label: '单行表达式'", frontend)
+        self.assertIn("label: '自定义函数'", frontend)
+        self.assertIn("label: '信号量'", frontend)
+        self.assertIn("label: '新建信号量'", frontend)
+        self.assertIn("label: '判断为真'", frontend)
+        self.assertIn("label: '清空信号量'", frontend)
+        self.assertIn("label: '后台设置'", frontend)
+        self.assertIn("label: '截屏间隔'", frontend)
+        self.assertIn("label: '清空所有'", frontend)
+        self.assertIn('with bg.scope("后台监听") as scope:', frontend)
+        self.assertIn('scope.add(', frontend)
+        self.assertIn('callback=lambda: bg.set_signal("my_signal", True)', frontend)
+        self.assertIn('def bg_listener():', frontend)
+        self.assertIn('bg.set_signal("my_signal", False)', frontend)
+        self.assertIn('if bg.signal("my_signal", False):', frontend)
+        self.assertIn('wait_for_signal("my_signal", True, 10)', frontend)
+        self.assertIn('bg.clear_signals()', frontend)
+        self.assertIn('with bg.interval(0.5):', frontend)
+
+        self.assertIn("label: '角色技能'", frontend)
+        self.assertIn("label: '左移'", frontend)
+        self.assertIn("label: '右移'", frontend)
+        self.assertIn("label: '技能1'", frontend)
+        self.assertIn("label: '技能6'", frontend)
+        self.assertIn("label: '法宝1'", frontend)
+        self.assertIn("label: '法宝2'", frontend)
+        self.assertIn("label: '爆'", frontend)
+        self.assertIn("label: '点击化身'", frontend)
+        self.assertIn("label: '玄女绝唱'", frontend)
+        self.assertIn("label: '点击本命神'", frontend)
+        self.assertIn("label: '合体'", frontend)
+        self.assertIn("label: '无双'", frontend)
+        self.assertIn('h.move_left(0)', frontend)
+        self.assertIn('h.move_right(0)', frontend)
+        self.assertIn('h.skill(1)', frontend)
+        self.assertIn('h.skill(6)', frontend)
+        self.assertIn('h.prop(fb=True, xb=False, ws=False)', frontend)
+        self.assertIn('h.prop(fb=False, xb=True, ws=False)', frontend)
+        self.assertIn('h.prop(fb=False, xb=False, ws=True)', frontend)
+        self.assertIn('h.huashen()', frontend)
+        self.assertIn('h.huashen_long()', frontend)
+        self.assertIn('h.zhenwu()', frontend)
+        self.assertIn('h.zhenling()', frontend)
+        self.assertIn("get_colors((B(", frontend)
+        self.assertIn("label: '后台'", frontend)
+        self.assertIn("with bg.scope", frontend)
+        self.assertIn("scope.add(", frontend)
+        self.assertIn("callback=lambda: bg.set_signal", frontend)
+        self.assertIn("wait_for_signal", frontend)
+        self.assertIn("bg.clear_signals()", frontend)
+        self.assertIn("with bg.interval(0.5):", frontend)
+        self.assertIn("label: '角色技能'", frontend)
+        self.assertIn("h.move_left(0)", frontend)
+        self.assertIn("h.move_right(0)", frontend)
+        for skill_index in range(1, 7):
+            self.assertIn(f"h.skill({skill_index})", frontend)
+        self.assertIn("h.prop(fb=True, xb=False, ws=False)", frontend)
+        self.assertIn("h.prop(fb=False, xb=True, ws=False)", frontend)
+        self.assertIn("h.prop(fb=False, xb=False, ws=True)", frontend)
+        self.assertIn("h.huashen()", frontend)
+        self.assertIn("h.huashen_long()", frontend)
+        self.assertIn("h.zhenwu()", frontend)
+        self.assertIn("h.zhenling()", frontend)
 
         self.assertRegex(css, r"\.editor-recorder-actions\s*\{[^}]*min-height:\s*0;")
         self.assertRegex(css, r"\.editor-recorder-actions\s*\{[^}]*overflow-y:\s*auto;")
         self.assertRegex(css, r"\.editor-recorder-actions\s*\{[^}]*overflow-x:\s*hidden;")
 
         self.assertIn("代码编辑器式 Tab 缩进", trajectories)
-        self.assertIn("`if ui_T():`", trajectories)
+        self.assertIn("`ui_T()`", trajectories)
+        self.assertIn("后台菜单", trajectories)
+        self.assertIn("角色技能", trajectories)
         self.assertIn("有框选时复用 click 的 T/I/B 目标", trajectories)
         self.assertIn("右侧按钮列内部滚动", trajectories)
 
@@ -2172,7 +2267,7 @@ class TestUpdaterGitCommandContract(unittest.TestCase):
             status = updater.get_status()
 
         self.assertFalse(has_update)
-        self.assertEqual(updater.state, "idle")
+        self.assertEqual(updater.state, "ahead")
         self.assertEqual(status["remote_branch"], "main")
         self.assertEqual(status["ahead_count"], 3)
         self.assertEqual(status["behind_count"], 0)
@@ -2215,7 +2310,7 @@ class TestUpdaterGitCommandContract(unittest.TestCase):
             status = updater.get_status()
 
         self.assertTrue(success)
-        self.assertEqual(updater.state, "done")
+        self.assertEqual(updater.state, "ahead")
         self.assertNotIn(["pull", "--ff-only", "origin", "main"], git_calls)
         self.assertEqual(status["remote_branch"], "main")
         self.assertEqual(status["ahead_count"], 2)
@@ -2538,3 +2633,123 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+class TestTaskOrderingGroupedOverlayContract(unittest.TestCase):
+    def test_grouped_overlay_flattens_order_and_drops_graph_fields(self):
+        from services.core.task_ordering import normalize_task_ordering_overlay, project_task_ordering
+
+        raw_overlay = {
+            "schema_version": 1,
+            "user_order": ["ignored/when/items/exist"],
+            "items": [
+                {"type": "task", "path": "B"},
+                {
+                    "type": "group",
+                    "id": "outer",
+                    "name": "组合",
+                    "expanded": False,
+                    "items": [
+                        {"type": "task", "path": "A"},
+                        {"type": "group", "id": "single", "items": [{"type": "task", "path": "C"}]},
+                        {"type": "task", "path": "A"},
+                    ],
+                },
+            ],
+            "hard_edges": [{"before": "A", "after": "B"}],
+            "layout": {"A": {"x": 1, "y": 2}},
+            "group_order": ["legacy"],
+        }
+
+        normalized = normalize_task_ordering_overlay(raw_overlay)
+        normalized_json = json.dumps(normalized, ensure_ascii=False)
+
+        self.assertEqual(normalized["user_order"], ["B", "A", "C"])
+        self.assertEqual(normalized["items"][1]["id"], "outer")
+        self.assertEqual([child["path"] for child in normalized["items"][1]["items"]], ["A", "C"])
+        self.assertNotIn("single", normalized_json)
+        self.assertNotIn("hard_edges", normalized)
+        self.assertNotIn("layout", normalized)
+        self.assertNotIn("group_order", normalized)
+
+        projection = project_task_ordering(
+            {"A": {"on": True}, "B": {"on": True}, "C": {"on": True}, "D": {"on": True}},
+            raw_overlay,
+        )
+
+        self.assertEqual(projection.effective_order, ["B", "A", "C", "D"])
+        self.assertEqual(projection.overlay["user_order"], ["B", "A", "C"])
+
+
+class TestTaskOrderingStaticContract(unittest.TestCase):
+    def test_task_page_uses_total_order_list_contract(self):
+        index_html = (ROOT / "services/webui/static/index.html").read_text(encoding="utf-8")
+        app_js = (ROOT / "services/webui/static/js/app.js").read_text(encoding="utf-8")
+        sidebar_js = (ROOT / "services/webui/static/js/components/AppSidebar.js").read_text(encoding="utf-8")
+        task_panel_js = (ROOT / "services/webui/static/js/components/TaskPanel.js").read_text(encoding="utf-8")
+
+        self.assertIn("{ id: 'tasks', label: '任务列表'", sidebar_js)
+        self.assertNotIn("task-graph", sidebar_js)
+        self.assertNotIn("任务计算图", sidebar_js)
+
+        self.assertIn("<task-panel v-if=\"activeTab==='tasks'\"", index_html)
+        self.assertNotIn("activeTab==='tasks' || activeTab==='task-graph'", index_html)
+        self.assertIn("AppSidebar.js?v=17", index_html)
+        self.assertIn("style.css?v=43", index_html)
+        self.assertIn("TaskPanel.js?v=23", index_html)
+        self.assertIn("app.js?v=38", index_html)
+        self.assertIn('@run-task-range="runTaskRange"', index_html)
+        self.assertIn(':runtime-status="runtimeStatus"', index_html)
+        self.assertNotIn("TaskDagCanvas.js", index_html)
+        self.assertNotIn("TaskRulesPanel.js", index_html)
+        self.assertNotIn("task-ordering.css", index_html)
+        self.assertNotIn("save-task-ordering-layout", index_html)
+        self.assertNotIn("task-graph", app_js)
+        self.assertNotIn("任务计算图", app_js)
+        self.assertNotIn("saveTaskOrderingLayout", app_js)
+
+        self.assertIn("activeTab === 'tasks'", task_panel_js)
+        self.assertNotIn("activeTab === 'task-graph'", task_panel_js)
+        self.assertNotIn("TaskDagCanvas", task_panel_js)
+        self.assertNotIn("TaskRulesPanel", task_panel_js)
+        self.assertNotIn("task-dag-canvas", task_panel_js)
+        self.assertNotIn("task-rules-panel", task_panel_js)
+        self.assertIn("任务顺序", task_panel_js)
+        self.assertIn("已启用任务", task_panel_js)
+        self.assertIn("拖到上/下边缘会插入排序", task_panel_js)
+        self.assertIn("拖到任务中部会创建分组", task_panel_js)
+        self.assertIn("分组顺序说明", task_panel_js)
+        self.assertIn("orderedTaskRows()", task_panel_js)
+        self.assertIn("visibleOrderingNodes()", task_panel_js)
+        self.assertIn("enabledTaskRows()", task_panel_js)
+        self.assertIn("selectedEnabledTaskPath", task_panel_js)
+        self.assertIn("currentRunningTaskPath", task_panel_js)
+        self.assertIn("isEnabledTaskCurrent", task_panel_js)
+        self.assertIn("task-current-badge", task_panel_js)
+        self.assertIn("scrollOrderingTaskIntoView", task_panel_js)
+        self.assertIn("data-ordering-task-path", task_panel_js)
+        self.assertIn("task-order-row-guided", task_panel_js)
+        self.assertIn("runSelectedEnabledTaskRange", task_panel_js)
+        self.assertIn("run-task-range", task_panel_js)
+        self.assertIn("taskStatusDotStyle", task_panel_js)
+        self.assertIn("taskStatusLabel", task_panel_js)
+        self.assertIn("orderingNumberClass", task_panel_js)
+        self.assertIn("task-enabled-row-selected", task_panel_js)
+        self.assertIn("task-status-dot", task_panel_js)
+        self.assertIn("从选中处执行", task_panel_js)
+        self.assertIn("showOnlyEnabledOrderingItems", task_panel_js)
+        self.assertIn("collapseAllOrderingGroups", task_panel_js)
+        self.assertIn("折叠全部分组", task_panel_js)
+        self.assertIn('@dragstart="startOrderingDrag($event, node)"', task_panel_js)
+        self.assertIn('@dragover.prevent="dragOverOrderingNode($event, node)"', task_panel_js)
+        self.assertIn('@drop.prevent="dropOrderingNode($event, node)"', task_panel_js)
+        self.assertIn("resolveOrderingDropPosition", task_panel_js)
+        self.assertIn("dropPosition === 'before'", task_panel_js)
+        self.assertIn("dropPosition === 'after'", task_panel_js)
+        self.assertIn("task-order-drop-before", task_panel_js)
+        self.assertIn("renameOrderingGroup", task_panel_js)
+        self.assertIn("ungroupOrderingGroup", task_panel_js)
+        self.assertIn("task_ordering.items", task_panel_js)
+        self.assertIn("runTaskRange", app_js)
+        self.assertIn("activate_scheduler: false", app_js)
+        self.assertIn("runtimeStatus", app_js)
+        self.assertNotIn('@dragstart="startTaskDrag($event, row)"', task_panel_js)
+        self.assertNotIn('@drop.prevent="dropTaskHere($event, row)"', task_panel_js)
