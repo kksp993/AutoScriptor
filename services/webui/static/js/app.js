@@ -9,6 +9,7 @@ const app = createApp({
     const logs = ref([]);
     const characterName = ref('');
     const schedulerStatus = reactive({ state: 'pending', label: '待运行', color: 'green', consecutive_errors: 0 });
+    const taskOrderingSaving = ref(false);
     const overviewData = reactive({
       scheduler: { state: 'pending', label: '待运行', color: 'green', consecutive_errors: 0, next_execution: null },
       stats: { total: 0, enabled: 0, pending: 0, scheduled: 0, disabled: 0 },
@@ -176,32 +177,36 @@ const app = createApp({
       return clone;
     });
 
-    /** 用于拼接任务路径前缀；一般任务页内同时含「一般任务」「活动任务」两棵顶层树，前缀由树路径自带，故 general 为空。 */
+    /** 统一任务页使用完整任务树，路径从一级分类开始，不再由 tab 补前缀。 */
     const activeTabLabel = computed(() => {
-      return { daily: '每日任务', weekly: '每周任务', general: '', custom: '自定义任务' }[activeTab.value] || '';
+      return '';
     });
 
     const pageTitle = computed(() => {
       const map = {
         news: '资讯', overview: '总览', scheduler: '调度', editor: '编辑器',
         errorArchives: '错误汇总', updater: '检查更新', settings: '设置', about: '关于',
-        daily: '每日任务', weekly: '每周任务', general: '一般任务', custom: '自定义任务',
+        tasks: '1. 任务列表',
       };
       return map[activeTab.value] || '';
     });
 
     const currentTasks = computed(() => {
       const t = configData.tasks || {};
-      if (activeTab.value === 'daily') return t['每日任务'] || {};
-      if (activeTab.value === 'weekly') return t['每周任务'] || {};
-      if (activeTab.value === 'general') {
-        return {
-          一般任务: t['一般任务'] || {},
-          活动任务: t['活动任务'] || t['event_task'] || {},
-        };
-      }
-      if (activeTab.value === 'custom') return t['自定义任务'] || {};
+      if (activeTab.value === 'tasks') return t;
       return {};
+    });
+
+    const taskOrderingProjection = computed(() => {
+      return configData.task_ordering_projection || {
+        schema_version: 1,
+        overlay: configData.task_ordering || { schema_version: 1, user_order: [], items: [] },
+        task_paths: [],
+        effective_order: [],
+        order_map: {},
+        diagnostics: [],
+        stale_user_order: [],
+      };
     });
 
     /** 顶栏在「未选完整 server+name」时显示的单行名（来自配置） */
@@ -453,9 +458,16 @@ const app = createApp({
       newsRefreshKey.value += 1;
     }
 
+    function normalizeNavigationTab(tab) {
+      const legacyTaskTabs = new Set(['daily', 'weekly', 'general', 'custom']);
+      if (legacyTaskTabs.has(tab)) return 'tasks';
+      return tab || 'news';
+    }
+
     function navigateTo(tab) {
-      if (tab === 'news') refreshNewsImmediately();
-      activeTab.value = tab;
+      const nextTab = normalizeNavigationTab(tab);
+      if (nextTab === 'news') refreshNewsImmediately();
+      activeTab.value = nextTab;
     }
 
     function ensureRunReady(message = '当前仍有任务在运行或停止中，请先终止或稍候再试') {
@@ -517,6 +529,22 @@ const app = createApp({
         });
         const data = await handleRunStartResponse(result, '启动执行失败');
         if (data) ElementPlus.ElMessage.success('已开始执行当前任务列表');
+      } catch (e) { ElementPlus.ElMessage.error('执行失败: ' + e); }
+    }
+
+    async function runTaskRange(taskPaths) {
+      if (!ensureRunReady('已有任务正在执行，请先终止后再从选中任务执行')) return;
+      const tasks = Array.isArray(taskPaths)
+        ? taskPaths.map((path) => String(path || '').trim()).filter(Boolean)
+        : [];
+      if (!tasks.length) {
+        ElementPlus.ElMessage.info('请先选择要开始执行的任务');
+        return;
+      }
+      try {
+        const result = await API.request('POST', '/run', { tasks, activate_scheduler: false, ...runCharacterPayload() });
+        const data = await handleRunStartResponse(result, '启动执行失败');
+        if (data) ElementPlus.ElMessage.success(`已从选中任务开始执行，共 ${tasks.length} 个任务`);
       } catch (e) { ElementPlus.ElMessage.error('执行失败: ' + e); }
     }
 
@@ -838,6 +866,57 @@ const app = createApp({
         ElementPlus.ElMessage.error('保存失败: ' + e);
         return false;
       }
+    }
+
+    async function saveTaskOrdering(overlay) {
+      if (!ensureIdle('执行中不能修改任务排序规则，请先终止当前任务')) return false;
+      taskOrderingSaving.value = true;
+      try {
+        const { ok, data } = await API.request('POST', '/task-ordering', { overlay });
+        if (!ok) {
+          showApiError(data, '保存任务排序失败');
+          return false;
+        }
+        if (!applyPublicConfigPayload(data)) {
+          await refreshConfig(true);
+        }
+        ElementPlus.ElMessage.success('任务顺序已保存');
+        return true;
+      } catch (e) {
+        ElementPlus.ElMessage.error('保存任务排序失败: ' + e);
+        return false;
+      } finally {
+        taskOrderingSaving.value = false;
+      }
+    }
+
+    function orderedTaskPathsForSoftOrder() {
+      const projection = taskOrderingProjection.value || {};
+      const effectiveOrder = Array.isArray(projection.effective_order) ? [...projection.effective_order] : [];
+      const taskPaths = Array.isArray(projection.task_paths) ? projection.task_paths : [];
+      for (const path of taskPaths) {
+        if (!effectiveOrder.includes(path)) effectiveOrder.push(path);
+      }
+      return effectiveOrder;
+    }
+
+    async function reorderTaskByDrop(payload) {
+      if (!ensureIdle('执行中不能修改任务排序，请先终止当前任务')) return false;
+      const sourcePath = String(payload?.sourcePath || '').trim();
+      const targetPath = String(payload?.targetPath || '').trim();
+      if (!sourcePath || !targetPath || sourcePath === targetPath) return false;
+      const nextUserOrder = orderedTaskPathsForSoftOrder().filter((path) => path !== sourcePath);
+      const targetIndex = nextUserOrder.indexOf(targetPath);
+      if (targetIndex < 0) {
+        ElementPlus.ElMessage.warning('目标任务不存在，无法保存排序');
+        return false;
+      }
+      nextUserOrder.splice(targetIndex, 0, sourcePath);
+      return saveTaskOrdering({
+        schema_version: 1,
+        user_order: nextUserOrder,
+        items: nextUserOrder.map((path) => ({ type: 'task', path })),
+      });
     }
 
     async function onEditModalClose() {
@@ -1300,7 +1379,7 @@ const app = createApp({
     }
 
     watch(activeTab, (v) => {
-      const map = { daily: '每日任务', weekly: '每周任务', general: '', custom: '自定义任务' };
+      const map = { tasks: '' };
       window.__TASK_HELP_PREFIX__ = map[v] !== undefined ? map[v] : '';
     }, { immediate: true });
 
@@ -1331,7 +1410,7 @@ const app = createApp({
 
     return {
       configData, activeTab, newsRefreshKey, logs, characterName, filteredConfig, currentTasks,
-      schedulerStatus, overviewData, activeGroupPath, pageTitle,
+      schedulerStatus, runtimeStatus, overviewData, activeGroupPath, pageTitle,
       editModalVisible, editTaskData, editTaskPath, editModalSaveOnClose, overviewEditContext, paramEnumOptions, paramLabel,
       addDialogVisible, addForm,
       accounts, currentAccount, accountDialogVisible, newAccountForm,
@@ -1340,6 +1419,8 @@ const app = createApp({
       gameProfessionsByCharacter, gameProfessionOptions, setGameProfession,
       dispatchQueue, allTasksSummary, isDispatchRunning,
       executionBusy,
+      taskOrderingSaving, taskOrderingProjection,
+      saveTaskOrdering, reorderTaskByDrop,
       handleAccountCommand, switchAccount, addAccount, deleteAccount,
       openCharacterDialog, switchCharacter, addCharacter, deleteCharacter,
       addToDispatch, removeFromDispatch, reorderDispatchQueue, runAllDispatchTasks, stopDispatch, unifiedStop,

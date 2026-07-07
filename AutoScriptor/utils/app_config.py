@@ -25,7 +25,7 @@ _SECURITY_KEY_CHECK_ERRORS = (OSError, AttributeError) + _DECRYPT_ERRORS
 
 _GLOBAL_KEYS = (
     "app", "ocr", "emulator", "scheduler", "deploy", "notify",
-    "update", "remote_access", "accounts",
+    "update", "remote_access", "task_ordering", "accounts",
 )
 
 _TEST_TASK_PATHS = (

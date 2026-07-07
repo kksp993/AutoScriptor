@@ -10,10 +10,7 @@ const APP_MENU = [
   {
     group: 'TASKS',
     items: [
-      { id: 'daily',   label: '每日任务', icon: 'fa-sun-o' },
-      { id: 'weekly',  label: '每周任务', icon: 'fa-calendar' },
-      { id: 'general', label: '一般任务', icon: 'fa-tasks' },
-      { id: 'custom',  label: '自定义任务', icon: 'fa-code' },
+      { id: 'tasks', label: '任务列表', icon: 'fa-sitemap' },
     ],
   },
   {

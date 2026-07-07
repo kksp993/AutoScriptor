@@ -59,7 +59,7 @@
       .stat-label { @apply text-sm text-gray-500 mt-1.5; }
     }
   </style>
-  <link rel="stylesheet" href="/static/css/style.css?v=39" />
+  <link rel="stylesheet" href="/static/css/style.css?v=43" />
 </head>
 <body class="app-body overflow-hidden" style="height:100vh;">
   <div id="app" class="flex h-screen overflow-hidden">
@@ -190,6 +190,7 @@
         <scheduler-panel v-if="activeTab==='scheduler'"
           :overview-data="overviewData" :logs="logs" :character-name="characterName"
           :scheduler-status="schedulerStatus" :execution-busy="executionBusy"
+          :runtime-status="runtimeStatus"
           :active-character="activeCharacter"
           :game-profession-options="gameProfessionOptions"
           :game-professions-by-character="gameProfessionsByCharacter"
@@ -213,15 +214,21 @@
 
         <about-panel v-if="activeTab==='about'"></about-panel>
 
-        <task-panel v-if="activeTab==='daily' || activeTab==='weekly' || activeTab==='general' || activeTab==='custom'"
+        <task-panel v-if="activeTab==='tasks'"
           :active-tab="activeTab"
           :current-tasks="currentTasks" :logs="logs" :character-name="characterName"
           :scheduler-status="schedulerStatus" :execution-busy="executionBusy"
+          :runtime-status="runtimeStatus"
+          :ordering-projection="taskOrderingProjection"
+          :ordering-saving="taskOrderingSaving"
           @edit-task="openEditModal" @expanded-change="setActiveGroup"
           @start-run="startRun" @stop-dispatch="stopDispatch" @save-tasks="saveTasks"
           @restart-task="saveTasks({ successMessage: '任务已重新开启' })"
           @clear-logs="clearLogs" @refresh-config="reloadTasks" @reset-scheduler="resetScheduler"
-          @run-task="runSingleTask"></task-panel>
+      @run-task="runSingleTask"
+      @run-task-range="runTaskRange"
+          @save-task-ordering="saveTaskOrdering"
+          @reorder-task="reorderTaskByDrop"></task-panel>
 
       </main>
     </div>
@@ -490,23 +497,24 @@
 
   <!-- Vue 组件 -->
   <script src="/static/js/components/NewsPanel.js?v=4"></script>
-  <script src="/static/js/components/AppSidebar.js?v=15"></script>
-  <script src="/static/js/components/TaskTree.js?v=13"></script>
+  <script src="/static/js/components/AppSidebar.js?v=17"></script>
+  <script src="/static/js/core/taskStatusTheme.js?v=1"></script>
+  <script src="/static/js/components/TaskTree.js?v=15"></script>
   <script src="/static/js/components/Overview.js?v=19"></script>
   <script src="/static/js/components/SchedulerPanel.js?v=15"></script>
-  <script src="/static/js/components/TaskPanel.js?v=13"></script>
+  <script src="/static/js/components/TaskPanel.js?v=23"></script>
   <script src="/static/js/components/Settings.js?v=10"></script>
   <script src="/static/js/components/AboutPanel.js?v=1"></script>
   <script src="/static/js/components/UpdatePanel.js?v=1"></script>
   <script src="/static/js/components/editor/EditorCanvas.js?v=10"></script>
   <script src="/static/js/components/editor/EditorControls.js?v=14"></script>
-  <script src="/static/js/components/editor/PythonCodeEditor.js?v=2"></script>
-  <script src="/static/js/components/editor/EditorPanel.js?v=31"></script>
+  <script src="/static/js/components/editor/PythonCodeEditor.js?v=3"></script>
+  <script src="/static/js/components/editor/EditorPanel.js?v=32"></script>
   <script src="/static/js/components/DiagnosticsPanel.js?v=2"></script>
   <script src="/static/js/components/ErrorArchivesPanel.js?v=4"></script>
   <script src="/static/js/task_help_docs.js?v=1"></script>
   <script src="/static/js/core/api.js?v=1"></script>
   <script src="/static/js/stores/runtimeStore.js?v=1"></script>
-  <script src="/static/js/app.js?v=32"></script>
+  <script src="/static/js/app.js?v=38"></script>
 </body>
 </html>

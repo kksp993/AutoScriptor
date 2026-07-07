@@ -44,21 +44,48 @@ WebUI 后端是 FastAPI；静态前端位于 `services/webui/static/`，源码 E
 
 ## 配置和任务
 
-| 接口 | 说明 |
-|------|------|
-| `POST /api/config` | 保存 `app/emulator/ocr`，可包含 `scheduler` |
-| `POST /api/config/sync` | 要求 runtime idle；同步所有配置并刷新 order map/log level/config_version；不清 `bg`，不重载任务注册表 |
-| `POST /api/tasks` | 保存任务树，后端剥离运行时字段并刷新任务投影/order/config_version；不重载任务注册表 |
-| `POST /api/tasks/reload` | 轻量 reload：要求 runtime idle，清 `bg`，刷新任务更新标记、任务投影、order map 和公开配置 |
-| `POST /api/tasks/reload-all` | 完整 reload：要求 runtime idle，同步配置、重载职业脚本和任务注册表、刷新 UI map 缓存，并清 `bg` |
-| `POST /api/enum-options` | 批量查询枚举选项，含 `BattleFlowName` 当前职业过滤；导入/枚举错误必须返回错误，不返回空列表伪装成功 |
-| `GET /api/config/export` | 导出可迁移配置 |
-| `POST /api/config/import` | 导入允许的配置段，剥离 deploy 密码/证书等敏感字段 |
-| `GET/POST /api/deploy` | 读取/保存 deploy、notify、update、remote_access |
+| 接口　　　　　　　　　　　　　　 | 说明　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
+| ----------------------------------| -------------------------------------------------------------------------------------------------------|
+| `POST /api/config`　　　　　　　 | 保存 `app/emulator/ocr`，可包含 `scheduler`　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
+| `POST /api/config/sync`　　　　　| 要求 runtime idle；同步所有配置并刷新 order map/log level/config_version；不清 `bg`，不重载任务注册表 |
+| `POST /api/tasks`　　　　　　　　| 保存任务树，后端剥离运行时字段并刷新任务投影/order/config_version；不重载任务注册表　　　　　　　　　 |
+| `POST /api/tasks/reload`　　　　 | 轻量 reload：要求 runtime idle，清 `bg`，刷新任务更新标记、任务投影、order map 和公开配置　　　　　　 |
+| `POST /api/tasks/reload-all`　　 | 完整 reload：要求 runtime idle，同步配置、重载职业脚本和任务注册表、刷新 UI map 缓存，并清 `bg`　　　 |
+| `GET /api/task-ordering`　　　　 | 读取全局任务总顺序投影：`overlay.items`、展平 `overlay.user_order`、`effective_order`、`order_map` 和诊断 |
+| `POST /api/task-ordering`　　　　| 要求 runtime idle；保存全局 `task_ordering.items` 并派生 `user_order`，刷新 WebUI order map 与调度器投影 |
+| `POST /api/task-ordering/layout` | 旧版图布局兼容 no-op；前端不再调用，不保存画布坐标，也不影响执行语义　　　　　　　　　　　　　　　　 |
+| `POST /api/enum-options`　　　　 | 批量查询枚举选项，含 `BattleFlowName` 当前职业过滤；导入/枚举错误必须返回错误，不返回空列表伪装成功　 |
+| `GET /api/config/export`　　　　 | 导出可迁移配置　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
+| `POST /api/config/import`　　　　| 导入允许的配置段，剥离 deploy 密码/证书等敏感字段　　　　　　　　　　　　　　　　　　　　　　　　　　 |
+| `GET/POST /api/deploy`　　　　　 | 读取/保存 deploy、notify、update、remote_access　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
 
 `POST /api/config` 保存时会把空的、`YOUR_` 占位的或 `:0` 结尾的 `emulator.adb_addr` 规范化为 MuMu 默认地址：`127.0.0.1:16384 + index*32`。保存失败必须返回标准 `api_error` JSON，并附带 `data_root/config_path/accounts_dir/current_account` 诊断字段；前端不能只显示“未知错误”。保存层只使用同目录临时文件加 `os.replace` 原子替换；`PermissionError/WinError 5` 等替换失败必须作为保存失败暴露出来，不再降级为直接覆写目标文件。
-
+  
 保存任务时必须通过 `TaskTreeService.strip_runtime_fields()`，不能持久化 `fn/order/param_meta/param_keys/beta/custom/debug_mode/task_description/task_doc_flow/_due/progress/progress_display` 等运行时字段。
+
+任务显示和执行顺序由全局 `task_ordering` 覆盖层控制，存放在 `data/config.json`，不写入账号 JSON，也不改变 `cfg["tasks"]` 的目录结构：
+
+```json
+{
+  "schema_version": 1,
+  "items": [
+    {"type": "task", "path": "每日任务/村庄/宠物培养"},
+    {
+      "type": "group",
+      "id": "group-example",
+      "name": "日常组合",
+      "expanded": true,
+      "items": [
+        {"type": "task", "path": "每日任务/村庄/领取奖励"},
+        {"type": "task", "path": "每日任务/村庄/宠物训练"}
+      ]
+    }
+  ],
+  "user_order": ["每日任务/村庄/宠物培养", "每日任务/村庄/领取奖励", "每日任务/村庄/宠物训练"]
+}
+```
+
+有效顺序通过确定性总排序计算：先递归展开 `items`，再回退到当前任务树顺序、运行时注册顺序和路径字典序。`user_order` 是展平后的兼容投影；旧版 `hard_edges`、`layout`、`group_order` 输入会被规范化忽略，不再表达偏序规则或画布布局；保存排序不再进行循环图检查。
 
 Reload 边界：所有 reload 类操作都会清 `bg`；纯配置同步 `POST /api/config/sync` 不属于 reload，不清 `bg`。保存任务、切换账号/角色、账号解锁、更新账号凭据和普通配置导入只保存或同步配置并刷新 WebUI 投影，不做职业脚本和任务注册表完整重载。Editor 保存自定义任务脚本、启动初始化、调度器安全边界处理脚本变更，以及兑换码任务注册缺失兜底，仍使用完整 reload。
 
