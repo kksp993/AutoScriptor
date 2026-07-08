@@ -14,8 +14,7 @@ def zudui_task(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
     click(ui["彩虹楼"].i)
     click(T("东天王殿"),delay=0.5)
     click(T("普通难度"))
-    click(T("组队挑战"))
-    wait_for_appear(T("队伍列表"))
+    click(T("组队挑战"), until=lambda: ui_T(T("队伍列表")))
     # 快速加入：失败则抛出可重试异常，让框架按 max_retry 重试
     try:
         click(T("快速加入"), until=lambda: ui_T(T("我的队伍")))

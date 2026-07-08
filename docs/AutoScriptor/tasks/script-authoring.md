@@ -40,17 +40,17 @@ WebUI 的“任务列表”使用全局 `task_ordering` 覆盖层保存用户拖
 
 ## register_task 元数据
 
-| 参数 | 说明 |
-|------|------|
-| `default_offset_hours` | 成功后按当前时间 + N 小时调度 |
-| `beta` | WebUI 显示实验标记 |
-| `task_doc` | WebUI 补充说明正文；不传时取函数 docstring 首段 |
-| `description` | WebUI 一句话简介；不传时生成占位，内置脚本不再使用集中默认描述表 |
-| `debug_mode` / `debug=True` | 调试直跑：跳过自动登录/失败恢复/本轮 post_execution |
-| `deprecated` | 弃用隐藏字段；`True` 时源码保留并记录注册元数据，但不写入 `cfg["tasks"]`、不出现在 WebUI/可见任务列表/调度列表 |
-| `path_cn` | `data/custom_task` 必填中文路径并归一到 `自定义任务/...`；内置任务可选，提供后替代文件名翻译映射 |
-| `sched_window_hours` | 本地可执行窗口 `[start, end)` |
-| `allowed_weekdays` | 允许星期，`1=周一 ... 7=周日` |
+| 参数　　　　　　　　　　　　| 说明　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
+| -----------------------------| ----------------------------------------------------------------------------------------------------------------|
+| `default_offset_hours`　　　| 成功后按当前时间 + N 小时调度　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
+| `beta`　　　　　　　　　　　| WebUI 显示实验标记　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
+| `task_doc`　　　　　　　　　| WebUI 补充说明正文；不传时取函数 docstring 首段　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
+| `description`　　　　　　　 | WebUI 一句话简介；不传时生成占位，内置脚本不再使用集中默认描述表　　　　　　　　　　　　　　　　　　　　　　　 |
+| `debug_mode` / `debug=True` | 调试直跑：跳过自动登录/失败恢复/本轮 post_execution　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
+| `deprecated`　　　　　　　　| 弃用隐藏字段；`True` 时源码保留并记录注册元数据，但不写入 `cfg["tasks"]`、不出现在 WebUI/可见任务列表/调度列表 |
+| `path_cn`　　　　　　　　　 | `data/custom_task` 必填中文路径并归一到 `自定义任务/...`；内置任务可选，提供后替代文件名翻译映射　　　　　　　 |
+| `sched_window_hours`　　　　| 本地可执行窗口 `[start, end)`　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
+| `allowed_weekdays`　　　　　| 允许星期，`1=周一 ... 7=周日`　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
 
 其他关键字会写入任务叶节点配置，可作为任务默认配置持久化，例如 `last_buy_time`、`sched_window_hours`、`allowed_weekdays`、`next_exec_offset_hours`。运行时元数据如 `fn/order/param_meta/debug_mode/task_doc_flow/description/deprecated` 存在 `TaskRegistry`，不会写入 JSON；其中 `deprecated=True` 的任务连配置叶节点也不会写入。
 
@@ -153,10 +153,10 @@ progress = get_task_status("progress")
 
 ## 设备和识别
 
-- 普通任务只调用 `click/locate/swipe/input/key_event/extract_info/get_colors`。
+- 普通任务只调用 `click/locate/match/swipe/input/key_event/extract_info/get_colors/coloris`。
 - 不直接调用 MuMuManager subprocess；设备会话由调度器、WebUI 或 runtime context 管。
 - 纯坐标点击用 `B(x, y, w, h)`；OCR 语义和业务语义分开处理。
-- 多个识别目标必须包成 tuple/list：`(T("A"), T("B"))` 表示任一命中，`[T("A"), T("B")]` 表示全部命中；不要写 `wait_for_appear(T("A"), T("B"))`，第二个位置参数是 `timeout`。
+- 多个识别目标必须包成 tuple/list：`(T("A"), T("B"))` 表示任一命中，`[T("A"), T("B")]` 表示全部命中；`locate()`、`match()`、`coloris()` 均沿用这套组合语义。不要写 `wait_for_appear(T("A"), T("B"))`，第二个位置参数是 `timeout`。
 - 在线截图测试应固定同一帧，传 `screenshot` 或 `screenshot_frame`。
 
 ## 后台监听

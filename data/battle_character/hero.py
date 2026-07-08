@@ -525,13 +525,13 @@ class Hero:
             logger.info("离开关卡 3.3: 开始左走搜索出口")
             cnt = 0
             # 以防万一出不去，设置一个最多走20步的限制
-            while cnt < 20:
+            while cnt < 15:
                 check_cancel_raise()
                 if check_if_exit_done(): return self.sleep(1)
                 if time() - step3_start > timeout:
                     raise RuntimeError(f"离开关卡 超时: {timeout}秒, 条件 {repr(until)} 未满足")
                 
-                self.move_left(100, directly=True);sleep(0.1)
+                self.move_left(50, directly=True);sleep(0.2)
                 core_api.mixctrl.release_all_keys()
                 if not wait_for_signal(exit_mark_signal, True, search_wait):
                     logger.debug("离开关卡 3.3: 未见出口标记，继续左走")
@@ -551,7 +551,7 @@ class Hero:
                 if time() - step3_start > timeout:
                     raise RuntimeError(f"离开关卡 超时: {timeout}秒, 条件 {repr(until)} 未满足")
 
-                self.move_right(20, directly=True);sleep(0.1)
+                self.move_right(20, directly=True);sleep(0.2)
                 core_api.mixctrl.release_all_keys()
                 if not ui_T(T(key="战斗-离开标记")):
                     logger.debug("离开关卡 3.4: 未见出口标记，继续右走")
