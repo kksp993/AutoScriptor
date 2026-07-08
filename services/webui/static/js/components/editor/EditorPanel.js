@@ -812,7 +812,7 @@ const EditorPanel = {
         return;
       }
       appendCode(`colors = get_colors((B(${b.left},${b.top},${b.width},${b.height}),))`);
-      ElementPlus.ElMessage.success('已添加「颜色提取」');
+      ElementPlus.ElMessage.success('已添加「提取颜色」');
     }
 
     function appendBgScope() {
@@ -987,12 +987,14 @@ const EditorPanel = {
           { key: 'wait-disappear', label: '等待消失', icon: 'fa fa-eye-slash', action: appendWaitDisappear, disabled: () => !optimizedSel.value },
         ] },
         { key: 'extract', label: '提取', icon: 'fa fa-scissors', children: [
-          { key: 'extract-text', label: '文字', icon: 'fa fa-font', action: appendExtractInfo, disabled: () => !optimizedSel.value || extractPreviewLoading.value },
           { key: 'extract-color', label: '颜色', icon: 'fa fa-eyedropper', action: appendExtractColor, disabled: () => !optimizedSel.value },
         ] },
       ] },
       { label: '定位', items: [
         { key: 'locate', label: '定位坐标', icon: 'fa fa-crosshairs', action: appendLocate, disabled: () => !optimizedSel.value },
+        { key: 'region-recognition', label: '区域识别', icon: 'fa fa-search-plus', children: [
+          { key: 'extract-text', label: '文字', icon: 'fa fa-font', action: appendExtractInfo, disabled: () => !optimizedSel.value || extractPreviewLoading.value },
+        ] },
         { key: 'ui-t', label: '判断存在', icon: 'fa fa-check-circle-o', action: appendUiExists },
         { key: 'ui-f', label: '判断不在', icon: 'fa fa-times-circle-o', action: appendUiNotExists },
       ] },

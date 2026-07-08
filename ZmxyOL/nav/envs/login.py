@@ -186,7 +186,9 @@ def _fill_account_password(ctx_or_account, password = None):
         account, password = ctx.account, ctx.password
     else:
         account = ctx_or_account
-    click(B(611,220,26,26))
+    click(B(611,220,26,26));sleep(0.5)
+    click(B(611,220,26,26));sleep(0.5)
+    click(B(612,304,25,26));sleep(0.5)
     click(B(612,304,25,26))
     click(T("请输入手机号或用户名"), if_exist=True, timeout=5)
     input(account)
@@ -268,7 +270,7 @@ def _on_password_login(ctx):
 
 @_login.page("快速登录", T("手机号登录"), T("账号登录"), clients=LoginClient.H4399)
 def _on_quick_login(ctx):
-    click(T("账号登录"), if_exist=True)
+    click(T("账号登录", box=Box(384,444,84,22).margin()))
     sleep(1)
     _fill_account_password(ctx)
     _handle_post_login_popups()

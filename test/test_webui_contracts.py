@@ -552,6 +552,16 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
             reload_ui_map=lambda: self.calls.append("reload_ui_map"),
         ), cfg
 
+    def test_config_operation_reuses_outer_transaction_when_nested(self):
+        service, _cfg = self._service()
+
+        with service.config_operation():
+            self.calls.append("outer")
+            with service.config_operation():
+                self.calls.append("inner")
+
+        self.assertEqual(self.calls, ["lock", "outer", "inner"])
+
     def test_reload_task_state_clears_background_and_refreshes_projection_only(self):
         service, _cfg = self._service()
 
@@ -560,7 +570,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
         self.assertEqual(version, 42)
         self.assertEqual(
             self.calls,
-            ["bg_clear", "mark_tasks_updated", "read_config", ("bump", "manual light reload")],
+            ["lock", "bg_clear", "mark_tasks_updated", "read_config", ("bump", "manual light reload")],
         )
         self.assertNotIn(("reload_tasks", None), self.calls)
 
@@ -572,7 +582,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
         self.assertEqual(version, 42)
         self.assertEqual(
             self.calls,
-            [("reload_config", "key"), "read_config", "apply_log_level", ("bump", "sync config")],
+            ["lock", ("reload_config", "key"), "read_config", "apply_log_level", ("bump", "sync config")],
         )
         self.assertNotIn("bg_clear", self.calls)
         self.assertNotIn(("reload_tasks", "key"), self.calls)
@@ -612,6 +622,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
         self.assertEqual(
             self.calls,
             [
+                "lock",
                 ("reload_tasks", "key"),
                 "reload_ui_map",
                 "bg_clear",
@@ -2705,6 +2716,8 @@ class TestTaskOrderingStaticContract(unittest.TestCase):
         self.assertNotIn("task-graph", app_js)
         self.assertNotIn("任务计算图", app_js)
         self.assertNotIn("saveTaskOrderingLayout", app_js)
+        self.assertIn("incomingConfigVersion < currentConfigVersion", app_js)
+        self.assertIn("Ignored stale public config payload", app_js)
 
         self.assertIn("activeTab === 'tasks'", task_panel_js)
         self.assertNotIn("activeTab === 'task-graph'", task_panel_js)
@@ -2714,13 +2727,21 @@ class TestTaskOrderingStaticContract(unittest.TestCase):
         self.assertNotIn("task-rules-panel", task_panel_js)
         self.assertIn("任务顺序", task_panel_js)
         self.assertIn("已启用任务", task_panel_js)
-        self.assertIn("拖到上/下边缘会插入排序", task_panel_js)
-        self.assertIn("拖到任务中部会创建分组", task_panel_js)
+        self.assertIn("拖到上/下边缘可排序", task_panel_js)
+        self.assertIn("拖到中部创建分组", task_panel_js)
         self.assertIn("分组顺序说明", task_panel_js)
         self.assertIn("orderedTaskRows()", task_panel_js)
         self.assertIn("visibleOrderingNodes()", task_panel_js)
         self.assertIn("enabledTaskRows()", task_panel_js)
         self.assertIn("selectedEnabledTaskPath", task_panel_js)
+        self.assertIn("selectedEnabledTaskIndex()", task_panel_js)
+        self.assertIn("orderedTaskRows.slice(this.selectedEnabledTaskIndex).filter", task_panel_js)
+        self.assertIn("selectTaskForRange", task_panel_js)
+        self.assertIn("selectTaskForRange(row)", task_panel_js)
+        self.assertIn("selectTaskForRange(row);", task_panel_js)
+        self.assertIn("selectTaskForRange(node.row, { reveal: false })", task_panel_js)
+        self.assertIn("isOrderingTaskSelected", task_panel_js)
+        self.assertIn("task-order-row-selected", task_panel_js)
         self.assertIn("currentRunningTaskPath", task_panel_js)
         self.assertIn("isEnabledTaskCurrent", task_panel_js)
         self.assertIn("task-current-badge", task_panel_js)
@@ -2747,7 +2768,11 @@ class TestTaskOrderingStaticContract(unittest.TestCase):
         self.assertIn("task-order-drop-before", task_panel_js)
         self.assertIn("renameOrderingGroup", task_panel_js)
         self.assertIn("ungroupOrderingGroup", task_panel_js)
-        self.assertIn("task_ordering.items", task_panel_js)
+        self.assertIn("按住任务或分组拖到想要的位置", task_panel_js)
+        self.assertIn("松开后会自动保存", task_panel_js)
+        self.assertIn("执行时会按当前列表从上到下运行", task_panel_js)
+        self.assertIn("拖进分组、拖出分组", task_panel_js)
+        self.assertNotIn("当前保存一个可嵌套的全局顺序列表", task_panel_js)
         self.assertIn("runTaskRange", app_js)
         self.assertIn("activate_scheduler: false", app_js)
         self.assertIn("runtimeStatus", app_js)

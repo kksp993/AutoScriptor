@@ -261,7 +261,28 @@ def _first_hit_path(boxes: list, target: Target|list[Target]|tuple[Target, ...])
 
 
 def match(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, *, screenshot=None) -> dict | None:
-    """结构化匹配目标，沿用 locate 的 tuple 任一、list 全部语义。"""
+    """
+    结构化匹配目标，沿用 locate 的组合语义，并返回命中细节。
+
+    target:
+        Target 表示查找单个目标。
+        tuple[Target, ...] 表示 OR，任一目标命中即成功。
+        list[Target] 表示 AND，全部目标命中才成功。
+    timeout:
+        最长等待秒数；0 表示只检查当前画面一次。
+    screenshot:
+        可传入固定截图帧，复用同一帧做定位，适合截图测试或批量识别。
+
+    返回:
+        None 表示未满足 target 对应的组合条件。
+        dict 表示匹配成功，常用字段如下：
+            all: 是否按 list 的 AND 语义匹配。
+            index: 扁平目标列表中的首个命中下标。
+            path: 目标结构中的嵌套位置，不是文件路径；如 (1, 0) 表示第 1 组里的第 0 个目标。
+            target: 首个命中的目标对象。
+            box: 首个命中的 Box。
+            boxes: 完整定位结果矩阵。
+    """
     _validate_timeout(timeout, "match")
     check_cancel_raise()
     is_all_match = isinstance(target, list)
@@ -706,7 +727,25 @@ def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), re
 
 
 def coloris(targets: Target|tuple[Target, ...]|list[Target], color: str, timeout: float=0, *, offset: tuple = (0, 0), resize: tuple = (-1, -1))->bool:
-    """判断目标区域颜色是否匹配，tuple 任一匹配，list 全部匹配。"""
+    """
+    判断目标区域颜色是否匹配，是 get_colors 的布尔快捷入口。
+
+    targets:
+        Target 表示判断单个目标区域。
+        tuple[Target, ...] 表示 OR，任一目标区域颜色匹配即返回 True。
+        list[Target] 表示 AND，全部目标区域颜色都匹配才返回 True。
+    color:
+        期望颜色名称，例如 "绿色"、"红色"、"灰色"；按 get_colors 返回值精确比较。
+    timeout:
+        最长等待秒数；0 表示只检查当前画面一次。
+    offset:
+        颜色采样区域相对定位 Box 的偏移量。
+    resize:
+        颜色采样区域大小；(-1, -1) 表示保持定位 Box 原大小。
+
+    返回:
+        True 表示颜色满足 targets 的组合语义，False 表示超时或不匹配。
+    """
     _validate_timeout(timeout, "coloris")
     if hasattr(targets, '__iter__') and not isinstance(targets, (list, tuple, str)):
         targets = list(targets)

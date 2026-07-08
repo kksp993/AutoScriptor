@@ -269,6 +269,12 @@ const app = createApp({
 
     function applyPublicConfigPayload(data) {
       if (!data || data.error) return false;
+      const incomingConfigVersion = Number(data.config_version || 0);
+      const currentConfigVersion = Number(configData.config_version || 0);
+      if (incomingConfigVersion && currentConfigVersion && incomingConfigVersion < currentConfigVersion) {
+        console.warn('Ignored stale public config payload', { incomingConfigVersion, currentConfigVersion });
+        return true;
+      }
       Object.keys(configData).forEach(k => delete configData[k]);
       Object.assign(configData, data);
       return applyRuntimeSnapshotPayload(data);
@@ -313,7 +319,7 @@ const app = createApp({
       if (_postStopRefreshTimer) clearTimeout(_postStopRefreshTimer);
       _postStopRefreshTimer = setTimeout(() => {
         _postStopRefreshTimer = null;
-        fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
+        fetchRuntimeSnapshot({ refreshConfigIfChanged: true });
       }, 300);
     }
 

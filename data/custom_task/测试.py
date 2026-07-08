@@ -7,7 +7,7 @@ from ZmxyOL.nav.envs.decorators import *
 from ZmxyOL.task.task_register import register_task
 from ZmxyOL import *
 @register_task(
-    path_cn='自定义任务/编辑器保存/测试',
+    path_cn='自定义任务/编辑器保存/离开关卡',
     description='调试角色离开关卡流程',
     task_doc='用于单独调试角色走向出口并离开关卡的流程。',
     debug_mode=True,

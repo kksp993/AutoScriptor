@@ -39,19 +39,19 @@ from AutoScriptor import *
 
 常用导出：
 
-| 类型 | 名称 |
-|------|------|
-| 目标 | `B`、`I`、`T`、`Box`、`Target`、`ui` |
-| 操作 | `click`、`swipe`、`input`、`key_event`、`sleep` |
-| 定位 | `locate`、`ui_T`、`ui_F`、`wait_for_appear`、`wait_for_disappear` |
-| OCR/颜色 | `extract_info`、`get_colors` |
-| 后台 | `bg`、`BG_SIGNALS` |
-| 配置/状态 | `cfg`、`get_task_status`、`set_task_status` |
-| 错误 | `TaskRequireReTry`、`RequestHumanTakeover` |
+| 类型　　　　　| 名称　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
+| ---------------| ----------------------------------------------------------------------------|
+| 目标　　　　　| `B`、`I`、`T`、`Box`、`Target`、`ui`　　　　　　　　　　　　　　　　　　　 |
+| 操作　　　　　| `click`、`swipe`、`input`、`key_event`、`sleep`　　　　　　　　　　　　　　|
+| 定位/区域识别 | `locate`、`match`、`ui_T`、`ui_F`、`wait_for_appear`、`wait_for_disappear` |
+| OCR/提取颜色　| `extract_info`、`get_colors`、`coloris`　　　　　　　　　　　　　　　　　　|
+| 后台　　　　　| `bg`、`BG_SIGNALS`　　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
+| 配置/状态　　 | `cfg`、`get_task_status`、`set_task_status`　　　　　　　　　　　　　　　　|
+| 错误　　　　　| `TaskRequireReTry`、`RequestHumanTakeover`　　　　　　　　　　　　　　　　 |
 
 `clear_task_status` 目前不是 `AutoScriptor.__all__` 公共导出；需要清理状态时从 `AutoScriptor.utils.task_state` 导入。
 
-## 目标语义
+## 定位
 
 ```python
 from AutoScriptor import B, I, T, Box
@@ -70,6 +70,27 @@ box = B(100, 200, 120, 60)              # 直接坐标区域，参数为 x, y, w
 | `list[Target]` | AND：全部目标命中才成功 |
 
 混合 `I()` 与 `T()` 的 tuple 会优先尝试图片，图片命中时跳过 OCR，降低弹窗类 OR 查询延迟。
+
+### 区域识别
+
+`match()` 是定位里的结构化区域识别入口，沿用同一套 `Target` / `tuple` / `list` 语义：
+
+```python
+hit = match((T("确定"), T("取消")), timeout=2)
+if hit:
+    click(hit["box"])
+```
+
+返回值为 `dict | None`。常用字段：
+
+| 字段 | 含义 |
+|------|------|
+| `all` | 本次是否按 list 的 AND 语义匹配 |
+| `index` | 扁平目标列表中的首个命中下标 |
+| `path` | 目标结构中的嵌套位置，不是文件路径，例如 `(1, 0)` 表示第 1 组里的第 0 个目标 |
+| `target` | 首个命中的目标对象 |
+| `box` | 首个命中的 `Box` |
+| `boxes` | 完整定位结果矩阵 |
 
 ## 操作 API
 
@@ -91,15 +112,25 @@ sleep(1)
 - `offset` / `resize` 和 `Box + {"offset": ..., "resize": ...}` 使用同一坐标语义。
 - `click()`、`locate()` 超时较长时会保存失败截图到调试截图目录。
 
-## OCR、数字与颜色
+## OCR、数字与提取颜色
+
+### OCR 与数字
 
 ```python
 value = extract_info(T("数量", box=B(100, 100, 80, 30)))
 digits = extract_info(B(100, 100, 80, 30), digit_only=True)
-colors = get_colors((B(10, 10, 20, 20), B(40, 10, 20, 20)))
 ```
 
 `extract_info(..., screenshot_frame=frame)` 会固定使用同一帧，适合在线截图测试、Editor 导入图和批量识别，避免 UI 漂移。OCR 层应保留识别语义：空/不可读返回 `None` 或空字符串，业务层再决定是否转成数量 `0` 或 `1`。
+
+### 提取颜色
+
+```python
+colors = get_colors((B(10, 10, 20, 20), B(40, 10, 20, 20)))
+is_green = coloris(B(100, 100, 80, 30), "绿色")
+```
+
+`coloris(targets, color, timeout=0, offset=(0, 0), resize=(-1, -1))` 用于直接判断颜色是否匹配：单个目标判断自身颜色，tuple 表示任一目标颜色匹配即可，list 表示全部目标都要匹配。需要读取具体颜色列表时仍使用 `get_colors()`。
 
 ## 配置与任务状态
 

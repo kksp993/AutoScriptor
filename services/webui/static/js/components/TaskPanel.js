@@ -26,6 +26,9 @@ const TaskPanel = {
       guidedOrderingTaskPath: '',
       guidedOrderingTaskTimer: null,
       transientExpandedOrderingGroupIds: [],
+      taskSearchQuery: '',
+      taskSearchFocused: false,
+      taskSearchHighlightedIndex: 0,
     };
   },
   computed: {
@@ -70,10 +73,12 @@ const TaskPanel = {
       return this.orderedTaskRows.filter((row) => row.item?.on);
     },
     selectedEnabledTaskIndex() {
-      return this.enabledTaskRows.findIndex((row) => row.path === this.selectedEnabledTaskPath);
+      return this.orderedTaskRows.findIndex((row) => row.path === this.selectedEnabledTaskPath);
     },
     selectedEnabledTaskRows() {
-      return this.selectedEnabledTaskIndex >= 0 ? this.enabledTaskRows.slice(this.selectedEnabledTaskIndex) : [];
+      return this.selectedEnabledTaskIndex >= 0
+        ? this.orderedTaskRows.slice(this.selectedEnabledTaskIndex).filter((row) => row.item?.on)
+        : [];
     },
     currentRunningTaskPath() {
       const runtimeActive = this.executionBusy || this.runtimeStatus?.running === true || this.runtimeStatus?.busy === true;
@@ -82,6 +87,19 @@ const TaskPanel = {
     },
     orderingDiagnostics() {
       return Array.isArray(this.orderingProjection?.diagnostics) ? this.orderingProjection.diagnostics : [];
+    },
+    taskSearchMatches() {
+      const normalizedQuery = this.normalizeTaskSearchText(this.taskSearchQuery);
+      if (!normalizedQuery) return [];
+      const queryTokens = normalizedQuery.split(/\s+/).filter(Boolean);
+      if (!queryTokens.length) return [];
+      return this.orderedTaskRows
+        .map((row) => ({ row, searchableText: this.buildTaskSearchText(row) }))
+        .filter((match) => queryTokens.every((token) => this.doesTaskSearchTextMatch(match.searchableText, token)))
+        .slice(0, 20);
+    },
+    taskSearchDropdownVisible() {
+      return this.taskSearchFocused && !!this.normalizeTaskSearchText(this.taskSearchQuery);
     },
   },
   methods: {
@@ -109,6 +127,9 @@ const TaskPanel = {
     isEnabledTaskSelected(row) {
       return !!row?.path && row.path === this.selectedEnabledTaskPath;
     },
+    isOrderingTaskSelected(node) {
+      return node?.type === 'task' && !!node.row?.path && node.row.path === this.selectedEnabledTaskPath;
+    },
     isEnabledTaskCurrent(row) {
       return !!row?.path && !!this.currentRunningTaskPath && row.path === this.currentRunningTaskPath;
     },
@@ -124,15 +145,18 @@ const TaskPanel = {
       }
       return 'border-transparent hover:border-primary/20 hover:bg-slate-50';
     },
-    selectEnabledTask(row) {
+    selectTaskForRange(row, options = {}) {
       if (!row?.path) return;
       this.selectedEnabledTaskPath = row.path;
-      this.scrollOrderingTaskIntoView(row.path);
+      if (options.reveal !== false) this.scrollOrderingTaskIntoView(row.path);
+    },
+    selectEnabledTask(row) {
+      this.selectTaskForRange(row);
     },
     runSelectedEnabledTaskRange() {
       if (this.executionBusy) return;
       if (!this.selectedEnabledTaskRows.length) {
-        ElementPlus.ElMessage.info('请先选择一个已启用任务');
+        ElementPlus.ElMessage.info(this.selectedEnabledTaskPath ? '选中位置之后没有已启用任务' : '请先选择一个任务');
         return;
       }
       this.$emit('run-task-range', this.selectedEnabledTaskRows.map((row) => row.path));
@@ -174,6 +198,68 @@ const TaskPanel = {
       row.item.on = !row.item.on;
       if (row.item.on) this.resetTaskActivation(row.item);
       else row.item._due = false;
+    },
+    normalizeTaskSearchText(value) {
+      return String(value ?? '').trim().toLowerCase();
+    },
+    stringifyTaskSearchValue(value, seenObjects = new WeakSet()) {
+      if (value === null || value === undefined) return '';
+      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+      if (Array.isArray(value)) return value.map((entry) => this.stringifyTaskSearchValue(entry, seenObjects)).join(' ');
+      if (typeof value !== 'object') return String(value);
+      if (seenObjects.has(value)) return '';
+      seenObjects.add(value);
+      return Object.entries(value)
+        .map(([fieldName, fieldValue]) => `${fieldName} ${this.stringifyTaskSearchValue(fieldValue, seenObjects)}`)
+        .join(' ');
+    },
+    buildTaskSearchText(row) {
+      const searchableParts = [
+        row?.key,
+        row?.path,
+        this.displayPath(row?.path),
+        row?.group,
+        this.taskStatusLabel(row?.item),
+        this.stringifyTaskSearchValue(row?.item),
+      ];
+      return this.normalizeTaskSearchText(searchableParts.filter(Boolean).join(' '));
+    },
+    doesTaskSearchTextMatch(searchableText, token) {
+      if (!token) return true;
+      if (searchableText.includes(token)) return true;
+      let nextCharacterIndex = 0;
+      for (const character of searchableText) {
+        if (character === token[nextCharacterIndex]) nextCharacterIndex += 1;
+        if (nextCharacterIndex >= token.length) return true;
+      }
+      return false;
+    },
+    hideTaskSearchDropdown() {
+      window.setTimeout(() => {
+        this.taskSearchFocused = false;
+      }, 120);
+    },
+    clearTaskSearch() {
+      this.taskSearchQuery = '';
+      this.taskSearchHighlightedIndex = 0;
+    },
+    moveTaskSearchHighlight(offset) {
+      const matchCount = this.taskSearchMatches.length;
+      if (!matchCount) return;
+      this.taskSearchHighlightedIndex = (this.taskSearchHighlightedIndex + offset + matchCount) % matchCount;
+    },
+    confirmTaskSearchHighlightedMatch() {
+      const match = this.taskSearchMatches[this.taskSearchHighlightedIndex] || this.taskSearchMatches[0];
+      if (match) this.selectTaskSearchMatch(match);
+    },
+    selectTaskSearchMatch(match) {
+      const row = match?.row;
+      if (!row?.path) return;
+      if (!row.item?.on && this.showOnlyEnabledOrderingItems) this.showOnlyEnabledOrderingItems = false;
+      this.taskSearchQuery = row.path;
+      this.taskSearchFocused = false;
+      this.taskSearchHighlightedIndex = 0;
+      this.selectTaskForRange(row);
     },
     makeTaskOrderingNode(path) {
       return { type: 'task', path };
@@ -592,9 +678,53 @@ const TaskPanel = {
       <div class="flex justify-between items-start gap-3 mb-3 flex-shrink-0">
         <div>
           <h2 class="page-panel-title">任务顺序</h2>
-          <p class="text-xs text-slate-500 mt-1">拖到上/下边缘会插入排序；拖到任务中部会创建分组，拖到分组中部会加入分组。分组只影响顺序展开，不记录计算图或偏序关系。</p>
         </div>
         <div class="flex items-center gap-3 shrink-0">
+          <div class="relative w-72 max-w-full min-w-[12rem]">
+            <div class="relative">
+              <i class="fa fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
+              <input v-model="taskSearchQuery"
+                     type="text"
+                     class="w-full h-8 pl-8 pr-8 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
+                     placeholder="搜索任务/属性/参数"
+                     title="模糊搜索所有任务字段、属性、参数和任务名称"
+                     @focus="taskSearchFocused = true"
+                     @blur="hideTaskSearchDropdown"
+                     @input="taskSearchHighlightedIndex = 0"
+                     @keydown.down.prevent="moveTaskSearchHighlight(1)"
+                     @keydown.up.prevent="moveTaskSearchHighlight(-1)"
+                     @keydown.enter.prevent="confirmTaskSearchHighlightedMatch"
+                     @keydown.esc.prevent="taskSearchFocused = false">
+              <button v-if="taskSearchQuery"
+                      type="button"
+                      class="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                      title="清空搜索"
+                      @mousedown.prevent
+                      @click="clearTaskSearch">
+                <i class="fa fa-times text-[10px]"></i>
+              </button>
+            </div>
+            <div v-if="taskSearchDropdownVisible"
+                 class="absolute left-0 right-0 top-[calc(100%+0.35rem)] z-30 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+              <div v-if="taskSearchMatches.length" class="max-h-72 overflow-y-auto py-1">
+                <button v-for="(match, matchIndex) in taskSearchMatches"
+                        :key="match.row.path"
+                        type="button"
+                        class="w-full px-3 py-2 text-left transition-colors"
+                        :class="matchIndex === taskSearchHighlightedIndex ? 'bg-primary/10 text-primary' : 'text-slate-700 hover:bg-slate-50'"
+                        @mousedown.prevent
+                        @click="selectTaskSearchMatch(match)">
+                  <div class="text-xs font-semibold truncate">{{ match.row.path }}</div>
+                  <div class="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-400 min-w-0">
+                    <span class="truncate">{{ taskStatusLabel(match.row.item) }}</span>
+                    <span v-if="match.row.item.custom" class="task-custom-tag">自定义</span>
+                    <span v-if="match.row.item.beta" class="task-beta-tag">Beta</span>
+                  </div>
+                </button>
+              </div>
+              <div v-else class="px-3 py-2 text-xs text-slate-400">没有匹配任务</div>
+            </div>
+          </div>
           <button type="button"
                   class="text-xs text-slate-600 hover:text-primary transition-colors cursor-pointer select-none disabled:opacity-40 disabled:pointer-events-none"
                   :disabled="orderingSaving"
@@ -614,9 +744,11 @@ const TaskPanel = {
              class="task-order-row px-4 py-3 rounded-xl border transition-colors flex items-center gap-3 min-w-0"
              :style="orderingNodeIndentStyle(node)"
              :data-ordering-task-path="node.type === 'task' ? node.row.path : null"
+             @click="node.type === 'task' ? selectTaskForRange(node.row, { reveal: false }) : null"
                :class="[
                  {
                    'opacity-60': executionBusy || orderingSaving,
+                   'task-order-row-selected bg-primary/10 border-primary/40': isOrderingTaskSelected(node),
                    'task-order-row-guided': isOrderingTaskGuided(node),
                    'task-order-drop-before': isOrderingDropHint(node, 'before'),
                    'task-order-drop-after': isOrderingDropHint(node, 'after'),
@@ -699,7 +831,7 @@ const TaskPanel = {
       <div class="bg-white rounded-xl shadow-md p-4 flex flex-col gap-3 shrink-0">
         <h2 class="page-panel-title"><i class="fa fa-list-ol mr-2 text-primary"></i>分组顺序说明</h2>
         <p class="text-sm text-slate-600 leading-relaxed">
-          当前保存一个可嵌套的全局顺序列表。拖拽后会写入 <code class="text-xs bg-slate-100 px-1 rounded">task_ordering.items</code>，执行时递归展开为 <code class="text-xs bg-slate-100 px-1 rounded">user_order</code>。
+          按住任务或分组拖到想要的位置，松开后会自动保存。执行时会按当前列表从上到下运行。你可以调整任务顺序，也可以把任务拖进分组、拖出分组，或移动整个分组。
         </p>
         <div v-if="orderingDiagnostics.length"
              class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">

@@ -239,10 +239,18 @@ def read_config():
     ORDER_MAP = task_tree_service.read_order_map()
 
 
-def make_public_config():
+def _make_public_config_unlocked():
     data = task_tree_service.public_config()
     data["config_version"] = current_version()
     return data
+
+
+def make_public_config():
+    service = lifecycle_service
+    if service is None:
+        return _make_public_config_unlocked()
+    with service.config_operation():
+        return _make_public_config_unlocked()
 
 
 def _mark_config_changed(reason: str) -> int:
@@ -581,10 +589,11 @@ async def favicon_png():
 @app.get("/api/refresh")
 async def refresh_config_api():
     try:
-        _consume_runtime_config_updates()
-        read_config()
-        _apply_webui_log_level_from_config()
-        return make_public_config()
+        with lifecycle_service.config_operation():
+            _consume_runtime_config_updates()
+            read_config()
+            _apply_webui_log_level_from_config()
+            return _make_public_config_unlocked()
     except Exception as e:
         logger.error("refresh error: %s", e)
         return api_error(500, str(e), code="refresh_failed")
@@ -596,8 +605,9 @@ async def reload_tasks_api():
     if busy is not None:
         return busy
     try:
-        lifecycle_service.reload_task_state(reason="reload tasks")
-        return make_public_config()
+        with lifecycle_service.config_operation():
+            lifecycle_service.reload_task_state(reason="reload tasks")
+            return _make_public_config_unlocked()
     except Exception as e:
         logger.error("reload_tasks error: %s", e)
         return api_error(500, str(e), code="reload_tasks_failed")
@@ -629,8 +639,9 @@ async def reload_all_tasks_api():
     if busy is not None:
         return busy
     try:
-        lifecycle_service.reload_all(reason="reload all")
-        return make_public_config()
+        with lifecycle_service.config_operation():
+            lifecycle_service.reload_all(reason="reload all")
+            return _make_public_config_unlocked()
     except Exception as e:
         logger.error("reload_all_tasks error: %s", e)
         return api_error(500, str(e), code="reload_all_tasks_failed")
@@ -668,8 +679,9 @@ async def save_tasks_api(request: Request):
         tasks = payload.get('tasks', payload)
         if not isinstance(tasks, dict):
             return api_error(400, "invalid tasks payload", code="invalid_payload")
-        lifecycle_service.save_tasks(tasks)
-        return make_public_config()
+        with lifecycle_service.config_operation():
+            lifecycle_service.save_tasks(tasks)
+            return _make_public_config_unlocked()
     except Exception as e:
         logger.error("save_tasks error: %s", e)
         return api_error(
@@ -683,13 +695,14 @@ async def save_tasks_api(request: Request):
 @app.get("/api/task-ordering")
 async def task_ordering_api():
     try:
-        projection = task_tree_service.task_ordering_projection()
-        return api_ok(
-            config_version=current_version(),
-            projection=projection.to_public_dict(),
-            generations=summarize_ordering_generations(projection),
-            runtime=runtime_controller.status(),
-        )
+        with lifecycle_service.config_operation():
+            projection = task_tree_service.task_ordering_projection()
+            return api_ok(
+                config_version=current_version(),
+                projection=projection.to_public_dict(),
+                generations=summarize_ordering_generations(projection),
+                runtime=runtime_controller.status(),
+            )
     except Exception as e:
         logger.error("task_ordering read error: %s", e, exc_info=True)
         return api_error(500, str(e), code="task_ordering_read_failed")
@@ -705,8 +718,9 @@ async def save_task_ordering_api(request: Request):
         if not isinstance(payload, dict):
             return api_error(400, "invalid task ordering payload", code="invalid_payload")
         raw_overlay = payload.get("overlay", payload)
-        lifecycle_service.save_task_ordering(raw_overlay)
-        return make_public_config()
+        with lifecycle_service.config_operation():
+            lifecycle_service.save_task_ordering(raw_overlay)
+            return _make_public_config_unlocked()
     except ValueError as e:
         return api_error(400, str(e), code="invalid_task_ordering")
     except Exception as e:
