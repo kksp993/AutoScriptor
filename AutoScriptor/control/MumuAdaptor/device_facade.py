@@ -195,7 +195,9 @@ class DeviceFacade:
             if state.returncode != 0 or state.stdout.strip() != "device":
                 if ":" not in self.adb_addr:
                     return False
-                self._adb_connect_serial(self.adb_addr)
+                # Already-listed offline TCP serials report "already connected"
+                # on plain adb connect; heal them with disconnect then connect.
+                self._adb_reconnect_serial(self.adb_addr)
                 state = self.run_adb(["get-state"], timeout=5)
                 if state.returncode != 0 or state.stdout.strip() != "device":
                     return False
@@ -350,12 +352,12 @@ class DeviceFacade:
 
     def _adb_connect_serial(self, serial: str) -> str:
         path = str(self.emulator.get("adb_path", "") or "").strip()
-        s = str(serial or "").strip()
-        if not path or not Path(path).is_file() or ":" not in s:
+        serial_text = str(serial or "").strip()
+        if not path or not Path(path).is_file() or ":" not in serial_text:
             return ""
         try:
             result = subprocess.run(
-                [path, "connect", s],
+                [path, "connect", serial_text],
                 capture_output=True,
                 text=True,
                 timeout=8,
@@ -364,6 +366,30 @@ class DeviceFacade:
             return (result.stdout or result.stderr or "").strip()
         except (OSError, subprocess.SubprocessError) as exc:
             return str(exc)
+
+    def _adb_disconnect_serial(self, serial: str) -> str:
+        path = str(self.emulator.get("adb_path", "") or "").strip()
+        serial_text = str(serial or "").strip()
+        if not path or not Path(path).is_file() or ":" not in serial_text:
+            return ""
+        try:
+            result = subprocess.run(
+                [path, "disconnect", serial_text],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                creationflags=CREATE_NO_WINDOW,
+            )
+            return (result.stdout or result.stderr or "").strip()
+        except (OSError, subprocess.SubprocessError) as exc:
+            return str(exc)
+
+    def _adb_reconnect_serial(self, serial: str) -> str:
+        """Heal TCP ADB sessions stuck as offline while still listed."""
+        disconnect_detail = self._adb_disconnect_serial(serial)
+        connect_detail = self._adb_connect_serial(serial)
+        detail_parts = [part for part in (disconnect_detail, connect_detail) if part]
+        return "; ".join(detail_parts)
 
     def _adb_mismatch_detail(
         self,
@@ -418,11 +444,15 @@ class DeviceFacade:
 
     def _adb_device_check(self) -> dict[str, Any]:
         try:
-            connect_detail = ""
+            reconnect_detail = ""
             state = self.run_adb(["get-state"], timeout=5)
-            if state.returncode != 0:
+            needs_reconnect = (
+                state.returncode != 0
+                or state.stdout.strip() != "device"
+            )
+            if needs_reconnect:
                 if ":" in self.adb_addr:
-                    connect_detail = self._adb_connect_serial(self.adb_addr)
+                    reconnect_detail = self._adb_reconnect_serial(self.adb_addr)
                     state = self.run_adb(["get-state"], timeout=5)
                     if state.returncode == 0 and state.stdout.strip() == "device":
                         booted = self.run_adb(["shell", "getprop", "sys.boot_completed"], timeout=5)
@@ -432,27 +462,32 @@ class DeviceFacade:
                                 "ADB device is ready after reconnect",
                                 serial=self.adb_addr,
                                 boot_completed=True,
-                                reconnect=connect_detail,
+                                reconnect=reconnect_detail,
                             )
                         return _status(
                             "warn",
                             "ADB device connected after reconnect but Android boot is not complete",
                             serial=self.adb_addr,
-                            reconnect=connect_detail,
+                            reconnect=reconnect_detail,
                         )
                 rows = self._adb_device_rows()
                 players = self._manager_info_rows()
                 detail = _text(state)
-                if connect_detail:
-                    detail = f"{detail}; adb connect: {connect_detail}".strip("; ")
+                if reconnect_detail:
+                    detail = f"{detail}; adb reconnect: {reconnect_detail}".strip("; ")
+                if state.returncode == 0 and state.stdout.strip() and state.stdout.strip() != "device":
+                    return _status(
+                        "warn",
+                        f"ADB device state is {state.stdout.strip()!r}",
+                        serial=self.adb_addr,
+                        reconnect=reconnect_detail or None,
+                    )
                 return self._adb_mismatch_detail(
                     configured=self.adb_addr,
                     raw_detail=detail,
                     rows=rows,
                     players=players,
                 )
-            if state.stdout.strip() != "device":
-                return _status("warn", f"ADB device state is {state.stdout.strip()!r}", serial=self.adb_addr)
             booted = self.run_adb(["shell", "getprop", "sys.boot_completed"], timeout=5)
             if booted.returncode == 0 and booted.stdout.strip() == "1":
                 return _status("ok", "ADB device is ready", serial=self.adb_addr, boot_completed=True)
@@ -493,15 +528,32 @@ class DeviceFacade:
 
         try:
             manager = module.ocr_manager
+            runtime_status = module.get_ocr_runtime_status()
             thread = getattr(manager, "_init_thread", None)
             ready = bool(manager.is_ready())
             initializing = bool(thread and thread.is_alive())
+            status_details = {
+                "use_gpu": bool(runtime_status["runtime_use_gpu"]),
+                "configured_use_gpu": bool(runtime_status["configured_use_gpu"]),
+                "engine_use_gpu": runtime_status.get("engine_use_gpu"),
+                "engine_device": runtime_status.get("engine_device"),
+                "restart_required": bool(runtime_status["restart_required"]),
+            }
+            initialization_error = runtime_status.get("initialization_error")
+            if initialization_error:
+                return _status("error", initialization_error, **status_details)
+            if runtime_status["restart_required"]:
+                return _status(
+                    "warn",
+                    "OCR configuration changed; restart AutoScriptor to apply it",
+                    **status_details,
+                )
             if ready:
-                return _status("ok", "OCR engine is ready", use_gpu=bool(module.ocr_config.get("use_gpu")))
+                return _status("ok", "OCR engine is ready", **status_details)
             if initializing:
-                return _status("warn", "OCR engine is still initializing", use_gpu=bool(module.ocr_config.get("use_gpu")))
-            return _status("error", "OCR engine is not ready", use_gpu=bool(module.ocr_config.get("use_gpu")))
-        except (AttributeError, TypeError) as exc:
+                return _status("warn", "OCR engine is still initializing", **status_details)
+            return _status("error", "OCR engine is not ready", **status_details)
+        except (AttributeError, KeyError, TypeError) as exc:
             return _status("error", f"OCR status check failed: {exc}")
 
     def _ui_map_check(self) -> dict[str, Any]:

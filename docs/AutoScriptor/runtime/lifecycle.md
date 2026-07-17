@@ -26,18 +26,22 @@
 
 `ensure_app_running()` 会：
 
-1. 依据调用方传入的 `start_emulator` / `launch_app` 启动模拟器和 App；`MuMuManager launch` 返回成功只代表启动命令已被接受，`Power.start()` 必须等到配置的 ADB 设备重新连上且 Android boot complete 后，才允许解析包名和启动 App。
-2. 解析 `app_to_start`，必要时写回配置。
-3. 创建 `MixControl(mumu, serial=adb_addr)`。
-4. 通过测试点击确认模拟器响应。
-5. 按 `run_in_background` 隐藏窗口。
+1. 依据 `start_emulator` 确认 MuMu 进程存在；`MuMuManager launch` 返回成功只代表启动命令已被接受。
+2. 无论 MuMu 是刚启动还是已在运行，都等待配置的 TCP ADB 串号重连为 `device`，并确认 `sys.boot_completed=1`。
+3. 按 `launch_app` 解析并启动 `app_to_start`，必要时写回配置。
+4. 创建 `MixControl(mumu, serial=adb_addr)`。
+5. 通过测试点击确认模拟器响应。
+6. 按 `run_in_background` 隐藏窗口。
+
+`debug_mode` 只跳过调度器的自动登录、任务前重启和常规失败恢复，不跳过设备会话的基本就绪检查。重启设备的任务应先调用 `runtime_ctx.shutdown()` 释放旧 NemuIpc 和运行态引用，再重启 MuMu 并通过 `runtime_ctx.refresh()` 建立新会话。
+
 
 ## 设备通道
 
 - `DeviceFacade` 用于诊断页聚合 Manager、ADB、App、NemuIpc、OCR、UI Map 状态。
 - MuMuManager 负责低频生命周期命令；`version` 等命令失败但 ADB 可用时通常是 warning。
 - ADB 是点击、滑动、输入、按键、App 启停和包状态的稳定路径；高频输入优先直接走 `adb.exe`。
-- MuMu TCP ADB 地址（如 `127.0.0.1:16384`）不会因为 `adb start-server` 自动出现在 `adb devices`；`DeviceFacade` 在 `get-state` 失败时会先 `adb connect <adb_addr>` 并重试，再判断端口错误或设备未启动。
+- MuMu TCP ADB 地址（如 `127.0.0.1:16384`）不会因为 `adb start-server` 自动出现在 `adb devices`；`DeviceFacade` 在配置串号不是 `device` 时会先 `adb disconnect <adb_addr>` 再 `adb connect <adb_addr>` 并重试。已列出但状态为 `offline` 的 TCP 串号只做 `connect` 会回 `already connected` 却不恢复，必须 disconnect 后再 connect。
 - NemuIpc 仍是截图主路径。默认诊断不做截图探测；用户点击“截图探测”才检查该层。
 - NemuIpc 原生连接按单通道使用：截图、点击、长按、滑动、拖拽、释放触摸和 disconnect 必须通过 `NemuIpc` 公开方法串行进入，不能在运行期直接调用底层 `nemu_ipc.nemu_ipc.*`。后台检测线程和战斗移动线程共享同一连接时，用串行化解决确定性争用，不用扩大重试或吞掉超时。
 

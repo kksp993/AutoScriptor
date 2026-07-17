@@ -20,7 +20,7 @@ class Power:
     def __init__(self, utils):
         self.utils = utils
 
-    def _wait_until_android_ready(
+    def wait_until_android_ready(
         self,
         timeout: float = 90.0,
         interval: float = 2.0,
@@ -87,7 +87,7 @@ class Power:
 
                 ret_code, retval = self.utils.run_command(args)
                 if ret_code == 0:
-                    if not self._wait_until_android_ready(cancel_check=cancel_check):
+                    if not self.wait_until_android_ready(cancel_check=cancel_check):
                         raise RuntimeError("MuMuManager launch code succeeded, but device did not become ready")
                     logger.info(f"模拟器 {self.utils.get_vm_id()} 启动成功")
                     return True
