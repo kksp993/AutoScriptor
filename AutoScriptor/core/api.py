@@ -69,6 +69,15 @@ def ensure_app_running(
     if not is_running:
         raise RuntimeError("ensure_app_running: 模拟器启动失败")
 
+    # MuMuManager may report a running process while its TCP ADB endpoint is
+    # still offline. Do not create controls or launch the app until the
+    # configured serial is connected and Android has completed booting.
+    logger.info("正在确认模拟器 ADB 与 Android 启动状态")
+    if not mumu.power.wait_until_android_ready(cancel_check=cancel_check):
+        raise RuntimeError(
+            f"ensure_app_running: ADB 设备 {adb_addr} 未就绪或 Android 启动未完成"
+        )
+
     # app_to_start 为空或未安装时由 resolve_app_to_start 枚举候选包并写回 data/config.json。
     # 解析只在需要拉起应用时进行，避免 WebUI 初始化或纯设备探测误触 MuMuManager。
     if launch_app:
