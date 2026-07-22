@@ -245,6 +245,17 @@ def _make_public_config_unlocked():
     return data
 
 
+def _make_task_ordering_response_unlocked():
+    projection = task_tree_service.task_ordering_projection()
+    return api_ok(
+        status="ok",
+        config_version=current_version(),
+        projection=projection.to_public_dict(),
+        generations=summarize_ordering_generations(projection),
+        runtime=runtime_controller.status(),
+    )
+
+
 def make_public_config():
     service = lifecycle_service
     if service is None:
@@ -696,13 +707,7 @@ async def save_tasks_api(request: Request):
 async def task_ordering_api():
     try:
         with lifecycle_service.config_operation():
-            projection = task_tree_service.task_ordering_projection()
-            return api_ok(
-                config_version=current_version(),
-                projection=projection.to_public_dict(),
-                generations=summarize_ordering_generations(projection),
-                runtime=runtime_controller.status(),
-            )
+            return _make_task_ordering_response_unlocked()
     except Exception as e:
         logger.error("task_ordering read error: %s", e, exc_info=True)
         return api_error(500, str(e), code="task_ordering_read_failed")
@@ -720,7 +725,7 @@ async def save_task_ordering_api(request: Request):
         raw_overlay = payload.get("overlay", payload)
         with lifecycle_service.config_operation():
             lifecycle_service.save_task_ordering(raw_overlay)
-            return _make_public_config_unlocked()
+            return _make_task_ordering_response_unlocked()
     except ValueError as e:
         return api_error(400, str(e), code="invalid_task_ordering")
     except Exception as e:
@@ -1231,19 +1236,29 @@ async def enum_options_api(request: Request):
 async def ocr_status_api():
     try:
         import paddle
-        from AutoScriptor.recognition.ocr_rec import ocr_manager
+        from AutoScriptor.recognition.ocr_rec import get_ocr_runtime_status
 
-        cfg_use_gpu = bool((cfg.get("ocr") or {}).get("use_gpu", cfg.get("ocr.use_gpu", False)))
+        runtime_status = get_ocr_runtime_status()
         compiled_with_cuda = paddle.device.is_compiled_with_cuda()
         gpu_count = paddle.device.cuda.device_count()
         current_device = paddle.get_device()
-        engine_ready = ocr_manager.is_ready()
         return {
-            "cfg_use_gpu": cfg_use_gpu,
+            "paddle_version": paddle.__version__,
+            "cfg_use_gpu": runtime_status["configured_use_gpu"],
+            "configured_use_gpu": runtime_status["configured_use_gpu"],
+            "runtime_use_gpu": runtime_status["runtime_use_gpu"],
+            "engine_use_gpu": runtime_status["engine_use_gpu"],
             "compiled_with_cuda": compiled_with_cuda,
             "gpu_count": gpu_count,
             "current_device": current_device,
-            "engine_ready": engine_ready,
+            "engine_device": runtime_status["engine_device"],
+            "engine_ready": runtime_status["engine_ready"],
+            "restart_required": runtime_status["restart_required"],
+            "initialization_error": runtime_status["initialization_error"],
+            "configured_model": runtime_status["configured_model"],
+            "runtime_model": runtime_status["runtime_model"],
+            "configured_digit_model": runtime_status["configured_digit_model"],
+            "runtime_digit_model": runtime_status["runtime_digit_model"],
         }
     except Exception as e:
         logger.error("ocr_status error: %s", e)

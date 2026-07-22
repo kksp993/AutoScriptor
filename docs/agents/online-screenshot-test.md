@@ -4,7 +4,7 @@ When the user asks to "截张图测一下", "在线测一下", "拿当前页面�
 
 ## Workflow
 
-1. Capture one live screenshot first, save it under the current logs root with a timestamp (`logs/` in source mode), and reuse that exact frame for all locate/OCR/extract calls in the test. Do not mix multiple implicit screenshots unless the test is explicitly about UI transitions.
+1. Capture one live screenshot first, save it under the current logs root with a timestamp (`logs/` in source mode), and reuse that exact frame for all locate/OCR/extract calls in the test. Do not mix multiple implicit screenshots unless the test is explicitly about UI transitions or timeout behavior.
 2. Use `.venv\Scripts\python.exe`. In PowerShell, prefer UTF-8 output with `$env:PYTHONIOENCODING='utf-8'` or `python -X utf8`.
 3. Put temporary test scripts, crops, overlays, and result JSON/text in a new `<logs-root>/<topic>_<timestamp>/` folder unless the user asks to modify source. Do not change production code for a pure online test.
 4. Record screenshot size and coordinate convention before interpreting boxes. Confirm whether `Box` means `(x, y, w, h)` or `(x1, y1, x2, y2)` in the current helper.
@@ -14,6 +14,18 @@ When the user asks to "截张图测一下", "在线测一下", "拿当前页面�
 8. Measure timings with `time.perf_counter()`. Report capture time, recognition/code time, and total time when useful. Separate warm-up from measured runs.
 9. For irreversible game actions, do not guess from low-confidence or inconsistent OCR. Return `None`, pause, or ask for confirmation.
 10. Final results should include the saved screenshot/debug folder, exact boxes or grid, recognized values with missing values preserved, elapsed time, and the accuracy basis if checked.
+
+## Transition And Timeout Bug Validation
+
+Use this workflow when verifying bugs like "after entering a page, X does not appear within N seconds".
+
+1. Define the observable target before acting: expected page, target text/UI key/template, timeout, sampling interval, and whether any navigation step could consume resources.
+2. Save a timeline under one new logs folder. Each frame must be saved separately, and each frame's OCR/template checks must use only that same frame.
+3. Prefer registered UI template checks (`ui_key`/registered image) over OCR for stylized game text. Use OCR as supporting evidence when templates are unavailable.
+4. Record at least: relative timestamp, screenshot path, detector values, confidence/recognized text, pass/fail state, and any blocking page or popup detected.
+5. On timeout, classify the failure before editing: navigation/state mismatch, target/crop coordinate issue, recognition/template issue, waiting condition bug, or task/runtime lifecycle bug.
+6. For fixes, keep the failure timeline as evidence, make the smallest targeted change, then rerun the same scenario/spec and compare before/after timings.
+7. Do not perform clicks, battles, purchases, item use, sweep/challenge, reward claim, or other resource-consuming actions unless the user explicitly confirms that specific step.
 
 ## Notes
 

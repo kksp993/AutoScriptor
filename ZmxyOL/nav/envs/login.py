@@ -204,7 +204,7 @@ def _handle_post_login_popups():
     """Dismiss popups that appear between login and character selection."""
     click(T("登录", box=Box(23,487,674,62).margin()))
     click(T("授权并登录"), if_exist=True, timeout=3)
-    wait_for_appear(T("进入游戏", box=Box(543,586,190,62).margin()), timeout=3)
+    wait_for_appear(T("进入游戏", box=Box(543,586,190,62).margin()), timeout=10)
 
 
 def _select_character():
@@ -256,10 +256,10 @@ def _on_authorization(ctx):
     click(T("授权并登录"), if_exist=True, timeout=3)
     click(T("添加账号"), if_exist=True, timeout=3)
     sleep(1)
+    click(T("账号登录"), if_exist=True, delay=1)
     if ui_T(T("请输入手机号或用户名"), 3) or ui_T(T("账号密码登录"), 3):
-        click(T("账号登录"), if_exist=True, delay=1)
         _fill_account_password(ctx)
-    _handle_post_login_popups()
+        _handle_post_login_popups()
 
 
 @_login.page("账号密码登录", T("账号密码登录"), clients=LoginClient.H4399)

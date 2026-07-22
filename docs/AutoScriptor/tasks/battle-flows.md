@@ -33,7 +33,7 @@
 - 使用明确的 `battle_flow` 选择战斗流程；所选 flow 只有属于当前角色 `game.game_profession` 对应职业脚本时才会生效，不要再传旧 `battle_weight` 参数。
 - 当前角色 `game.game_profession` 找不到同名 `profession` 注册时，会使用 `default` 职业，这是保留的业务默认。
 - 全局默认 `战斗循环` / `竞技场循环` 必须由已注册职业提供；缺失会在任务参数导入时直接报错。
-- 天庭组队 `heaven_battle()` 中，`抽牌` 可见等同于战斗循环完成。bg 回调只置位 `Pause_battle`/`try_exit`，退出移动和抽牌收尾必须在 `battle_loop()` 返回后的主线程顺序执行，避免 bg callback 异常阻断退出信号。
+- 天庭组队 `heaven_battle()` 中，`抽牌` 可见等同于战斗循环完成。该 bg scope 使用 `bg.interval(0.2)` 每 0.2 秒截新图并批量 locate，避免默认 1 秒轮询慢半拍；bg 回调只置位 `Pause_battle`/`try_exit`，退出移动和抽牌收尾必须在 `battle_loop()` 返回后的主线程顺序执行，避免 bg callback 异常阻断退出信号。
 - `way_to_exit(until=...)` 使用 bg 监听出口迹象，主线程按“到最右侧 → 快速左移到出口附近 → 再注册 `战斗-离开标记` → 小步左移搜索 → 看到 `秒` 后原地驻留 → 未出去再向右微调”的节奏移动。退出位移用 `mumu` 长按，位移后切回 `nemu` 继续识别。`战斗-离开标记` 只表示站上出口倒计时点，`until` 必须是真正离开后的加载、回家或抽牌等完成状态，不要用 `还有`/`秒` 作为完成条件，也不要重新加入私有检测线程、`fast_until`、OCR 节流或 list/AND 特判。
 - 极寒深渊、洪荒遗境这类会触发“混沌先锋”的新 boss 任务，通过 `battle_task(check_pioneer=True)` 打开通用收尾处理。流程必须先按原关卡逻辑正常返回地图并看到“回家”，再开 4 秒短窗口检测 `T("混沌先锋", box=Box(608,494,112,47).margin())`；若短窗口内直接出现“加载中”也按自动进入处理。命中后等待加载消失，额外打一场单倍 `crash_suddenly` 先锋本，返回地图后结束；先锋本不再递归检测先锋。
 - 旧 YAML profile 和 `ZmxyOL/battle/skill/*` 不是当前实现入口；不要把新功能写回旧路径。

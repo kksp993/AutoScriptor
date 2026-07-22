@@ -1,7 +1,7 @@
 import os
 import threading
 import time
-from typing import Callable
+from typing import Any, Callable, Literal
 from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
 from AutoScriptor.core.control import MixControl, ControlModeProxy
 from AutoScriptor.core.background import bg
@@ -9,6 +9,10 @@ from AutoScriptor.core.targets import Target, B
 from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget
 from AutoScriptor.recognition.ocr_rec import ocr_for_box
 from AutoScriptor.recognition.rec import get_box_color
+from AutoScriptor.recognition.recognition_trace import (
+    create_recognition_result,
+    record_recognition_result,
+)
 from AutoScriptor.utils.box import Box, b2p
 from AutoScriptor.utils.tracer import save_debug_screenshot
 from AutoScriptor.utils.logger import logger, setup_logfile
@@ -353,6 +357,52 @@ ctrl_nemu = ControlModeProxy("nemu", _current_control)
 ctrl_mumu = ControlModeProxy("mumu", _current_control)
 
 
+def _locate_targets_with_trace(
+    targets,
+    target_triples,
+    screenshot,
+    *,
+    frame_source: str | None = None,
+):
+    started_at = time.perf_counter()
+    resolved_frame_source = frame_source or (
+        "injected" if screenshot is not None else "live"
+    )
+    try:
+        boxes = mixctrl.locate(target_triples, screenshot=screenshot)
+    except Exception as error:
+        record_recognition_result(
+            create_recognition_result(
+                operation="locate",
+                success=False,
+                target=targets,
+                result=None,
+                started_at=started_at,
+                frame_source=resolved_frame_source,
+                frame=screenshot,
+                engine="locate_on_screen",
+                error=error,
+                metadata={"target_count": len(targets)},
+            )
+        )
+        raise
+
+    record_recognition_result(
+        create_recognition_result(
+            operation="locate",
+            success=first(boxes) is not None,
+            target=targets,
+            result=boxes,
+            started_at=started_at,
+            frame_source=resolved_frame_source,
+            frame=screenshot,
+            engine="locate_on_screen",
+            metadata={"target_count": len(targets)},
+        )
+    )
+    return boxes
+
+
 def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=None, image_first: bool = False)->list[list[Box]]:
     """Locate all targets on the current screen.
 
@@ -370,6 +420,7 @@ def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=No
             raise ValueError(f"Unsupported target type: {type(target)}")
 
     boxes: list[list[Box] | None] = [None] * len(target)
+    frame_source = "injected" if screenshot is not None else "live"
 
     if image_first:
         img_items = [(idx, t) for idx, t in enumerate(target) if isinstance(t, ImageTarget)]
@@ -378,7 +429,13 @@ def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=No
         if img_items:
             img_triples = [genertate_source(t) for _, t in img_items]
             frame = screenshot if screenshot is not None else mixctrl.screenshot()
-            img_boxes = mixctrl.locate(img_triples, screenshot=frame)
+            img_targets = [target_item for _, target_item in img_items]
+            img_boxes = _locate_targets_with_trace(
+                img_targets,
+                img_triples,
+                frame,
+                frame_source=frame_source,
+            )
             for j, (orig_idx, _) in enumerate(img_items):
                 boxes[orig_idx] = img_boxes[j]
             if first(boxes):
@@ -387,11 +444,24 @@ def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=No
 
         if rest_items:
             rest_triples = [genertate_source(t) for _, t in rest_items]
-            rest_boxes = mixctrl.locate(rest_triples, screenshot=screenshot)
+            rest_targets = [target_item for _, target_item in rest_items]
+            rest_boxes = _locate_targets_with_trace(
+                rest_targets,
+                rest_triples,
+                screenshot,
+                frame_source=frame_source,
+            )
             for j, (orig_idx, _) in enumerate(rest_items):
                 boxes[orig_idx] = rest_boxes[j]
     else:
-        return mixctrl.locate([genertate_source(t) for t in target], screenshot=screenshot)
+        target_items = list(target)
+        target_triples = [genertate_source(target_item) for target_item in target_items]
+        return _locate_targets_with_trace(
+            target_items,
+            target_triples,
+            screenshot,
+            frame_source=frame_source,
+        )
 
     return boxes
 
@@ -657,52 +727,157 @@ def key_event(key_code: int):
 
 def extract_info(
     target,
-    post_process: callable = None,
+    post_process: Callable[[Any], Any] | None = None,
     ensure_not_empty: bool = True,
     save_screenshot: bool = True,
     *,
-    digit_only: bool = False,
-    digital: bool | None = None,
+    mode: Literal["digital_only", "text", "img", "both"] = "text",
     ocr_ttl: float = 0.5,
     max_retries: int = 10,
     screenshot_frame=None,
-)->str|None:
-    """若传入 *screenshot_frame*（BGR ndarray），则在该帧上 OCR，且重试时不再刷新画面；
-    用于 Web 编辑器导入图片与模拟执行时与画布一致。未传入时仍每次重试从 mixctrl 截屏。"""
-    if digital is not None:
-        digit_only = bool(digital)
-    if digit_only:
-        from AutoScriptor.recognition.digit_rec import extract_digits
-        screenshot = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
-        res = extract_digits(screenshot, target)
-        if post_process:
-            res = post_process(res)
-        return res
+) -> Any:
+    """Extract numbers, OCR text, or registered UI image keys from Box targets.
 
-    res = None
+    ``target`` may be one Box-like target, a row, or a two-dimensional grid.
+    Row and grid inputs preserve their original result shape. ``both`` checks
+    registered ``ui_map`` images first for each box and runs OCR only for image
+    misses. Supplying ``screenshot_frame`` keeps every recognition operation on
+    that fixed BGR frame.
+    """
+    supported_modes = {"digital_only", "text", "img", "both"}
+    if mode not in supported_modes:
+        raise ValueError(
+            f"Unsupported extract_info mode {mode!r}; expected one of {sorted(supported_modes)}"
+        )
+
+    if mode == "digital_only":
+        from AutoScriptor.recognition.digit_rec import extract_digits
+
+        started_at = time.perf_counter()
+        screenshot = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
+        try:
+            result = extract_digits(screenshot, target)
+            if post_process:
+                result = post_process(result)
+        except Exception as error:
+            record_recognition_result(
+                create_recognition_result(
+                    operation="extract_info",
+                    success=False,
+                    target=target,
+                    result=None,
+                    started_at=started_at,
+                    frame_source="injected" if screenshot_frame is not None else "live",
+                    frame=screenshot,
+                    engine="digital_only",
+                    error=error,
+                    metadata={"mode": mode, "attempt_count": 1},
+                )
+            )
+            raise
+        record_recognition_result(
+            create_recognition_result(
+                operation="extract_info",
+                success=result is not None,
+                target=target,
+                result=result,
+                started_at=started_at,
+                frame_source="injected" if screenshot_frame is not None else "live",
+                frame=screenshot,
+                engine="digital_only",
+                metadata={"mode": mode, "attempt_count": 1},
+            )
+        )
+        return result
+
+    from AutoScriptor.recognition.info_rec import (
+        BoxTargetLayout,
+        extract_registered_image_keys,
+    )
+
+    target_layout = BoxTargetLayout.from_target(target)
+
+    def contains_information(value: Any) -> bool:
+        if isinstance(value, (list, tuple)):
+            return any(contains_information(item) for item in value)
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        return True
+
+    started_at = time.perf_counter()
+    result = None
+    recognition_frame = None
+    attempt_count = 0
     last_ocr_at: float | None = None
-    for _ in range(max_retries):
+    for attempt_index in range(max_retries):
+        attempt_count = attempt_index + 1
         check_cancel_raise()
-        if last_ocr_at is not None:
+        needs_text_recognition = mode in {"text", "both"}
+        if needs_text_recognition and last_ocr_at is not None:
             wait = ocr_ttl - (time.monotonic() - last_ocr_at)
             if wait > 0:
                 cancellable_sleep(wait)
+
         screenshot = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
-        res = ocr_for_box(screenshot, target.box, ttl=ocr_ttl)
-        last_ocr_at = time.monotonic()
-        logger.debug(f"Extract info {target} raw_res: {res}")
+        recognition_frame = screenshot
+        flat_values: list[Any] = [None] * target_layout.box_count
+
+        if mode in {"img", "both"}:
+            image_result = extract_registered_image_keys(screenshot, target)
+            flat_values = target_layout.flatten_values(image_result)
+
+        if needs_text_recognition:
+            for target_index, target_box in enumerate(target_layout.flat_boxes):
+                if mode == "both" and flat_values[target_index] is not None:
+                    continue
+                flat_values[target_index] = ocr_for_box(screenshot, target_box, ttl=ocr_ttl)
+            last_ocr_at = time.monotonic()
+
+        raw_result = target_layout.restore_values(flat_values)
+        logger.debug("Extract info %s mode=%s raw_res: %s", target, mode, raw_result)
+        result = raw_result
         if post_process:
             try:
-                res = post_process(res)
-            except Exception as e:
-                logger.error(f"Extract info {target} failed, raw_res: {res}, for {e}")
+                result = post_process(raw_result)
+            except Exception as error:
+                logger.error(
+                    "Extract info %s mode=%s failed, raw_res: %s, for %s",
+                    target,
+                    mode,
+                    raw_result,
+                    error,
+                )
                 continue
-        if ensure_not_empty and isinstance(res, str) and len(res) == 0: continue
-        if res is not None: break
+
+        if not ensure_not_empty or contains_information(result):
+            break
+
+    record_recognition_result(
+        create_recognition_result(
+            operation="extract_info",
+            success=contains_information(result),
+            target=target,
+            result=result,
+            started_at=started_at,
+            frame_source="injected" if screenshot_frame is not None else "live",
+            frame=recognition_frame,
+            engine=mode,
+            metadata={"mode": mode, "attempt_count": attempt_count},
+        )
+    )
+
     if save_screenshot and cfg["app"]["debug_mode"]:
-        dbg = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
-        save_debug_screenshot(target=target, screenshot=dbg, box=target.box, ocr_text=res, prefix="e")
-    return res
+        debug_screenshot = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
+        save_debug_screenshot(
+            target=target,
+            screenshot=debug_screenshot,
+            box=target_layout.bounding_box,
+            ocr_text=result,
+            prefix="e",
+        )
+    return result
 
 def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), resize: tuple = (-1, -1))->list[str|None]:
     """

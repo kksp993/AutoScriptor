@@ -14,6 +14,23 @@
 
 导入 `AutoScriptor` 本身是懒加载：不会初始化 OCR、UI Map、MuMu、NemuIpc 或 `mixctrl/mumu`。真正执行 `click()`、`locate()`、任务运行或显式设备接口时才需要设备会话。
 
+## 屏幕与坐标合同
+
+AutoScriptor 的截图、模板、`Box` 和点击坐标统一使用 **1280x720 横屏绝对像素**。`Box(x, y, width, height)` 表示左上角坐标与宽高；运行时不会自动缩放截图、模板或坐标。
+
+`MixControl.screenshot()` 会检查实际帧尺寸。尺寸不符时会输出带实际值和期望值的中文 warning，同一异常尺寸 60 秒内节流；原始帧会原样返回，不抛异常、不改尺寸，任务继续运行，但识别和点击可能偏移，应修正 MuMu 分辨率。
+
+`locate()`、`match()`、`click()`、`extract_info()` 的参数和返回合同不因诊断功能改变。内部 `RecognitionResult` 只在当前线程保留最近 32 条摘要，供错误归档和维护排查使用；它不保存截图数组，也不是任务脚本公共 API。
+
+离线维护入口：
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 scripts\audit_ui_assets.py
+.\.venv\Scripts\python.exe -X utf8 scripts\run_recognition_baselines.py
+```
+
+素材审计只读检查 `ui_map.csv`、模板引用和孤立图片；固定帧基准要求样本严格为 1280x720，报告都写入 `logs/`。空基准清单会报告 `status=empty` 并以退出码 `2` 结束，不视为回归通过。
+
 ## 数据目录
 
 | 目录/文件 | 说明 |
@@ -117,11 +134,13 @@ sleep(1)
 ### OCR 与数字
 
 ```python
-value = extract_info(T("数量", box=B(100, 100, 80, 30)))
-digits = extract_info(B(100, 100, 80, 30), digit_only=True)
+text_value = extract_info(B(100, 100, 80, 30), mode="text")
+digits = extract_info(B(100, 100, 80, 30), mode="digital_only")
+image_keys = extract_info(box_grid, mode="img")
+values = extract_info(box_grid, mode="both")
 ```
 
-`extract_info(..., screenshot_frame=frame)` 会固定使用同一帧，适合在线截图测试、Editor 导入图和批量识别，避免 UI 漂移。OCR 层应保留识别语义：空/不可读返回 `None` 或空字符串，业务层再决定是否转成数量 `0` 或 `1`。
+`extract_info` 的 `mode` 只接受 `digital_only`、`text`、`img`、`both`：分别表示仅数字、仅 OCR 文本、仅匹配 `ui_map` 已登记图片并返回条目 key，以及逐格优先图片、未命中时再 OCR。单个 Box、Box 列表和二维 Box 网格会保持对应的返回形状；未识别的格子保留 `None` 或空字符串。`extract_info(..., screenshot_frame=frame)` 会固定使用同一帧，适合在线截图测试、Editor 导入图和批量识别，避免 UI 漂移。OCR 层应保留识别语义，业务层再决定是否转成数量 `0` 或 `1`。
 
 ### 提取颜色
 

@@ -1,0 +1,5 @@
+-i https://pypi.tuna.tsinghua.edu.cn/simple
+--extra-index-url https://pypi.org/simple
+--prefer-binary
+paddlepaddle==3.2.0
+mkl>=2023.0.0

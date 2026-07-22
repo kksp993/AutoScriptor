@@ -10,6 +10,23 @@ const app = createApp({
     const characterName = ref('');
     const schedulerStatus = reactive({ state: 'pending', label: '待运行', color: 'green', consecutive_errors: 0 });
     const taskOrderingSaving = ref(false);
+    let taskPersistenceOperationTail = Promise.resolve();
+    let pendingTaskOrderingOperations = 0;
+
+    function queueTaskPersistenceOperation(operation) {
+      const queuedOperation = taskPersistenceOperationTail.then(() => operation());
+      taskPersistenceOperationTail = queuedOperation.catch(() => undefined);
+      return queuedOperation;
+    }
+
+    async function waitForTaskPersistenceOperations() {
+      let observedOperationTail;
+      do {
+        observedOperationTail = taskPersistenceOperationTail;
+        await observedOperationTail;
+      } while (observedOperationTail !== taskPersistenceOperationTail);
+    }
+
     const overviewData = reactive({
       scheduler: { state: 'pending', label: '待运行', color: 'green', consecutive_errors: 0, next_execution: null },
       stats: { total: 0, enabled: 0, pending: 0, scheduled: 0, disabled: 0 },
@@ -280,6 +297,31 @@ const app = createApp({
       return applyRuntimeSnapshotPayload(data);
     }
 
+    function applyTaskOrderingPayload(data) {
+      if (!data || data.error) return false;
+      const incomingConfigVersion = Number(data.config_version || 0);
+      const currentConfigVersion = Number(configData.config_version || 0);
+      if (incomingConfigVersion && currentConfigVersion && incomingConfigVersion < currentConfigVersion) {
+        console.warn('Ignored stale task ordering payload', { incomingConfigVersion, currentConfigVersion });
+        return true;
+      }
+
+      const incomingProjection = data.projection || data.task_ordering_projection;
+      if (!incomingProjection || typeof incomingProjection !== 'object') return false;
+
+      const nextProjection = _deepClone(incomingProjection);
+      configData.task_ordering_projection = nextProjection;
+      configData.task_ordering = _deepClone(nextProjection.overlay || {});
+      if (data.generations && typeof data.generations === 'object') {
+        configData.task_ordering_generations = _deepClone(data.generations);
+      }
+      if (incomingConfigVersion) configData.config_version = incomingConfigVersion;
+      if (data.runtime && typeof data.runtime === 'object') {
+        applyRuntimeSnapshotPayload({ runtime: data.runtime });
+      }
+      return true;
+    }
+
     async function refreshConfig(force = false) {
       const now = Date.now();
       if (!force && now - _lastRefreshAt < REFRESH_COOLDOWN) return;
@@ -295,12 +337,13 @@ const app = createApp({
     async function fetchRuntimeSnapshot({ refreshConfigIfChanged = true } = {}) {
       if (_runtimeSnapshotPromise) return _runtimeSnapshotPromise;
       _runtimeSnapshotPromise = (async () => {
-        const publicVersion = Number(configData.config_version || 0);
         try {
           const data = await API.get('/runtime/snapshot');
           if (!applyRuntimeSnapshotPayload(data)) return false;
+          await waitForTaskPersistenceOperations();
           const nextVersion = Number(data.config_version || 0);
-          if (refreshConfigIfChanged && nextVersion && nextVersion !== publicVersion) {
+          const currentConfigVersion = Number(configData.config_version || 0);
+          if (refreshConfigIfChanged && nextVersion > currentConfigVersion) {
             await refreshConfig(true);
           }
           return true;
@@ -876,23 +919,29 @@ const app = createApp({
 
     async function saveTaskOrdering(overlay) {
       if (!ensureIdle('执行中不能修改任务排序规则，请先终止当前任务')) return false;
+      const overlaySnapshot = _deepClone(overlay);
+      pendingTaskOrderingOperations += 1;
       taskOrderingSaving.value = true;
       try {
-        const { ok, data } = await API.request('POST', '/task-ordering', { overlay });
-        if (!ok) {
-          showApiError(data, '保存任务排序失败');
-          return false;
-        }
-        if (!applyPublicConfigPayload(data)) {
-          await refreshConfig(true);
-        }
-        ElementPlus.ElMessage.success('任务顺序已保存');
-        return true;
+        return await queueTaskPersistenceOperation(async () => {
+          const { ok, data } = await API.request('POST', '/task-ordering', { overlay: overlaySnapshot });
+          if (!ok) {
+            showApiError(data, '保存任务排序失败');
+            return false;
+          }
+          if (!applyTaskOrderingPayload(data)) {
+            ElementPlus.ElMessage.error('保存任务排序失败: 服务端返回排序投影不完整');
+            return false;
+          }
+          ElementPlus.ElMessage.success('任务顺序已保存');
+          return true;
+        });
       } catch (e) {
         ElementPlus.ElMessage.error('保存任务排序失败: ' + e);
         return false;
       } finally {
-        taskOrderingSaving.value = false;
+        pendingTaskOrderingOperations = Math.max(0, pendingTaskOrderingOperations - 1);
+        taskOrderingSaving.value = pendingTaskOrderingOperations > 0;
       }
     }
 
@@ -1020,18 +1069,21 @@ const app = createApp({
     }
 
     async function persistTasks(tasks, successMessage = '任务已保存') {
-      const { ok, data } = await API.request('POST', '/tasks', { tasks });
-      if (!ok) {
-        ElementPlus.ElMessage.error('保存失败: ' + API.errorMessage(data, '未知错误'));
-        return false;
-      }
-      if (!applyPublicConfigPayload(data)) {
-        ElementPlus.ElMessage.error('保存失败: 服务端返回配置不完整');
-        return false;
-      }
-      ElementPlus.ElMessage.success(successMessage);
-      fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
-      return true;
+      const tasksSnapshot = _deepClone(tasks);
+      return queueTaskPersistenceOperation(async () => {
+        const { ok, data } = await API.request('POST', '/tasks', { tasks: tasksSnapshot });
+        if (!ok) {
+          ElementPlus.ElMessage.error('保存失败: ' + API.errorMessage(data, '未知错误'));
+          return false;
+        }
+        if (!applyPublicConfigPayload(data)) {
+          ElementPlus.ElMessage.error('保存失败: 服务端返回配置不完整');
+          return false;
+        }
+        ElementPlus.ElMessage.success(successMessage);
+        fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
+        return true;
+      });
     }
 
     async function saveTaskFromDialog() {

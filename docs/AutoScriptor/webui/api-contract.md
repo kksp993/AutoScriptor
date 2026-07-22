@@ -52,7 +52,7 @@ WebUI 后端是 FastAPI；静态前端位于 `services/webui/static/`，源码 E
 | `POST /api/tasks/reload`　　　　 | 轻量 reload：要求 runtime idle，清 `bg`，刷新任务更新标记、任务投影、order map 和公开配置　　　　　　 |
 | `POST /api/tasks/reload-all`　　 | 完整 reload：要求 runtime idle，同步配置、重载职业脚本和任务注册表、刷新 UI map 缓存，并清 `bg`　　　 |
 | `GET /api/task-ordering`　　　　 | 读取全局任务总顺序投影：`overlay.items`、展平 `overlay.user_order`、`effective_order`、`order_map` 和诊断 |
-| `POST /api/task-ordering`　　　　| 要求 runtime idle；保存全局 `task_ordering.items` 并派生 `user_order`，刷新 WebUI order map 与调度器投影 |
+| `POST /api/task-ordering`　　　　| 要求 runtime idle；保存全局 `task_ordering.items` 并派生 `user_order`，返回轻量排序投影，不返回完整任务树 |
 | `POST /api/task-ordering/layout` | 旧版图布局兼容 no-op；前端不再调用，不保存画布坐标，也不影响执行语义　　　　　　　　　　　　　　　　 |
 | `POST /api/enum-options`　　　　 | 批量查询枚举选项，含 `BattleFlowName` 当前职业过滤；导入/枚举错误必须返回错误，不返回空列表伪装成功　 |
 | `GET /api/config/export`　　　　 | 导出可迁移配置　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
@@ -87,6 +87,10 @@ WebUI 后端是 FastAPI；静态前端位于 `services/webui/static/`，源码 E
 
 有效顺序通过确定性总排序计算：先递归展开 `items`，再回退到当前任务树顺序、运行时注册顺序和路径字典序。`user_order` 是展平后的兼容投影；旧版 `hard_edges`、`layout`、`group_order` 输入会被规范化忽略，不再表达偏序规则或画布布局；保存排序不再进行循环图检查。
 
+任务树和排序覆盖层是两个独立持久化域。`POST /api/tasks` 保存当前角色任务树，成功后可返回完整公开配置；`POST /api/task-ordering` 只返回 `config_version`、`projection`、`generations` 和轻量 `runtime` 状态。前端应用排序响应时只能更新 `task_ordering`、`task_ordering_projection` 及对应版本，不得替换 `configData.tasks`。
+
+前端任务保存和排序保存必须进入同一个 FIFO 提交序列，并在入队时深拷贝请求数据，保证服务端看到的是用户点击保存时的快照。`runtime/snapshot` 判断是否需要 `/api/refresh` 前必须等待该提交序列稳定排空，并与响应处理时的当前 `config_version` 比较；只有响应版本更大时才允许全量配置回填，不能让旧版本轮询覆盖本地草稿。
+
 Reload 边界：所有 reload 类操作都会清 `bg`；纯配置同步 `POST /api/config/sync` 不属于 reload，不清 `bg`。保存任务、切换账号/角色、账号解锁、更新账号凭据和普通配置导入只保存或同步配置并刷新 WebUI 投影，不做职业脚本和任务注册表完整重载。Editor 保存自定义任务脚本、启动初始化、调度器安全边界处理脚本变更，以及兑换码任务注册缺失兜底，仍使用完整 reload。
 
 ## 账号、角色和队列
@@ -113,12 +117,27 @@ Reload 边界：所有 reload 类操作都会清 `bg`；纯配置同步 `POST /a
 | `GET /api/device/discover?probe_adb=true` | 只读发现 MuMu 安装目录、MuMuManager、adb.exe 和可用 ADB 设备，不写配置 |
 | `POST /api/device/discover/apply` | 运行空闲时应用已确认的发现结果到 `emulator` 全局配置并刷新 `config_version` |
 | `GET /api/ocr-status` | 读取 Paddle/OCR 状态；探测异常返回 500，不合成 `false/0/unknown` |
+| `GET /api/editor/navigation-options` | 不需要设备会话；返回已注册的环境及其位置名称，供 Editor“工具 > 导航到...”生成 `ensure_in(...)` 代码 |
 | `/api/editor/ingest-image`、`ocr`、`color`、`save`、`store-template`、`locate-image` | 使用缓存截图/导入图，不启动模拟器 |
 | `/api/editor/screenshot`、无缓存 `locate`、`remote/click`、`remote/swipe`、真实 `execute-code`、无缓存 `preview-extract` | 需要 `runtime_ctx.ensure_device_session()` |
 | `POST /api/editor/execute-code/stop` | Editor 自定义代码执行中的终止入口；前端“终止执行”按钮只发送该请求，不再调用语法校验 |
 | `POST /api/editor/save-custom-task` | Editor 保存脚本入口；不需要设备会话，接收保存表单和编辑器合并后的代码内容，写入 `data/custom_task` 并注册为 `自定义任务/...` |
 
+`GET /api/ocr-status` 将配置意图、进程快照和实际引擎分开返回：
+
+- `configured_use_gpu`、`configured_model`、`configured_digit_model`：当前配置值；
+- `runtime_use_gpu`、`runtime_model`、`runtime_digit_model`：进程启动时冻结的值；
+- `engine_use_gpu`、`engine_device`、`engine_ready`：实际 OCR 引擎状态；
+- `restart_required`：当前配置与进程快照不一致，需要重启；
+- `initialization_error`：异步 OCR 初始化失败原因；
+- `paddle_version`、`compiled_with_cuda`、`gpu_count`、`current_device`：Paddle 运行时探测。
+
+`cfg_use_gpu` 暂时保留为 `configured_use_gpu` 的兼容别名。Paddle 导入或设备探测失败时
+返回 `500 ocr_status_failed`，不得用默认值把失败表示为 CPU 正常。
+
 Editor 真实设备动作需要 credential unlock；模拟执行且已有缓存图时应使用虚拟 `mixctrl`，不触碰真实设备。`/api/editor/execute-code` 的 running/stopping 状态会通过 `RuntimeController` 投影为 `reason="editor"`，因此运行期间配置、任务、账号、角色和 reload 类接口都应返回 `409 runtime_busy`。
+
+`GET /api/editor/navigation-options` 只读取 `ZmxyOL.nav.envs` 已注册到 `mm` 的名称，不执行导航、识别或设备初始化。响应按注册顺序返回 `items: [{"name": "村庄", "locations": ["法相", "背包"]}]`；环境自身的同名根位置不重复列入 `locations`。导入或注册异常返回 `500 editor_navigation_options_failed`，前端不得把失败伪装成空菜单。
 
 MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和常见安装目录，并从安装目录推导 `mumu_folder`、`emu_path`、`adb_path`，可选探测已连接 ADB 设备。运行热路径仍依赖已持久化配置，不能在任务执行时临时扫盘。
 

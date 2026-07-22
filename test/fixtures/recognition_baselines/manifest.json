@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "library_version": "2026.07.1",
+  "coordinate_contract": {
+    "width": 1280,
+    "height": 720,
+    "orientation": "landscape",
+    "box_mode": "xywh"
+  },
+  "cases": []
+}

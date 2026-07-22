@@ -9,7 +9,9 @@
         "cpu_cores": 4
     },
     "ocr": {
-        "use_gpu": false
+        "use_gpu": false,
+        "model": "PP-OCRv6_small",
+        "digit_model": "PP-OCRv6_tiny"
     },
     "emulator": {
         "index": 0,

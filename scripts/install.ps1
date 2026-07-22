@@ -1,6 +1,9 @@
 param(
     [ValidateSet("tools", "python", "electron", "all")]
-    [string]$Target = "all"
+    [string]$Target = "all",
+
+    [ValidateSet("auto", "cpu", "gpu")]
+    [string]$PaddleVariant = "auto"
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,7 +12,10 @@ $ScriptDir = $PSScriptRoot
 $Root = (Resolve-Path -Path (Join-Path $ScriptDir "..")).Path
 $VenvDir = Join-Path $Root ".venv"
 $VenvPy = Join-Path $VenvDir "Scripts\python.exe"
-$Requirements = Join-Path $Root "requirements.txt"
+$CommonRequirements = Join-Path $Root "requirements.txt"
+$CpuRequirements = Join-Path $Root "requirements-cpu.txt"
+$GpuRequirements = Join-Path $Root "requirements-gpu.txt"
+$RuntimeConfig = Join-Path $Root "data\config.json"
 $WebappDir = Join-Path $Root "webapp"
 $PythonVersion = "3.10.15"
 $NodeMinimumVersion = [version]"22.12.0"
@@ -193,19 +199,77 @@ function Ensure-Venv {
     }
 }
 
+function Resolve-PaddleVariant {
+    if ($PaddleVariant -ne "auto") {
+        return $PaddleVariant
+    }
+
+    if (-not (Test-Path -LiteralPath $RuntimeConfig -PathType Leaf)) {
+        Write-Host "data\config.json is absent; selecting the CPU Paddle runtime."
+        return "cpu"
+    }
+
+    try {
+        $configDocument = Get-Content -Raw -Encoding UTF8 -LiteralPath $RuntimeConfig | ConvertFrom-Json
+    } catch {
+        throw "Failed to read Paddle variant from $RuntimeConfig`: $($_.Exception.Message)"
+    }
+
+    $configuredUseGpu = $false
+    if ($null -ne $configDocument.ocr -and $null -ne $configDocument.ocr.use_gpu) {
+        $configuredUseGpu = [bool]$configDocument.ocr.use_gpu
+    }
+
+    if ($configuredUseGpu) {
+        return "gpu"
+    }
+    return "cpu"
+}
+
+function Test-PaddleRuntime {
+    param([ValidateSet("cpu", "gpu")][string]$SelectedVariant)
+
+    $expectedCudaLiteral = if ($SelectedVariant -eq "gpu") { "True" } else { "False" }
+    $probe = "import paddle; expected_cuda = $expectedCudaLiteral; actual_cuda = paddle.device.is_compiled_with_cuda(); gpu_count = paddle.device.cuda.device_count(); print(f'paddle={paddle.__version__}, cuda_compiled={actual_cuda}, gpu_count={gpu_count}'); assert actual_cuda == expected_cuda, f'expected CUDA compiled={expected_cuda}, got {actual_cuda}'; assert not expected_cuda or gpu_count > 0, 'GPU Paddle is installed but no CUDA device is available'"
+    & $VenvPy -X utf8 -c $probe
+    if ($LASTEXITCODE -ne 0) {
+        throw "Paddle $SelectedVariant runtime validation failed with exit code $LASTEXITCODE"
+    }
+}
+
 function Install-PythonDeps {
-    if (-not (Test-Path -LiteralPath $Requirements -PathType Leaf)) {
-        throw "Missing requirements file: $Requirements"
+    $selectedPaddleVariant = Resolve-PaddleVariant
+    $variantRequirements = if ($selectedPaddleVariant -eq "gpu") { $GpuRequirements } else { $CpuRequirements }
+
+    foreach ($requirementsPath in @($CommonRequirements, $variantRequirements)) {
+        if (-not (Test-Path -LiteralPath $requirementsPath -PathType Leaf)) {
+            throw "Missing requirements file: $requirementsPath"
+        }
     }
 
     Ensure-Venv
 
     $uv = Ensure-Uv
-    Write-Host "Installing Python dependencies from requirements.txt with uv pip install ..."
-    & $uv pip install --python $VenvPy -r $Requirements
+    Write-Host "Installing common Python dependencies from requirements.txt ..."
+    & $uv pip install --python $VenvPy -r $CommonRequirements
     if ($LASTEXITCODE -ne 0) {
-        throw "Python dependency installation failed with exit code $LASTEXITCODE"
+        throw "Common Python dependency installation failed with exit code $LASTEXITCODE"
     }
+
+    Write-Host "Removing mutually exclusive Paddle CPU/GPU packages before selecting $selectedPaddleVariant ..."
+    & $uv pip uninstall --python $VenvPy paddlepaddle paddlepaddle-gpu
+    if ($LASTEXITCODE -ne 0) {
+        throw "Existing Paddle package removal failed with exit code $LASTEXITCODE"
+    }
+
+    $variantFileName = Split-Path -Leaf $variantRequirements
+    Write-Host "Installing Paddle $selectedPaddleVariant runtime from $variantFileName ..."
+    & $uv pip install --python $VenvPy -r $variantRequirements
+    if ($LASTEXITCODE -ne 0) {
+        throw "Paddle $selectedPaddleVariant installation failed with exit code $LASTEXITCODE"
+    }
+
+    Test-PaddleRuntime -SelectedVariant $selectedPaddleVariant
 }
 
 function Install-ElectronDeps {
@@ -245,5 +309,5 @@ if ($Target -eq "electron" -or $Target -eq "all") {
     Install-ElectronDeps
 }
 
-Write-Host "Install complete: $Target"
+Write-Host "Install complete: target=$Target, paddle=$PaddleVariant"
 exit 0

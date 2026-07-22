@@ -205,6 +205,16 @@ const SettingsPanel = {
         <el-form-item label="CPU 核心限制">
           <el-input-number v-model="appConfig.cpu_cores" :min="0" :max="64" controls-position="right" />
         </el-form-item>
+
+        <div class="settings-field-row">
+          <div class="settings-field-text">
+            <div class="settings-field-title">OCR 使用 GPU</div>
+            <div class="settings-help">
+              需要先运行 scripts\\install.bat python gpu。保存后重启 AutoScriptor，普通、线程局部和数字 OCR 才会统一切换设备。
+            </div>
+          </div>
+          <el-switch v-model="ocrConfig.use_gpu" />
+        </div>
       </article>
 
       <article class="settings-card">

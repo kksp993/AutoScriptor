@@ -40,6 +40,10 @@ nuitka-crash-report.xml
 /main.js
 
 /output/
+/activity_analysis/
+/activity_lib/
+/news/
+/out/app/
 /dist_plain_portable/
 /dist_source_portable/
 /packaging/
@@ -62,9 +66,7 @@ webapp/buildResources/icon.ico
 /custom_task/
 /battle_character/
 /.autoscriptor/
-docs/zmxy_codes.json
-docs/zmxy_redeem_codes.json
-docs/zmxy_gift_codes_rows.json
-docs/zmxy_redeem_codes_only_detail.txt
-docs/zmxy_redeem_codes_only.meta.txt
-docs/zmxy_redeem_codes_only.txt
+docs/*.json
+packaging_dllhost/
+tools/autoscriptor_cli.py
+tools/README.md

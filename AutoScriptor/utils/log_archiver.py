@@ -21,6 +21,7 @@ _DEFAULT_CONTEXT_CONFIG = {
     "bg_active_callbacks": True,
     "bg_signals": True,
     "bg_event_history": True,
+    "recognition_trace": True,
     "python_version": True,
     "timestamp": True,
 }
@@ -142,6 +143,19 @@ def collect_default_context(config: Optional[Dict[str, bool]] = None) -> Dict[st
                 context["bg_event_history"] = "(unsupported)"
         except Exception as exc:
             context["bg_event_history"] = f"failed: {exc}"
+
+    if merged.get("recognition_trace"):
+        try:
+            from AutoScriptor.recognition.recognition_trace import (
+                get_recent_recognition_results,
+                serialize_recognition_results,
+            )
+
+            context["recognition_trace"] = serialize_recognition_results(
+                get_recent_recognition_results(limit=16)
+            )
+        except Exception as exc:
+            context["recognition_trace"] = f"failed: {exc}"
 
     if merged.get("python_version"):
         context["python_version"] = sys.version.split()[0]

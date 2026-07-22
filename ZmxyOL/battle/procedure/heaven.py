@@ -190,7 +190,7 @@ def heaven_draw_card_exit(self:Hero):
     click(B(Box(182,232,904,102)),repeat=3)
     sleep(1)
     click(B(Box(10,10,0,0)))
-    click(T("返回", box=Box(588,538,103,38).margin()), until=lambda:ui_T((T("我的队伍"), T("回家", box=Box(29,613,77,88).margin()))))
+    click(T("返回", box=Box(0,538,720,38).margin()), until=lambda:ui_T((T("我的队伍"), T("回家", box=Box(29,613,77,88).margin()))))
 
 @combo
 def heaven_battle(
@@ -200,7 +200,8 @@ def heaven_battle(
 ):
     """天庭战斗"""
     try:
-        with bg.scope("天庭战斗") as scope:
+        # 战斗结束/抽牌窗口短，默认 bg 1.0s 一轮会慢半拍；这里临时加速到 0.1s 截新图 locate。
+        with bg.scope("天庭战斗") as scope, bg.interval(0.1):
             scope.add(
                 name="战斗结束",
                 identifier=(I("战斗结束"), T("抽牌", box=Box(514,513,253,97))),

@@ -40,7 +40,7 @@ def task(
     click(T("狮驼岭", box=Box(0,385,1280,63).margin()))
     click(T("选择难度", box=Box(1078,625,177,53).margin()))
     wait_for_appear(T("挑战", box=Box(909,561,180,77).margin()))
-    for _ in range((d - 1) // 4):
+    while not ui_T(T("难度" + str(d), box=Box(982,463,105,55).margin())):
         swipe(B(979,497,1,1), B(979,257,1,1), duration_s=2)
     click(T("难度" + str(d), box=Box(982,463,105,55).margin()))
     click(T("挑战", box=Box(909,561,180,77).margin()))
