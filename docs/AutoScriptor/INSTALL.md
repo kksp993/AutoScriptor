@@ -64,6 +64,15 @@ git branch --show-current
    uv pip install --python .\.venv\Scripts\python.exe -r requirements.txt
    ```
 
+   `requirements.txt` 只包含公共依赖和 `paddleocr==3.7.0`。安装脚本随后卸载
+   互斥的 `paddlepaddle` / `paddlepaddle-gpu`，再按所选设备安装：
+
+   - `requirements-cpu.txt`：`paddlepaddle==3.2.0`；
+   - `requirements-gpu.txt`：`paddlepaddle-gpu==3.2.2`，使用官方 CUDA 12.9 源。
+
+   默认 `PaddleVariant=auto`：存在 `data/config.json` 时读取
+   `ocr.use_gpu`，缺少配置文件时选择 CPU。
+
 5. 准备 Electron：
 
    ```powershell
@@ -77,6 +86,8 @@ git branch --show-current
 ```powershell
 .\scripts\install.bat tools
 .\scripts\install.bat python
+.\scripts\install.bat python cpu
+.\scripts\install.bat python gpu
 .\scripts\install.bat electron
 ```
 
@@ -117,6 +128,29 @@ http://127.0.0.1:5000
 ```
 
 运行脚本不会安装依赖。缺 `.venv` 时运行 `.\scripts\install.bat python`，缺 `webapp\node_modules` 时运行 `.\scripts\install.bat electron`。
+
+## OCR 与 Paddle 运行时
+
+配置示例：
+
+```json
+{
+  "ocr": {
+    "use_gpu": true,
+    "model": "PP-OCRv6_small",
+    "digit_model": "PP-OCRv6_tiny"
+  }
+}
+```
+
+- `use_gpu=false` 对应 CPU Paddle；`use_gpu=true` 对应 GPU Paddle。
+- CPU/GPU Paddle 提供同一个 `paddle` 包，不能在同一 `.venv` 中共存。
+- 设置 `use_gpu=true` 后运行 `.\scripts\install.bat python gpu`；切回 CPU 时运行
+  `.\scripts\install.bat python cpu`。不显式指定时，`python` 会按当前配置自动选择。
+- 普通 OCR、线程局部 OCR 和数字 OCR 共用进程启动时的设备/模型快照。运行中保存
+  `ocr.use_gpu` 或模型不会热切换；安装匹配的 Paddle 变体后必须重启 AutoScriptor。
+- GPU 已配置但当前 Paddle 不含 CUDA，或没有可用 CUDA 设备时，OCR 初始化会明确失败，
+  不会静默回退到 CPU。
 
 ## 配置与数据
 
@@ -175,10 +209,12 @@ WebUI 的 `/api/update/status`、`/api/update/check`、`/api/update/run` 使用�
 ## MuMu 检查
 
 1. 启动 MuMu 或 MuMu12。
-2. 建议分辨率设为横屏 `1280x720`。
+2. 将分辨率设为横屏 `1280x720`；这是模板、`Box` 和点击坐标使用的绝对像素合同。
 3. 确认游戏能正常进入。
 4. 打开 WebUI 启动诊断。
 5. 按 Manager、ADB、App、NemuIpc、OCR、UI Map 分层排查。
+
+运行时截图尺寸不符会输出带实际尺寸和期望尺寸的中文 warning，同一异常尺寸会节流提示。任务仍会继续，截图也不会被自动缩放；此时识别和点击可能偏移，应在 MuMu 设置中恢复 `1280x720` 横屏，而不是修改任务坐标适配错误分辨率。
 
 MuMu TCP ADB 地址不会因为 `adb start-server` 自动出现在 `adb devices`。设备诊断应连接 `data/config.json -> emulator.adb_addr` 后再判断。
 
@@ -208,6 +244,23 @@ Electron 找不到可执行文件：
 ```powershell
 .\scripts\install.bat electron
 ```
+
+OCR 配置为 GPU 但提示 Paddle 不含 CUDA：
+
+```powershell
+.\scripts\install.bat python gpu
+```
+
+检查当前 Paddle 和 GPU：
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -c "import paddle; print(paddle.__version__); print(paddle.device.is_compiled_with_cuda()); print(paddle.device.cuda.device_count())"
+```
+
+也可读取 `GET /api/ocr-status`，核对 `configured_use_gpu`、`runtime_use_gpu`、
+`engine_device` 和 `restart_required`。GPU Paddle 已安装但 `gpu_count=0` 时先检查
+NVIDIA 驱动和设备可见性。`AUTOSCRIPTOR_ELECTRON_RENDER_MODE` 只控制 Electron/Chromium
+渲染，与 OCR 使用 CPU 还是 GPU 无关。
 
 Electron 打开后系统明显卡顿：
 

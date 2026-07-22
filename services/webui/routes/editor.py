@@ -669,6 +669,41 @@ def _write_ui_map_rows(csv_path: str, rows: list[dict]) -> None:
             writer.writerow(deduped[key])
 
 
+# ── GET /api/editor/navigation-options ──
+
+def _build_editor_navigation_options() -> list[dict]:
+    """Return registered environment/location names without touching device state."""
+    from ZmxyOL.nav import envs as _registered_navigation_envs  # noqa: F401
+    from ZmxyOL.nav.map_manager import mm
+
+    if not mm.envs:
+        raise RuntimeError("导航环境尚未注册")
+
+    options = []
+    for environment_name, environment in mm.envs.items():
+        location_names = []
+        for location_name in environment.locs:
+            if location_name not in mm.locs:
+                raise RuntimeError(f"导航位置注册不一致: {environment_name}/{location_name}")
+            if location_name != environment_name:
+                location_names.append(location_name)
+        options.append({"name": environment_name, "locations": location_names})
+    return options
+
+
+@router.get("/navigation-options")
+async def editor_navigation_options():
+    try:
+        return api_ok(items=_build_editor_navigation_options())
+    except Exception as exception:
+        logger.error("editor/navigation-options error: %s", exception)
+        return api_error(
+            500,
+            f"加载导航选项失败: {exception}",
+            code="editor_navigation_options_failed",
+        )
+
+
 # ── GET /api/editor/screenshot ──
 
 @router.get("/screenshot")

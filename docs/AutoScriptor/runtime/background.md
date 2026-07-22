@@ -8,6 +8,7 @@
 |------|----------|
 | 实例 | `bg` 是懒加载 `BackgroundProxy`，首次访问时创建 `BackgroundMonitor` 线程 |
 | 默认间隔 | `DEFAULT_INTERVAL = 1.0` 秒 |
+| 临时加速 | 延迟敏感流程可用 `bg.interval(...)` 临时降低轮询间隔，例如天庭组队战斗结束/抽牌检测使用 `bg.interval(0.2)` |
 | 截图策略 | 主循环每轮尽量共享一张截图，批量 `_locate_all()`，避免每个回调单独截图 |
 | throttle | 全部回调都在冷却内时不截图，直接等待 |
 | 普通回调 | `allow_concurrent=False`，按 `priority` 从高到低扫描 |

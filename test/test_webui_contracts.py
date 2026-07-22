@@ -1206,6 +1206,9 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertIn("只负责启动、关闭、窗口等官方管理动作", content)
         self.assertIn("自动定位 MuMu", content)
         self.assertIn("/device/discover?probe_adb=true", content)
+        self.assertIn("OCR 使用 GPU", content)
+        self.assertIn('v-model="ocrConfig.use_gpu"', content)
+        self.assertIn("scripts\\\\install.bat python gpu", content)
         self.assertIn("<diagnostics-panel embedded", content)
         self.assertIn("post_execution", content)
         self.assertIn("value: 'goto_main'", content)
@@ -1400,7 +1403,9 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertNotIn("\"unknown\"", body)
         self.assertIn("paddle.device.is_compiled_with_cuda()", body)
         self.assertIn("paddle.device.cuda.device_count()", body)
-        self.assertIn("ocr_manager.is_ready()", body)
+        self.assertIn("get_ocr_runtime_status()", body)
+        self.assertIn('"engine_ready": runtime_status["engine_ready"]', body)
+        self.assertIn('"restart_required": runtime_status["restart_required"]', body)
         self.assertIn("return api_error(500, str(e), code=\"ocr_status_failed\")", body)
 
     def test_frontend_enum_loader_honors_http_status(self):
@@ -1653,13 +1658,28 @@ print("OK")
         self.assertNotIn("B(${x},${y},1,1)", content)
         self.assertNotIn(".margin()+(", content)
 
+    def test_editor_match_action_is_available_in_region_recognition_menu(self):
+        frontend = (
+            ROOT / "services/webui/static/js/components/editor/EditorPanel.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("function appendMatchAction()", frontend)
+        self.assertIn("appendCode(`match(${target})`)", frontend)
+        self.assertIn("key: 'region-recognition'", frontend)
+        self.assertIn("key: 'match'", frontend)
+        self.assertIn("label: '匹配目标（match）'", frontend)
+        self.assertLess(
+            frontend.index("key: 'match'"),
+            frontend.index("key: 'extract-text'"),
+        )
+
     def test_editor_custom_executor_supports_grid_templates_stop_and_indent(self):
         frontend = (ROOT / "services/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
         backend = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
         api = (ROOT / "AutoScriptor/core/api.py").read_text(encoding="utf-8")
 
         self.assertIn("counts = extract_info(make_box_grid", frontend)
-        self.assertIn("digital=True", frontend)
+        self.assertIn('mode="digital_only"', frontend)
         self.assertIn("@click=\"stopCustomCodeExecution\"", frontend)
         self.assertIn("apiPost('/execute-code/stop'", frontend)
         self.assertIn("stopCustomLoading", frontend)
@@ -1677,8 +1697,9 @@ print("OK")
         self.assertIn("check_cancel_raise", backend)
         self.assertIn("asyncio.to_thread(_execute_editor_code_sync", backend)
 
-        self.assertIn("digital: bool | None = None", api)
-        self.assertIn("if digital is not None:", api)
+        self.assertIn('mode: Literal["digital_only", "text", "img", "both"] = "text"', api)
+        self.assertNotIn("digital: bool | None = None", api)
+        self.assertNotIn("digit_only: bool = False", api)
 
     def test_editor_draft_cache_and_save_custom_script_contract(self):
         frontend = (ROOT / "services/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
@@ -1729,7 +1750,7 @@ print("OK")
         self.assertNotIn("recorded_code: recordedCode.value || ''", frontend)
         self.assertNotIn("custom_exec_code: customExecCode.value || ''", frontend)
         self.assertIn("PythonCodeEditor.js?v=3", index)
-        self.assertIn("EditorPanel.js?v=32", index)
+        self.assertIn("EditorPanel.js?v=34", index)
 
         self.assertIn('@router.post("/save-custom-task")', backend)
         self.assertIn("def _normalize_editor_custom_task_filename", backend)
@@ -1770,6 +1791,29 @@ print("OK")
         self.assertIn('Enum(单选)', authoring)
         self.assertIn('Enum(多选)', authoring)
         self.assertIn('@register_task(path_cn="自定义任务/...")', authoring)
+
+    def test_editor_navigation_menu_contract(self):
+        from services.webui.routes import editor
+
+        frontend = (ROOT / "services/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
+        backend = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
+        api_contract = (ROOT / "docs/AutoScriptor/webui/api-contract.md").read_text(encoding="utf-8")
+
+        self.assertIn('@router.get("/navigation-options")', backend)
+        self.assertIn("def _build_editor_navigation_options()", backend)
+        self.assertIn('code="editor_navigation_options_failed"', backend)
+        self.assertIn("label: '导航到...'", frontend)
+        self.assertLess(frontend.index("key: 'navigation'"), frontend.index("key: 'grid'"))
+        self.assertIn("appendEnsureInAction", frontend)
+        self.assertIn("ensure_in(${JSON.stringify", frontend)
+        self.assertIn("recorderNestedSubmenuOpen", frontend)
+        self.assertIn("GET /api/editor/navigation-options", api_contract)
+
+        options = editor._build_editor_navigation_options()
+        locations_by_environment = {item["name"]: item["locations"] for item in options}
+        self.assertIn("村庄", locations_by_environment)
+        self.assertIn("法相", locations_by_environment["村庄"])
+        self.assertNotIn("村庄", locations_by_environment["村庄"])
 
     def test_editor_save_custom_task_metadata_codegen_contract(self):
         from services.webui.routes import editor
@@ -2706,7 +2750,7 @@ class TestTaskOrderingStaticContract(unittest.TestCase):
         self.assertIn("AppSidebar.js?v=17", index_html)
         self.assertIn("style.css?v=43", index_html)
         self.assertIn("TaskPanel.js?v=23", index_html)
-        self.assertIn("app.js?v=38", index_html)
+        self.assertIn("app.js?v=39", index_html)
         self.assertIn('@run-task-range="runTaskRange"', index_html)
         self.assertIn(':runtime-status="runtimeStatus"', index_html)
         self.assertNotIn("TaskDagCanvas.js", index_html)

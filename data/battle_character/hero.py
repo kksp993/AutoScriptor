@@ -134,7 +134,7 @@ class Hero:
         if ws:
             click(B("战斗-无双"))
         if fb:
-            click(B("战斗-法宝"))
+            click(B("战斗-法宝"), repeat=2) # 荒古剑阵技能
         if xb:
             click(B("战斗-仙宝"))
         return self
@@ -462,6 +462,7 @@ class Hero:
         exit_loc: float = 0,
         timeout: float = 180,
         *,
+        no_travel: bool = False,
         step_delay: float | None = None,
         monitor_interval: float | None = None,
     ):
@@ -499,11 +500,13 @@ class Hero:
                 once=False,
                 throttle=search_wait,
             )
-            logger.info("离开关卡 1: 向右移动到最远处")
-            self.move_right(900, directly=True)
-            logger.info("离开关卡 2: 向左移动到出口旁 exit_loc=%s", exit_loc)
-            self.move_left(exit_loc, directly=True)
-            
+            if not no_travel:
+                logger.info("离开关卡 1: 向右移动到最远处")
+                self.move_right(900, directly=True)
+                logger.info("离开关卡 2: 向左移动到出口旁 exit_loc=%s", exit_loc)
+                self.move_left(exit_loc, directly=True)
+            else:
+                logger.info("离开关卡 12: 从出口旁开始离开")
 
             scope.add(
                 "出口标记",

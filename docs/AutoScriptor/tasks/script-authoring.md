@@ -23,6 +23,10 @@ def task(count: int = 1):
 
 WebUI Editor 的“保存脚本”接口 `/api/editor/save-custom-task` 也必须生成同样形态的自定义任务文件：写入 `data/custom_task/`，使用 UTF-8，并带有 `@register_task(path_cn="自定义任务/...")`。保存弹窗提供 `文件名称`（默认 `.py` 后缀）、`脚本名称`（默认前缀为 `自定义任务/`，用户填写后续路径）、`description`、`task_docs` 和参数设置；参数字段包括字段名称、字段类型、字段解释，字段类型支持 `Enum(单选)` 和 `Enum(多选)`，enum 选项使用 `["普通","困难"]` 这类 JSON 数组填写。
 
+Editor 操作录制区的“工具 > 导航到...”按 `ZmxyOL.nav.envs` 的环境和位置层级展示导航目标。点击环境或位置会在当前代码目标中插入 `ensure_in("目标名称")`；位置名可包含 `天庭#1` 等索引后缀。
+
+Editor 操作录制区的“定位 > 区域识别 > 匹配目标（match）”会根据当前选区生成 `B/T/I` 目标，并在当前代码目标中插入 `match(...)`。复杂的 tuple（OR）或 list（AND）目标可在插入后继续编辑。
+
 编辑器保存裸片段时会按表单生成 `@register_task(path_cn="自定义任务/...", description=..., task_doc=...)`，并把参数设置转换为函数签名、本地 `enum.Enum` 类和默认值；如果传入的是完整自定义任务文件，文件内的 `@register_task` 必须显式提供 `path_cn`，已有装饰器元数据由文件自身负责。只落盘未注册的 Python 片段不会出现在 WebUI 任务树中。
 
 自定义任务导入失败会记录到 WebUI 公开配置的 `custom_task_load_errors`，并在本轮加载中跳过 stale 自定义任务配置清理和 `cfg.save_config()`。修复脚本语法或导入错误后重新加载即可恢复；不要因为任务临时消失就手动清空 `自定义任务` 配置分支。
@@ -154,6 +158,10 @@ progress = get_task_status("progress")
 ## 设备和识别
 
 - 普通任务只调用 `click/locate/match/swipe/input/key_event/extract_info/get_colors/coloris`。
+- 所有截图、模板、`B/Box` 和点击坐标都按 `1280x720` 横屏绝对像素编写；`B(x, y, width, height)` 使用左上角与宽高，不编写相对坐标或静默缩放逻辑。
+- 截图尺寸不符合合同时运行时只会节流 warning 并继续任务，不会自动缩放；应修正 MuMu 分辨率，不要修改任务坐标去适配错误尺寸。
+- 任务脚本只依赖现有公共识别 API，不导入或依赖内部 `RecognitionResult` 追踪结构。
+- `extract_info(..., mode=...)` 使用 `digital_only`（仅数字）、`text`（仅 OCR 文本）、`img`（仅返回 `ui_map` 图片 key）或 `both`（逐格优先图片，未命中再 OCR）；Box 列表和二维网格会保持返回形状。
 - 不直接调用 MuMuManager subprocess；设备会话由调度器、WebUI 或 runtime context 管。
 - 纯坐标点击用 `B(x, y, w, h)`；OCR 语义和业务语义分开处理。
 - 多个识别目标必须包成 tuple/list：`(T("A"), T("B"))` 表示任一命中，`[T("A"), T("B")]` 表示全部命中；`locate()`、`match()`、`coloris()` 均沿用这套组合语义。不要写 `wait_for_appear(T("A"), T("B"))`，第二个位置参数是 `timeout`。

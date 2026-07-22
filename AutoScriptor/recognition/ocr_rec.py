@@ -1,30 +1,43 @@
-import cv2
-from paddleocr import PaddleOCR
-from AutoScriptor.utils.logger import logger
-from AutoScriptor.utils.box import Box
-from AutoScriptor.utils.app_config import cfg
-from fuzzywuzzy import fuzz
 import threading
-import paddle
 import time
-import numpy as np
-OCR_VERSION = 'PP-OCRv4'
-# OCR_VERSION = 'PP-OCRv5'
-# OCR_VERSION = 'PP-OCRv5_server_rec'
 
-ocr_config = {
-    "use_gpu":cfg["ocr.use_gpu"],
-    "gpu_mem":4096,
-    "enable_mkldnn":True,
-    "use_angle_cls":False,
-    "lang":"ch",
-    "ocr_version":OCR_VERSION,
-    "show_log":False,
-    # "det_db_thresh":0.15,
-    # "det_db_box_thresh":0.2,
-    # "drop_score":0.2,
-    # "scales":[0.5,1.0,1.5],
-}
+import cv2
+import numpy as np
+from fuzzywuzzy import fuzz
+
+from AutoScriptor.recognition.ocr_runtime_config import (
+    ocr_runtime_config,
+    read_configured_ocr_runtime,
+)
+from AutoScriptor.utils.box import Box
+from AutoScriptor.utils.logger import logger
+
+
+OCR_MODEL_PROFILE = ocr_runtime_config.model_profile
+
+
+def _load_ocr_runtime():
+    """Import the heavyweight Paddle runtime only inside the OCR worker."""
+
+    import paddle
+
+    from AutoScriptor.recognition.paddle_ocr_compat import (
+        CompatiblePaddleOCR,
+        get_paddleocr_version,
+    )
+
+    return paddle, CompatiblePaddleOCR, get_paddleocr_version
+
+
+def _create_ocr_engine():
+    from AutoScriptor.recognition.paddle_ocr_compat import CompatiblePaddleOCR
+
+    return CompatiblePaddleOCR(
+        model_profile_name=OCR_MODEL_PROFILE,
+        language="ch",
+        use_gpu=ocr_runtime_config.use_gpu,
+    )
+
 
 class OCRManager:
     """全局OCR引擎管理器"""
@@ -44,24 +57,57 @@ class OCRManager:
             with self._lock:
                 if not self._initialized:
                     self.ocr_engine = None
+                    self.initialization_error = None
                     self._initialized = True
                     self._start_async_init()
 
     def _start_async_init(self):
         def init_ocr():
+            total_start_time = time.perf_counter()
             try:
-                # 打印 PaddleGPU 支持情况和可用 GPU 数量
-                logger.info(f"Paddle 支持 GPU 编译: {paddle.device.is_compiled_with_cuda()}, 可用 GPU 数量: {paddle.device.cuda.device_count()}")
-                logger.info("正在初始化 PaddleOCR 引擎，这可能需要一些时间...")
-                start_time = time.time()
-                self.ocr_engine = PaddleOCR(
-                    **ocr_config,
+                logger.info("正在后台导入 Paddle/PaddleOCR 运行时...")
+                runtime_import_start_time = time.perf_counter()
+                paddle_module, ocr_constructor, version_reader = _load_ocr_runtime()
+                runtime_import_elapsed = time.perf_counter() - runtime_import_start_time
+                logger.info(
+                    "Paddle/PaddleOCR 运行时导入完成，耗时 %.2f 秒",
+                    runtime_import_elapsed,
                 )
-                logger.info(f"PaddleOCR 初始化参数 use_gpu={cfg['ocr.use_gpu']}, 当前设备={paddle.get_device()}")
-                elapsed_time = time.time() - start_time
-                logger.info(f"PaddleOCR 引擎初始化完成，耗时 {elapsed_time:.2f} 秒")
-            except Exception as e:
-                raise RuntimeError(f"PaddleOCR 引擎初始化失败: {e}")
+                logger.info(
+                    "Paddle 支持 GPU 编译: %s, 可用 GPU 数量: %s",
+                    paddle_module.device.is_compiled_with_cuda(),
+                    paddle_module.device.cuda.device_count(),
+                )
+                logger.info(
+                    "正在初始化 PaddleOCR 引擎: package=%s, model=%s",
+                    version_reader(),
+                    OCR_MODEL_PROFILE,
+                )
+                engine_start_time = time.perf_counter()
+                self.ocr_engine = ocr_constructor(
+                    model_profile_name=OCR_MODEL_PROFILE,
+                    language="ch",
+                    use_gpu=ocr_runtime_config.use_gpu,
+                )
+                logger.info(
+                    "PaddleOCR 初始化参数 model=%s, use_gpu=%s, 当前设备=%s",
+                    OCR_MODEL_PROFILE,
+                    ocr_runtime_config.use_gpu,
+                    self.ocr_engine.device_name,
+                )
+                engine_elapsed = time.perf_counter() - engine_start_time
+                total_elapsed = time.perf_counter() - total_start_time
+                logger.info(
+                    "PaddleOCR 引擎初始化完成，模型阶段耗时 %.2f 秒，总耗时 %.2f 秒",
+                    engine_elapsed,
+                    total_elapsed,
+                )
+            except Exception as error:
+                self.initialization_error = RuntimeError(
+                    f"PaddleOCR 引擎初始化失败: {error}"
+                )
+                logger.exception("%s", self.initialization_error)
+
         self._init_thread = threading.Thread(target=init_ocr, daemon=True)
         self._init_thread.start()
 
@@ -72,6 +118,8 @@ class OCRManager:
             if self._init_thread.is_alive():
                 logger.warning("PaddleOCR 引擎初始化超时")
                 return False
+        if self.initialization_error is not None:
+            raise self.initialization_error
         return self.ocr_engine is not None
 
     def get_ocr_engine(self):
@@ -86,6 +134,29 @@ class OCRManager:
 
 ocr_manager = OCRManager()
 
+
+def get_ocr_runtime_status() -> dict:
+    """Report persisted intent separately from the process-level OCR runtime."""
+
+    configured_runtime = read_configured_ocr_runtime()
+    engine = ocr_manager.ocr_engine
+    initialization_error = ocr_manager.initialization_error
+    return {
+        "configured_use_gpu": configured_runtime.use_gpu,
+        "runtime_use_gpu": ocr_runtime_config.use_gpu,
+        "engine_use_gpu": getattr(engine, "use_gpu", None),
+        "engine_device": getattr(engine, "device_name", None),
+        "configured_model": configured_runtime.model_profile,
+        "runtime_model": ocr_runtime_config.model_profile,
+        "configured_digit_model": configured_runtime.digit_model_profile,
+        "runtime_digit_model": ocr_runtime_config.digit_model_profile,
+        "restart_required": configured_runtime != ocr_runtime_config,
+        "engine_ready": ocr_manager.is_ready(),
+        "initialization_error": (
+            str(initialization_error) if initialization_error is not None else None
+        ),
+    }
+
 # 引入线程局部存储
 _thread_local = threading.local()
 
@@ -96,10 +167,7 @@ def get_ocr_engine():
         raise RuntimeError("OCR引擎未初始化完成")
     # 如果该线程无本地实例或仍指向全局实例，则创建新的 PaddleOCR 实例
     if not hasattr(_thread_local, 'ocr_engine') or _thread_local.ocr_engine is ocr_manager.ocr_engine:
-        # 复制与全局相同的初始化参数
-        _thread_local.ocr_engine = PaddleOCR(
-            **ocr_config,
-        )
+        _thread_local.ocr_engine = _create_ocr_engine()
     return _thread_local.ocr_engine
 
 

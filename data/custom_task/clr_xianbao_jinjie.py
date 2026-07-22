@@ -12,7 +12,6 @@ from AutoScriptor import *
     task_doc=(
         "【特别注意】：这个过程会吃掉所有B/C级仙宝，此外确保您已经解锁了法相功能"
     ),
-    debug_mode=True,
 )
 def test_task(xianbao_idx=1):
     ensure_in("法相")

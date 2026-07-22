@@ -5,6 +5,15 @@
 ## 启动边界
 
 - Source Electron configures Chromium render mode before `app.whenReady()`. `AUTOSCRIPTOR_ELECTRON_RENDER_MODE` supports `software` (default, hardware acceleration disabled plus GPU composition/raster/zero-copy switches), `d3d11` (GPU kept with ANGLE D3D11), and `default` (no Electron render switches for comparison). The shell logs the render mode and GPU feature status; browser access to `http://127.0.0.1:5000` is unchanged.
+- OCR 在进程启动时冻结 `ocr.use_gpu`、普通模型和数字模型。全局 OCR、线程局部 OCR
+  和数字 OCR 都使用该快照；保存新配置不会热切换已加载或稍后创建的 Paddle 引擎。
+  `GET /api/ocr-status` 通过 `configured_*`、`runtime_*`、`engine_*` 和
+  `restart_required` 暴露三层状态，变更设备或模型后必须重启进程。
+- Paddle/PaddleOCR 的 Python 运行时导入和 OCR 模型构造都在 OCR 后台线程执行。
+  模型文件命中本地缓存仍需完成每个新进程的运行时导入和模型构造；启动日志分别记录
+  运行时导入、模型阶段和总耗时，`Model files already exist` 表示模型文件缓存已命中。
+- Electron/Chromium 的渲染模式与 Paddle OCR 设备互相独立；关闭 Electron 硬件加速
+  不会阻止 OCR 使用 CUDA GPU。
 - WebUI 启动后只做静态服务、日志 WebSocket、任务注册和后台监控代理。
 - 后台初始化必须完成运行时上下文、任务重载和配置读取后才把 `/api/init-status` 标记为 `ready=true`；失败时保留 `ready=false` 和错误信息，不伪装成已完成。
 - 启动、刷新、普通轮询和默认诊断不应主动创建 `mixctrl/mumu`。
@@ -35,14 +44,15 @@
 
 `debug_mode` 只跳过调度器的自动登录、任务前重启和常规失败恢复，不跳过设备会话的基本就绪检查。重启设备的任务应先调用 `runtime_ctx.shutdown()` 释放旧 NemuIpc 和运行态引用，再重启 MuMu 并通过 `runtime_ctx.refresh()` 建立新会话。
 
-
 ## 设备通道
 
 - `DeviceFacade` 用于诊断页聚合 Manager、ADB、App、NemuIpc、OCR、UI Map 状态。
 - MuMuManager 负责低频生命周期命令；`version` 等命令失败但 ADB 可用时通常是 warning。
 - ADB 是点击、滑动、输入、按键、App 启停和包状态的稳定路径；高频输入优先直接走 `adb.exe`。
-- MuMu TCP ADB 地址（如 `127.0.0.1:16384`）不会因为 `adb start-server` 自动出现在 `adb devices`；`DeviceFacade` 在配置串号不是 `device` 时会先 `adb disconnect <adb_addr>` 再 `adb connect <adb_addr>` 并重试。已列出但状态为 `offline` 的 TCP 串号只做 `connect` 会回 `already connected` 却不恢复，必须 disconnect 后再 connect。
+- MuMu TCP ADB 地址（如 `127.0.0.1:16384`）不会因为 `adb start-server` 自动出现在 `adb devices`；`DeviceFacade` 在 `get-state` 失败时会先 `adb connect <adb_addr>` 并重试，再判断端口错误或设备未启动。
+ - MuMu TCP ADB 地址（如 `127.0.0.1:16384`）不会因为 `adb start-server` 自动出现在 `adb devices`；`DeviceFacade` 在配置串号不是 `device` 时会先 `adb disconnect <adb_addr>` 再 `adb connect <adb_addr>` 并重试。已列出但状态为 `offline` 的 TCP 串号只做 `connect` 会回 `already connected` 却不恢复，必须 disconnect 后再 connect。
 - NemuIpc 仍是截图主路径。默认诊断不做截图探测；用户点击“截图探测”才检查该层。
+- NemuIpc 截图返回后按 `1280x720` 横屏绝对像素合同检查帧尺寸。尺寸不符只输出节流 warning；原始帧保持不变并继续交给调用方，不自动缩放、不终止设备会话或当前任务。
 - NemuIpc 原生连接按单通道使用：截图、点击、长按、滑动、拖拽、释放触摸和 disconnect 必须通过 `NemuIpc` 公开方法串行进入，不能在运行期直接调用底层 `nemu_ipc.nemu_ipc.*`。后台检测线程和战斗移动线程共享同一连接时，用串行化解决确定性争用，不用扩大重试或吞掉超时。
 
 ## WebUI 运行状态
@@ -83,6 +93,10 @@ Editor 自定义代码执行由 `/api/editor/execute-code` 拥有路由内执行
 - `WebUILifecycleService` 负责配置副作用顺序：修改内存、保存、按场景选择配置同步/轻量 reload/完整 reload、刷新 order map、唤醒调度、递增 `config_version`。新增账号完成写入和切换后，投影刷新失败会沿 API 返回错误，不再把不完整生命周期上报为成功。
 
 任务顺序保存只使用 `POST /api/task-ordering`：保存 `items` 分组顺序并派生 `user_order`，要求 runtime idle，并刷新 WebUI order map 与调度器投影。旧版图布局接口 `POST /api/task-ordering/layout` 仅作为兼容 no-op 保留，不再保存画布坐标或影响执行顺序。
+
+任务树保存和排序保存的并发边界分为两层：后端通过 `WebUILifecycleService.config_operation()` 串行完成内存修改、文件保存、投影刷新和版本递增；前端把 `POST /api/tasks` 与 `POST /api/task-ordering` 放入同一个 FIFO 提交序列，并在入队时冻结请求快照。排序接口只返回排序投影，前端不得用排序响应替换 `configData.tasks` 中尚未提交的任务草稿。
+
+`GET /api/runtime/snapshot` 可能与前端提交同时在途。轮询响应在根据 `config_version` 触发完整 `/api/refresh` 前，必须等待任务持久化序列稳定排空，再与响应处理时的当前公开版本比较；只有响应版本更大时才允许刷新，不能让请求发出前的旧版本基线引发全量配置回填并覆盖本地草稿。
 
 WebUI 公开配置必须剥离账号、密码、加密块、运行时任务字段和 `_due` 等后端投影字段。
 

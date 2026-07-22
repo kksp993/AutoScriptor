@@ -32,7 +32,7 @@ def kls_yxd_callback(registry=bg):
             h.battle()
         [h.move_right(5, directly=True) for _ in range(2)]
         h.move_left(1280)
-        h.way_to_exit(until=I("加载中"), exit_loc=300)
+        h.way_to_exit(until=I("加载中"), exit_loc=300, no_travel=True)
         wait_for_disappear(I("加载中"))
         registry.add(
             name="玉虚殿-战斗结束",

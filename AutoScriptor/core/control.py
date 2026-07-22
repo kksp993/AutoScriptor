@@ -9,6 +9,7 @@ from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import (
     NemuIpcError,
     RequestHumanTakeover,
 )
+from AutoScriptor.core.display_contract import EXPECTED_FRAME_SIZE, get_frame_size
 from AutoScriptor.recognition.rec import locate_on_screen
 from AutoScriptor.utils.box import Box
 from AutoScriptor.utils.tracer import save_debug_screenshot
@@ -83,6 +84,9 @@ class MixControl(BaseMumuControl):
         self.screenshot_interval=5
         self._last_action_log = defaultdict(float)
         self._action_log_interval = 1.0
+        self._last_resolution_warning_at = 0.0
+        self._last_resolution_warning_size: tuple[int, int] | None = None
+        self._resolution_warning_interval = 60.0
 
     def _log_action(self, action: str, detail: str) -> None:
         msg = f"【{self.mode}】{action}: {detail}"
@@ -125,10 +129,41 @@ class MixControl(BaseMumuControl):
         """根据当前模式返回相应的截图"""
         from AutoScriptor import cfg
         screenshot=self.nemu_control.screenshot()
+        self._warn_if_resolution_mismatch(screenshot)
         if cfg["app"]["debug_mode"] and (t:=time.time()) - self.last_screenshot_time > self.screenshot_interval:
             self.last_screenshot_time = t
             save_debug_screenshot(target=None, screenshot=screenshot, prefix="s")
         return screenshot
+
+    def _warn_if_resolution_mismatch(self, screenshot) -> None:
+        actual_size = get_frame_size(screenshot)
+        if actual_size is None:
+            return
+        if actual_size == EXPECTED_FRAME_SIZE:
+            self._last_resolution_warning_size = None
+            return
+
+        current_time = time.monotonic()
+        resolution_changed = actual_size != self._last_resolution_warning_size
+        warning_interval_elapsed = (
+            current_time - self._last_resolution_warning_at >= self._resolution_warning_interval
+        )
+        if not resolution_changed and not warning_interval_elapsed:
+            return
+
+        self._last_resolution_warning_at = current_time
+        self._last_resolution_warning_size = actual_size
+        logger.warning(
+            "当前 MuMu 截图分辨率为 %sx%s，不符合 AutoScriptor 的 %sx%s 横屏坐标合同；"
+            "现有素材、Box 与点击坐标均按绝对像素编写。任务会继续运行，但识别和点击可能偏移，"
+            "请在 MuMu 设置中切换为 %sx%s 横屏分辨率。",
+            actual_size[0],
+            actual_size[1],
+            EXPECTED_FRAME_SIZE[0],
+            EXPECTED_FRAME_SIZE[1],
+            EXPECTED_FRAME_SIZE[0],
+            EXPECTED_FRAME_SIZE[1],
+        )
 
     
     def long_click(self, x, y, duration=1.0)->None:
@@ -169,4 +204,3 @@ class ControlModeProxy:
             mixctrl.switch_to_nemu()
         else:
             raise ValueError(f"Invalid base: {base}")
-

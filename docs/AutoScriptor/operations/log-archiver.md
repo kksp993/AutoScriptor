@@ -52,10 +52,13 @@ YYMMDD_HHMMSS_micro_e.png   # OCR/提取信息截图
 - `bg_active_callbacks`
 - `bg_signals`
 - `bg_event_history`
+- `recognition_trace`
 - `python_version`
 - `error_timestamp`
 
 当前不再保留运行时覆盖率追踪和默认上下文开关。需要追加业务信息时，在调用 `archive_error()` 时传入 `extra_context`。
+
+`recognition_trace` 是当前任务线程最近识别结果的结构化摘要：运行时环形缓冲最多保留 32 条，归档默认写入最近 16 条。摘要包含操作、成功状态、目标/结果概况、耗时、帧来源和帧形状，不保留截图数组；读取追踪本身不会初始化设备、截图或重跑 OCR/识别。
 
 ## 手动归档
 
@@ -96,7 +99,8 @@ except Exception as e:
 ## 排查顺序
 
 1. 看 `error.log` 的异常类型、异常信息和最后日志。
-2. 看 `bg_event_history` 是否有信号、回调或 `clear()`。
-3. 看 `*_s.png` 失败即时截图。
-4. 看 `current_screenshot.png` 和 timed screenshots 是否发生状态变化。
-5. 看堆栈局部变量，确认参数、角色、任务状态是否异常。
+2. 识别类失败先看 `recognition_trace` 的最后几条操作、耗时、帧来源和结果摘要。
+3. 看 `bg_event_history` 是否有信号、回调或 `clear()`。
+4. 看 `*_s.png` 失败即时截图。
+5. 看 `current_screenshot.png` 和 timed screenshots 是否发生状态变化。
+6. 看堆栈局部变量，确认参数、角色、任务状态是否异常。
