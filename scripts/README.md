@@ -15,6 +15,7 @@
 - `launcher.ps1` / `launcher.bat`：兼容旧入口，只转发到运行脚本。
 - `bootstrap-python310.ps1`：通过 uv 确保 Python 3.10.15 可用于 `.venv`。
 - `collect_zmxy_redeem_2026.py`：4399 官方公告礼包码增量采集器，默认写入 `logs/zmxy_redeem_codes.json`。
+- `run_safety_education.ps1` / `run_safety_education.bat`：手动运行历史安全教育脚本；只初始化 AutoScriptor 核心和模拟器控制，不启动 WebUI/Electron。
 
 ## 边界
 

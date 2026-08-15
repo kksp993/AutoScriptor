@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from AutoScriptor.utils.paths import get_error_archives_dir
 
-_RE_SAFE_FOLDER = re.compile(r"^[\w\u4e00-\u9fff.\-]+$")
+_RE_SAFE_FOLDER = re.compile(r"^[\w\u4e00-\u9fff.\-+]+$")
 _RE_FOLDER_META = re.compile(r"^(\d{6})_(\d{6})_(.+)$")
 # 主日志行内时间戳（与 logger 文件格式、Rich 等常见格式兼容）
 _RE_LOG_TS_FILE = re.compile(

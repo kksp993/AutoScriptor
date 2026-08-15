@@ -95,9 +95,9 @@ def chaos_select(
         cur_linggen = extract_info(B(260, 440, 80, 50), lambda x: x.strip()[0])
         logger.info(f"{name} -> {cur_linggen}")
         pairs.append((name, cur_linggen))
-        if same_linggen_chaos is None and cur_linggen in Weather:
+        if same_linggen_chaos is None and cur_linggen and cur_linggen in Weather:
             same_linggen_chaos = name
         sleep(1)
         click(B(1200, 30, 30, 30))
-        wait_for_appear(T("回家", box=Box(29, 613, 77, 88).margin()))
+        wait_for_appear(T("回家", box=Box(29, 656, 77, 54).margin()))
     return same_linggen_chaos, pairs

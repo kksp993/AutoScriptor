@@ -81,7 +81,7 @@ def task(
 
     def _after_no_remains():
         click(B(1200, 30, 30, 30))
-        wait_for_appear(T("回家", box=Box(29, 613, 77, 88).margin()))
+        wait_for_appear(T("回家", box=Box(29, 656, 77, 54).margin()))
 
     def _run_battle(name: str, is_lingyu: bool):
         row = battle_config[name]

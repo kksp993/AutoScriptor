@@ -17,12 +17,17 @@ def task():
     else:
         click(T('干将'),offset=(25,140),resize=(0,0))
     click(T("分解", box=Box(413,49,142,53).margin()),delay=0.5)
-    for quality in ["普通","精良","史诗"]:
+    quality_targets = [
+        (T("普通", box=Box(791,370,59,41).margin())),
+        (T("精良", box=Box(797,326,39,18).margin())),
+        (T("史诗", box=Box(797,279,40,22).margin())),
+    ]
+    for quality in quality_targets:
         wait_for_appear(T("分解", box=Box(589,171,127,49).margin()))
         click(B(259,226,89,90))
         wait_for_appear(T("神兵选择", box=Box(543,31,248,67).margin()))
         click(B(892,114,41,45),delay=0.5)
-        click(T(quality, box=Box(752,171,133,239).margin()))
+        click(quality)
         click(T("键选择", box=Box(464,565,152,56).margin()))
         count = 15
         for _ in range(10):

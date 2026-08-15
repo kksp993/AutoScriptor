@@ -4,7 +4,7 @@ from ZmxyOL import *
 from AutoScriptor.utils.logger import logger
 
 @register_task(
-    path_cn="活动任务/烘炉+机缘",
+    path_cn="活动任务/烘炉_机缘",
     description="依次处理造化烘炉和机缘大集。",
     task_doc="【未完成】依次处理造化烘炉和机缘大集。",
 )

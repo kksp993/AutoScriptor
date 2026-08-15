@@ -22,7 +22,7 @@ def task():
     switch_base("mumu")
     ensure_in("幽冥冰窟")
 
-    click(T("奖励",box=Box(37,232,84,89)))
+    click(T("奖励",box=Box(37,232,84,89)),offset=(0,-30))
     click(T("领取奖励"))
     sleep(1)
     click(B(898,18,67,66),until=lambda:ui_F(T("领取奖励")))

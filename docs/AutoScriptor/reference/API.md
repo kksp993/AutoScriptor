@@ -33,16 +33,16 @@ AutoScriptor 的截图、模板、`Box` 和点击坐标统一使用 **1280x720 �
 
 ## 数据目录
 
-| 目录/文件 | 说明 |
-|-----------|------|
-| `data/config.json` | 源码运行的全局配置 |
-| `data/accounts/*.json` | 账号、角色、任务树、任务状态、加密凭据；真实账号文件不提交 |
-| `data/custom_task/` | 用户自定义任务脚本 |
-| `data/battle_character/` | 当前有效的运行态职业脚本目录 |
-| `logs/zmxy_redeem_codes.json` | 4399 兑换码采集器生成的运行态缓存；不提交到仓库 |
-| `ZmxyOL/assets/config/ui_map.csv` | UI 名称到图片、文本、坐标的映射 |
-| `ZmxyOL/assets/pic/` | 模板图片资源 |
-| `logs/` | `get_logs_root()` 返回的运行日志、调试截图、错误归档目录 |
+| 目录/文件　　　　　　　　　　　　 | 说明　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
+| -----------------------------------| ------------------------------------------------------------|
+| `data/config.json`　　　　　　　　| 源码运行的全局配置　　　　　　　　　　　　　　　　　　　　 |
+| `data/accounts/*.json`　　　　　　| 账号、角色、任务树、任务状态、加密凭据；真实账号文件不提交 |
+| `data/custom_task/`　　　　　　　 | 用户自定义任务脚本　　　　　　　　　　　　　　　　　　　　 |
+| `data/battle_character/`　　　　　| 当前有效的运行态职业脚本目录　　　　　　　　　　　　　　　 |
+| `logs/zmxy_redeem_codes.json`　　 | 4399 兑换码采集器生成的运行态缓存；不提交到仓库　　　　　　|
+| `ZmxyOL/assets/config/ui_map.csv` | UI 名称到图片、文本、坐标的映射　　　　　　　　　　　　　　|
+| `ZmxyOL/assets/pic/`　　　　　　　| 模板图片资源　　　　　　　　　　　　　　　　　　　　　　　 |
+| `logs/`　　　　　　　　　　　　　 | `get_logs_root()` 返回的运行日志、调试截图、错误归档目录　 |
 
 路径统一通过 `AutoScriptor.utils.paths` 解析。不要在仓库根目录新增散落的 `accounts/`、`custom_task/` 或 `battle_character/`。
 
@@ -140,7 +140,7 @@ image_keys = extract_info(box_grid, mode="img")
 values = extract_info(box_grid, mode="both")
 ```
 
-`extract_info` 的 `mode` 只接受 `digital_only`、`text`、`img`、`both`：分别表示仅数字、仅 OCR 文本、仅匹配 `ui_map` 已登记图片并返回条目 key，以及逐格优先图片、未命中时再 OCR。单个 Box、Box 列表和二维 Box 网格会保持对应的返回形状；未识别的格子保留 `None` 或空字符串。`extract_info(..., screenshot_frame=frame)` 会固定使用同一帧，适合在线截图测试、Editor 导入图和批量识别，避免 UI 漂移。OCR 层应保留识别语义，业务层再决定是否转成数量 `0` 或 `1`。
+`extract_info` 的 `mode` 只接受 `digital_only`、`text`、`img`、`both`：分别表示仅数字、仅 OCR 文本、仅匹配 `ui_map` 已登记图片并返回条目 key，以及逐格优先图片、未命中时再 OCR。单个 Box、Box 列表和二维 Box 网格会保持对应的返回形状；未识别的格子保留 `None` 或空字符串。`post_process` 解析失败会记录为本次识别失败并继续重试，重试耗尽后返回 `None`，不会把原始 OCR 文本当作处理后结果返回。`extract_info(..., screenshot_frame=frame)` 会固定使用同一帧，适合在线截图测试、Editor 导入图和批量识别，避免 UI 漂移。OCR 层应保留识别语义，业务层再决定是否转成数量 `0` 或 `1`。
 
 ### 提取颜色
 

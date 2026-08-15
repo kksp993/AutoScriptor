@@ -811,6 +811,7 @@ def extract_info(
     recognition_frame = None
     attempt_count = 0
     last_ocr_at: float | None = None
+    last_post_process_error: Exception | None = None
     for attempt_index in range(max_retries):
         attempt_count = attempt_index + 1
         check_cancel_raise()
@@ -841,7 +842,10 @@ def extract_info(
         if post_process:
             try:
                 result = post_process(raw_result)
+                last_post_process_error = None
             except Exception as error:
+                result = None
+                last_post_process_error = error
                 logger.error(
                     "Extract info %s mode=%s failed, raw_res: %s, for %s",
                     target,
@@ -864,6 +868,7 @@ def extract_info(
             frame_source="injected" if screenshot_frame is not None else "live",
             frame=recognition_frame,
             engine=mode,
+            error=last_post_process_error,
             metadata={"mode": mode, "attempt_count": attempt_count},
         )
     )

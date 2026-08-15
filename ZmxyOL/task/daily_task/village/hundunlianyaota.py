@@ -24,7 +24,11 @@ def hundunlianyaota():
         click(B(*shop_tmp),until=lambda: ui_T(T("拥有")))
         yy_tmp = wait_for_appear(T("拥有"))
         for i in range(8):
-            items = locate([T("功绩"),T("6级灵玉")],is_simplify=False)
+            items = locate([
+                T("功绩"),
+                T("6级灵玉", box=Box(529,300,81,23).margin()),
+                T("化身·封魂仙符", box=Box(859,0,159,720).margin())
+            ], is_simplify=False)
             flatten_items = [B(*item) for sublist in items if sublist is not None for item in sublist]
             color_targets = [B(item.box.center()[0]+45,item.box.center()[1]+215,30,30) for item in flatten_items]
             colors = get_colors(color_targets) if color_targets else []

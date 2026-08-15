@@ -361,6 +361,21 @@ class Hero:
         self.battle()
         return self
 
+    @flow("梵天塔破妄")
+    def powang_flow(self):
+        h.skill(6); sleep(0.1)
+        h.prop(ws=False)
+        h.huashen(1)
+        h.skill(4); sleep(0.3)
+        h.skill(3)
+        h.skill(6)
+        h.prop(xb=False,fb=False)
+        for _ in range(10):
+            h.move_right().skill(3)   
+            h.move_left().skill(3)   
+    
+
+
     # ═══════════════ battle_loop 外壳 ═══════════════
 
     def battle_loop(
@@ -554,7 +569,7 @@ class Hero:
                 if time() - step3_start > timeout:
                     raise RuntimeError(f"离开关卡 超时: {timeout}秒, 条件 {repr(until)} 未满足")
 
-                self.move_right(20, directly=True);sleep(0.2)
+                self.move_right(15, directly=True);sleep(0.4)
                 core_api.mixctrl.release_all_keys()
                 if not ui_T(T(key="战斗-离开标记")):
                     logger.debug("离开关卡 3.4: 未见出口标记，继续右走")
