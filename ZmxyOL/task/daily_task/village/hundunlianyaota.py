@@ -2,11 +2,16 @@ from datetime import datetime
 from AutoScriptor import *
 from ZmxyOL.nav import *
 from ZmxyOL import register_task
-import traceback
 
 from ZmxyOL.task.time import next_Mon, next_month
 
-@register_task(last_buy_time=0)
+
+@register_task(
+    path_cn="每日任务/村庄/混沌炼狱塔",
+    description="领取混沌炼妖塔挂机奖励并按周期购买商店物品。",
+    task_doc="领取混沌炼妖塔挂机奖励，并且自动购置功绩、6级灵域。",
+    last_buy_time=0,
+)
 def hundunlianyaota():
     ensure_in("联盟")
     click(T("魔渊之界"))
@@ -19,18 +24,19 @@ def hundunlianyaota():
         click(B(*shop_tmp),until=lambda: ui_T(T("拥有")))
         yy_tmp = wait_for_appear(T("拥有"))
         for i in range(8):
-            items = locate([T("功绩"),T("6级灵玉")],is_simplify=False)
+            items = locate([
+                T("功绩"),
+                T("6级灵玉", box=Box(529,300,81,23).margin()),
+                T("化身·封魂仙符", box=Box(859,0,159,720).margin())
+            ], is_simplify=False)
             flatten_items = [B(*item) for sublist in items if sublist is not None for item in sublist]
-            print("flatten_items:",flatten_items)
             color_targets = [B(item.box.center()[0]+45,item.box.center()[1]+215,30,30) for item in flatten_items]
             colors = get_colors(color_targets) if color_targets else []
-            print("colors:",colors)
             target_available = [color_targets[i] for i in range(len(flatten_items)) if "红色" in colors[i]]
-            print("target_available:",target_available)
             for tgt in target_available:
                 click(tgt, delay=1)
                 confirm_btn=wait_for_appear(T("确定"))
-                swipe(B(502,439,1,1), B(779,439,1,1))
+                swipe(B(525,432),B(760,436))
                 click(B(*confirm_btn))
                 wait_for_disappear(T("购买成功"))
             swipe(B(660,480),B(660,205))
@@ -41,13 +47,3 @@ def hundunlianyaota():
     click(B(30,30,30,30))
     wait_for_appear(I("混沌炼狱塔"))
     click(B(30,30,30,30))
-
-
-if __name__ == "__main__":
-    try:
-        hundunlianyaota()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

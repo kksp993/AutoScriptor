@@ -1,12 +1,15 @@
-import traceback
 from AutoScriptor import *
 from ZmxyOL import *
 
 from AutoScriptor.utils.logger import logger
 
-@register_task
+@register_task(
+    path_cn="活动任务/造化烘炉",
+    description="处理造化烘炉活动。",
+    task_doc="【未完成】处理造化烘炉活动。",
+)
 def task(battle_loop: int = 1000, battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
-    from ZmxyOL.battle.character.hero import h
+    from AutoScriptor.battle_character.hero import h
     TASK_TABLE_LIST = [
         "龙宫",
         # "九重天",
@@ -21,12 +24,3 @@ def task(battle_loop: int = 1000, battle_flow: BattleFlowName = DEFAULT_BATTLE_F
         "凌霄宝殿",
     ]
     h.battle_tasks(task_table=TASK_TABLE_LIST)
-
-if __name__ == "__main__":
-    try:
-        task(battle_loop=7)
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

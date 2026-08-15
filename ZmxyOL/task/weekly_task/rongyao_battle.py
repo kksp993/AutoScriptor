@@ -1,9 +1,11 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
 
-@register_task
+
+@register_task(
+    path_cn="每周任务/荣耀之战",
+    description="执行荣耀之战每周流程。",
+)
 def task(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):
@@ -12,6 +14,7 @@ def task(
     wait_for_appear(T("天选阁"))
     while ui_F(T("荣耀之战")):
         swipe(B(1000, 300), B(700, 300), duration_s=0.5)
+        sleep(0.5)
     click(T("荣耀之战"))
     for i in range(5):
         wait_for_appear(T("荣耀之战",box=Box(510, 0, 250, 80)))
@@ -26,7 +29,8 @@ def task(
                 callback=lambda: bg.set_signal("try_exit", True),
                 once=True
             )
-            h.set(True,1).battle_loop(battle_weight=100)
+            flow_name = getattr(battle_flow, "value", battle_flow)
+            h.set(True,1).battle_loop(flow_name=flow_name)
         click(T("确定"), if_exist=True)
         click(B(1090,25,30,30))
     sleep(2)
@@ -34,12 +38,3 @@ def task(
     wait_for_appear(I("挑战-取经"))
     sleep(1)
     click(B(1200,30,30,30))
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

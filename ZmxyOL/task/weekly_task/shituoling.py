@@ -1,9 +1,7 @@
-import traceback
 from enum import IntEnum
 
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
 
 
 class ShituolingDiff(IntEnum):
@@ -25,7 +23,11 @@ class ShituolingDiff(IntEnum):
     D15 = 15
 
 
-@register_task(allowed_weekdays=[6, 7])
+@register_task(
+    path_cn="每周任务/狮驼岭",
+    description="在周末执行狮驼岭任务。",
+    allowed_weekdays=[6, 7],
+)
 def task(
     diff: ShituolingDiff = ShituolingDiff.D15,
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
@@ -33,11 +35,12 @@ def task(
     d = int(diff)
     ensure_in("村庄")
     click(T("挑战", box=Box(0,65,1280,56).margin()))
+    wait_for_appear(T("取经"), timeout=5)
     swipe(B(982,339,1,1), B(245,339,1,1))
     click(T("狮驼岭", box=Box(0,385,1280,63).margin()))
     click(T("选择难度", box=Box(1078,625,177,53).margin()))
     wait_for_appear(T("挑战", box=Box(909,561,180,77).margin()))
-    for _ in range((d - 1) // 4):
+    while not ui_T(T("难度" + str(d), box=Box(982,463,105,55).margin())):
         swipe(B(979,497,1,1), B(979,257,1,1), duration_s=2)
     click(T("难度" + str(d), box=Box(982,463,105,55).margin()))
     click(T("挑战", box=Box(909,561,180,77).margin()))
@@ -49,7 +52,8 @@ def task(
             callback=lambda: bg.set_signal("try_exit", True),
             once=True
         )
-        h.set(True,3).battle_loop(battle_weight=0)
+        flow_name = getattr(battle_flow, "value", battle_flow)
+        h.set(True,3).battle_loop(flow_name=flow_name)
     click(T("确认", box=Box(572,474,135,78).margin()))
     wait_for_appear(T("恐怖加工厂", box=Box(520,16,239,58).margin()))
     click(B(274,671,105,39))
@@ -58,12 +62,3 @@ def task(
     click(B(1188,25,71,54))
     wait_for_appear(T("挑战", box=Box(561,18,195,79).margin()))
     click(B(1204,14,58,55))
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

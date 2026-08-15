@@ -1,8 +1,12 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
-@register_task
+@register_task(
+    path_cn="每日任务/村庄/取经",
+    description="完成每日取经流程。",
+    task_doc="【弃用】该任务保留旧每日取经流程。",
+    deprecated=True,
+)
 def daily_qujing_task():
     ensure_in("村庄")
     logger.info("====取经====")
@@ -23,15 +27,5 @@ def daily_qujing_task():
     wait_for_appear(I("挑战-取经"))
     sleep(0.5)
     click(B(1200,30,30,30))
-
-
-if __name__ == "__main__":
-    try:
-        daily_qujing_task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)
 
 

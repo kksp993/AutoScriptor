@@ -1,4 +1,3 @@
-import traceback
 from AutoScriptor import *
 from ZmxyOL import *
 
@@ -12,16 +11,11 @@ tasks =[
     "九重天",
 ]
 
-@register_task
+@register_task(
+    path_cn="活动任务/五光十色",
+    description="完成五光十色活动流程。",
+    task_doc="【未完成】完成五光十色活动流程。",
+)
 def task(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
-    from ZmxyOL.battle.character.hero import h
+    from AutoScriptor.battle_character.hero import h
     h.battle_tasks(task_table=tasks[0])
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

@@ -1,10 +1,9 @@
-import traceback
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.cancel import check_cancel_raise
 from ZmxyOL.nav.api import locate_region
 from ZmxyOL import *
 from AutoScriptor import *
-from ZmxyOL.battle.character.hero import h
+from AutoScriptor.battle_character.hero import h
 from time import time
 
 
@@ -138,7 +137,10 @@ def _run_bonus_and_handle_settlement(start_game: bool = True) -> str:
 # ]
 
 
-@register_task
+@register_task(
+    path_cn="每日任务/荒古万界/万界副本",
+    description="按配置挑战荒古万界固定副本关卡。",
+)
 def task2(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
     task(battle_flow=battle_flow)
     task(battle_flow=battle_flow)
@@ -210,14 +212,3 @@ def task(
     click(B(1200, 30, 30, 30))
     bg.clear(clear_signals=True)
     locate_region()
-
-
-if __name__ == "__main__":
-    try:
-        init()
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

@@ -1,9 +1,12 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
 
-@register_task
+@register_task(
+    path_cn="每日任务/村庄/仙盟建设",
+    description="完成仙盟建设并领取每日任务奖励。",
+    task_doc="完成仙盟建设+每日任务【仙盟建设1】。",
+)
 def daily_alliance_task():
     logger.info("====仙盟贡献====")
     ensure_in("仙盟")
@@ -13,7 +16,7 @@ def daily_alliance_task():
     click(B(925,220,120,40))
     click(T("确定",color="绿色"))
     wait_for_appear(T("优秀建设"))
-    click(B(1200,30,30,30))
+    click(B(1200,30,30,30), until=lambda:ui_F(T("优秀建设")))
     logger.info("====日常任务====")
     sleep(2)
     click(I("导航-任务"))
@@ -29,16 +32,8 @@ def daily_alliance_task():
         click(T("领取奖励"))
     while ui_F(T("翡翠灵签任务")):
         click(T("限时任务"))
+        sleep(0.5)
     click(B(1200,30,30,30))
     wait_for_appear(T("活跃任务"))
     click(B(1200,30,30,30))
-
-if __name__ == "__main__":
-    try:
-        daily_alliance_task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)
 

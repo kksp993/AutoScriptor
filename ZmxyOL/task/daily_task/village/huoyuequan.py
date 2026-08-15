@@ -1,4 +1,3 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
@@ -10,7 +9,11 @@ def buy_item(item_name: str):
         click(B(box),offset=(0,240),delay=0.5)
         sleep(4)
 
-@register_task
+@register_task(
+    path_cn="每日任务/村庄/活跃券",
+    description="通过荣耀商店购置并使用活跃福利券。",
+    task_doc="通过荣耀商店购置活跃券。【bug】活跃券使用可能有异常，建议自行确认是否使用成功。",
+)
 def task():
     logger.info("====活跃券====")
     ensure_in(["村庄"])
@@ -37,14 +40,4 @@ def task():
     click(T("使用",color="红色"), if_exist=True, delay=0.5, timeout=2)
     sleep(3)
     ensure_in(LOC_ENV)
-
-if __name__ == "__main__":
-    try:
-        task()
-        # buy_item("至尊成长礼包")
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)
 

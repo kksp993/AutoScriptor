@@ -1,8 +1,9 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
-@register_task
+@register_task(
+    description="执行极北冰窟扫荡。",
+    path_cn="每日任务/极北/极北地区/冰窟探险",
+)
 def bingkuTanXian():
     ensure_in("极北",-1)
     click(I("冰霜遗迹"),delay=1)
@@ -23,23 +24,5 @@ def bingkuTanXian():
         wait_for_disappear(I("加载中"))
     else:
         click(B(1122,34,30,30))
-
-
-if __name__ == "__main__":
-    try:
-        bingkuTanXian()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)
-
-
-
-
-
-
-
-
 
 

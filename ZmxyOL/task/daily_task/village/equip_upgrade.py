@@ -1,9 +1,13 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
 
-@register_task
+
+@register_task(
+    path_cn="每日任务/村庄/强化装备",
+    description="打开炼器炉并按配置强化装备。",
+    task_doc="【弃用】该任务已不推荐使用，保留旧强化装备流程。",
+    deprecated=True,
+)
 def daily_qianghua_task():
     ensure_in("村庄")
     if ui_T(T("仙盟",box=Box(16,30,924,400)), 3):
@@ -29,15 +33,6 @@ def daily_qianghua_task():
     click(T("确定",color="绿色"))
     while ui_F(I("炼丹炉-启灵-添加装备")):
         click(T(key="炼丹炉-启灵"))
+        sleep(0.5)
     click(B(1200,30,30,30))
     click(I("菜单"))
-
-
-if __name__ == "__main__":
-    try:
-        daily_qianghua_task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

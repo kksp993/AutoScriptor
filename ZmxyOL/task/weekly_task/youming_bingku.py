@@ -1,8 +1,6 @@
-import traceback
 from ZmxyOL.battle.utils import ChiBang, WuQi, YiFu, wear_shizhuang_choice
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
 
 def Shield_handle_bk():
     """默认4号位藤蔓，2-3号位无位移技能"""
@@ -47,10 +45,14 @@ def bingku_battle():
             click(T("确定"),if_exist=True)
         else:
             if ui_T(T("下一轮")): bg.set_signal("Exit",True)
-            if ui_T(T("重新挑战")): bg.set_signal("Failed",True)
+            elif ui_T(T("重新挑战")): bg.set_signal("Failed",True)
+            else: sleep(0.5)
     switch_base("mumu")
 
-@register_task
+@register_task(
+    path_cn="每周任务/幽冥冰窟",
+    description="完成幽冥冰窟每周流程。",
+)
 def task(
     Bingku_WuQi=WuQi.风虎之怒,
     Bingku_YiFu=YiFu.风虎潮流,
@@ -76,24 +78,3 @@ def task(
     wear_shizhuang_choice(Changgui_WuQi)
     wear_shizhuang_choice(Changgui_YiFu)
     wear_shizhuang_choice(Changgui_ChiBang)
-
-
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)
-
-
-
-
-
-
-
-
-
-

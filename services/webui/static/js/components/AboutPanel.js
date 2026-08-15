@@ -1,5 +1,5 @@
-/** 与 webapp/package.json version 保持同步（发行构建时一并发布） */
-const APP_DISPLAY_VERSION = '1.0.0';
+/** 与 webapp/package.json version 保持同步。 */
+const APP_DISPLAY_VERSION = '1.0.3';
 
 const AboutPanel = {
   name: 'AboutPanel',
@@ -15,6 +15,7 @@ const AboutPanel = {
     <h1 class="text-2xl font-bold text-slate-800 mb-1">造笔</h1>
     <p class="text-slate-500 text-sm font-medium tracking-wide">AutoScriptor</p>
     <p class="mt-3 text-sm text-slate-600">软件版本 <span class="font-mono text-slate-800">{{ appVersion }}</span></p>
+    <p class="mt-1 text-sm text-slate-600">仓库作者 <span class="font-medium text-slate-800">Kksp993</span></p>
   </div>
 
   <el-divider />

@@ -1,9 +1,12 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
 
-@register_task
+@register_task(
+    path_cn="每日任务/村庄/仙气消耗",
+    description="找小龙女消耗仙气。",
+    task_doc="【弃用】该任务保留旧仙气消耗流程。",
+    deprecated=True,
+)
 def task():
     ensure_in("仙盟")
     ensure_in("村庄")
@@ -19,12 +22,3 @@ def task():
     click(T("确定"))
     sleep(3)
     click(B(1200,30,30,30))
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

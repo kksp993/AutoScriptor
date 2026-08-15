@@ -7,6 +7,9 @@
 """
 from __future__ import annotations
 
+import os
+import subprocess
+
 from AutoScriptor.utils.logger import logger
 
 
@@ -34,9 +37,13 @@ def handle_notify(config_yaml: str, title: str = "", content: str = "") -> bool:
     try:
         config = {}
         for item in yaml.safe_load_all(config_yaml):
-            if item:
-                config.update(item)
-    except Exception:
+            if item is None:
+                continue
+            if not isinstance(item, dict):
+                logger.error("通知配置必须是 YAML 映射，跳过发送")
+                return False
+            config.update(item)
+    except yaml.YAMLError:
         logger.error("通知配置解析失败，跳过发送")
         return False
 
@@ -88,14 +95,53 @@ def handle_notify(config_yaml: str, title: str = "", content: str = "") -> bool:
     return True
 
 
+def notify_desktop(title: str, content: str) -> bool:
+    """发送 Windows 右下角 Toast；非 Windows 环境直接跳过。"""
+    if os.name != "nt":
+        return False
+    script = r'''
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null
+[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] > $null
+$template = @"
+<toast><visual><binding template="ToastGeneric"><text></text><text></text></binding></visual></toast>
+"@
+$xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+$xml.LoadXml($template)
+$texts = $xml.GetElementsByTagName("text")
+$texts.Item(0).AppendChild($xml.CreateTextNode($env:AUTOSCRIPTOR_TOAST_TITLE)) > $null
+$texts.Item(1).AppendChild($xml.CreateTextNode($env:AUTOSCRIPTOR_TOAST_CONTENT)) > $null
+$toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("AutoScriptor").Show($toast)
+'''
+    env = os.environ.copy()
+    env["AUTOSCRIPTOR_TOAST_TITLE"] = title
+    env["AUTOSCRIPTOR_TOAST_CONTENT"] = content
+    try:
+        subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).check_returncode()
+    except Exception as e:
+        logger.warning("Windows 桌面通知失败: %s", e)
+        return False
+    return True
+
+
 def notify_from_config(title: str, content: str) -> bool:
     """从全局配置读取通知设置并发送"""
-    try:
-        from AutoScriptor.utils.app_config import cfg
-        if not cfg.get("notify.enabled", False):
-            return False
-        config_yaml = cfg.get("notify.config_yaml", "provider: null")
-        return handle_notify(config_yaml, title=title, content=content)
-    except Exception as e:
-        logger.debug(f"notify_from_config 失败: {e}")
+    from AutoScriptor.utils.app_config import cfg
+    if not cfg.get("notify.enabled", False):
         return False
+    config_yaml = cfg.get("notify.config_yaml", "provider: null")
+    return handle_notify(config_yaml, title=title, content=content)
+
+
+def notify_runtime_event(title: str, content: str) -> bool:
+    """同步发送本机桌面通知，并沿用用户配置的远程通知。"""
+    desktop_ok = notify_desktop(title, content)
+    config_ok = notify_from_config(title, content)
+    return desktop_ok or config_ok

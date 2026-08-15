@@ -1,6 +1,6 @@
 """琉离 — 运行态可编辑职业脚本。
 
-这个文件位于 data/battle_character/，开发环境和发行环境都会动态加载这一份。
+这个文件位于 data/battle_character/，源码运行时会动态加载这一份。
 """
 from __future__ import annotations
 

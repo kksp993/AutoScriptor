@@ -1,7 +1,6 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
+
 
 def buy(item):
     item_box = locate(T(item), timeout=10)
@@ -15,12 +14,15 @@ def buy(item):
         sleep(4)
 
 
-@register_task
+@register_task(
+    path_cn="每周任务/冰窟商店",
+    description="处理冰窟商店每周兑换。",
+)
 def task():
     switch_base("mumu")
     ensure_in("幽冥冰窟")
 
-    click(T("奖励",box=Box(37,232,84,89)))
+    click(T("奖励",box=Box(37,232,84,89)),offset=(0,-30))
     click(T("领取奖励"))
     sleep(1)
     click(B(898,18,67,66),until=lambda:ui_F(T("领取奖励")))
@@ -51,30 +53,3 @@ def task():
 
     sleep(1)
     click(B(1200,30,30,30))
-
-if __name__ == "__main__":
-    try:
-        task()
-        # swipe(B(640,600),B(640,300),duration_s=1)
-        # swipe(B(640,600),B(640,300),duration_s=1)
-        # swipe(B(640,600),B(640,300),duration_s=1)
-        # swipe(B(640,600),B(640,300),duration_s=1)
-        # swipe(B(640,300),B(640,600),duration_s=1)
-        # swipe(B(640,300),B(640,600),duration_s=1)
-        # swipe(B(640,300),B(640,600),duration_s=1)
-        # swipe(B(640,300),B(640,600),duration_s=1)
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)
-
-
-
-
-
-
-
-
-
-

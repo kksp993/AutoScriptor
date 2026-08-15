@@ -1,9 +1,13 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
 
-@register_task
+@register_task(
+    path_cn="每日任务/村庄/宠物培养",
+    description="执行宠物培养相关日常操作。",
+    task_doc="【弃用】该任务保留旧宠物培养流程。",
+    deprecated=True,
+)
 def upgrade_pet():
     ensure_in(["村庄","仙盟","极北村庄"])
     logger.info("====喂养宠物====")
@@ -34,12 +38,3 @@ def upgrade_pet():
     click(T("微型宠物经验药水"))
     click(B(1220,30,30,30))
     click(I("菜单"), delay=0.5)
-
-if __name__ == "__main__":
-    try:
-        upgrade_pet()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

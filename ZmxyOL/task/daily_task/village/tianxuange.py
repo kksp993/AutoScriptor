@@ -1,10 +1,8 @@
-import traceback
-
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import RequestHumanTakeover
-from AutoScriptor.core.api import _locate_all
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
+
 
 def reset_task():
     if extract_info(B(1053,581,213,48), lambda x: int(x.strip()[-1])==0):
@@ -15,11 +13,15 @@ def reset_task():
     sleep(2)
     return True
 
-@register_task
+
+@register_task(
+    path_cn="每日任务/村庄/天选阁",
+    description="处理天选阁每日领取或挑战。",
+    task_doc="【bug】云端模式暂不会自动操作，需要手动处理。",
+)
 def task(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):
-    print(cfg["weekday"])
     if cfg["weekday"] in [1,2,3,4]:
         logger.info(f"今日{cfg['weekday']}为周一至周四，不进行天选阁任务")
         return
@@ -62,6 +64,8 @@ def task(
                 task_idx = len(task_arr)
         else:
             task_idx += 1
+        if task_idx > 5:
+            break
         logger.info(f"准备开始第{task_idx}关")
         swipe(B(800,300,),B(200,300)) if task_idx>3 else None
         sleep(2)
@@ -71,7 +75,7 @@ def task(
             wait_for_appear(T("得分记录", box=Box(493,29,292,73).margin()))
             click(B(1028,39,38,45))
         click(T(f"第{task_idx}关"), offset=(120, 120), resize=(80, 80))
-        if task_idx==5 and ui_F(I("加载中"),2):
+        if task_idx>5:
             if not reset_task(): break
             not_finish = False
             continue
@@ -79,7 +83,7 @@ def task(
         with bg.scope("天选阁") as scope:
             scope.add(
                 name="战斗结束",
-                identifier=(T("胜利", box=Box(568,30,161,85).margin()),T("确定"),T("联赛排行"),T("回家")),
+                identifier=(T("胜利", box=Box(568,30,161,85).margin()),T("确定", box=Box(571,509,135,66).margin()),T("联赛排行"),T("回家")),
                 callback=lambda : [
                     logger.info("战斗结束"),
                     bg.set_signal("try_exit", True),
@@ -99,15 +103,3 @@ def task(
     wait_for_appear(T("天选阁"))
     sleep(0.5)
     click(B(1200,30,30,30))
-
-
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)
-

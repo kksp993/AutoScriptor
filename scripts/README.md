@@ -1,21 +1,25 @@
 # scripts 目录约定
 
-这个目录只放项目日常入口和自动化流水线会直接调用的脚本，避免把一次性调试脚本长期留在这里。
+本目录只保留当前源码主线需要的脚本。一次性实验脚本不要长期放在这里。
 
-## 根目录保留
+## 核心入口
 
-- `launcher*.bat` / `launcher.ps1`: 用户和开发者启动入口。
-- `bootstrap-python310.ps1` / `npm-postinstall.js`: 安装和启动器依赖准备。
-- `build_release.py` / `verify_packaging_prereqs.py`: 发行构建与构建前自检。
-- `collect_zmxy_redeem_2026.py`: WebUI 资讯页使用的 4399 官方兑换码采集器。
-- `release_autoscriptor_locks.ps1`: 解除运行中进程/文件锁的维护工具，由仓库根目录 `release_locks.bat` 调用。
+| 脚本 | 作用 |
+| --- | --- |
+| `install.ps1` / `install.bat` | 安装依赖。默认 `all`，也支持 `tools`、`python`、`electron` |
+| `run.ps1` / `run.bat` | 运行源码。支持 `webui` 和 `electron` |
+| `update.ps1` / `update.bat` | `fetch origin main`，并把当前检出分支快进到 `origin/main` |
 
-## 子目录
+## 辅助脚本
 
-- `release/`: 发布辅助脚本，例如增量包、二进制补丁、manifest 签名。
+- `launcher.ps1` / `launcher.bat`：兼容旧入口，只转发到运行脚本。
+- `bootstrap-python310.ps1`：通过 uv 确保 Python 3.10.15 可用于 `.venv`。
+- `collect_zmxy_redeem_2026.py`：4399 官方公告礼包码增量采集器，默认写入 `logs/zmxy_redeem_codes.json`。
+- `run_safety_education.ps1` / `run_safety_education.bat`：手动运行历史安全教育脚本；只初始化 AutoScriptor 核心和模拟器控制，不启动 WebUI/Electron。
 
-## 不应放在这里
+## 边界
 
-- 临时 Playwright 探针、网页调试、截图实验脚本。需要保留时应转成测试或放入专门文档示例。
-- `__pycache__`、截图、日志、临时输出文件。
-- 仅用于人工排查的一次性脚本。问题解决后应删除，或沉淀为可重复运行的测试。
+- 安装脚本负责依赖，不启动应用。
+- 运行脚本负责启动，不安装依赖。
+- 更新脚本负责 Git 快进，不 stash/reset、不安装依赖、不启动应用。
+- 发布器、安装器、CLI 菜单、Nuitka、Canvas、Socket.IO、打包验收脚本不属于当前主线。

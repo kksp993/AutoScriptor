@@ -30,6 +30,10 @@
       if (!state.configData.game) state.configData.game = {};
       state.configData.game.character_name = state.characterName.value;
     }
+    if (payload.game && typeof payload.game === 'object') {
+      if (!state.configData.game) state.configData.game = {};
+      Object.assign(state.configData.game, payload.game);
+    }
     const characters = payload.characters || payload.characters_summary;
     if (characters) {
       replaceReactiveObject(state.charactersTree, characters);
@@ -61,6 +65,7 @@
       assignObject(state.schedulerStatus, payload.scheduler);
     }
     if (payload.runtime) {
+      if (state.runtimeStatus) assignObject(state.runtimeStatus, payload.runtime);
       state.directRunRunning.value = !!payload.runtime.direct_running;
       if (payload.runtime.scheduler) assignObject(state.schedulerStatus, payload.runtime.scheduler);
     }

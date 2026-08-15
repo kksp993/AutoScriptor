@@ -1,7 +1,7 @@
 """
 RuntimeContext: 运行时对象的集中生命周期管理
 =============================================
-管理 mixctrl / mumu / bg / vlm_client 的初始化、刷新、关闭，
+管理 mixctrl / mumu / bg 的初始化、刷新、关闭，
 替代 scheduler.py 中对全局变量的散乱修补。
 
 用法::
@@ -41,7 +41,6 @@ class RuntimeContext:
         self.mixctrl: MixControl | None = None
         self.mumu: Mumu | None = None
         self.bg = None
-        self.vlm_client = None
         self._initialized = False
         self._refresh_lock = threading.RLock()
 
@@ -74,20 +73,6 @@ class RuntimeContext:
         from AutoScriptor.core.background import bg
         self.bg = bg
         logger.debug("RuntimeContext: bg 已绑定")
-
-    def init_vlm(self):
-        """Lazily create a VLM client if llm.use_agent is enabled."""
-        if self.vlm_client is not None:
-            return
-        from AutoScriptor.utils.app_config import cfg
-        if not cfg.get("llm.use_agent", False):
-            return
-        try:
-            from AutoScriptor.vlm.vlm import VLMClient
-            self.vlm_client = VLMClient()
-            logger.info("RuntimeContext: VLM client 初始化完成")
-        except Exception as e:
-            logger.warning("RuntimeContext: VLM client 初始化失败: %s", e)
 
     # ── 设备会话 ──
 
@@ -139,7 +124,6 @@ class RuntimeContext:
         self._release_nemu_ipc()
         self.mixctrl = None
         self.mumu = None
-        self.vlm_client = None
         self._initialized = False
         self._sync_globals()
         logger.info("RuntimeContext 已关闭")
@@ -214,7 +198,6 @@ class RuntimeContext:
             "has_mixctrl": self.mixctrl is not None,
             "has_mumu": self.mumu is not None,
             "has_bg": self.bg is not None,
-            "has_vlm": self.vlm_client is not None,
         }
 
 

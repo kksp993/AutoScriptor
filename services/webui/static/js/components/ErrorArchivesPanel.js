@@ -19,6 +19,7 @@ const ErrorArchivesPanel = {
       previewTitle: '',
       importLoading: false,
       fileInputKey: 0,
+      videoCollapsed: false,
     };
   },
   computed: {
@@ -86,6 +87,7 @@ const ErrorArchivesPanel = {
     async selectArchive(folder) {
       this.activeFolder = folder;
       this.detail = null;
+      this.videoCollapsed = false;
       if (!folder) return;
       this.detailLoading = true;
       try {
@@ -219,6 +221,9 @@ const ErrorArchivesPanel = {
       const q = new URLSearchParams({ folder: this.activeFolder, path: relPath });
       return `/api/error-archives/file?${q.toString()}`;
     },
+    videoSrc(relPath) {
+      return this.imgSrc(relPath);
+    },
     hasSegments(detail) {
       return detail && Array.isArray(detail.segments) && detail.segments.length > 0;
     },
@@ -247,7 +252,7 @@ const ErrorArchivesPanel = {
         <div class="text-center text-slate-400 text-sm py-16">
           <i class="fa fa-inbox text-4xl mb-3 opacity-40"></i>
           <p>暂无归档。任务失败时会自动写入 <code class="text-xs bg-slate-100 px-1 rounded">logs/errors</code></p>
-          <p class="mt-2 text-xs">也可导入他人打包的 zip 预览</p>
+          <p class="mt-2 text-xs">也可导入他人导出的 zip 预览</p>
         </div>
       </template>
       <template v-else>
@@ -293,6 +298,25 @@ const ErrorArchivesPanel = {
         <p v-else class="text-base leading-relaxed font-medium tracking-wide text-slate-900">{{ (detail && detail.summary) || '—' }}</p>
       </div>
       <div class="flex-1 flex flex-col min-h-0 p-4">
+        <div v-if="detail && detail.videos && detail.videos.length" class="mb-3 rounded-xl border border-emerald-200/60 bg-[#f1faf5] p-3 shrink-0">
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <div class="text-sm font-semibold text-slate-900">
+              <i class="fa fa-video-camera mr-1.5 text-primary"></i>任务录屏
+              <span class="ml-1 text-xs font-normal text-slate-500">{{ detail.videos.length }} 个</span>
+            </div>
+            <button type="button" class="text-xs text-primary hover:text-primary/80" :aria-expanded="String(!videoCollapsed)" @click="videoCollapsed = !videoCollapsed">
+              <i class="fa mr-1" :class="videoCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'"></i>{{ videoCollapsed ? '展开' : '折叠' }}
+            </button>
+          </div>
+          <transition name="expand">
+            <div v-if="!videoCollapsed" class="space-y-2">
+              <div v-for="video in detail.videos" :key="video" class="space-y-1">
+                <div class="text-xs text-slate-500 font-mono">{{ video }}</div>
+                <video :src="videoSrc(video)" class="w-full max-h-[360px] rounded bg-black" controls preload="metadata"></video>
+              </div>
+            </div>
+          </transition>
+        </div>
         <div class="flex items-center justify-between mb-2 shrink-0">
           <h3 class="text-sm font-semibold text-slate-900">
             <i class="fa fa-file-text-o mr-1.5 text-primary"></i>日志与截图（富文本）

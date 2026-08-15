@@ -13,6 +13,9 @@ import json
 import time
 import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -73,6 +76,53 @@ class TestCfgNodeShape(unittest.TestCase):
         self.assertIn("next_exec_time", node)
         self.assertIn("params", node)
 
+
+    def test_builtin_path_cn_defines_cfg_and_registry_path(self):
+        import ZmxyOL.task.task_register as task_register_mod
+
+        old_counter = task_register_mod.registration_counter
+        try:
+            def fn(level=1):
+                pass
+
+            fake_file = os.path.join(
+                os.path.dirname(__file__), "..", "..", "ZmxyOL", "task", "daily_task", "village", "no_translation_task.py"
+            )
+            with patch("inspect.getfile", return_value=fake_file):
+                task_register_mod.register_task(
+                    fn,
+                    path_cn="每日任务/村庄/无映射任务",
+                    description="无映射任务",
+                )
+
+            self.assertIn("无映射任务", cfg._config["tasks"]["每日任务"]["村庄"])
+            self.assertTrue(task_registry.has_task("每日任务/村庄/无映射任务"))
+            self.assertNotIn("no_translation_task", cfg._config["tasks"]["每日任务"]["村庄"])
+        finally:
+            task_register_mod.registration_counter = old_counter
+
+
+    def test_deprecated_register_is_not_visible_or_written_to_cfg(self):
+        import ZmxyOL.task.task_register as task_register_mod
+
+        old_counter = task_register_mod.registration_counter
+        cfg._config["tasks"] = {"每日任务": {"村庄": {"仙盟建设": {"on": True, "next_exec_time": 1}}}}
+        try:
+            def fn():
+                pass
+
+            fake_file = os.path.join(
+                os.path.dirname(__file__), "..", "..", "ZmxyOL", "task", "daily_task", "village", "alliance_build.py"
+            )
+            with patch("inspect.getfile", return_value=fake_file):
+                task_register_mod.register_task(fn, path_cn="每日任务/村庄/仙盟建设", deprecated=True, description="旧任务")
+
+            self.assertNotIn("每日任务", cfg._config["tasks"])
+            self.assertFalse(task_registry.has_task("每日任务/村庄/仙盟建设"))
+            self.assertTrue(task_registry.get_deprecated("每日任务/村庄/仙盟建设"))
+        finally:
+            task_register_mod.registration_counter = old_counter
+
     def test_registry_has_fn(self):
         fn = lambda: "work"
         self._simulate_register(["cat", "task"], fn, order=7)
@@ -91,15 +141,67 @@ class TestCfgSaveClean(unittest.TestCase):
         self._cfg_backup = copy.deepcopy(cfg._config)
         self._reg_backup = dict(task_registry._tasks)
         self._orig_path = cfg.CONFIG_PATH
+        self._orig_accounts_dir = cfg.ACCOUNTS_DIR
+        self._orig_mgr_config_path = cfg._mgr.config_path
+        self._orig_mgr_default_accounts_dir = cfg._mgr.default_accounts_dir
+        self._orig_mgr_global_cfg = copy.deepcopy(cfg._mgr.global_cfg)
+        self._orig_mgr_current_acc = cfg._mgr.current_acc
         self._tmp = tempfile.mkdtemp(prefix="test_cfg_save_")
         cfg.CONFIG_PATH = os.path.join(self._tmp, "config.json")
+        cfg.ACCOUNTS_DIR = os.path.join(self._tmp, "accounts")
+        os.makedirs(cfg.ACCOUNTS_DIR, exist_ok=True)
+
+        from AutoScriptor.utils.app_config import Account
+
+        cfg._mgr.config_path = Path(cfg.CONFIG_PATH)
+        cfg._mgr.default_accounts_dir = Path(cfg.ACCOUNTS_DIR)
+        cfg._mgr.global_cfg = {
+            "app": {},
+            "ocr": {},
+            "emulator": {},
+            "scheduler": {},
+            "deploy": {},
+            "notify": {},
+            "update": {},
+            "remote_access": {},
+            "accounts": {"dir": cfg.ACCOUNTS_DIR},
+            "current_account": "test",
+        }
+        cfg._mgr.current_acc = Account(
+            "test",
+            {
+                "encryption": {},
+                "active_character": {"server": "s1", "name": "c1"},
+                "characters": {
+                    "s1": {
+                        "c1": {
+                            "tasks": {},
+                            "status": {},
+                            "game_profession": "悟空",
+                        }
+                    }
+                },
+            },
+        )
+        cfg._refresh_flat_config()
 
     def tearDown(self):
         cfg._config = self._cfg_backup
         task_registry._tasks = self._reg_backup
         cfg.CONFIG_PATH = self._orig_path
+        cfg.ACCOUNTS_DIR = self._orig_accounts_dir
+        cfg._mgr.config_path = self._orig_mgr_config_path
+        cfg._mgr.default_accounts_dir = self._orig_mgr_default_accounts_dir
+        cfg._mgr.global_cfg = self._orig_mgr_global_cfg
+        cfg._mgr.current_acc = self._orig_mgr_current_acc
         import shutil
         shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _saved_active_character_tasks(self):
+        account_path = os.path.join(cfg.ACCOUNTS_DIR, "test.json")
+        with open(account_path, "r", encoding="utf-8") as f:
+            saved = json.load(f)
+        return saved["characters"]["s1"]["c1"]["tasks"]
 
     def test_saved_json_has_no_fn_or_order(self):
         cfg._config["tasks"] = {
@@ -108,9 +210,7 @@ class TestCfgSaveClean(unittest.TestCase):
             }
         }
         cfg.save_config()
-        with open(cfg.CONFIG_PATH, "r", encoding="utf-8") as f:
-            saved = json.load(f)
-        node = saved["tasks"]["测试"]["子任务"]
+        node = self._saved_active_character_tasks()["测试"]["子任务"]
         self.assertNotIn("fn", node)
         self.assertNotIn("order", node)
 
@@ -126,9 +226,7 @@ class TestCfgSaveClean(unittest.TestCase):
             }
         }
         cfg.save_config()
-        with open(cfg.CONFIG_PATH, "r", encoding="utf-8") as f:
-            saved = json.load(f)
-        node = saved["tasks"]["测试"]["子任务"]
+        node = self._saved_active_character_tasks()["测试"]["子任务"]
         self.assertFalse(node["on"])
         self.assertEqual(node["next_exec_time"], 12345.0)
         self.assertEqual(node["params"]["speed"], 3)
@@ -259,23 +357,43 @@ class TestSchedulerCollectDue(unittest.TestCase):
         due = sched._collect_due(tree, "", time.time())
         self.assertEqual(due, [])
 
-    def test_human_takeover_task_not_collected(self):
+    def test_human_takeover_task_not_collected_before_next_exec_time(self):
         from services.core.scheduler import Scheduler
         sched = Scheduler()
 
         task_registry.register("cat/human", lambda: None, order=1)
+        now = time.time()
         tree = {
             "cat": {
                 "human": {
                     "on": True,
-                    "next_exec_time": 0,
+                    "next_exec_time": now + 99999,
                     "human_takeover_error": "需要人工确认",
                 }
             }
         }
 
-        due = sched._collect_due(tree, "", time.time())
+        due = sched._collect_due(tree, "", now)
         self.assertEqual(due, [])
+
+    def test_human_takeover_task_collected_after_next_exec_time(self):
+        from services.core.scheduler import Scheduler
+        sched = Scheduler()
+
+        task_registry.register("cat/human", lambda: None, order=1)
+        now = time.time()
+        tree = {
+            "cat": {
+                "human": {
+                    "on": True,
+                    "next_exec_time": now - 1,
+                    "human_takeover_error": "需要人工确认",
+                }
+            }
+        }
+
+        due = sched._collect_due(tree, "", now)
+        self.assertEqual(due, ["cat/human"])
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +425,26 @@ class TestTaskManagerPrepare(unittest.TestCase):
         got_fn, got_kwargs = tm._prepare_task("测试/任务")
         self.assertIs(got_fn, fn)
 
+    def test_prepare_applies_one_time_param_override(self):
+        from services.core.task_manager import TaskManager
+
+        def fn(redeem_code="1111"):
+            return redeem_code
+
+        cfg._config["tasks"] = {
+            "测试": {"任务": {"on": True, "next_exec_time": 0, "params": {"redeem_code": "1111"}}}
+        }
+        task_registry.register("测试/任务", fn, order=1)
+
+        tm = TaskManager()
+        _got_fn, got_kwargs = tm._prepare_task(
+            "测试/任务",
+            param_override={"redeem_code": "临时代码"},
+        )
+
+        self.assertEqual(got_kwargs, {"redeem_code": "临时代码"})
+        self.assertEqual(cfg._config["tasks"]["测试"]["任务"]["params"]["redeem_code"], "1111")
+
     def test_prepare_raises_if_not_registered(self):
         from services.core.task_manager import TaskManager
 
@@ -329,6 +467,59 @@ class TestTaskManagerPrepare(unittest.TestCase):
 
         tm = TaskManager()
         self.assertFalse(tm._try_recover_app(0, task="测试/调试任务"))
+
+
+class TestTaskStatusProgress(unittest.TestCase):
+    def setUp(self):
+        self._cfg_backup = copy.deepcopy(cfg._config)
+        self._reg_backup = dict(task_registry._tasks)
+        task_registry.clear()
+        cfg._config = {
+            "app": {"max_retry": 0, "restart_on_error": False, "app_to_start": "com.test"},
+            "emulator": {},
+            "tasks": {"测试": {"进度任务": {"on": True, "next_exec_time": 0, "params": {}}}},
+            "status": {},
+        }
+
+    def tearDown(self):
+        cfg._config = self._cfg_backup
+        task_registry._tasks = self._reg_backup
+
+    def test_task_status_api_uses_current_task_path(self):
+        from AutoScriptor.utils.task_state import (
+            clear_task_status,
+            get_task_status,
+            set_current_task_path,
+            set_task_status,
+        )
+
+        set_current_task_path("测试/进度任务")
+        try:
+            set_task_status("progress", "5/6", save=False)
+            self.assertEqual(get_task_status("progress"), "5/6")
+            clear_task_status("progress", save=False)
+            self.assertIsNone(get_task_status("progress"))
+        finally:
+            set_current_task_path(None)
+
+    def test_normal_return_with_incomplete_progress_marks_human_takeover_after_retry_exhausted(self):
+        from AutoScriptor import set_task_status
+        from services.core import task_manager as tm_mod
+        from services.core.task_manager import TaskManager
+
+        def partial_done():
+            set_task_status("progress", "5/6", save=False)
+
+        task_registry.register("测试/进度任务", partial_done, order=1)
+        tm = TaskManager()
+        mixctrl = SimpleNamespace(release_all_keys=lambda: None)
+
+        with patch.object(tm_mod.runtime_ctx, "mixctrl", mixctrl):
+            with patch.object(tm_mod.cfg, "save_config", lambda *args, **kwargs: None):
+                self.assertFalse(tm._execute_single_task("测试/进度任务"))
+
+        node = cfg._config["tasks"]["测试"]["进度任务"]
+        self.assertIn("5/6", node.get("human_takeover_error", ""))
 
 
 if __name__ == "__main__":

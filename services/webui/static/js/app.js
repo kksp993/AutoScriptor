@@ -1,16 +1,32 @@
 const { createApp, ref, reactive, computed, nextTick, watch } = Vue;
 
-/** 临时关闭「脚本画布」侧边入口与主区面板；改为 true 可恢复 */
-const FEATURE_SCRIPT_CANVAS = false;
-
 const app = createApp({
-  components: { AppSidebar, NewsPanel, OverviewPanel, SchedulerPanel, TaskPanel, SettingsPanel, EditorPanel, DiagnosticsPanel, CanvasPanel, ErrorArchivesPanel, UpdatePanel, AboutPanel },
+  components: { AppSidebar, NewsPanel, OverviewPanel, SchedulerPanel, TaskPanel, SettingsPanel, EditorPanel, DiagnosticsPanel, ErrorArchivesPanel, UpdatePanel, AboutPanel },
   setup() {
     const configData = reactive({});
     const activeTab = ref('news');
+    const newsRefreshKey = ref(0);
     const logs = ref([]);
     const characterName = ref('');
     const schedulerStatus = reactive({ state: 'pending', label: '待运行', color: 'green', consecutive_errors: 0 });
+    const taskOrderingSaving = ref(false);
+    let taskPersistenceOperationTail = Promise.resolve();
+    let pendingTaskOrderingOperations = 0;
+
+    function queueTaskPersistenceOperation(operation) {
+      const queuedOperation = taskPersistenceOperationTail.then(() => operation());
+      taskPersistenceOperationTail = queuedOperation.catch(() => undefined);
+      return queuedOperation;
+    }
+
+    async function waitForTaskPersistenceOperations() {
+      let observedOperationTail;
+      do {
+        observedOperationTail = taskPersistenceOperationTail;
+        await observedOperationTail;
+      } while (observedOperationTail !== taskPersistenceOperationTail);
+    }
+
     const overviewData = reactive({
       scheduler: { state: 'pending', label: '待运行', color: 'green', consecutive_errors: 0, next_execution: null },
       stats: { total: 0, enabled: 0, pending: 0, scheduled: 0, disabled: 0 },
@@ -19,7 +35,7 @@ const app = createApp({
       /** 全账号最早一次计划执行时间（与各角色 next_execution 一致口径） */
       overall_next_execution: null,
       upcoming: [],
-      runtime: { initialized: false, has_mixctrl: false, has_mumu: false, has_bg: false, has_vlm: false },
+      runtime: { initialized: false, has_mixctrl: false, has_mumu: false, has_bg: false },
     });
 
     /** 错误汇总「前往标注」等：切换到编辑器后由 EditorPanel 消费并清空 */
@@ -29,6 +45,8 @@ const app = createApp({
     const editTaskData = ref({});
     const editTaskPath = ref('');
     const editTaskKey = ref('');
+    const editModalSaveOnClose = ref(false);
+    const overviewEditContext = ref(null);
     const activeGroupPath = ref('');
     const paramEnumOptions = reactive({});
     const PARAM_KEY_LABELS = {
@@ -38,7 +56,6 @@ const app = createApp({
       battle_times: '战斗轮数',
       speed_x: '战斗加速',
       has_cd: '关卡有CD',
-      battle_weight: '战斗配比',
       difficulty: '难度选择',
       diff: '难度',
       preference: '关卡偏好',
@@ -62,6 +79,7 @@ const app = createApp({
       ZhangWang: '獐王星宫',
       AnShen: '犴神星宫',
       TuShen: '兔神星宫',
+      ZhuWang: '猪王星宫',
       cancel_on_failed: '不用点券复活',
       claim_past: '是否解锁过去',
     };
@@ -103,6 +121,8 @@ const app = createApp({
           return;
         }
         applyRuntimeSnapshotPayload(payload);
+        await refreshConfig(true);
+        await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
         ElementPlus.ElMessage.success('职业已保存');
       } catch (e) {
         ElementPlus.ElMessage.error('保存职业失败: ' + e);
@@ -117,9 +137,13 @@ const app = createApp({
     /** 后台 /api/run 直接执行线程是否存活（单任务、队列逐步执行） */
     const directRunRunning = ref(false);
 
+    /** 后端 RuntimeController 的统一 busy 投影，包含 direct_run / scheduler / editor。 */
+    const runtimeStatus = reactive({ running: false, busy: false, stopping: false, reason: null, external: {} });
+
     /** 总调度 / 调度模式 / 单任务互斥：任一路径占用即禁止其它入口 */
     const executionBusy = computed(() => {
       if (directRunRunning.value) return true;
+      if (runtimeStatus.busy === true || runtimeStatus.running === true) return true;
       return schedulerStatus.state === 'running' || schedulerStatus.busy === true || schedulerStatus.executing === true;
     });
 
@@ -135,15 +159,23 @@ const app = createApp({
       overviewSecurityUnlocked.value = true;
     }
     async function clearOverviewSecurityUnlocked() {
-      overviewSecurityUnlocked.value = false;
       try {
-        await fetch('/api/credential/revoke', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ _timestamp: Date.now() / 1000 }),
-        });
-      } catch (e) { /* ignore */ }
+        const result = await API.request('POST', '/credential/revoke', {});
+        if (!result.ok) {
+          if (result.status === 409) {
+            showApiError(result.data, '执行中不能重新验证，请先终止当前任务', 'warning');
+            await refreshRuntimePanels();
+            return;
+          }
+          showApiError(result.data, '重新验证失败');
+          await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
+          return;
+        }
+        overviewSecurityUnlocked.value = false;
+      } catch (e) {
+        ElementPlus.ElMessage.error('重新验证失败: ' + e);
+        await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
+      }
     }
 
     // ── 主题（固定浅色） ──
@@ -162,32 +194,36 @@ const app = createApp({
       return clone;
     });
 
-    /** 用于拼接任务路径前缀；一般任务页内同时含「一般任务」「活动任务」两棵顶层树，前缀由树路径自带，故 general 为空。 */
+    /** 统一任务页使用完整任务树，路径从一级分类开始，不再由 tab 补前缀。 */
     const activeTabLabel = computed(() => {
-      return { daily: '每日任务', weekly: '每周任务', general: '', custom: '自定义任务' }[activeTab.value] || '';
+      return '';
     });
 
     const pageTitle = computed(() => {
       const map = {
-        news: '资讯', overview: '总览', scheduler: '调度', editor: '编辑器', canvas: '脚本画布',
+        news: '资讯', overview: '总览', scheduler: '调度', editor: '编辑器',
         errorArchives: '错误汇总', updater: '检查更新', settings: '设置', about: '关于',
-        daily: '每日任务', weekly: '每周任务', general: '一般任务', custom: '自定义任务',
+        tasks: '1. 任务列表',
       };
       return map[activeTab.value] || '';
     });
 
     const currentTasks = computed(() => {
       const t = configData.tasks || {};
-      if (activeTab.value === 'daily') return t['每日任务'] || {};
-      if (activeTab.value === 'weekly') return t['每周任务'] || {};
-      if (activeTab.value === 'general') {
-        return {
-          一般任务: t['一般任务'] || {},
-          活动任务: t['活动任务'] || t['event_task'] || {},
-        };
-      }
-      if (activeTab.value === 'custom') return t['自定义任务'] || {};
+      if (activeTab.value === 'tasks') return t;
       return {};
+    });
+
+    const taskOrderingProjection = computed(() => {
+      return configData.task_ordering_projection || {
+        schema_version: 1,
+        overlay: configData.task_ordering || { schema_version: 1, user_order: [], items: [] },
+        task_paths: [],
+        effective_order: [],
+        order_map: {},
+        diagnostics: [],
+        stale_user_order: [],
+      };
     });
 
     /** 顶栏在「未选完整 server+name」时显示的单行名（来自配置） */
@@ -232,6 +268,7 @@ const app = createApp({
       overviewData,
       schedulerStatus,
       directRunRunning,
+      runtimeStatus,
       overviewSecurityUnlocked,
     };
 
@@ -249,9 +286,40 @@ const app = createApp({
 
     function applyPublicConfigPayload(data) {
       if (!data || data.error) return false;
+      const incomingConfigVersion = Number(data.config_version || 0);
+      const currentConfigVersion = Number(configData.config_version || 0);
+      if (incomingConfigVersion && currentConfigVersion && incomingConfigVersion < currentConfigVersion) {
+        console.warn('Ignored stale public config payload', { incomingConfigVersion, currentConfigVersion });
+        return true;
+      }
       Object.keys(configData).forEach(k => delete configData[k]);
       Object.assign(configData, data);
       return applyRuntimeSnapshotPayload(data);
+    }
+
+    function applyTaskOrderingPayload(data) {
+      if (!data || data.error) return false;
+      const incomingConfigVersion = Number(data.config_version || 0);
+      const currentConfigVersion = Number(configData.config_version || 0);
+      if (incomingConfigVersion && currentConfigVersion && incomingConfigVersion < currentConfigVersion) {
+        console.warn('Ignored stale task ordering payload', { incomingConfigVersion, currentConfigVersion });
+        return true;
+      }
+
+      const incomingProjection = data.projection || data.task_ordering_projection;
+      if (!incomingProjection || typeof incomingProjection !== 'object') return false;
+
+      const nextProjection = _deepClone(incomingProjection);
+      configData.task_ordering_projection = nextProjection;
+      configData.task_ordering = _deepClone(nextProjection.overlay || {});
+      if (data.generations && typeof data.generations === 'object') {
+        configData.task_ordering_generations = _deepClone(data.generations);
+      }
+      if (incomingConfigVersion) configData.config_version = incomingConfigVersion;
+      if (data.runtime && typeof data.runtime === 'object') {
+        applyRuntimeSnapshotPayload({ runtime: data.runtime });
+      }
+      return true;
     }
 
     async function refreshConfig(force = false) {
@@ -265,20 +333,37 @@ const app = createApp({
       } catch (e) { console.error('Refresh failed:', e); }
     }
 
+    let _runtimeSnapshotPromise = null;
     async function fetchRuntimeSnapshot({ refreshConfigIfChanged = true } = {}) {
-      const publicVersion = Number(configData.config_version || 0);
-      try {
-        const data = await API.get('/runtime/snapshot');
-        if (!applyRuntimeSnapshotPayload(data)) return false;
-        const nextVersion = Number(data.config_version || 0);
-        if (refreshConfigIfChanged && nextVersion && nextVersion !== publicVersion) {
-          await refreshConfig(true);
+      if (_runtimeSnapshotPromise) return _runtimeSnapshotPromise;
+      _runtimeSnapshotPromise = (async () => {
+        try {
+          const data = await API.get('/runtime/snapshot');
+          if (!applyRuntimeSnapshotPayload(data)) return false;
+          await waitForTaskPersistenceOperations();
+          const nextVersion = Number(data.config_version || 0);
+          const currentConfigVersion = Number(configData.config_version || 0);
+          if (refreshConfigIfChanged && nextVersion > currentConfigVersion) {
+            await refreshConfig(true);
+          }
+          return true;
+        } catch (e) {
+          console.error('runtime snapshot failed:', e);
+          return false;
+        } finally {
+          _runtimeSnapshotPromise = null;
         }
-        return true;
-      } catch (e) {
-        console.error('runtime snapshot failed:', e);
-        return false;
-      }
+      })();
+      return _runtimeSnapshotPromise;
+    }
+
+    let _postStopRefreshTimer = null;
+    function scheduleRuntimeRefreshAfterStop() {
+      if (_postStopRefreshTimer) clearTimeout(_postStopRefreshTimer);
+      _postStopRefreshTimer = setTimeout(() => {
+        _postStopRefreshTimer = null;
+        fetchRuntimeSnapshot({ refreshConfigIfChanged: true });
+      }, 300);
     }
 
     async function reloadTasks() {
@@ -418,6 +503,22 @@ const app = createApp({
       return activeTab.value === 'overview' || activeTab.value === 'scheduler';
     }
 
+    function refreshNewsImmediately() {
+      newsRefreshKey.value += 1;
+    }
+
+    function normalizeNavigationTab(tab) {
+      const legacyTaskTabs = new Set(['daily', 'weekly', 'general', 'custom']);
+      if (legacyTaskTabs.has(tab)) return 'tasks';
+      return tab || 'news';
+    }
+
+    function navigateTo(tab) {
+      const nextTab = normalizeNavigationTab(tab);
+      if (nextTab === 'news') refreshNewsImmediately();
+      activeTab.value = nextTab;
+    }
+
     function ensureRunReady(message = '当前仍有任务在运行或停止中，请先终止或稍候再试') {
       if (!overviewSecurityUnlocked.value) {
         ElementPlus.ElMessage.warning('请先验证安全密码后再执行任务');
@@ -480,6 +581,22 @@ const app = createApp({
       } catch (e) { ElementPlus.ElMessage.error('执行失败: ' + e); }
     }
 
+    async function runTaskRange(taskPaths) {
+      if (!ensureRunReady('已有任务正在执行，请先终止后再从选中任务执行')) return;
+      const tasks = Array.isArray(taskPaths)
+        ? taskPaths.map((path) => String(path || '').trim()).filter(Boolean)
+        : [];
+      if (!tasks.length) {
+        ElementPlus.ElMessage.info('请先选择要开始执行的任务');
+        return;
+      }
+      try {
+        const result = await API.request('POST', '/run', { tasks, activate_scheduler: false, ...runCharacterPayload() });
+        const data = await handleRunStartResponse(result, '启动执行失败');
+        if (data) ElementPlus.ElMessage.success(`已从选中任务开始执行，共 ${tasks.length} 个任务`);
+      } catch (e) { ElementPlus.ElMessage.error('执行失败: ' + e); }
+    }
+
     async function runSingleTask(taskPath) {
       if (!ensureRunReady('已有任务正在执行，请先终止后再跑单任务')) return;
       const fullPath = (activeTabLabel.value ? activeTabLabel.value + '/' : '') + taskPath;
@@ -493,15 +610,15 @@ const app = createApp({
     async function unifiedStop() {
       try {
         const { ok, data } = await API.request('POST', '/stop', {});
-        if (!ok) showApiError(data, '终止失败');
+        if (!ok) {
+          showApiError(data, '终止失败');
+        } else if (data && data.runtime) {
+          applyRuntimeSnapshotPayload({ runtime: data.runtime, scheduler: data.runtime.scheduler });
+        }
       } catch (e) {
         console.error('Stop error:', e);
       }
-      await refreshRuntimePanels();
-    }
-
-    function stopRun() {
-      unifiedStop();
+      scheduleRuntimeRefreshAfterStop();
     }
 
     async function verifyAccount(securityKeyDirect) {
@@ -536,6 +653,7 @@ const app = createApp({
         }
         Object.assign(schedulerStatus, data);
         Object.assign(overviewData.scheduler, data);
+        await fetchRuntimeSnapshot({ refreshConfigIfChanged: true });
         ElementPlus.ElMessage.success('调度器已恢复');
       } catch (e) { ElementPlus.ElMessage.error('恢复失败: ' + e); }
     }
@@ -571,7 +689,7 @@ const app = createApp({
       cloned.params = next;
     }
 
-    function openEditModal(key, data, path) {
+    function openEditModal(key, data, path, options = {}) {
       const cloned = JSON.parse(JSON.stringify(data));
       if (cloned.params && typeof cloned.params === 'object') {
         delete cloned.params.profession;
@@ -589,6 +707,8 @@ const app = createApp({
       editTaskData.value = cloned;
       editTaskPath.value = path || key;
       editTaskKey.value = key;
+      editModalSaveOnClose.value = !!options.saveOnClose;
+      overviewEditContext.value = options.overviewContext || null;
       Object.keys(paramEnumOptions).forEach(k => delete paramEnumOptions[k]);
       Object.keys(tableRowsCache).forEach(k => delete tableRowsCache[k]);
       const paths = Object.values(meta).map(_enumMetaPath).filter(Boolean);
@@ -600,24 +720,270 @@ const app = createApp({
         }
       }
       const uniquePaths = [...new Set(paths)];
+      const openDialog = () => { _initTableRowsCache(meta); editModalVisible.value = true; };
       if (uniquePaths.length) {
-        API.post('/enum-options', { paths: uniquePaths, task_path: editTaskPath.value || '' }).then(map => {
+        API.request('POST', '/enum-options', { paths: uniquePaths, task_path: editTaskPath.value || '' }).then(({ ok, data: map }) => {
+          if (!ok) {
+            showApiError(map, '加载参数选项失败');
+            return;
+          }
+          const requireOptions = (enumPath) => {
+            const optionsList = map && map[enumPath];
+            if (!Array.isArray(optionsList)) throw new Error(`枚举选项缺失: ${enumPath}`);
+            return optionsList;
+          };
           Object.entries(meta).forEach(([pk, ep]) => {
             if (ep && typeof ep === 'object' && ep.type === 'table' && ep.columns) {
               for (const [col, colMeta] of Object.entries(ep.columns)) {
-                if (colMeta.enum && map[colMeta.enum]) {
-                  paramEnumOptions[pk + '.' + col] = map[colMeta.enum];
+                if (colMeta.enum) {
+                  paramEnumOptions[pk + '.' + col] = requireOptions(colMeta.enum);
                 }
               }
             } else {
               const p = _enumMetaPath(ep);
-              if (p) paramEnumOptions[pk] = map[p] || [];
+              if (p) paramEnumOptions[pk] = requireOptions(p);
             }
           });
-          _initTableRowsCache(meta);
-          editModalVisible.value = true;
-        }).catch(() => { _initTableRowsCache(meta); editModalVisible.value = true; });
-      } else { _initTableRowsCache(meta); editModalVisible.value = true; }
+          openDialog();
+        }).catch((e) => {
+          const message = e && e.message ? e.message : String(e || '');
+          ElementPlus.ElMessage.error(message ? `加载参数选项失败: ${message}` : '加载参数选项失败');
+        });
+      } else { openDialog(); }
+    }
+
+    async function openOverviewTaskEditor({ server, name, task }) {
+      if (!ensureIdle('执行中不能修改任务配置，请先终止当前任务')) return;
+      const path = task && task.path;
+      if (!server || !name || !path) return;
+      const overviewOpts = {
+        saveOnClose: true,
+        overviewContext: { server, name, path, status: task.status, human_takeover_error: task.human_takeover_error },
+      };
+      const ac = activeCharacter;
+      if (ac.server === server && ac.name === name) {
+        const slot = _taskSlotByPath(configData.tasks || {}, path);
+        if (slot && slot.parent[slot.key] && typeof slot.parent[slot.key] === 'object') {
+          openEditModal(path.split('/').pop(), slot.parent[slot.key], path, overviewOpts);
+          return;
+        }
+      }
+      try {
+        const q = new URLSearchParams({ server, character: name, path });
+        const { ok, data } = await API.request('GET', `/characters/task?${q.toString()}`);
+        if (!ok || !data || !data.task) {
+          showApiError(data, '加载任务失败');
+          return;
+        }
+        openEditModal(path.split('/').pop(), data.task, path, overviewOpts);
+      } catch (e) {
+        ElementPlus.ElMessage.error('加载任务失败: ' + e);
+      }
+    }
+
+    function editTaskStatusLabel() {
+      const item = editTaskData.value || {};
+      if (!item.on) return '未启用';
+      if (item.error) return '错误';
+      if ((item.human_takeover || item.human_takeover_error) && !item._due) return '错误';
+      return item._due ? '待执行' : '已完成';
+    }
+
+    function editTaskStatusClass() {
+      const map = {
+        disabled: 'bg-gray-200 text-gray-600',
+        pending: 'bg-yellow-200 text-yellow-600',
+        scheduled: 'bg-green-200 text-green-600',
+        error: 'bg-red-200 text-red-600',
+      };
+      const item = editTaskData.value || {};
+      let key = 'scheduled';
+      if (!item.on) key = 'disabled';
+      else if (item.error || ((item.human_takeover || item.human_takeover_error) && !item._due)) key = 'error';
+      else if (item._due) key = 'pending';
+      return map[key];
+    }
+
+    function getEditTaskStatusKey() {
+      const item = editTaskData.value || {};
+      if (!item.on) return 'disabled';
+      if (item.error || ((item.human_takeover || item.human_takeover_error) && !item._due)) return 'error';
+      return item._due ? 'pending' : 'scheduled';
+    }
+
+    async function handleEditTaskStatusClick() {
+      if (executionBusy.value) {
+        ElementPlus.ElMessage.warning('执行中不能修改任务状态，请先终止当前任务');
+        return;
+      }
+      const item = editTaskData.value;
+      if (!item || typeof item !== 'object') return;
+      if (getEditTaskStatusKey() === 'error' && item.on) {
+        const detail = item.human_takeover_error ? `\n${item.human_takeover_error}` : '';
+        try {
+          await ElementPlus.ElMessageBox.confirm(
+            `关闭并重新开启此任务，将清除错误状态并设为待执行。${detail}`,
+            '重新开启任务',
+            { confirmButtonText: '重新开启', cancelButtonText: '取消', type: 'warning' },
+          );
+        } catch { return; }
+        item.on = false;
+        resetTaskActivationFields(item);
+        item.on = true;
+        return;
+      }
+      item.on = !item.on;
+      if (item.on) resetTaskActivationFields(item);
+      else item._due = false;
+    }
+
+    function _buildTaskSavePayload() {
+      const meta = editTaskData.value?.param_meta || {};
+      for (const [pk, mp] of Object.entries(meta)) {
+        if (mp && typeof mp === 'object' && mp.type === 'table') {
+          _syncTableRowsToParams(pk);
+        }
+      }
+      const payload = _deepClone(editTaskData.value);
+      _filterParamsToRegisteredKeys(payload);
+      if (payload.params && typeof payload.params === 'object') {
+        delete payload.params.profession;
+      }
+      if (payload.param_meta && typeof payload.param_meta === 'object') {
+        delete payload.param_meta.profession;
+      }
+      return payload;
+    }
+
+    async function _persistTaskPayload(payload, overviewCtx) {
+      const fullPath = _editTaskFullPath();
+      const ac = activeCharacter;
+      const isActiveChar = overviewCtx
+        && overviewCtx.server === ac.server
+        && overviewCtx.name === ac.name;
+      if (overviewCtx && !isActiveChar) {
+        const { ok, data } = await API.request('POST', '/characters/task', {
+          server: overviewCtx.server,
+          character: overviewCtx.name,
+          path: fullPath,
+          task: payload,
+        });
+        if (!ok) {
+          showApiError(data, '保存失败');
+          return false;
+        }
+        if (data && data.tasks) {
+          if (!applyPublicConfigPayload(data)) {
+            ElementPlus.ElMessage.error('保存失败: 服务端返回配置不完整');
+            return false;
+          }
+        } else {
+          await fetchRuntimeSnapshot({ refreshConfigIfChanged: true });
+        }
+        ElementPlus.ElMessage.success('任务已保存');
+        return true;
+      }
+      const tasksDraft = _deepClone(configData.tasks || {});
+      const slot = _taskSlotByPath(tasksDraft, fullPath);
+      if (!slot || !slot.parent[slot.key] || typeof slot.parent[slot.key] !== 'object') {
+        ElementPlus.ElMessage.error('保存失败: 找不到任务路径 ' + fullPath);
+        return false;
+      }
+      const previous = slot.parent[slot.key];
+      const next = { ...previous, ...payload };
+      if (next.on && !previous.on) {
+        resetTaskActivationFields(next);
+      } else if (!next.on) {
+        next._due = false;
+      }
+      slot.parent[slot.key] = next;
+      return persistTasks(tasksDraft, overviewCtx ? '任务已保存' : '任务已保存');
+    }
+
+    async function saveTask(options = {}) {
+      if (!editTaskKey.value) return false;
+      if (!ensureIdle('执行中不能修改任务配置，请先终止当前任务')) return false;
+      const payload = _buildTaskSavePayload();
+      const overviewCtx = options.overview || overviewEditContext.value;
+      try {
+        const ok = await _persistTaskPayload(payload, overviewCtx);
+        if (ok && options.closeAfter !== false && !editModalSaveOnClose.value) {
+          editModalVisible.value = false;
+        }
+        return ok;
+      } catch (e) {
+        ElementPlus.ElMessage.error('保存失败: ' + e);
+        return false;
+      }
+    }
+
+    async function saveTaskOrdering(overlay) {
+      if (!ensureIdle('执行中不能修改任务排序规则，请先终止当前任务')) return false;
+      const overlaySnapshot = _deepClone(overlay);
+      pendingTaskOrderingOperations += 1;
+      taskOrderingSaving.value = true;
+      try {
+        return await queueTaskPersistenceOperation(async () => {
+          const { ok, data } = await API.request('POST', '/task-ordering', { overlay: overlaySnapshot });
+          if (!ok) {
+            showApiError(data, '保存任务排序失败');
+            return false;
+          }
+          if (!applyTaskOrderingPayload(data)) {
+            ElementPlus.ElMessage.error('保存任务排序失败: 服务端返回排序投影不完整');
+            return false;
+          }
+          ElementPlus.ElMessage.success('任务顺序已保存');
+          return true;
+        });
+      } catch (e) {
+        ElementPlus.ElMessage.error('保存任务排序失败: ' + e);
+        return false;
+      } finally {
+        pendingTaskOrderingOperations = Math.max(0, pendingTaskOrderingOperations - 1);
+        taskOrderingSaving.value = pendingTaskOrderingOperations > 0;
+      }
+    }
+
+    function orderedTaskPathsForSoftOrder() {
+      const projection = taskOrderingProjection.value || {};
+      const effectiveOrder = Array.isArray(projection.effective_order) ? [...projection.effective_order] : [];
+      const taskPaths = Array.isArray(projection.task_paths) ? projection.task_paths : [];
+      for (const path of taskPaths) {
+        if (!effectiveOrder.includes(path)) effectiveOrder.push(path);
+      }
+      return effectiveOrder;
+    }
+
+    async function reorderTaskByDrop(payload) {
+      if (!ensureIdle('执行中不能修改任务排序，请先终止当前任务')) return false;
+      const sourcePath = String(payload?.sourcePath || '').trim();
+      const targetPath = String(payload?.targetPath || '').trim();
+      if (!sourcePath || !targetPath || sourcePath === targetPath) return false;
+      const nextUserOrder = orderedTaskPathsForSoftOrder().filter((path) => path !== sourcePath);
+      const targetIndex = nextUserOrder.indexOf(targetPath);
+      if (targetIndex < 0) {
+        ElementPlus.ElMessage.warning('目标任务不存在，无法保存排序');
+        return false;
+      }
+      nextUserOrder.splice(targetIndex, 0, sourcePath);
+      return saveTaskOrdering({
+        schema_version: 1,
+        user_order: nextUserOrder,
+        items: nextUserOrder.map((path) => ({ type: 'task', path })),
+      });
+    }
+
+    async function onEditModalClose() {
+      if (!editModalSaveOnClose.value || !editTaskKey.value) return;
+      await saveTask({ overview: overviewEditContext.value, closeAfter: false });
+      editModalSaveOnClose.value = false;
+      overviewEditContext.value = null;
+    }
+
+    function onEditModalClosed() {
+      editModalSaveOnClose.value = false;
+      overviewEditContext.value = null;
     }
 
     function _initTableRowsCache(meta) {
@@ -671,6 +1037,17 @@ const app = createApp({
       return JSON.parse(JSON.stringify(value || {}));
     }
 
+    function resetTaskActivationFields(taskItem) {
+      delete taskItem.human_takeover;
+      delete taskItem.human_takeover_error;
+      delete taskItem.human_takeover_at;
+      delete taskItem.error;
+      delete taskItem.progress;
+      delete taskItem.progress_display;
+      taskItem.next_exec_time = 0;
+      taskItem._due = true;
+    }
+
     function _editTaskFullPath() {
       const path = editTaskPath.value || editTaskKey.value || '';
       const prefix = activeTabLabel.value || '';
@@ -692,61 +1069,25 @@ const app = createApp({
     }
 
     async function persistTasks(tasks, successMessage = '任务已保存') {
-      const { ok, data } = await API.request('POST', '/tasks', { tasks });
-      if (!ok) {
-        ElementPlus.ElMessage.error('保存失败: ' + API.errorMessage(data, '未知错误'));
-        return false;
-      }
-      if (!applyPublicConfigPayload(data)) {
-        ElementPlus.ElMessage.error('保存失败: 服务端返回配置不完整');
-        return false;
-      }
-      ElementPlus.ElMessage.success(successMessage);
-      fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
-      return true;
+      const tasksSnapshot = _deepClone(tasks);
+      return queueTaskPersistenceOperation(async () => {
+        const { ok, data } = await API.request('POST', '/tasks', { tasks: tasksSnapshot });
+        if (!ok) {
+          ElementPlus.ElMessage.error('保存失败: ' + API.errorMessage(data, '未知错误'));
+          return false;
+        }
+        if (!applyPublicConfigPayload(data)) {
+          ElementPlus.ElMessage.error('保存失败: 服务端返回配置不完整');
+          return false;
+        }
+        ElementPlus.ElMessage.success(successMessage);
+        fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
+        return true;
+      });
     }
 
-    async function saveTask() {
-      if (!editTaskKey.value) return;
-      if (!ensureIdle('执行中不能修改任务配置，请先终止当前任务')) return;
-      const meta = editTaskData.value?.param_meta || {};
-      for (const [pk, mp] of Object.entries(meta)) {
-        if (mp && typeof mp === 'object' && mp.type === 'table') {
-          _syncTableRowsToParams(pk);
-        }
-      }
-      const payload = _deepClone(editTaskData.value);
-      _filterParamsToRegisteredKeys(payload);
-      if (payload.params && typeof payload.params === 'object') {
-        delete payload.params.profession;
-      }
-      if (payload.param_meta && typeof payload.param_meta === 'object') {
-        delete payload.param_meta.profession;
-      }
-      const tasksDraft = _deepClone(configData.tasks || {});
-      const slot = _taskSlotByPath(tasksDraft, _editTaskFullPath());
-      if (!slot || !slot.parent[slot.key] || typeof slot.parent[slot.key] !== 'object') {
-        ElementPlus.ElMessage.error('保存失败: 找不到任务路径 ' + _editTaskFullPath());
-        return;
-      }
-      const previous = slot.parent[slot.key];
-      const next = { ...previous, ...payload };
-      if (next.on && !previous.on) {
-        delete next.human_takeover;
-        delete next.human_takeover_error;
-        delete next.human_takeover_at;
-        next.next_exec_time = 0;
-        next._due = true;
-      } else if (!next.on) {
-        next._due = false;
-      }
-      slot.parent[slot.key] = next;
-      try {
-        const ok = await persistTasks(tasksDraft);
-        if (ok) editModalVisible.value = false;
-      } catch (e) {
-        ElementPlus.ElMessage.error('保存失败: ' + e);
-      }
+    async function saveTaskFromDialog() {
+      await saveTask({ closeAfter: true });
     }
 
     function addListItem(key) {
@@ -757,27 +1098,40 @@ const app = createApp({
       if (Array.isArray(editTaskData.value.params[key])) editTaskData.value.params[key].splice(idx, 1);
     }
 
-    async function saveTasks() {
+    async function saveTasks(options = {}) {
       if (!ensureIdle('执行中不能保存任务配置，请先终止当前任务')) return;
+      const silent = !!options.silent;
+      const successMessage = options.successMessage || '任务已保存';
       try {
-        await persistTasks(configData.tasks || {});
+        await persistTasks(configData.tasks || {}, successMessage);
       } catch (e) { ElementPlus.ElMessage.error('保存失败: ' + e); }
     }
 
-    async function saveSettings() {
-      if (!ensureIdle('执行中不能保存设置，请先终止当前任务')) return;
+    async function saveSettings(options = {}) {
+      const silent = !!options.silent;
+      const done = typeof options.done === 'function' ? options.done : null;
+      if (!ensureIdle('执行中不能保存设置，请先终止当前任务')) {
+        if (done) done(false);
+        return;
+      }
       try {
         applyTheme();
         const { ok, data } = await API.request('POST', '/config', configData);
         if (!ok) {
           ElementPlus.ElMessage.error('保存失败: ' + API.errorMessage(data, '未知错误'));
+          if (done) done(false);
           return;
         }
-        ElementPlus.ElMessage.success('保存成功');
+        await refreshConfig(true);
+        await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
+        if (!silent) ElementPlus.ElMessage.success('保存成功');
+        if (done) done(true);
       } catch (e) {
         ElementPlus.ElMessage.error('保存失败: ' + e);
+        if (done) done(false);
       }
     }
+
 
     function clearLogs() {
       logs.value.length = 0;
@@ -858,6 +1212,7 @@ const app = createApp({
           ElementPlus.ElMessage.success('登录成功');
           await refreshConfig(true);
           await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
+          if (activeTab.value === 'news') refreshNewsImmediately();
           setupWebSocket();
         } else {
           const data = await res.json().catch(() => ({}));
@@ -942,6 +1297,8 @@ const app = createApp({
         const { ok, data } = await API.request('POST', '/accounts/add', { name, account, password, server, character_name, security_key });
         if (ok) {
           applyRuntimeSnapshotPayload(data);
+          await refreshConfig(true);
+          await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
           accountDialogVisible.value = false;
           Object.assign(newAccountForm, { name: '', account: '', password: '', server: '', character_name: '', security_key: '' });
           ElementPlus.ElMessage.success('账号已创建');
@@ -960,6 +1317,8 @@ const app = createApp({
         const { ok, data } = await API.request('POST', '/accounts/delete', { name });
         if (ok) {
           applyRuntimeSnapshotPayload(data);
+          await refreshConfig(true);
+          await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
           ElementPlus.ElMessage.success('账号已删除');
         } else {
           showApiError(data, '删除失败');
@@ -1030,6 +1389,7 @@ const app = createApp({
           return false;
         }
         applyRuntimeSnapshotPayload({ dispatch_queue: data.queue });
+        await fetchRuntimeSnapshot({ refreshConfigIfChanged: true });
         return true;
       } catch (e) {
         ElementPlus.ElMessage.error('保存调度队列失败: ' + e);
@@ -1077,11 +1437,7 @@ const app = createApp({
     }
 
     watch(activeTab, (v) => {
-      if (!FEATURE_SCRIPT_CANVAS && v === 'canvas') {
-        activeTab.value = 'news';
-        return;
-      }
-      const map = { daily: '每日任务', weekly: '每周任务', general: '', custom: '自定义任务' };
+      const map = { tasks: '' };
       window.__TASK_HELP_PREFIX__ = map[v] !== undefined ? map[v] : '';
     }, { immediate: true });
 
@@ -1111,9 +1467,9 @@ const app = createApp({
     }
 
     return {
-      configData, activeTab, logs, characterName, filteredConfig, currentTasks,
-      schedulerStatus, overviewData, activeGroupPath, pageTitle,
-      editModalVisible, editTaskData, editTaskPath, paramEnumOptions, paramLabel,
+      configData, activeTab, newsRefreshKey, logs, characterName, filteredConfig, currentTasks,
+      schedulerStatus, runtimeStatus, overviewData, activeGroupPath, pageTitle,
+      editModalVisible, editTaskData, editTaskPath, editModalSaveOnClose, overviewEditContext, paramEnumOptions, paramLabel,
       addDialogVisible, addForm,
       accounts, currentAccount, accountDialogVisible, newAccountForm,
       activeCharacter, charactersTree, characterDialogVisible, newCharacterForm,
@@ -1121,6 +1477,8 @@ const app = createApp({
       gameProfessionsByCharacter, gameProfessionOptions, setGameProfession,
       dispatchQueue, allTasksSummary, isDispatchRunning,
       executionBusy,
+      taskOrderingSaving, taskOrderingProjection,
+      saveTaskOrdering, reorderTaskByDrop,
       handleAccountCommand, switchAccount, addAccount, deleteAccount,
       openCharacterDialog, switchCharacter, addCharacter, deleteCharacter,
       addToDispatch, removeFromDispatch, reorderDispatchQueue, runAllDispatchTasks, stopDispatch, unifiedStop,
@@ -1129,14 +1487,16 @@ const app = createApp({
       currentTheme,
       setActiveGroup: path => { activeGroupPath.value = path; },
       refreshOverviewPanel,
-      startRun, stopRun, runSingleTask, verifyAccount, resetScheduler,
-      openEditModal, enumParamIsMultiple, saveTask, addListItem, removeListItem,
+      startRun, runSingleTask, verifyAccount, resetScheduler,
+      openEditModal, openOverviewTaskEditor, enumParamIsMultiple, saveTaskFromDialog, saveTask,
+      editTaskStatusLabel, editTaskStatusClass, getEditTaskStatusKey, handleEditTaskStatusClick,
+      onEditModalClose, onEditModalClosed,
       isTableParam, getTableRows, getTableColumns, getTableColumnLabel, getTableEnumOptions, tableRowsCache,
+      addListItem, removeListItem,
       saveTasks, saveSettings, clearLogs, reloadTasks,
       submitAddAccount,
-      isElectron, minimizeToTray,
+      isElectron, minimizeToTray, navigateTo,
       pendingEditorImportUrl, goToEditorWithImage, onEditorImported,
-      featureScriptCanvas: FEATURE_SCRIPT_CANVAS,
       init,
     };
   },

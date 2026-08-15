@@ -1,51 +1,48 @@
-"""
-源码仓库更新器
-==============
-只用于开发/源码部署形态：fetch -> stash -> pull/reset -> pip install -> restart。
+"""Source Git updater.
 
-发行版安装包没有 .git，也不应该在「检查更新」里走这个通道；发行版更新由
-content_delta_update 或 Electron 的 backend_incremental.zip 机制负责。
+This channel is intentionally limited to source checkouts: fetch origin/main,
+compare it with HEAD, then fast-forward by pulling origin main. Dependency
+installation stays explicit in scripts/install.*.
 """
 from __future__ import annotations
 
 import os
 import subprocess
 import threading
-import time
-from typing import Optional
 
 from AutoScriptor.utils.logger import logger
+from AutoScriptor.utils.paths import get_app_root
 
-try:
-    from AutoScriptor.utils.paths import get_app_root, is_compiled
-except Exception:  # pragma: no cover - 部分契约测试会替换 AutoScriptor.utils
-    def get_app_root():
-        return os.getcwd()
 
-    def is_compiled() -> bool:
-        return False
+UPDATE_REMOTE = "origin"
+UPDATE_BRANCH = "main"
+
+
+class GitCommandError(RuntimeError):
+    pass
 
 
 class Updater:
     """管理源码 Git 仓库的更新检查与执行。"""
 
-    state: str = "idle"
-    changelog: str = ""
-    current_version: str = ""
-    remote_version: str = ""
-    last_error: str = ""
-
-    _check_thread: Optional[threading.Thread] = None
-    _stop_event = threading.Event()
-    _restart_event = None  # multiprocessing.Event，由 gui.py 传入
-
     def __init__(self):
         self._root = str(get_app_root())
         self._git = self._find_git()
         self._unavailable_reason = ""
+        self.state = "idle"
+        self.changelog = ""
+        self.current_version = ""
+        self.remote_version = ""
+        self.remote_branch = UPDATE_BRANCH
+        self.ahead_count = 0
+        self.behind_count = 0
+        self.last_error = ""
+        self.action_taken = ""
+        self.restart_triggered = False
+        self._restart_event = None  # multiprocessing.Event，由 services/webui/gui.py 传入
 
     def _find_git(self) -> str:
-        for candidate in ["git", "git.exe"]:
+        for candidate in ["git.exe", "git"]:
             try:
                 result = subprocess.run(
                     [candidate, "--version"],
@@ -54,34 +51,23 @@ class Updater:
                 )
                 if result.returncode == 0:
                     return candidate
-            except Exception:
+            except (OSError, subprocess.SubprocessError):
                 continue
-        return "git"
+        return ""
 
     def _git_cmd(self, *args) -> list[str]:
+        if not self._git:
+            raise GitCommandError("git not found. Install Git for Windows first.")
         safe_root = os.path.abspath(self._root).replace("\\", "/")
         return [self._git, "-c", f"safe.directory={safe_root}", *args]
 
-    def _run_git(self, *args, timeout: int = 30, allow_failure: bool = False) -> str:
-        cmd = self._git_cmd(*args)
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                cwd=self._root,
-                timeout=timeout,
-            )
-            if result.returncode != 0 and not allow_failure:
-                logger.debug(f"Git 命令非零退出: {cmd} -> {result.stderr.strip()}")
-            return result.stdout.strip()
-        except Exception as e:
-            logger.debug(f"Git 命令失败: {cmd} -> {e}")
-            return ""
+    @staticmethod
+    def _git_failure_text(args, result) -> str:
+        detail = (result.stderr or result.stdout or "").strip()
+        suffix = f": {detail}" if detail else ""
+        return f"git {' '.join(args)} failed with exit code {result.returncode}{suffix}"
 
-    def _run_git_ok(self, *args, timeout: int = 30) -> bool:
+    def _run_git(self, *args, timeout: int = 30) -> str:
         cmd = self._git_cmd(*args)
         try:
             result = subprocess.run(
@@ -93,15 +79,19 @@ class Updater:
                 cwd=self._root,
                 timeout=timeout,
             )
-            return result.returncode == 0
-        except Exception:
-            return False
+            if result.returncode != 0:
+                raise GitCommandError(self._git_failure_text(args, result))
+            return result.stdout.strip()
+        except subprocess.TimeoutExpired as e:
+            raise GitCommandError(f"git {' '.join(args)} timed out after {timeout}s") from e
+        except OSError as e:
+            raise GitCommandError(f"git {' '.join(args)} failed to start: {e}") from e
 
     def _git_update_available(self) -> bool:
         """当前运行目录是否真的可执行源码 Git 更新。"""
         self._unavailable_reason = ""
-        if is_compiled():
-            self._unavailable_reason = "当前是发行版运行环境，发行版不使用 Git 更新通道。"
+        if not self._git:
+            self._unavailable_reason = "git not found. Install Git for Windows first."
             return False
         if not os.path.isdir(self._root):
             self._unavailable_reason = f"项目根目录不存在: {self._root}"
@@ -109,24 +99,63 @@ class Updater:
         if not os.path.isdir(os.path.join(self._root, ".git")):
             self._unavailable_reason = "当前目录不是 Git 工作区，源码更新不可用。"
             return False
-        if not self._run_git_ok("rev-parse", "--is-inside-work-tree", timeout=5):
-            self._unavailable_reason = "Git 不可用或当前目录不是有效工作区。"
+        try:
+            self._run_git("rev-parse", "--is-inside-work-tree", timeout=5)
+        except GitCommandError as e:
+            self._unavailable_reason = str(e)
             return False
         return True
+
+    def _current_commit(self) -> str:
+        return self._run_git("rev-parse", "--short", "HEAD")
+
+    def _current_branch(self) -> str:
+        return self._run_git("rev-parse", "--abbrev-ref", "HEAD")
 
     def get_current_commit(self) -> str:
         if not self._git_update_available():
             return ""
-        return self._run_git("rev-parse", "--short", "HEAD")
+        return self._current_commit()
 
     def get_current_branch(self) -> str:
         if not self._git_update_available():
             return ""
-        return self._run_git("rev-parse", "--abbrev-ref", "HEAD")
+        return self._current_branch()
 
-    def _get_remote_branch(self) -> str:
-        branch = self.get_current_branch()
-        return branch if branch else "feat/launcher"
+    def _ensure_attached_branch(self) -> str:
+        branch = self._current_branch().strip()
+        if not branch or branch == "HEAD":
+            raise GitCommandError("Detached HEAD is not supported by source Git updater.")
+        return branch
+
+    def _target_ref(self) -> str:
+        return f"{UPDATE_REMOTE}/{UPDATE_BRANCH}"
+
+    def _fetch_target(self) -> None:
+        self._run_git("fetch", UPDATE_REMOTE, UPDATE_BRANCH, timeout=60)
+
+    def _ahead_behind(self, target_ref: str) -> tuple[int, int]:
+        output = self._run_git(
+            "rev-list",
+            "--left-right",
+            "--count",
+            f"HEAD...{target_ref}",
+            timeout=10,
+        )
+        parts = output.replace("\t", " ").split()
+        if len(parts) != 2:
+            raise GitCommandError(f"git rev-list returned unexpected ahead/behind output: {output}")
+        try:
+            return int(parts[0]), int(parts[1])
+        except ValueError as e:
+            raise GitCommandError(f"git rev-list returned invalid ahead/behind output: {output}") from e
+
+    @staticmethod
+    def _diverged_message(branch: str, target_ref: str, ahead: int, behind: int) -> str:
+        return (
+            f"Local branch {branch} and {target_ref} have diverged: "
+            f"local ahead {ahead} commit(s), behind {behind}. Resolve with Git manually."
+        )
 
     # ── 检查更新 ──
 
@@ -136,6 +165,10 @@ class Updater:
             self.last_error = self._unavailable_reason
             self.remote_version = ""
             self.changelog = ""
+            self.ahead_count = 0
+            self.behind_count = 0
+            self.action_taken = "disabled"
+            self.restart_triggered = False
             return False
 
         if self.state == "checking":
@@ -143,68 +176,72 @@ class Updater:
 
         self.state = "checking"
         self.last_error = ""
+        self.changelog = ""
+        self.ahead_count = 0
+        self.behind_count = 0
+        self.action_taken = "check"
+        self.restart_triggered = False
         try:
-            branch = self._get_remote_branch()
+            branch = self._ensure_attached_branch()
+        except GitCommandError as e:
+            self.state = "failed"
+            self.last_error = str(e)
+            return False
 
-            for attempt in range(3):
-                if self._run_git_ok("fetch", "origin", branch, timeout=60):
-                    break
-                logger.warning(f"git fetch 失败 (第 {attempt + 1} 次)")
-                time.sleep(2)
-            else:
-                self.state = "failed"
-                self.last_error = "git fetch 连续失败"
-                return False
+        try:
+            self._fetch_target()
+        except GitCommandError as e:
+            self.state = "failed"
+            self.last_error = str(e)
+            logger.warning(f"git fetch 失败: {self.last_error}")
+            return False
 
+        target_ref = self._target_ref()
+        try:
             local = self._run_git("rev-parse", "HEAD")
-            remote = self._run_git("rev-parse", f"origin/{branch}")
+            remote = self._run_git("rev-parse", target_ref)
+            ahead, behind = self._ahead_behind(target_ref)
+        except GitCommandError as e:
+            self.state = "failed"
+            self.last_error = str(e)
+            return False
 
-            if not local or not remote:
-                self.state = "failed"
-                self.last_error = "无法获取 commit"
-                return False
+        self.current_version = local[:8]
+        self.remote_version = remote[:8]
+        self.ahead_count = ahead
+        self.behind_count = behind
 
-            if local == remote:
-                self.state = "idle"
-                self.changelog = ""
-                self.current_version = local[:8]
-                self.remote_version = ""
-                return False
+        if local == remote:
+            self.state = "up_to_date"
+            self.changelog = ""
+            return False
 
-            # 开发分支保护：有本地未推送提交时不自动覆盖。
-            local_only = self._run_git(
-                "log",
-                "--not",
-                "--remotes=origin/*",
-                "-1",
-                "--oneline",
-                allow_failure=True,
-            )
-            if local_only:
-                logger.info(f"本地有未推送提交 {local_only.split()[0]}，跳过更新")
-                self.state = "idle"
-                self.current_version = local[:8]
-                self.remote_version = ""
-                return False
+        if behind == 0:
+            self.state = "ahead"
+            self.changelog = ""
+            return False
 
-            self.current_version = local[:8]
-            self.remote_version = remote[:8]
+        if ahead > 0 and behind > 0:
+            self.state = "failed"
+            self.changelog = ""
+            self.last_error = self._diverged_message(branch, target_ref, ahead, behind)
+            return False
+
+        try:
             self.changelog = self._run_git(
                 "log",
                 "--oneline",
                 "--no-merges",
-                f"HEAD..origin/{branch}",
+                f"HEAD..{target_ref}",
                 "--max-count=20",
             )
-            self.state = "available"
-            logger.info(f"发现源码更新: {self.current_version} -> {self.remote_version}")
-            return True
-
-        except Exception as e:
-            logger.error(f"检查源码更新失败: {e}")
+        except GitCommandError as e:
             self.state = "failed"
             self.last_error = str(e)
             return False
+        self.state = "available"
+        logger.info(f"发现源码更新: {self.current_version} -> {self.remote_version}")
+        return True
 
     # ── 执行更新 ──
 
@@ -212,71 +249,99 @@ class Updater:
         if not self._git_update_available():
             self.state = "disabled"
             self.last_error = self._unavailable_reason
+            self.action_taken = "disabled"
+            self.restart_triggered = False
             return False
 
-        if self.state not in ("available", "failed", "idle"):
+        if self.state not in ("available", "failed", "idle", "up_to_date", "ahead", "done", "updated"):
             return False
 
         self.state = "updating"
         self.last_error = ""
+        self.changelog = ""
+        self.action_taken = "update"
+        self.restart_triggered = False
         try:
-            branch = self._get_remote_branch()
-
-            self._run_git_ok("fetch", "origin", branch, timeout=60)
-
-            for lock in [".git/index.lock", ".git/HEAD.lock"]:
-                lock_path = os.path.join(self._root, lock)
-                if os.path.exists(lock_path):
-                    logger.info(f"移除 Git 锁文件: {lock}")
-                    os.remove(lock_path)
-
-            stashed = self._run_git_ok("stash", "--quiet")
-
-            if not self._run_git_ok("pull", "--ff-only", "origin", branch, timeout=120):
-                logger.warning("pull --ff-only 失败，尝试 reset --hard")
-                self._run_git_ok("reset", "--hard", f"origin/{branch}")
-
-            if stashed:
-                self._run_git_ok("stash", "pop", "--quiet", timeout=10)
-
-            self._pip_install()
-
-            self.current_version = self.get_current_commit()
-
-            if self._restart_event is not None:
-                self.state = "restarting"
-                logger.info(f"源码更新完成: {self.current_version}，即将重启后端")
-                self._trigger_restart()
-            else:
-                self.state = "done"
-                logger.info(f"源码更新完成: {self.current_version}")
-            return True
-
-        except Exception as e:
-            logger.error(f"源码更新执行失败: {e}")
+            branch = self._ensure_attached_branch()
+        except GitCommandError as e:
             self.state = "failed"
             self.last_error = str(e)
             return False
 
-    def _pip_install(self):
-        req_file = os.path.join(self._root, "requirements.txt")
-        if not os.path.exists(req_file):
-            return
         try:
-            import sys
+            status = self._run_git("status", "--porcelain", timeout=10)
+        except GitCommandError as e:
+            self.state = "failed"
+            self.last_error = str(e)
+            return False
+        if status.strip():
+            self.state = "failed"
+            self.last_error = "Working tree has local changes. Commit or clean them before updating."
+            return False
 
-            logger.info("更新 Python 依赖...")
-            subprocess.run(
-                [sys.executable, "-m", "pip", "install", "-r", req_file, "--quiet"],
-                cwd=self._root,
-                timeout=300,
-                capture_output=True,
-            )
-        except Exception as e:
-            logger.warning(f"依赖安装失败: {e}")
+        try:
+            self._fetch_target()
+        except GitCommandError as e:
+            self.state = "failed"
+            self.last_error = str(e)
+            return False
+
+        target_ref = self._target_ref()
+        try:
+            local = self._run_git("rev-parse", "HEAD")
+            remote = self._run_git("rev-parse", target_ref)
+            ahead, behind = self._ahead_behind(target_ref)
+        except GitCommandError as e:
+            self.state = "failed"
+            self.last_error = str(e)
+            return False
+
+        self.current_version = local[:8]
+        self.remote_version = remote[:8]
+        self.ahead_count = ahead
+        self.behind_count = behind
+
+        if ahead > 0 and behind > 0:
+            self.state = "failed"
+            self.last_error = self._diverged_message(branch, target_ref, ahead, behind)
+            return False
+
+        if local == remote:
+            self.state = "up_to_date"
+            self.action_taken = "none"
+            return True
+
+        if behind == 0:
+            self.state = "ahead"
+            self.action_taken = "none"
+            return True
+
+        try:
+            self._run_git("pull", "--ff-only", UPDATE_REMOTE, UPDATE_BRANCH, timeout=120)
+            local = self._run_git("rev-parse", "HEAD")
+            remote = self._run_git("rev-parse", target_ref)
+        except GitCommandError as e:
+            self.state = "failed"
+            self.last_error = str(e)
+            return False
+        self.current_version = local[:8]
+        self.remote_version = remote[:8]
+        self.ahead_count = 0
+        self.behind_count = 0
+        self.action_taken = "fast_forward"
+
+        if self._restart_event is not None:
+            self.state = "restarting"
+            self.restart_triggered = True
+            logger.info(f"源码更新完成: {self.current_version}，即将重启后端")
+            self._trigger_restart()
+        else:
+            self.state = "updated"
+            logger.info(f"源码更新完成: {self.current_version}")
+        return True
 
     def set_restart_event(self, event):
-        """设置重启事件（multiprocessing.Event），由 gui.py 子进程传入。"""
+        """设置重启事件（multiprocessing.Event），由 services/webui/gui.py 子进程传入。"""
         self._restart_event = event
 
     def _trigger_restart(self, delay: float = 2.0):
@@ -289,23 +354,36 @@ class Updater:
         timer.daemon = True
         timer.start()
 
-    def stop(self):
-        self._stop_event.set()
-
     def get_status(self) -> dict:
         available = self._git_update_available()
         state = self.state
         reason = self._unavailable_reason
+        current_version = ""
+        branch = ""
         if not available:
             state = "disabled"
+        else:
+            try:
+                current_version = self._run_git("rev-parse", "HEAD")[:8]
+                branch = self._ensure_attached_branch()
+            except GitCommandError as e:
+                state = "failed"
+                self.last_error = str(e)
         return {
             "kind": "source-git",
             "available": available,
             "unavailable_reason": reason,
             "state": state,
-            "current_version": self.get_current_commit() if available else "",
-            "branch": self.get_current_branch() if available else "",
+            "has_update": available and state == "available",
+            "action_taken": self.action_taken if available else "",
+            "restart_supported": available and self._restart_event is not None,
+            "restart_triggered": available and self.restart_triggered,
+            "current_version": current_version,
+            "branch": branch,
+            "remote_branch": self.remote_branch,
             "remote_version": self.remote_version if available else "",
+            "ahead_count": self.ahead_count if available else 0,
+            "behind_count": self.behind_count if available else 0,
             "changelog": self.changelog if available else "",
             "last_error": self.last_error if available else reason,
         }

@@ -19,13 +19,16 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
-from fastapi import APIRouter, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, Response
 from lxml import html as lxml_html
 
+from AutoScriptor.utils.paths import get_logs_root
 from services.webui.routes.news_4399_session import (
     get_cached_or_login_session,
+    get_cached_session,
     get_news_4399_credentials_from_server,
+    is_public_news_credential,
 )
 from services.webui.security import CREDENTIAL_UNLOCK_COOKIE_NAME, validate_credential_unlock
 
@@ -55,7 +58,7 @@ def _project_root() -> Path:
 
 
 def _redeem_codes_path() -> Path:
-    return _project_root() / "docs" / "zmxy_redeem_codes.json"
+    return get_logs_root() / "zmxy_redeem_codes.json"
 
 
 def _load_redeem_codes_payload() -> dict[str, Any]:
@@ -63,30 +66,35 @@ def _load_redeem_codes_payload() -> dict[str, Any]:
     path = _redeem_codes_path()
     if not path.is_file():
         return {"generated_at": "", "timezone": "Asia/Shanghai", "source": "", "rows": []}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        payload.setdefault("rows", [])
-        payload.setdefault("timezone", "Asia/Shanghai")
-        payload.setdefault("source", "")
-        return payload
-    except Exception:
-        return {"generated_at": "", "timezone": "Asia/Shanghai", "source": "", "rows": [], "error": "invalid_json"}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload.setdefault("rows", [])
+    payload.setdefault("timezone", "Asia/Shanghai")
+    payload.setdefault("source", "")
+    return payload
 
 
 def _refresh_gift_codes_rows() -> None:
     root = _project_root()
     script = root / "scripts" / "collect_zmxy_redeem_2026.py"
     if not script.is_file():
-        return
+        raise HTTPException(status_code=500, detail=f"Missing gift-code collector: {script}")
     try:
         subprocess.run(
             [sys.executable, str(script)],
             cwd=str(root),
             capture_output=True,
+            text=True,
             timeout=240,
+            check=True,
         )
-    except subprocess.TimeoutExpired:
-        pass
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=504, detail="Gift-code collector timed out after 240 seconds") from exc
+    except subprocess.CalledProcessError as exc:
+        message = (exc.stderr or exc.stdout or "").strip()
+        detail = f"Gift-code collector failed with exit code {exc.returncode}"
+        if message:
+            detail += f": {message}"
+        raise HTTPException(status_code=502, detail=detail) from exc
 
 
 # 从 HTML 中移除会拉起「登录 / 通行证」弹窗的外链脚本（在服务端处理，避免脚本先执行）
@@ -195,10 +203,7 @@ _HEAD_XHR_SANDBOX_JS = r"""<script data-proxy-xhr-sandbox>
 def _upstream_is_json_like(resp: requests.Response) -> bool:
     """子请求（如 profile/notice-profile ?_AJAX_=1）多为 JSON，需原样透传，不能当 HTML 注入。"""
     ct = (resp.headers.get("Content-Type") or "").lower()
-    try:
-        raw = resp.text.lstrip()
-    except Exception:
-        return False
+    raw = resp.text.lstrip()
     if ("text/html" in ct or "application/xhtml" in ct) and not (
         raw.startswith("{") or raw.startswith("[")
     ):
@@ -323,15 +328,30 @@ _NAV_INTERCEPTOR_JS = r"""
 </script>
 """
 _cache_time: float = 0.0
+_PUBLIC_NEWS_SESSION_CACHE_TOKEN = "public-news-4399"
+
+
+def _news_credentials_for_request(request: Request) -> tuple[str | None, str | None, str | None]:
+    """
+    返回当前请求可用于 4399 论坛代拉的 (account, password, cache_token)。
+    项目公开 news 通行证可直接用于资讯代理；其他凭据仍必须先通过 credential_unlock。
+    """
+    acc, pwd = get_news_4399_credentials_from_server()
+    if not acc or not pwd:
+        return None, None, None
+    if is_public_news_credential(acc, pwd):
+        return acc, pwd, _PUBLIC_NEWS_SESSION_CACHE_TOKEN
+
+    tok = request.cookies.get(CREDENTIAL_UNLOCK_COOKIE_NAME)
+    if tok and validate_credential_unlock(tok):
+        return acc, pwd, tok
+    return None, None, None
 
 
 def _bbs_session_eligible(request: Request) -> bool:
-    """是否具备使用通行证代拉论坛页的条件（已解锁 + 配置中有 news 或 game 账密）。"""
-    tok = request.cookies.get(CREDENTIAL_UNLOCK_COOKIE_NAME)
-    if not validate_credential_unlock(tok):
-        return False
-    acc, pwd = get_news_4399_credentials_from_server()
-    return bool(acc and pwd)
+    """是否具备使用通行证代拉论坛页的条件。"""
+    acc, pwd, cache_token = _news_credentials_for_request(request)
+    return bool(acc and pwd and cache_token)
 
 
 def _is_login_wall_response(resp: requests.Response) -> bool:
@@ -345,6 +365,45 @@ def _is_login_wall_response(resp: requests.Response) -> bool:
     if "passport.4399" in u or "sso.4399" in u:
         return True
     return False
+
+
+def _fetch_proxy_upstream(
+    url: str,
+    http_session: requests.Session | None = None,
+) -> requests.Response:
+    """拉取论坛代理上游；Session 为空时按匿名请求。"""
+    if http_session is not None:
+        return http_session.get(url, headers=_BROWSER_HEADERS, timeout=20)
+    return requests.get(url, headers=_BROWSER_HEADERS, timeout=20)
+
+
+def _fetch_proxy_with_adaptive_login(
+    url: str,
+    account: str | None,
+    password: str | None,
+    cache_token: str | None,
+) -> requests.Response:
+    """
+    先用匿名或已有缓存会话拉取；若上游转到 4399 登录墙，再立即登录并重试一次。
+    这样普通公告不消耗登录请求，受保护页面或失效 Cookie 则能自动补救。
+    """
+    http_session: requests.Session | None = None
+    if account and cache_token:
+        http_session = get_cached_session(cache_token, account)
+
+    resp = _fetch_proxy_upstream(url, http_session)
+    if not _is_login_wall_response(resp) or not (account and password and cache_token):
+        return resp
+
+    retry_session = get_cached_or_login_session(
+        cache_token,
+        account,
+        password,
+        force=http_session is not None,
+    )
+    if retry_session is None:
+        return resp
+    return _fetch_proxy_upstream(url, retry_session)
 
 
 def _forum_iframe_placeholder(original_url: str) -> str:
@@ -369,7 +428,7 @@ def _forum_iframe_placeholder(original_url: str) -> str:
 <body>
   <h1>无法在窗口内嵌中显示全文</h1>
   <p>4399 论坛在无登录会话时会跳转到通行证/游戏吧页面。</p>
-  <p>若您已在 WebUI 验证<strong>安全密码</strong>且配置中存有<strong>news 或游戏账号密码</strong>（优先 news），本站会尝试自动登录通行证后再拉取正文；若仍失败（如需验证码），请使用<strong>「论坛原文」</strong>在浏览器中打开。</p>
+  <p>若配置中使用项目公开 news 通行证，本站会直接尝试自动登录后再拉取正文；若改为其他 news 或游戏账号密码，则必须先在 WebUI 验证<strong>安全密码</strong>。若仍失败（如需验证码），请使用<strong>「论坛原文」</strong>在浏览器中打开。</p>
   <p><a href="{safe}" target="_blank" rel="noopener noreferrer">在新标签页打开帖子</a></p>
 </body>
 </html>"""
@@ -549,7 +608,7 @@ async def get_redeem_codes(request: Request, force: int = Query(0, description="
 
 @router.get("/gift_codes")
 def get_gift_codes(refresh: int = Query(0, description="传 1 时先执行采集脚本再返回")):
-    """未过期兑换码列表（JSON），与 `docs/zmxy_redeem_codes.json` 同步。"""
+    """未过期兑换码列表（JSON），读取 logs/ 运行态副本。"""
     if refresh:
         _refresh_gift_codes_rows()
     return _load_redeem_codes_payload()
@@ -557,7 +616,7 @@ def get_gift_codes(refresh: int = Query(0, description="传 1 时先执行采集
 
 @router.get("/gift_codes/page", response_class=HTMLResponse)
 def get_gift_codes_page():
-    """独立 HTML 页（仅读本地 JSON，不跑采集）；表格列 标题 | 口令 | 到期时间 | 类型 | 复制。"""
+    """独立 HTML 页（仅读本地 JSON，不跑采集）；表格列 序号 | 兑换码 | 到期时间 | 来源链接 | 操作。"""
     p = _load_redeem_codes_payload()
     rows = p.get("rows") or []
     gen = escape(str(p.get("generated_at") or "-"))
@@ -565,50 +624,96 @@ def get_gift_codes_page():
         "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"/>",
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>",
         "<style>",
-        "body{font-family:system-ui,sans-serif;margin:0;padding:12px 14px;background:#f8fafc;color:#0f172a;font-size:14px;}",
-        "h1{font-size:15px;margin:0 0 10px;font-weight:600;}",
-        ".hint{color:#64748b;font-size:12px;margin-bottom:12px;}",
-        "table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06);}",
-        "th,td{text-align:left;padding:10px 12px;border-bottom:1px solid #e2e8f0;vertical-align:top;}",
-        "th{background:#f1f5f9;font-weight:600;font-size:12px;color:#475569;}",
+        "*{box-sizing:border-box;}",
+        "body{font-family:system-ui,sans-serif;margin:0;padding:16px 18px;background:#f8fafc;color:#0f172a;font-size:14px;line-height:1.4;}",
+        "h1{font-size:20px;margin:0 0 10px;font-weight:600;}",
+        ".hint{color:#64748b;font-size:13px;margin-bottom:14px;}",
+        ".toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px;}",
+        ".selected-count{font-size:13px;color:#64748b;}",
+        ".page-status{font-size:13px;margin:0 0 12px;color:#2563eb;min-height:20px;}",
+        ".page-status.error{color:#dc2626;}",
+        ".table-wrap{width:100%;overflow:auto;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.06);}",
+        "table{width:100%;min-width:760px;border-collapse:collapse;background:#fff;}",
+        "th,td{text-align:left;padding:10px 12px;border-bottom:1px solid #e2e8f0;vertical-align:middle;}",
+        "th{background:#f1f5f9;font-weight:600;font-size:12px;color:#475569;white-space:nowrap;}",
         "tbody tr:last-child td{border-bottom:none;}",
-        ".code{font-family:ui-monospace,Menlo,monospace;word-break:break-all;}",
+        "tr.row-working{background:#eff6ff;}",
+        ".index{width:78px;color:#64748b;}",
+        ".select-cell{display:flex;align-items:center;gap:8px;}",
+        ".row-check{width:16px;height:16px;accent-color:#2563eb;}",
+        ".code{font-family:ui-monospace,Menlo,monospace;font-size:13px;word-break:break-all;}",
+        ".expires{white-space:nowrap;font-variant-numeric:tabular-nums;}",
+        ".actions{display:flex;gap:6px;align-items:center;white-space:nowrap;}",
         "a.link{color:#2563eb;text-decoration:none;}",
         "a.link:hover{text-decoration:underline;}",
-        ".btn-copy{cursor:pointer;border:none;background:#22c55e;color:#fff;padding:6px 12px;border-radius:6px;font-size:12px;}",
+        ".btn{cursor:pointer;border:1px solid transparent;color:#fff;padding:6px 10px;border-radius:5px;font-size:13px;line-height:1.2;}",
+        ".btn:disabled{cursor:not-allowed;opacity:.55;}",
+        ".btn-secondary{background:#fff;color:#334155;border-color:#cbd5e1;}",
+        ".btn-secondary:hover{background:#f8fafc;}",
+        ".btn-copy{background:#22c55e;}",
         ".btn-copy:hover{background:#16a34a;}",
-        "td.empty{text-align:center;color:#94a3b8;padding:28px 12px;}",
+        ".btn-redeem{background:#2563eb;}",
+        ".btn-redeem:hover{background:#1d4ed8;}",
+        ".btn-cancel{background:#fff;color:#334155;border-color:#cbd5e1;}",
+        ".btn-cancel:hover{background:#f8fafc;}",
+        "td.empty{text-align:center;color:#94a3b8;padding:34px 16px;}",
+        ".modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.48);display:none;align-items:center;justify-content:center;padding:18px;z-index:20;}",
+        ".modal-backdrop.open{display:flex;}",
+        ".modal{width:min(520px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:8px;box-shadow:0 18px 45px rgba(15,23,42,.22);padding:18px;}",
+        ".modal h2{font-size:20px;margin:0 0 16px;font-weight:650;}",
+        ".field{margin-bottom:12px;}",
+        ".field label{display:block;font-size:13px;color:#475569;margin-bottom:6px;}",
+        ".field select,.field input{width:100%;font-size:14px;line-height:1.25;padding:8px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;color:#0f172a;}",
+        ".modal-status{min-height:20px;font-size:13px;color:#64748b;margin:2px 0 14px;}",
+        ".modal-status.error{color:#dc2626;}",
+        ".modal-actions{display:flex;gap:8px;justify-content:flex-start;}",
+        "@media(max-width:720px){body{padding:12px;font-size:13px;}h1{font-size:18px}.table-wrap{border-radius:6px}.btn{padding:6px 9px}.modal{padding:16px}.modal-actions{flex-wrap:wrap}}",
         "</style></head><body>",
         f"<h1>兑换码</h1><p class=\"hint\">更新时间：{gen}</p>",
-        "<table><thead><tr><th>标题</th><th>口令</th><th>到期时间</th><th>类型</th><th>复制</th></tr></thead><tbody>",
+        '<div class="toolbar"><button type="button" class="btn btn-secondary" id="batchRedeem" disabled>兑换选中</button>'
+        '<span class="selected-count" id="selectedCount">已选 0 个</span></div>',
+        '<div id="pageStatus" class="page-status"></div>',
+        "<div class=\"table-wrap\"><table><thead><tr><th>序号</th><th>兑换码</th><th>到期时间</th><th>来源链接</th><th>操作</th></tr></thead><tbody>",
     ]
     if not rows:
         parts.append('<tr><td colspan="5" class="empty">暂无当前仍有效的兑换码</td></tr>')
     else:
-        for r in rows:
+        for idx, r in enumerate(rows, start=1):
             title = escape(str(r.get("title") or ""))
             code = escape(str(r.get("code") or ""))
             exp = escape(str(r.get("expires_at") or ""))
-            kind = str(r.get("kind") or "")
-            note = escape(str(r.get("note") or ""))
-            kind_label = {"public_code": "通用口令", "conditional_code": "有限制", "box_gift": "礼包"}.get(kind, kind)
-            kind_cell = escape(kind_label)
-            if note:
-                kind_cell += f'<div class="hint">{note}</div>'
             url = str(r.get("url") or "")
             url_esc = escape(url, quote=True)
-            title_cell = (
-                f'<a class="link" href="{url_esc}" target="_blank" rel="noopener noreferrer">{title}</a>'
+            source_cell = (
+                f'<a class="link" href="{url_esc}" target="_blank" rel="noopener noreferrer" title="{title}">原帖</a>'
                 if url
-                else title
+                else "-"
             )
             code_attr = escape(str(r.get("code") or ""), quote=True)
             parts.append(
-                f"<tr><td>{title_cell}</td><td class=\"code\">{code}</td><td>{exp}</td><td>{kind_cell}</td>"
-                f'<td><button type="button" class="btn-copy" data-code="{code_attr}" '
-                f'onclick="copyCode(this)">复制</button></td></tr>'
+                f'<tr data-code="{code_attr}"><td class="index"><label class="select-cell">'
+                f'<input type="checkbox" class="row-check" data-code="{code_attr}" onclick="setChecked(this,event)"/>'
+                f"<span>{idx}</span></label></td><td class=\"code\">{code}</td><td class=\"expires\">{exp}</td><td>{source_cell}</td>"
+                f'<td><div class="actions"><button type="button" class="btn btn-copy" data-code="{code_attr}" '
+                f'onclick="copyCode(this)">复制</button>'
+                f'<button type="button" class="btn btn-redeem" data-code="{code_attr}" '
+                f'onclick="openRedeem(this)">前往兑换</button></div></td></tr>'
             )
-    parts.append("</tbody></table>")
+    parts.append("</tbody></table></div>")
+    parts.append(
+        '<div id="redeemBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="redeemTitle">'
+        '<div class="modal">'
+        '<h2 id="redeemTitle">前往兑换</h2>'
+        '<div class="field"><label for="redeemAccount">账号</label><select id="redeemAccount"></select></div>'
+        '<div class="field"><label for="redeemRole">角色</label><select id="redeemRole"></select></div>'
+        '<div class="field" id="securityField" hidden><label for="securityKey">安全密码</label>'
+        '<input id="securityKey" type="password" autocomplete="current-password"/></div>'
+        '<div id="modalStatus" class="modal-status"></div>'
+        '<div class="modal-actions">'
+        '<button type="button" class="btn btn-redeem" id="confirmRedeem">确认</button>'
+        '<button type="button" class="btn btn-cancel" id="cancelRedeem">取消</button>'
+        '</div></div></div>'
+    )
     parts.append(
         "<script>"
         "function copyCode(btn){var t=btn.getAttribute('data-code')||'';"
@@ -620,6 +725,42 @@ def get_gift_codes_page():
         "document.body.appendChild(ta);ta.select();try{document.execCommand('copy');}catch(e){}"
         "document.body.removeChild(ta);btn.textContent='已复制';"
         "setTimeout(function(){btn.textContent='复制';},1200);}}"
+        "var redeemTargets=null,currentCodes=[],checkedCodes={},lastCheckedCode='';"
+        "var backdrop=document.getElementById('redeemBackdrop');"
+        "var accountSel=document.getElementById('redeemAccount');"
+        "var roleSel=document.getElementById('redeemRole');"
+        "var securityField=document.getElementById('securityField');"
+        "var securityInput=document.getElementById('securityKey');"
+        "var modalStatus=document.getElementById('modalStatus');"
+        "var confirmBtn=document.getElementById('confirmRedeem');"
+        "var batchBtn=document.getElementById('batchRedeem');"
+        "var selectedCount=document.getElementById('selectedCount');"
+        "var pageStatus=document.getElementById('pageStatus');"
+        "function setStatus(text,isError){modalStatus.textContent=text||'';modalStatus.className='modal-status'+(isError?' error':'');}"
+        "function setPageStatus(text,isError){pageStatus.textContent=text||'';pageStatus.className='page-status'+(isError?' error':'');}"
+        "function allCodeValues(){return Array.prototype.map.call(document.querySelectorAll('.row-check'),function(cb){return cb.getAttribute('data-code')||'';}).filter(Boolean);}"
+        "function selectedCodes(){var out=[],seen={};allCodeValues().forEach(function(c){if(checkedCodes[c]&&!seen[c]){seen[c]=true;out.push(c);}});return out;}"
+        "function renderChecked(){document.querySelectorAll('.row-check').forEach(function(cb){cb.checked=!!checkedCodes[cb.getAttribute('data-code')];});var codes=selectedCodes();selectedCount.textContent='已选 '+codes.length+' 个';batchBtn.disabled=!codes.length;}"
+        "function setChecked(cb,ev){var code=cb.getAttribute('data-code')||'';var on=!!cb.checked;var next=Object.assign({},checkedCodes);next[code]=on;if(ev.shiftKey&&lastCheckedCode&&lastCheckedCode!==code){var codes=allCodeValues();var start=codes.indexOf(lastCheckedCode);var end=codes.indexOf(code);if(start>=0&&end>=0){var lo=Math.min(start,end),hi=Math.max(start,end);codes.slice(lo,hi+1).forEach(function(c){next[c]=on;});}}checkedCodes=next;lastCheckedCode=code;renderChecked();}"
+        "function markWorking(codes){var set={};(codes||[]).forEach(function(c){set[c]=true;});document.querySelectorAll('tr[data-code]').forEach(function(tr){tr.classList.toggle('row-working',!!set[tr.getAttribute('data-code')]);});}"
+        "function selectedAccount(){return accountSel.value||'';}"
+        "function accountInfo(){var n=selectedAccount();return (redeemTargets&&redeemTargets.accounts||[]).find(function(a){return a.name===n;})||null;}"
+        "function updateRoleOptions(){var a=accountInfo();roleSel.innerHTML='';(a&&a.roles||[]).forEach(function(r){var o=document.createElement('option');o.value=r.server+'\\n'+r.name;o.textContent=r.label;roleSel.appendChild(o);});updateSecurityField();}"
+        "function updateSecurityField(){var need=!redeemTargets||selectedAccount()!==redeemTargets.current_account||!redeemTargets.credential_unlocked;securityField.hidden=!need;if(need)setTimeout(function(){securityInput.focus();},0);}"
+        "function renderTargets(data){redeemTargets=data||{};accountSel.innerHTML='';(redeemTargets.accounts||[]).forEach(function(a){var o=document.createElement('option');o.value=a.name;o.textContent=a.name;accountSel.appendChild(o);});if(redeemTargets.current_account)accountSel.value=redeemTargets.current_account;if(!accountSel.value&&accountSel.options.length)accountSel.selectedIndex=0;updateRoleOptions();}"
+        "function redeemCountText(){var n=currentCodes.length;return n>1?'已选择 '+n+' 个兑换码':'已选择 1 个兑换码';}"
+        "async function loadTargets(){setStatus('正在加载账号与角色...',false);var r=await fetch('/api/news/redeem_targets',{credentials:'same-origin'});var d=await r.json().catch(function(){return {};});if(!r.ok){throw new Error(d.message||d.error||'加载失败');}renderTargets(d);setStatus(redeemCountText(),false);}"
+        "async function openRedeem(btn){currentCodes=[btn.getAttribute('data-code')||''].filter(Boolean);securityInput.value='';confirmBtn.disabled=false;backdrop.classList.add('open');try{await loadTargets();}catch(e){setStatus(e.message||String(e),true);}}"
+        "async function openBatchRedeem(){var codes=selectedCodes();if(!codes.length)return;currentCodes=codes;securityInput.value='';confirmBtn.disabled=false;backdrop.classList.add('open');try{await loadTargets();}catch(e){setStatus(e.message||String(e),true);}}"
+        "function closeRedeem(){backdrop.classList.remove('open');currentCodes=[];}"
+        "accountSel.addEventListener('change',updateRoleOptions);"
+        "batchBtn.addEventListener('click',openBatchRedeem);"
+        "document.getElementById('cancelRedeem').addEventListener('click',closeRedeem);"
+        "backdrop.addEventListener('click',function(e){if(e.target===backdrop)closeRedeem();});"
+        "document.addEventListener('keydown',function(e){if(e.key==='Escape'&&backdrop.classList.contains('open'))closeRedeem();});"
+        "confirmBtn.addEventListener('click',async function(){var rv=roleSel.value||'';var parts=rv.split('\\n');var codes=currentCodes.slice();var payload={redeem_codes:codes,account:selectedAccount(),server:parts[0]||'',character:parts[1]||'',security_key:securityInput.value||'',_timestamp:Date.now()/1000};"
+        "confirmBtn.disabled=true;setStatus('正在启动兑换任务...',false);try{var r=await fetch('/api/news/gift_codes/redeem',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});var d=await r.json().catch(function(){return {};});if(!r.ok){if(d.need_security_key||d.need_credential_unlock){securityField.hidden=false;securityInput.focus();}throw new Error(d.message||d.error||'启动失败');}if(redeemTargets)redeemTargets.credential_unlocked=true;markWorking(codes);closeRedeem();setPageStatus((codes.length>1?codes.length+' 个兑换码':'兑换码')+'正在兑换中',false);}catch(e){confirmBtn.disabled=false;setStatus(e.message||String(e),true);}});"
+        "renderChecked();"
         "</script></body></html>"
     )
     return HTMLResponse("".join(parts))
@@ -630,19 +771,13 @@ async def proxy_page(request: Request, url: str = Query(..., description="要代
     """
     反向代理 4399 帖子页面，供前端 iframe 嵌入。
     仅允许 bbs.4399.cn / my.4399.com 域名，防止 SSRF。
-    若请求携带有效的 credential_unlock Cookie 且配置中已有 news 或 game 账密，
-    则先经 ptlogin 建立通行证会话再抓取（news 优先）。
+    项目公开 news 通行证可直接用于资讯代理；其他 news/game 凭据必须先完成 credential_unlock。
     """
     parsed = urlparse(url)
     if parsed.hostname not in _ALLOWED_DOMAINS:
         return HTMLResponse("<h3>不允许的域名</h3>", status_code=403)
 
-    tok = request.cookies.get(CREDENTIAL_UNLOCK_COOKIE_NAME)
-    http_session: requests.Session | None = None
-    if validate_credential_unlock(tok):
-        acc, pwd = get_news_4399_credentials_from_server()
-        if acc and pwd and tok:
-            http_session = get_cached_or_login_session(tok, acc, pwd)
+    acc, pwd, cache_token = _news_credentials_for_request(request)
 
     # 提前注入到 <head> 最前面：在 4399 自身脚本运行前就把 UniLogin 拦截掉
     # 注意：<base> 必须与当前页面域名一致，否则 my.4399.com 页面会错误解析相对路径导致白屏
@@ -664,10 +799,7 @@ async def proxy_page(request: Request, url: str = Query(..., description="要代
     )
 
     try:
-        if http_session is not None:
-            resp = http_session.get(url, headers=_BROWSER_HEADERS, timeout=20)
-        else:
-            resp = requests.get(url, headers=_BROWSER_HEADERS, timeout=20)
+        resp = _fetch_proxy_with_adaptive_login(url, acc, pwd, cache_token)
         resp.encoding = "utf-8"
         if _is_login_wall_response(resp):
             return HTMLResponse(_forum_iframe_placeholder(url))

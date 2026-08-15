@@ -18,13 +18,17 @@ const SettingsPanel = {
     filteredConfig: { type: Object, required: true },
     executionBusy: { type: Boolean, default: false },
   },
-  emits: ['save-settings'],
+  emits: ['settings-change'],
   data() {
     return {
       MUMU_ADB_BASE_PORT: 16384,
       MUMU_ADB_PORT_STEP: 32,
       serverPackages: SETTINGS_SERVER_PACKAGES,
       postExecutionOptions: SETTINGS_POST_EXECUTION_OPTIONS,
+      saving: false,
+      savedAt: 0,
+      discovering: false,
+      discoveryMessage: '',
     };
   },
   computed: {
@@ -43,8 +47,41 @@ const SettingsPanel = {
     hasOcrScale() {
       return Object.prototype.hasOwnProperty.call(this.ocrConfig, 'scale');
     },
+    syncStatusText() {
+      if (this.executionBusy) return '执行中暂停自动保存';
+      if (this.saving) return '正在同步配置...';
+      if (this.savedAt) return '配置已同步到本地文件';
+      return '修改后自动保存';
+    },
+  },
+  watch: {
+    'emulatorConfig.adb_addr': {
+      immediate: true,
+      handler() {
+        this.ensureDefaultAdbAddr();
+      },
+    },
+    'emulatorConfig.index': {
+      immediate: true,
+      handler() {
+        this.ensureDefaultAdbAddr();
+      },
+    },
   },
   methods: {
+    defaultAdbAddrForIndex(index) {
+      const n = Number(index);
+      const safeIndex = Number.isFinite(n) && n >= 0 ? n : 0;
+      const port = this.MUMU_ADB_BASE_PORT + safeIndex * this.MUMU_ADB_PORT_STEP;
+      return `127.0.0.1:${port}`;
+    },
+    ensureDefaultAdbAddr() {
+      if (!this.emulatorConfig || typeof this.emulatorConfig !== 'object') return;
+      const addr = String(this.emulatorConfig.adb_addr || '').trim();
+      if (!addr || addr.startsWith('YOUR_') || addr.endsWith(':0')) {
+        this.emulatorConfig.adb_addr = this.defaultAdbAddrForIndex(this.emulatorConfig.index);
+      }
+    },
     syncAdbPortFromIndex(index) {
       const n = Number(index);
       if (!Number.isFinite(n) || n < 0) return;
@@ -63,12 +100,52 @@ const SettingsPanel = {
       }
       return this.serverPackages;
     },
-    saveAllSettings() {
+    async autoDiscoverMumu() {
       if (this.executionBusy) {
-        ElementPlus.ElMessage.warning('执行中不能保存设置，请先终止当前任务');
+        ElementPlus.ElMessage.warning('执行中不能修改模拟器配置，请先终止当前任务');
         return;
       }
-      this.$emit('save-settings');
+      this.discovering = true;
+      this.discoveryMessage = '';
+      try {
+        const result = await window.WebUIApi.request('GET', '/device/discover?probe_adb=true');
+        const payload = result.data || {};
+        if (!result.ok || payload.ok === false) {
+          ElementPlus.ElMessage.error(window.WebUIApi.errorMessage(payload, '自动定位失败'));
+          return;
+        }
+        const discovery = payload.discovery || {};
+        if (discovery.needs_manual_paths) {
+          this.discoveryMessage = `未找到完整 MuMu 路径，已扫描 ${discovery.candidate_count || 0} 个候选目录`;
+          ElementPlus.ElMessage.warning(this.discoveryMessage);
+          return;
+        }
+        Object.assign(this.emulatorConfig, discovery.emulator || {});
+        const apply = await window.WebUIApi.request('POST', '/device/discover/apply', { emulator: this.emulatorConfig });
+        const applyPayload = apply.data || {};
+        if (!apply.ok || applyPayload.ok === false) {
+          ElementPlus.ElMessage.error(window.WebUIApi.errorMessage(applyPayload, '应用自动定位结果失败'));
+          return;
+        }
+        this.discoveryMessage = discovery.adb_device && discovery.adb_device.connected
+          ? `已定位 MuMu，并连接 ${discovery.adb_device.serial}`
+          : '已定位 MuMu 路径，启动模拟器后可刷新诊断';
+        this.savedAt = Date.now();
+        ElementPlus.ElMessage.success(this.discoveryMessage);
+      } catch (e) {
+        ElementPlus.ElMessage.error('自动定位失败: ' + e);
+      } finally {
+        this.discovering = false;
+      }
+    },
+    saveSettings() {
+      if (this.executionBusy || this.saving) return;
+      this.saving = true;
+      this.$emit('settings-change', { done: this.onSaved });
+    },
+    onSaved(ok) {
+      this.saving = false;
+      if (ok) this.savedAt = Date.now();
     },
   },
   template: `
@@ -76,10 +153,8 @@ const SettingsPanel = {
   <div class="settings-hero">
     <div>
       <h2 class="settings-title">运行配置</h2>
+      <p class="text-sm text-gray-500 mt-1">{{ syncStatusText }}</p>
     </div>
-    <el-button type="primary" size="large" @click="saveAllSettings" :disabled="executionBusy">
-      <i class="fa fa-save mr-1"></i>保存设置
-    </el-button>
   </div>
 
   <el-alert v-if="executionBusy" type="warning" :closable="false" show-icon class="settings-busy-alert"
@@ -130,6 +205,16 @@ const SettingsPanel = {
         <el-form-item label="CPU 核心限制">
           <el-input-number v-model="appConfig.cpu_cores" :min="0" :max="64" controls-position="right" />
         </el-form-item>
+
+        <div class="settings-field-row">
+          <div class="settings-field-text">
+            <div class="settings-field-title">OCR 使用 GPU</div>
+            <div class="settings-help">
+              需要先运行 scripts\\install.bat python gpu。保存后重启 AutoScriptor，普通、线程局部和数字 OCR 才会统一切换设备。
+            </div>
+          </div>
+          <el-switch v-model="ocrConfig.use_gpu" />
+        </div>
       </article>
 
       <article class="settings-card">
@@ -137,7 +222,11 @@ const SettingsPanel = {
           <div>
             <h3><i class="fa fa-desktop"></i>模拟器连接</h3>
           </div>
+          <el-button size="small" type="primary" plain :loading="discovering" @click="autoDiscoverMumu">
+            <i class="fa fa-search mr-1"></i>自动定位 MuMu
+          </el-button>
         </div>
+        <el-alert v-if="discoveryMessage" type="info" :closable="false" :title="discoveryMessage" class="mb-3"></el-alert>
 
         <div class="settings-field-grid">
           <el-form-item label="游戏服务器">
@@ -168,11 +257,5 @@ const SettingsPanel = {
   </el-form>
 
   <diagnostics-panel embedded></diagnostics-panel>
-
-  <div class="settings-footer-save">
-    <el-button type="primary" size="large" @click="saveAllSettings" :disabled="executionBusy">
-      <i class="fa fa-save mr-1"></i>保存设置
-    </el-button>
-  </div>
 </section>`,
 };

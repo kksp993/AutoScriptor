@@ -18,12 +18,13 @@ class TestTaskDebugMode(unittest.TestCase):
         cfg._config = self._cfg_backup
         task_registry._tasks = self._reg_backup
 
-    def _install_task_config(self, *, debug_mode: bool = False):
+    def _install_task_config(self, *, debug_mode: bool = False, app_debug_mode: bool = False):
         cfg._config = {
             "app": {
                 "app_to_start": "com.test.app",
                 "max_retry": 1,
                 "restart_on_error": True,
+                "debug_mode": app_debug_mode,
             },
             "emulator": {"post_execution": "close_game_only"},
             "ocr": {"use_gpu": False},
@@ -53,13 +54,28 @@ class TestTaskDebugMode(unittest.TestCase):
         mixctrl = SimpleNamespace(release_all_keys=lambda: None)
 
         with patch.object(tm_mod.runtime_ctx, "mixctrl", mixctrl):
-            with patch.object(tm, "_archive_error") as archive_error:
-                with patch.object(tm, "_try_recover_app") as recover_app:
-                    with patch.object(tm_mod.traceback, "print_exc"):
+            with patch.object(tm_mod, "new_task_video_recorder", return_value=None):
+                with patch.object(tm, "_archive_error") as archive_error:
+                    with patch.object(tm, "_try_recover_app") as recover_app:
                         self.assertFalse(tm._execute_single_task("测试/任务"))
 
         archive_error.assert_called_once()
         recover_app.assert_not_called()
+
+    def test_task_video_uses_global_app_debug_mode(self):
+        from services.core import task_manager as tm_mod
+        from services.core.task_manager import TaskManager
+
+        self._install_task_config(app_debug_mode=True)
+        tm = TaskManager()
+        mixctrl = SimpleNamespace(release_all_keys=lambda: None)
+
+        with patch.object(tm_mod.runtime_ctx, "mixctrl", mixctrl):
+            with patch.object(tm_mod, "new_task_video_recorder", return_value=None) as recorder:
+                with patch.object(tm, "_archive_error"):
+                    self.assertFalse(tm._execute_single_task("测试/任务"))
+
+        recorder.assert_called_once_with("测试/任务", True)
 
     def test_scheduler_debug_task_skips_login_restart_and_post_action(self):
         from services.core import scheduler as scheduler_mod
@@ -83,21 +99,110 @@ class TestTaskDebugMode(unittest.TestCase):
         sched = Scheduler()
         sched.set_task_manager(tm)
 
-        with patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}):
-            with patch.object(cfg, "save_config"):
-                with patch("services.core.scheduler.runtime_ctx.refresh"):
-                    with patch("AutoScriptor.utils.perf.boost"):
-                        with patch("AutoScriptor.utils.perf.unboost"):
-                            with patch("services.core.scheduler.notify_from_config"):
-                                with patch.object(sched, "_maybe_daily_restart") as daily_restart:
-                                    with patch.object(sched, "_ensure_character_logged_in") as ensure_login:
-                                        with patch.object(sched, "_post_execution_action") as post_action:
-                                            sched._run_task_pipeline(explicit_tasks=["测试/任务"])
+        with (
+            patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}),
+            patch.object(cfg, "save_config"),
+            patch("services.core.scheduler.runtime_ctx.refresh"),
+            patch("services.core.scheduler.notify_runtime_event"),
+            patch.object(sched, "_maybe_daily_restart") as daily_restart,
+            patch.object(sched, "_ensure_character_logged_in") as ensure_login,
+            patch.object(sched, "_post_execution_action") as post_action,
+        ):
+            sched._run_task_pipeline(explicit_tasks=["测试/任务"])
 
         self.assertEqual(tm.executed, ["测试/任务"])
         daily_restart.assert_not_called()
         ensure_login.assert_not_called()
         post_action.assert_not_called()
+
+    def test_scheduler_can_force_login_for_debug_task_with_param_override(self):
+        from services.core.scheduler import Scheduler
+
+        self._install_task_config(debug_mode=True)
+
+        class FakeTaskManager:
+            def __init__(self):
+                self._cancel_event = Event()
+                self.calls = []
+
+            def execute_tasks(self, tasks, *, param_overrides=None):
+                self.calls.append((list(tasks), param_overrides))
+                return 1, 0
+
+            def reload_tasks(self):
+                return None
+
+            def _reset_cancel(self):
+                self._cancel_event.clear()
+
+        tm = FakeTaskManager()
+        sched = Scheduler()
+        sched.set_task_manager(tm)
+        overrides = {"测试/任务": {"redeem_code": "临时代码"}}
+
+        with (
+            patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}),
+            patch.object(cfg, "save_config"),
+            patch("services.core.scheduler.runtime_ctx.refresh"),
+            patch("services.core.scheduler.notify_runtime_event"),
+            patch.object(sched, "_maybe_daily_restart") as daily_restart,
+            patch.object(sched, "_ensure_character_logged_in") as ensure_login,
+            patch.object(sched, "_post_execution_action") as post_action,
+        ):
+            sched._run_task_pipeline(
+                explicit_tasks=["测试/任务"],
+                force_login=True,
+                param_overrides=overrides,
+            )
+
+        self.assertEqual(tm.calls, [(["测试/任务"], overrides)])
+        daily_restart.assert_not_called()
+        ensure_login.assert_called_once()
+        post_action.assert_not_called()
+
+    def test_scheduler_runs_same_debug_task_with_distinct_param_overrides(self):
+        from services.core.scheduler import Scheduler
+
+        self._install_task_config(debug_mode=True)
+
+        class FakeTaskManager:
+            def __init__(self):
+                self._cancel_event = Event()
+                self.calls = []
+
+            def execute_tasks(self, tasks, *, param_overrides=None):
+                self.calls.append((list(tasks), param_overrides))
+                return 1, 0
+
+            def reload_tasks(self):
+                return None
+
+            def _reset_cancel(self):
+                self._cancel_event.clear()
+
+        tm = FakeTaskManager()
+        sched = Scheduler()
+        sched.set_task_manager(tm)
+        runs = [
+            {"id": "code-1", "task": "测试/任务", "params": {"redeem_code": "A"}},
+            {"id": "code-2", "task": "测试/任务", "params": {"redeem_code": "B"}},
+        ]
+
+        with (
+            patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}),
+            patch.object(cfg, "save_config"),
+            patch("services.core.scheduler.runtime_ctx.refresh"),
+            patch("services.core.scheduler.notify_runtime_event"),
+            patch.object(sched, "_maybe_daily_restart"),
+            patch.object(sched, "_ensure_character_logged_in"),
+            patch.object(sched, "_post_execution_action"),
+        ):
+            sched.run_direct_sequence(runs, force_login=True)
+
+        self.assertEqual(tm.calls, [
+            (["测试/任务"], {"测试/任务": {"redeem_code": "A"}}),
+            (["测试/任务"], {"测试/任务": {"redeem_code": "B"}}),
+        ])
 
 
 if __name__ == "__main__":

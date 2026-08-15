@@ -7,7 +7,35 @@ server-side projections, notify scheduler, then bump the public config version.
 from __future__ import annotations
 
 from copy import deepcopy
+from contextlib import contextmanager
+import logging
+from threading import RLock, local
 from typing import Any, Callable
+
+from services.core.task_ordering import normalize_task_ordering_overlay
+
+logger = logging.getLogger(__name__)
+
+MUMU_ADB_BASE_PORT = 16384
+MUMU_ADB_PORT_STEP = 32
+
+
+def default_mumu_adb_addr(index: Any) -> str:
+    try:
+        n = int(index)
+    except (TypeError, ValueError):
+        n = 0
+    if n < 0:
+        n = 0
+    return f"127.0.0.1:{MUMU_ADB_BASE_PORT + n * MUMU_ADB_PORT_STEP}"
+
+
+def normalize_emulator_config(emulator: dict[str, Any]) -> dict[str, Any]:
+    data = deepcopy(emulator)
+    adb_addr = str(data.get("adb_addr", "") or "").strip()
+    if not adb_addr or adb_addr.startswith("YOUR_") or adb_addr.endswith(":0"):
+        data["adb_addr"] = default_mumu_adb_addr(data.get("index", 0))
+    return data
 
 
 class WebUILifecycleService:
@@ -15,13 +43,13 @@ class WebUILifecycleService:
         "app",
         "emulator",
         "ocr",
-        "llm",
         "scheduler",
         "tasks",
         "deploy",
         "notify",
         "update",
         "remote_access",
+        "task_ordering",
     )
 
     def __init__(
@@ -33,6 +61,8 @@ class WebUILifecycleService:
         refresh_order_map: Callable[[], None],
         mark_config_changed: Callable[[str], int],
         apply_log_level: Callable[[], None] | None = None,
+        clear_background: Callable[[], None] | None = None,
+        reload_ui_map: Callable[[], None] | None = None,
     ):
         self.cfg = cfg
         self.task_manager = task_manager
@@ -41,11 +71,57 @@ class WebUILifecycleService:
         self.refresh_order_map = refresh_order_map
         self.mark_config_changed = mark_config_changed
         self.apply_log_level = apply_log_level
+        self.clear_background = clear_background
+        self.reload_ui_map = reload_ui_map
+        self._config_operation_lock = RLock()
+        self._config_operation_state = local()
+
+    @contextmanager
+    def config_operation(self):
+        """Serialize WebUI config reload/save lifecycles.
+
+        Task saves, task-order saves and config sync all touch the shared cfg
+        object and the same persistence files.  Keep the whole lifecycle
+        atomic from cfg mutation through UI projection refresh so concurrent
+        requests cannot validate against one tree and persist against another.
+        """
+        if getattr(self._config_operation_state, "depth", 0) > 0:
+            self._config_operation_state.depth += 1
+            try:
+                yield
+            finally:
+                self._config_operation_state.depth -= 1
+            return
+
+        with self._config_operation_lock:
+            with self.task_manager.config_transaction():
+                self._config_operation_state.depth = 1
+                try:
+                    yield
+                finally:
+                    self._config_operation_state.depth = 0
 
     def reload_tasks(self, security_key: str | None = None, *, reason: str = "reload tasks") -> int:
-        self.task_manager.reload_tasks(security_key)
-        self.refresh_order_map()
-        return self.mark_config_changed(reason)
+        return self.reload_all(security_key, reason=reason)
+
+    def reload_task_state(self, *, reason: str = "reload tasks") -> int:
+        with self.config_operation():
+            self._clear_background()
+            return self._refresh_task_projection(reason)
+
+    def sync_all_config(self, security_key: str | None = None, *, reason: str = "sync config") -> int:
+        with self.config_operation():
+            self.cfg.reload_preserving_decrypted_credentials(security_key)
+            self.refresh_order_map()
+            self._apply_log_level()
+            return self.mark_config_changed(reason)
+
+    def reload_all(self, security_key: str | None = None, *, reason: str = "reload all") -> int:
+        with self.config_operation():
+            self.task_manager.reload_tasks(security_key)
+            self._reload_ui_map_cache()
+            self._clear_background()
+            return self._refresh_task_projection(reason)
 
     def save_runtime_config(self, data: dict[str, Any]) -> int:
         missing = [key for key in ("app", "emulator", "ocr") if key not in data]
@@ -55,35 +131,127 @@ class WebUILifecycleService:
             self.cfg["app"] = deepcopy(data["app"])
             if isinstance(data.get("scheduler"), dict):
                 self.cfg["scheduler"] = deepcopy(data["scheduler"])
-            self.cfg["emulator"] = deepcopy(data["emulator"])
+            self.cfg["emulator"] = normalize_emulator_config(data["emulator"])
             self.cfg["ocr"] = deepcopy(data["ocr"])
-            self.cfg.save_config()
+            self._save_global_config()
         self._apply_log_level()
         return self.mark_config_changed("save config")
 
-    def save_tasks(self, tasks: dict[str, Any]) -> int:
-        cleaned = self.task_tree_service.strip_runtime_fields(tasks)
+    def apply_discovered_emulator_config(self, emulator: dict[str, Any]) -> int:
+        if not isinstance(emulator, dict):
+            raise ValueError("invalid emulator payload")
+        allowed = {"index", "adb_addr", "mumu_folder", "emu_path", "adb_path", "post_execution"}
+        next_emulator = deepcopy(self.cfg["emulator"])
+        for key in allowed:
+            if key in emulator:
+                next_emulator[key] = emulator[key]
         with self.task_manager.config_transaction():
+            self.cfg["emulator"] = normalize_emulator_config(next_emulator)
+            self._save_global_config()
+        return self.reload_all(reason="apply device discovery")
+
+    def save_tasks(self, tasks: dict[str, Any]) -> int:
+        with self.config_operation():
+            cleaned = self.task_tree_service.strip_runtime_fields(tasks)
+            old_tasks = deepcopy(self.cfg._config.get("tasks", {}))
+            reset_paths = self.task_tree_service.collect_task_reset_paths(old_tasks, cleaned)
             self.cfg._config["tasks"] = cleaned
+            if reset_paths:
+                from AutoScriptor.utils.task_state import clear_task_status
+
+                for path in reset_paths:
+                    self.task_manager._clear_human_takeover_state(path)
+                    clear_task_status(None, task_path=path, save=False)
             self.cfg.save_config()
-            self.task_manager.reload_tasks()
-        self.scheduler.wake()
-        self.refresh_order_map()
-        return self.mark_config_changed("save tasks")
+            self.scheduler.wake()
+            return self._refresh_task_projection("save tasks")
+
+    def save_task_ordering(self, raw_overlay: dict[str, Any]) -> int:
+        """Persist one global task order without rewriting account task data."""
+        with self.config_operation():
+            if not isinstance(raw_overlay, dict):
+                raise ValueError("invalid task ordering payload")
+            next_overlay = normalize_task_ordering_overlay(raw_overlay)
+
+            current_tasks = self.cfg._config.get("tasks", {})
+            projection = self.task_tree_service.task_ordering_projection(current_tasks)
+            candidate_projection = self.task_tree_service.task_ordering_projection_with_overlay(next_overlay, current_tasks)
+            if projection.task_paths != candidate_projection.task_paths:
+                raise ValueError("task tree changed while saving ordering")
+
+            self.cfg._config["task_ordering"] = next_overlay
+            self._save_global_config()
+            self.scheduler.wake()
+            return self._refresh_task_projection("save task ordering")
+
+    def save_task_ordering_layout(self, raw_layout: dict[str, Any]) -> int:
+        """Deprecated graph-layout endpoint; keep a no-op for older clients."""
+        with self.config_operation():
+            if not isinstance(raw_layout, dict):
+                raise ValueError("invalid task ordering layout payload")
+            current_overlay = normalize_task_ordering_overlay(self.cfg._config.get("task_ordering", {}))
+            self.cfg._config["task_ordering"] = current_overlay
+            self._save_global_config()
+            self.refresh_order_map()
+            return self.mark_config_changed("save task ordering layout")
+
+    def save_character_task(self, server: str, character: str, task_path: str, task_data: dict[str, Any]) -> int:
+        with self.config_operation():
+            server = (server or "").strip()
+            character = (character or "").strip()
+            task_path = (task_path or "").strip().replace("\\", "/")
+            if not server or not character or not task_path:
+                raise ValueError("invalid character task payload")
+            chars = self.cfg._account_data.get("characters", {})
+            if server not in chars or character not in chars[server]:
+                raise KeyError(f"角色 '{server}/{character}' 不存在")
+
+            import dpath
+
+            char_node = chars[server][character]
+            tree = deepcopy(char_node.get("tasks") or {})
+            old_leaf = deepcopy(dpath.get(tree, task_path))
+            self.task_tree_service.apply_character_task_leaf(tree, task_path, task_data)
+            cleaned_tree = self.task_tree_service.strip_runtime_fields(tree)
+            new_leaf = dpath.get(cleaned_tree, task_path)
+            reset_paths = [task_path] if self.task_tree_service.task_leaf_needs_reset(old_leaf, new_leaf) else []
+            if reset_paths:
+                for key in ("human_takeover", "human_takeover_error", "human_takeover_at", "error"):
+                    new_leaf.pop(key, None)
+                new_leaf["next_exec_time"] = 0
+                dpath.set(cleaned_tree, task_path, new_leaf)
+
+            char_node["tasks"] = cleaned_tree
+            ac = self.cfg.active_character()
+            if ac.get("server") == server and ac.get("name") == character:
+                self.cfg._config["tasks"] = cleaned_tree
+                if reset_paths:
+                    from AutoScriptor.utils.task_state import clear_task_status
+
+                    for path in reset_paths:
+                        self.task_manager._clear_human_takeover_state(path)
+                        clear_task_status(None, task_path=path, save=False)
+                self.cfg.save_config()
+            else:
+                if reset_paths:
+                    status_tasks = char_node.setdefault("status", {}).setdefault("tasks", {})
+                    for path in reset_paths:
+                        status_tasks.pop(path, None)
+                self.cfg._save_account_file()
+            self.scheduler.wake()
+            return self._refresh_task_projection("save character task")
 
     def switch_character(self, server: str, character: str, *, reason: str = "switch character") -> int:
-        self.task_manager.switch_character_and_reload(server, character)
+        with self.task_manager.config_transaction():
+            self.cfg.switch_character(server, character)
         self.scheduler.invalidate_login()
-        self.refresh_order_map()
-        return self.mark_config_changed(reason)
+        return self._refresh_task_projection(reason)
 
     def switch_account(self, name: str, security_key: str) -> int:
         with self.task_manager.config_transaction():
             self.cfg.switch_account(name, security_key)
-            self.task_manager.reload_tasks(security_key)
         self.scheduler.invalidate_login()
-        self.refresh_order_map()
-        return self.mark_config_changed("switch account")
+        return self._refresh_task_projection("switch account")
 
     def save_dispatch_queue(self, raw_queue) -> tuple[list[dict[str, str]], int]:
         queue = self.task_tree_service.normalize_dispatch_queue(raw_queue)
@@ -109,7 +277,9 @@ class WebUILifecycleService:
     ) -> int:
         with self.task_manager.config_transaction():
             self.cfg.add_account(name, account, password, server, character_name, security_key)
-        return self.mark_config_changed("add account")
+            self.cfg.switch_account(name, security_key)
+        self.scheduler.invalidate_login()
+        return self._refresh_task_projection("add account")
 
     def delete_account(self, name: str) -> int:
         with self.task_manager.config_transaction():
@@ -119,7 +289,10 @@ class WebUILifecycleService:
     def add_character(self, server: str, character: str) -> int:
         with self.task_manager.config_transaction():
             self.cfg.add_character(server, character)
-        return self.mark_config_changed("add character")
+            self.cfg.switch_character(server, character)
+            self.task_manager.reload_tasks()
+        self.scheduler.invalidate_login()
+        return self._refresh_task_projection("add character")
 
     def delete_character(self, server: str, character: str) -> int:
         with self.task_manager.config_transaction():
@@ -132,7 +305,7 @@ class WebUILifecycleService:
         return self.mark_config_changed("delete character")
 
     def reload_verified_account(self, security_key: str) -> str:
-        self.task_manager.reload_tasks(security_key)
+        self.cfg.reload_preserving_decrypted_credentials(security_key)
         character_name = self.ensure_active_character_in_game()
         self.refresh_order_map()
         return character_name
@@ -140,9 +313,7 @@ class WebUILifecycleService:
     def update_account_credentials(self, account: str, password: str, security_key: str) -> tuple[str, int]:
         with self.task_manager.config_transaction():
             self.cfg.update_current_account_credentials(account, password, security_key)
-            self.task_manager.reload_tasks(security_key)
-        self.refresh_order_map()
-        version = self.mark_config_changed("update account credentials")
+        version = self._refresh_task_projection("update account credentials")
         character_name = self.cfg._config.get("game", {}).get("character_name", "")
         return character_name, version
 
@@ -172,7 +343,7 @@ class WebUILifecycleService:
                     value = self.task_tree_service.strip_runtime_fields(value)
                 self.cfg._config[key] = value
             self.cfg.save_config()
-            self.task_manager.reload_tasks()
+        self._mark_tasks_updated()
         self.refresh_order_map()
         self._apply_log_level()
         return self.mark_config_changed("import config")
@@ -181,7 +352,7 @@ class WebUILifecycleService:
         with self.task_manager.config_transaction():
             self.cfg["notify.enabled"] = enabled
             self.cfg["notify.config_yaml"] = config_yaml
-            self.cfg.save_config()
+            self._save_global_config()
         return self.mark_config_changed("save notify settings")
 
     def save_deploy_sections(self, data: dict[str, Any]) -> int:
@@ -189,7 +360,7 @@ class WebUILifecycleService:
             for section in ("deploy", "notify", "update", "remote_access"):
                 if section in data:
                     self.cfg._config[section] = deepcopy(data[section])
-            self.cfg.save_config()
+            self._save_global_config()
         self._apply_log_level()
         return self.mark_config_changed("save deploy settings")
 
@@ -206,3 +377,40 @@ class WebUILifecycleService:
     def _apply_log_level(self) -> None:
         if self.apply_log_level is not None:
             self.apply_log_level()
+
+    def _clear_background(self) -> None:
+        if self.clear_background is not None:
+            self.clear_background()
+            return
+        from AutoScriptor.core.background import bg
+
+        bg.clear(clear_signals=True)
+
+    def _reload_ui_map_cache(self) -> None:
+        if self.reload_ui_map is not None:
+            self.reload_ui_map()
+            return
+        from AutoScriptor.utils.ui_map import reload_ui_map
+
+        reload_ui_map()
+
+    def _mark_tasks_updated(self) -> None:
+        marker = getattr(self.scheduler, "mark_tasks_updated", None)
+        if callable(marker):
+            marker()
+            return
+        event = getattr(self.scheduler, "_tasks_updated", None)
+        if event is not None and hasattr(event, "set"):
+            event.set()
+
+    def _refresh_task_projection(self, reason: str) -> int:
+        self._mark_tasks_updated()
+        self.refresh_order_map()
+        return self.mark_config_changed(reason)
+
+    def _save_global_config(self) -> None:
+        saver = getattr(self.cfg, "save_global_config", None)
+        if callable(saver):
+            saver()
+        else:
+            self.cfg.save_config()

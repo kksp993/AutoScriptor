@@ -24,7 +24,7 @@ def _get_app_version() -> str:
     for path in candidates:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             continue
         version = str(data.get("version") or "").strip()
         if version:
@@ -46,17 +46,14 @@ def _render_center_line(content: str, inner_width: int, color_prefix: str = "", 
 
 def _print_banner(small_banner: bool = False, banner_only: bool = False):
     """打印商业化风格的启动横幅，自动适配终端宽度。"""
-    try:
-        cols = shutil.get_terminal_size(fallback=(100, 24)).columns
-    except Exception:
-        cols = 100
+    cols = shutil.get_terminal_size(fallback=(100, 24)).columns
     inner = max(72, min(cols - 4, 120))
     top = f"╔{'═' * inner}╗"
     bottom = f"╚{'═' * inner}╝"
     if small_banner:
         print("------------------------------"*4)
         print("   ╭──────╮              ╭╮╭╮╭╮╭╮   ")
-        print("   │  AutoScriptor  │    KKsp993     ")
+        print("   │  AutoScriptor  │    Kksp993     ")
         print("   ╰──────╯    https://github.com/kksp993/AutoScriptor")
         print("------------------------------"*4)
         return

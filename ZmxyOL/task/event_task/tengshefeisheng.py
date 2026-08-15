@@ -1,10 +1,11 @@
-import traceback
 from AutoScriptor import *
 from ZmxyOL import *
 
-from AutoScriptor.utils.logger import logger
-
-@register_task
+@register_task(
+    path_cn="活动任务/腾蛇飞升",
+    description="完成腾蛇飞升活动流程。",
+    task_doc="【未完成】完成腾蛇飞升活动流程。",
+)
 def task():
     ensure_in("村庄")
     while ui_T(T("仙盟",box=Box(16,30,924,400))):
@@ -24,13 +25,3 @@ def task():
     click(B(1200,30,30,30))
     wait_for_appear(T("天赋晋升"))
     click(B(1200,30,30,30))
-
-if __name__ == "__main__":
-
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

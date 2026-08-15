@@ -1,5 +1,4 @@
 import enum
-import traceback
 
 from ZmxyOL import *
 from AutoScriptor import *
@@ -52,12 +51,16 @@ _DEFAULT_BATTLE_CONFIG = TableParam(
         "獐王星宫": {"difficulty": JhsyNandu.灵域, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
         "犴神星宫": {"difficulty": JhsyNandu.灵域, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
         "兔神星宫": {"difficulty": JhsyNandu.灵域, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
+        "猪王星宫": {"difficulty": JhsyNandu.灵域, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
     },
     column_labels={"difficulty": "难度", "cancel_on_failed": "不用点券复活", "battle_flow": "战斗招式"},
 )
 
 
-@register_task
+@register_task(
+    description="根据配置挑战极寒深渊副本。",
+    path_cn="每日任务/极北/极寒深渊/极渊副本",
+)
 def task(
     lingqi_priority: tuple[LingQi, ...] = _DEFAULT_LINGQI_PRIORITY,
     battle_config: TableParam = _DEFAULT_BATTLE_CONFIG,
@@ -78,7 +81,7 @@ def task(
 
     def _after_no_remains():
         click(B(1200, 30, 30, 30))
-        wait_for_appear(T("回家", box=Box(29, 613, 77, 88).margin()))
+        wait_for_appear(T("回家", box=Box(29, 656, 77, 54).margin()))
 
     def _run_battle(name: str, is_lingyu: bool):
         row = battle_config[name]
@@ -92,6 +95,7 @@ def task(
             h.set(has_cd=True, speed_x=3).battle_task(
                 crash_suddenly=True, bonus_x=3,
                 cancel_on_failed=row_cancel, flow_name=row_flow,
+                check_pioneer=True,
             )
         else:
             h.set(has_cd=True, speed_x=3).battle_task(
@@ -99,6 +103,7 @@ def task(
                 has_loading_after_battle=True,
                 exit_loc=get_task_table(name)["exit_loc"],
                 cancel_on_failed=row_cancel, flow_name=row_flow,
+                check_pioneer=True,
             )
 
     # ── 阶段一：灵气匹配关卡打灵狱（共享3次，只打1个本） ──
@@ -150,13 +155,3 @@ def task(
             _run_battle(name, is_lingyu=False)
         else:
             _after_no_remains()
-
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

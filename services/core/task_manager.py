@@ -9,14 +9,13 @@ import datetime
 import enum
 import importlib
 import inspect
-import os
 import sys
-import traceback
 from contextlib import contextmanager
-from typing import List, Tuple
+from typing import Any, List, Tuple
 from threading import Event, RLock
 
 import dpath
+from dpath.exceptions import PathNotFound
 from AutoScriptor.utils.cancel import TaskCancelled, bind_cancel_event
 from AutoScriptor.utils.logger import logger
 
@@ -26,7 +25,16 @@ from AutoScriptor.utils.cancel import cancellable_sleep as sleep
 from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.task_registry import task_registry
 from AutoScriptor.utils.logger import set_current_task
+from AutoScriptor.utils.task_state import (
+    clear_task_status,
+    get_task_status,
+    progress_incomplete,
+    progress_label,
+    set_current_task_path,
+)
+from AutoScriptor.utils.paths import get_logs_root
 from services.core.runtime_context import runtime_ctx
+from AutoScriptor.utils.task_video_recorder import new_task_video_recorder
 
 
 # ── 下次执行时间计算 ──
@@ -74,7 +82,7 @@ def is_task_debug_mode(task_path: str, task_data: dict | None = None) -> bool:
         return bool(task_data.get("debug_mode") or task_data.get("debug"))
     try:
         data = dpath.get(cfg["tasks"], task_path)
-    except Exception:
+    except PathNotFound:
         return False
     return isinstance(data, dict) and bool(data.get("debug_mode") or data.get("debug"))
 
@@ -147,11 +155,25 @@ class TaskManager:
         self._cancel_event = Event()
         bind_cancel_event(self._cancel_event)
         self._cfg_lock = RLock()
+        self._runtime_state_lock = RLock()
+        self._current_task_path: str | None = None
 
     # ── 公共接口 ──
 
     def request_cancel(self):
         self._cancel_event.set()
+
+    def reset_cancel(self):
+        self._reset_cancel()
+
+    def current_task_path(self) -> str | None:
+        """Return the task currently being executed for WebUI display only."""
+        with self._runtime_state_lock:
+            return self._current_task_path
+
+    def _set_current_task_path_for_runtime(self, task_path: str | None) -> None:
+        with self._runtime_state_lock:
+            self._current_task_path = task_path
 
     def _reset_cancel(self):
         self._cancel_event.clear()
@@ -167,10 +189,15 @@ class TaskManager:
             yield
 
     def switch_character_and_reload(self, server: str, character: str) -> None:
-        """Switch the active character and reload task registry/config atomically."""
+        """Switch the active character and perform a full task registry reload."""
         with self.config_transaction():
             cfg.switch_character(server, character)
             self.reload_tasks()
+
+    def switch_character(self, server: str, character: str) -> None:
+        """Switch the active character without rebuilding task modules."""
+        with self.config_transaction():
+            cfg.switch_character(server, character)
 
     def execute_tasks(
         self,
@@ -178,6 +205,7 @@ class TaskManager:
         *,
         max_attempts: int | None = None,
         attempt_offset: int = 0,
+        param_overrides: dict[str, dict[str, Any]] | None = None,
     ) -> Tuple[int, int]:
         """执行一组任务。返回 (成功数, 失败数)。"""
         if self._cancel_event.is_set():
@@ -193,6 +221,7 @@ class TaskManager:
                 task,
                 max_attempts=max_attempts,
                 attempt_offset=attempt_offset,
+                param_override=(param_overrides or {}).get(task),
             ):
                 success += 1
             else:
@@ -205,29 +234,16 @@ class TaskManager:
             try:
                 cfg.reload_preserving_decrypted_credentials(security_key)
                 # 清除 ZmxyOL 子模块缓存，强制重新导入
-                for name in [m for m in sys.modules if m.startswith('ZmxyOL.')]:
+                for name in [m for m in sys.modules if m == "ZmxyOL" or m.startswith("ZmxyOL.")]:
                     sys.modules.pop(name, None)
-                try:
-                    from AutoScriptor.battle_character.hero import reload_battle_character_modules
+                from AutoScriptor.battle_character.hero import reload_battle_character_modules
 
-                    reload_battle_character_modules()
-                except Exception as e:
-                    logger.warning("职业脚本热重载失败（将使用已缓存职业）: %s", e)
-                try:
-                    import ZmxyOL
-                    importlib.reload(ZmxyOL)
-                except Exception:
-                    pass
+                reload_battle_character_modules()
                 # 重新发现并注册任务（不再由 import 自动触发）
                 from ZmxyOL.task import force_reload_tasks
                 force_reload_tasks()
                 logger.info("✅ 任务重新加载完成")
             except Exception as e:
-                if _is_request_human_takeover(e):
-                    logger.error(f"Request requires human takeover: {task}, reason: {e}")
-                    with self._cfg_lock:
-                        self._update_next_exec_time(task)
-                    return False
                 logger.error(f"❌ 任务重新加载失败: {e}")
                 raise
             finally:
@@ -241,6 +257,7 @@ class TaskManager:
         *,
         max_attempts: int | None = None,
         attempt_offset: int = 0,
+        param_override: dict[str, Any] | None = None,
     ) -> bool:
         """执行单个任务（含重试）。返回是否成功。"""
         max_retry = cfg["app"].get("max_retry", 0)
@@ -256,20 +273,33 @@ class TaskManager:
             if self._cancel_event.is_set():
                 return False
             has_local_retry = attempt + 1 in attempt_numbers
+            task_video = None
 
             set_current_task(task.rsplit("/", 1)[-1])
+            set_current_task_path(task)
+            self._set_current_task_path_for_runtime(task)
             try:
                 try:
-                    fn, kwargs = self._prepare_task(task)
+                    fn, kwargs = self._prepare_task(task, param_override=param_override)
                 except KeyError:
                     logger.error(f"❌ 任务函数未注册: {task}，跳过")
                     return False
 
                 assert runtime_ctx.mixctrl is not None, "mixctrl 未初始化，请先调用 runtime_ctx.init()"
                 runtime_ctx.mixctrl.release_all_keys()
+                clear_task_status("progress", task_path=task, save=False)
+                record_video = cfg["app"].get("debug_mode") or is_task_debug_mode(task)
+                task_video = new_task_video_recorder(task, bool(record_video))
                 fn(**kwargs)
+                if self._task_progress_incomplete(task):
+                    label = self._task_progress_label(task)
+                    raise TaskRequireReTry(f"任务进度未完成: {label}")
+                if task_video:
+                    task_video.stop(keep=False)
+                    task_video = None
                 logger.info(f"▶️  执行成功: {task}")
                 with self._cfg_lock:
+                    clear_task_status("progress", task_path=task, save=False)
                     self._clear_human_takeover_state(task)
                     self._update_next_exec_time(task)
                 return True
@@ -281,6 +311,8 @@ class TaskManager:
                         continue
                     return False
                 logger.warning(f"⚠️ 重试次数已满: {task}，原因: {e}")
+                with self._cfg_lock:
+                    self._mark_incomplete_progress_takeover(task, f"重试次数已满: {e}")
                 return False
 
             except RequestHumanTakeover as e:
@@ -304,21 +336,32 @@ class TaskManager:
                         self._mark_human_takeover(task, e)
                     return False
                 logger.error("❌ 执行失败: %s，错误: %r", task, e)
-                self._archive_error(task, e)
-                traceback.print_exc()
+                video_path = task_video.stop(keep=True) if task_video else None
+                self._archive_error(task, e, video_path=video_path)
+                if task_video:
+                    task_video.cleanup_local()
+                    task_video = None
                 if is_task_debug_mode(task):
                     logger.info("🔄 debug_mode: 跳过失败恢复，不关闭/重启游戏: %s", task)
                     return False
                 if not self._try_recover_app(attempt, task=task):
+                    with self._cfg_lock:
+                        self._mark_incomplete_progress_takeover(task, f"执行失败: {e}")
                     return False
                 if attempt < max_retry:
                     logger.info(f"🔄 重试 ({attempt + 1}/{max_retry})")
                     if has_local_retry:
                         continue
                     return False
+                with self._cfg_lock:
+                    self._mark_incomplete_progress_takeover(task, f"重试次数已满: {e}")
                 return False
 
             finally:
+                if task_video:
+                    task_video.stop(keep=False)
+                self._set_current_task_path_for_runtime(None)
+                set_current_task_path(None)
                 set_current_task(None)
                 logger.info(f"Task [END] {task}")
 
@@ -326,7 +369,7 @@ class TaskManager:
 
     # ── 任务准备 ──
 
-    def _prepare_task(self, task: str):
+    def _prepare_task(self, task: str, *, param_override: dict[str, Any] | None = None):
         """读取任务函数和参数快照（锁内）。"""
         with self._cfg_lock:
             task_data = dpath.get(cfg["tasks"], task)
@@ -334,11 +377,20 @@ class TaskManager:
             fn = task_registry.get_fn(task)
             if fn is None:
                 raise KeyError("fn")
-            return fn, self._resolve_params(task, task_data, fn)
+            return fn, self._resolve_params(task, task_data, fn, param_override=param_override)
 
-    def _resolve_params(self, task_path: str, task_data: dict, fn) -> dict:
+    def _resolve_params(
+        self,
+        task_path: str,
+        task_data: dict,
+        fn,
+        *,
+        param_override: dict[str, Any] | None = None,
+    ) -> dict:
         """解析任务参数（枚举恢复，TableParam 重建）。"""
-        raw = task_data.get('params', {})
+        raw = dict(task_data.get('params', {}) or {})
+        if param_override:
+            raw.update(param_override)
         meta = task_registry.get_param_meta(task_path)
         sig = inspect.signature(fn)
         has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
@@ -401,17 +453,34 @@ class TaskManager:
         """任务成功或用户重新激活后，清掉人工接管冻结标记。"""
         try:
             task_data = dpath.get(cfg["tasks"], task)
-        except Exception:
+        except PathNotFound:
             return
         if not isinstance(task_data, dict):
             return
         for key in ("human_takeover", "human_takeover_error", "human_takeover_at"):
             task_data.pop(key, None)
 
+    @staticmethod
+    def _task_progress_value(task: str):
+        return get_task_status("progress", None, task_path=task)
+
+    def _task_progress_incomplete(self, task: str) -> bool:
+        return progress_incomplete(self._task_progress_value(task))
+
+    def _task_progress_label(self, task: str) -> str:
+        return progress_label(self._task_progress_value(task)) or str(self._task_progress_value(task))
+
+    def _mark_incomplete_progress_takeover(self, task: str, reason: str) -> bool:
+        if not self._task_progress_incomplete(task):
+            return False
+        label = self._task_progress_label(task)
+        self._mark_human_takeover(task, RequestHumanTakeover(f"{reason}；进度 {label}"))
+        return True
+
     def _mark_human_takeover(self, task: str, exc: Exception) -> None:
         """
-        人工接管不是普通异常：WebUI 显示红色未完成，但调度器按冻结态处理，
-        直到用户手动重新启用/直跑或任务后续成功清除该标记。
+        人工接管不是普通异常：WebUI 显示红色未完成，调度器会等到
+        next_exec_time 到期后自动重试；任务后续成功会清除该标记。
         """
         task_data = dpath.get(cfg["tasks"], task)
         task_data["human_takeover"] = True
@@ -450,9 +519,6 @@ class TaskManager:
             dpath.set(cfg["tasks"], task + "/on", False)
         return None
 
-    # 向后兼容
-    _update_task_post_execution = _update_next_exec_time
-
     # ── 错误恢复 ──
 
     def _try_recover_app(self, retry_count: int, task: str | None = None) -> bool:
@@ -466,25 +532,20 @@ class TaskManager:
         if runtime_ctx.mixctrl is None:
             logger.warning("🔄 mixctrl 不可用，跳过应用重启恢复")
             return False
-        from AutoScriptor.utils.perf import mumu_safe_subprocess
-        with mumu_safe_subprocess():
-            try:
-                runtime_ctx.mixctrl.app.close(app_name)
-                self._wait_app_stopped(app_name)
-                if retry_count >= 1:
-                    self._restart_adb_and_wait()
-                if not self._wait_app_running(app_name):
-                    return False
-                # if not dismiss_floating_window(max_retries=40, debug=False):
-                #     logger.warning("🔄 悬浮窗关闭失败，尝试完全重启模拟器")
-                #     return self._full_emulator_restart(app_name)
-                sleep(5)
-                from ZmxyOL.nav.map_manager import mm
-                mm.set_region("登录")
-                return True
-            except Exception as e:
-                logger.error("🔄 应用重启失败: %r", e)
+        try:
+            runtime_ctx.mixctrl.app.close(app_name)
+            self._wait_app_stopped(app_name)
+            if retry_count >= 1:
+                self._restart_adb_and_wait()
+            if not self._wait_app_running(app_name):
                 return False
+            sleep(5)
+            from ZmxyOL.nav.map_manager import mm
+            mm.set_region("登录")
+            return True
+        except Exception as e:
+            logger.error("🔄 应用重启失败: %r", e)
+            return False
 
     def _wait_app_stopped(self, app_name: str, timeout: int = 15):
         """等待应用完全停止后再返回，防止 close 后立即 launch 被忽略。"""
@@ -518,35 +579,6 @@ class TaskManager:
         logger.error("🔄 应用启动超时 (%ds)", timeout)
         return False
 
-    def _full_emulator_restart(self, app_name: str) -> bool:
-        """完全重启模拟器（最后手段）。"""
-        try:
-            if runtime_ctx.mixctrl is not None:
-                try:
-                    runtime_ctx.mixctrl.app.close(app_name)
-                    sleep(2)
-                except Exception as e:
-                    logger.debug("🔄 关闭应用失败(可忽略): %s", e)
-
-            runtime_ctx._release_nemu_ipc()
-
-            from AutoScriptor.control.MumuAdaptor.mumu import Mumu
-            mumu = Mumu().select(cfg["emulator"]["index"])
-            mumu.power.shutdown(wait=True, timeout=30)
-
-            runtime_ctx.mixctrl = None
-            runtime_ctx.mumu = None
-
-            sleep(3)
-            runtime_ctx.refresh(cancel_check=self._check_cancel_requested)
-            sleep(5)
-            from ZmxyOL.nav.map_manager import mm
-            mm.set_region("登录")
-            return True
-        except Exception as e:
-            logger.error(f"🔄 模拟器重启失败: {e}")
-            return False
-
     def _restart_adb_and_wait(self):
         """重启 ADB 并验证连接。"""
         import subprocess
@@ -578,22 +610,21 @@ class TaskManager:
 
     # ── 工具 ──
 
-    def _archive_error(self, task: str, exc: Exception):
+    def _archive_error(self, task: str, exc: Exception, video_path=None):
         from AutoScriptor.utils.log_archiver import archive_error
         try:
-            archive_error(task, exc, mixctrl=runtime_ctx.mixctrl, include_click_screenshots=True)
+            archive_error(task, exc, mixctrl=runtime_ctx.mixctrl, include_click_screenshots=True, video_path=video_path)
         except Exception as e:
             logger.error(f"归档错误失败: {e}")
 
     @staticmethod
     def _clean_debug_dir():
-        d = os.path.join(os.getcwd(), 'logs', 'debug_screenshot')
-        if not os.path.isdir(d):
+        d = get_logs_root() / "debug_screenshot"
+        if not d.is_dir():
             return
-        for f in os.listdir(d):
-            fp = os.path.join(d, f)
-            if os.path.isfile(fp):
+        for fp in d.iterdir():
+            if fp.is_file():
                 try:
-                    os.remove(fp)
-                except Exception:
-                    pass
+                    fp.unlink()
+                except OSError as e:
+                    logger.warning("清理 debug 截图失败: %s -> %s", fp, e)

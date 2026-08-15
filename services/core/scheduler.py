@@ -5,8 +5,8 @@ AutoScriptor 后台定时调度器
 
 状态机：
   PENDING ─── activate() ───▶ RUNNING
-  RUNNING ─── 正常完成/未验证 ──▶ PENDING
-  RUNNING ─── 连续失败 ≥3 ─────▶ ERROR
+  RUNNING ─── request_stop()/deactivate() ──▶ PENDING
+  RUNNING ─── 连续错误 ≥3 ────────────────▶ ERROR
   ERROR   ─── reset() ────────▶ PENDING
 
 安全策略：
@@ -22,7 +22,7 @@ from AutoScriptor.utils.cancel import TaskCancelled
 from AutoScriptor.utils.logger import logger
 
 from services.core.runtime_context import runtime_ctx
-from services.core.notify import notify_from_config
+from services.core.notify import notify_runtime_event
 
 
 class SchedulerState(Enum):
@@ -56,8 +56,6 @@ def collect_active_times_from_tasks_tree(tasks: dict) -> list[float]:
             path = f"{prefix}/{key}" if prefix else key
             if "on" in val:
                 if val.get("on") and task_registry.has_task(path):
-                    if is_human_takeover_blocked(val):
-                        continue
                     raw = float(val.get("next_exec_time", 0) or 0)
                     sw = parse_sched_window_hours(val)
                     effective = clamp_to_sched_window(max(raw, now_ts), sw[0], sw[1]) if sw else (raw or now_ts)
@@ -143,7 +141,7 @@ def is_task_due(val: dict, path: str, now_ts: float) -> bool:
 
     if not val.get("on"):
         return False
-    if is_human_takeover_blocked(val):
+    if is_human_takeover_blocked(val, now_ts):
         return False
     if not task_registry.has_task(path):
         return False
@@ -179,9 +177,18 @@ def is_task_debug_mode(task_path: str, task_data: dict | None = None) -> bool:
     return isinstance(data, dict) and bool(data.get("debug_mode") or data.get("debug"))
 
 
-def is_human_takeover_blocked(val: dict) -> bool:
-    """人工接管后的红色冻结态：展示为错误，但不参与自动调度。"""
-    return bool(val.get("human_takeover") or val.get("human_takeover_error"))
+def is_human_takeover_blocked(val: dict, now_ts: float | None = None) -> bool:
+    """
+    人工接管后的红色冷却态。
+
+    标记存在但 next_exec_time 尚未到期时，暂不参与自动调度；一旦到期，
+    调度器会自动再试。未传 now_ts 时保留保守语义，供纯标记判断调用。
+    """
+    if not bool(val.get("human_takeover") or val.get("human_takeover_error")):
+        return False
+    if now_ts is None:
+        return True
+    return now_ts < float(val.get("next_exec_time", 0) or 0)
 
 
 def calc_effective_next_time(val: dict, now_ts: float) -> float:
@@ -262,7 +269,7 @@ class Scheduler:
     def mark_error(self):
         logger.error("📅 连续失败 %d 次，进入 ERROR 状态", self._consecutive_errors)
         self._transition(SchedulerState.ERROR)
-        notify_from_config(
+        notify_runtime_event(
             title="AutoScriptor 调度器错误",
             content=f"连续失败 {self._consecutive_errors} 次，调度器已暂停"
         )
@@ -284,6 +291,9 @@ class Scheduler:
 
     def wake(self):
         self._wake.set()
+
+    def mark_tasks_updated(self) -> None:
+        self._tasks_updated.set()
 
     def _check_cancel_requested(self) -> None:
         if self._task_manager and self._task_manager._cancel_event.is_set():
@@ -467,6 +477,12 @@ class Scheduler:
                 paths.append(cfg._account_path(cfg.current_account()))
             return paths
 
+        def _runtime_persistence_paths() -> list[str]:
+            paths = [cfg.CONFIG_PATH]
+            if cfg.current_account():
+                paths.append(cfg._account_path(cfg.current_account()))
+            return paths
+
         watcher = ConfigWatcher(
             cfg.CONFIG_PATH,
             extra_paths=_extra_reload_paths,
@@ -479,6 +495,7 @@ class Scheduler:
                 break
             if watcher.should_reload():
                 self._handle_watched_config_change()
+                watcher.mark_seen()
             if self.state == SchedulerState.RUNNING and self._task_manager:
                 try:
                     self._check_and_run()
@@ -487,6 +504,12 @@ class Scheduler:
                     self._consecutive_errors += 1
                     if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
                         self.mark_error()
+                finally:
+                    # Scheduler/task execution persists task state and next_exec_time.
+                    # Those self-writes should update WebUI state, but should not be
+                    # mistaken for external config/script edits that need another
+                    # task registry hot reload on the next scheduler tick.
+                    watcher.mark_seen(_runtime_persistence_paths())
 
     # ── 到期任务收集 ──
 
@@ -509,7 +532,7 @@ class Scheduler:
             if "on" in val:
                 if (
                     val.get("on")
-                    and not is_human_takeover_blocked(val)
+                    and not is_human_takeover_blocked(val, now_ts)
                     and now_ts >= val.get("next_exec_time", 0)
                     and task_registry.has_task(path)
                 ):
@@ -546,11 +569,31 @@ class Scheduler:
                 tasks.extend(self._collect_due(val, path, now_ts))
         return tasks
 
+    def _sort_due_paths(self, due_paths: list[str]) -> list[str]:
+        """Sort due paths by the global task ordering overlay."""
+        from AutoScriptor.utils.app_config import cfg
+        from services.core.task_ordering import sort_paths_by_task_ordering
+
+        return sort_paths_by_task_ordering(
+            due_paths,
+            cfg.get("tasks") or {},
+            cfg._config.get("task_ordering", {}),
+        )
+
     def _iter_characters_schedule_order(self):
         """调度顺序：优先账号内 dispatch_queue，其余按服务器名、角色名排序。"""
         from AutoScriptor.utils.app_config import cfg
 
         yield from iter_dispatch_characters(cfg)
+
+    def _switch_active_character(self, server: str, character: str) -> None:
+        """Switch cfg/account state without rebuilding task modules."""
+        from AutoScriptor.utils.app_config import cfg
+
+        if self._task_manager and hasattr(self._task_manager, "switch_character"):
+            self._task_manager.switch_character(server, character)
+        else:
+            cfg.switch_character(server, character)
 
     def _collect_due_cross_character(self) -> list[str]:
         """
@@ -573,10 +616,7 @@ class Scheduler:
                 due = self._collect_due(cfg.get("tasks") or {}, "", time.time())
             else:
                 try:
-                    if self._task_manager:
-                        self._task_manager.switch_character_and_reload(server, name)
-                    else:
-                        cfg.switch_character(server, name)
+                    self._switch_active_character(server, name)
                 except (KeyError, ValueError) as e:
                     logger.warning("📅 切换角色跳过 %s/%s: %s", server, name, e)
                     continue
@@ -584,24 +624,57 @@ class Scheduler:
                 self.invalidate_login()
                 due = self._collect_due(cfg.get("tasks") or {}, "", time.time())
             due = self._filter_retry_available((server, name), due)
+            due = self._sort_due_paths(due)
             if due:
                 if switched:
                     self._tasks_updated.set()
                 return due
         if switched and original_key[0] and original_key[1]:
             try:
-                if self._task_manager:
-                    self._task_manager.switch_character_and_reload(*original_key)
-                else:
-                    cfg.switch_character(*original_key)
+                self._switch_active_character(*original_key)
                 self.invalidate_login()
             except (KeyError, ValueError) as e:
                 logger.warning("📅 恢复原角色失败 %s/%s: %s", original_key[0], original_key[1], e)
         return []
 
+    def _return_to_first_dispatch_character(self) -> bool:
+        """全角色调度完成后回到 dispatch_queue 首角色，并确认游戏内也登录到该角色。"""
+        from AutoScriptor.utils.app_config import cfg
+
+        first_char = next(iter_dispatch_characters(cfg), None)
+        if first_char is None:
+            logger.info("📅 dispatch_queue 为空，跳过回到首个角色")
+            return False
+
+        server, name = first_char
+        active = cfg.active_character()
+        current = (active.get("server", ""), active.get("name", ""))
+
+        try:
+            if current != first_char:
+                logger.info("📅 全角色调度完成，切回首个角色: %s/%s", server, name)
+                self._switch_active_character(server, name)
+                self.invalidate_login()
+                self._tasks_updated.set()
+            else:
+                logger.info("📅 全角色调度完成，首个角色已是当前角色: %s/%s", server, name)
+
+            self._ensure_character_logged_in(cfg)
+            return True
+        except Exception as e:
+            logger.warning("📅 回到首个角色失败 %s/%s: %s", server, name, e, exc_info=True)
+            return False
+
     # ── 共用执行管线 ──
 
-    def _run_task_pipeline(self, explicit_tasks: list[str] | None = None):
+    def _run_task_pipeline(
+        self,
+        explicit_tasks: list[str] | None = None,
+        *,
+        force_login: bool = False,
+        param_overrides: dict[str, dict] | None = None,
+        explicit_task_runs: list[dict] | None = None,
+    ):
         """
         统一的任务执行管线，调度模式和单任务模式共用。
 
@@ -610,7 +683,6 @@ class Scheduler:
         """
         import inspect
         from AutoScriptor.utils.app_config import cfg
-        from AutoScriptor.utils.perf import ABOVE_NORMAL_PRIORITY_CLASS, boost, unboost
 
         if not cfg._config.get("game", {}).get("character_name", ""):
             logger.warning("⚠️ 账号未验证，跳过执行")
@@ -620,10 +692,17 @@ class Scheduler:
         max_retry = int(cfg["app"].get("max_retry", 0) or 0)
         retry_round = 0
         attempted_this_round: set[tuple[str, str, str]] = set()
-        retry_queue: list[tuple[tuple[str, str], str]] = []
-        failed_next_round: list[tuple[tuple[str, str], str]] = []
+        retry_queue: list[tuple[tuple[str, str], dict]] = []
+        failed_next_round: list[tuple[tuple[str, str], dict]] = []
         only_debug_tasks_executed = True
         self._pipeline_active.set()
+        scheduled_mode = explicit_tasks is None and explicit_task_runs is None
+
+        if explicit_task_runs is None and explicit_tasks is not None:
+            explicit_task_runs = [
+                {"id": f"{i}:{task}", "task": task}
+                for i, task in enumerate(explicit_tasks)
+            ]
 
         def _active_char_key() -> tuple[str, str]:
             ac = cfg.active_character()
@@ -639,7 +718,7 @@ class Scheduler:
             if not server or not name:
                 return False
             try:
-                self._task_manager.switch_character_and_reload(server, name)
+                self._switch_active_character(server, name)
                 self.invalidate_login()
                 self._tasks_updated.set()
                 return True
@@ -647,12 +726,28 @@ class Scheduler:
                 logger.warning("📅 重试轮切换角色失败，跳过 %s/%s: %s", server, name, e)
                 return False
 
-        def _execute_task_attempt(task_key: str, attempt_index: int) -> tuple[int, int]:
+        def _run_id(run: dict) -> str:
+            return str(run.get("id") or run.get("task") or "")
+
+        def _run_task(run: dict) -> str:
+            return str(run.get("task") or "")
+
+        def _run_param_override(run: dict) -> dict | None:
+            params = run.get("params")
+            return params if isinstance(params, dict) else None
+
+        def _execute_task_attempt(task_key: str, attempt_index: int, param_override: dict | None = None) -> tuple[int, int]:
             execute = self._task_manager.execute_tasks
             params = inspect.signature(execute).parameters
+            kwargs = {}
             if "max_attempts" in params:
-                return execute([task_key], max_attempts=1, attempt_offset=attempt_index)
-            return execute([task_key])
+                kwargs.update(max_attempts=1, attempt_offset=attempt_index)
+            if "param_overrides" in params:
+                if param_override is not None:
+                    kwargs["param_overrides"] = {task_key: param_override}
+                elif param_overrides:
+                    kwargs["param_overrides"] = param_overrides
+            return execute([task_key], **kwargs)
 
         def _task_is_human_takeover_blocked(task_key: str) -> bool:
             import dpath
@@ -661,7 +756,7 @@ class Scheduler:
                 node = dpath.get(cfg["tasks"], task_key)
             except Exception:
                 return False
-            return isinstance(node, dict) and is_human_takeover_blocked(node)
+            return isinstance(node, dict) and is_human_takeover_blocked(node, time.time())
 
         try:
             while True:
@@ -669,18 +764,18 @@ class Scheduler:
                     logger.info("⏹ 检测到取消请求，停止执行")
                     break
 
-                if explicit_tasks is None and self.state != SchedulerState.RUNNING:
+                if scheduled_mode and self.state != SchedulerState.RUNNING:
                     break
 
                 if retry_queue:
-                    char_key, task_key = retry_queue.pop(0)
+                    char_key, task_run = retry_queue.pop(0)
                     if not _switch_to_char_if_needed(char_key):
                         continue
-                    due = [task_key]
-                elif explicit_tasks is not None:
+                    due = [task_run]
+                elif explicit_task_runs is not None:
                     char_key = _active_char_key()
                     due = [] if retry_round > 0 else [
-                        t for t in explicit_tasks if (*char_key, t) not in attempted_this_round
+                        run for run in explicit_task_runs if (*char_key, _run_id(run)) not in attempted_this_round
                     ]
                 else:
                     char_key = _active_char_key()
@@ -712,21 +807,25 @@ class Scheduler:
                         continue
                     break
 
-                task_key = due[0]
+                task_run = due[0] if isinstance(due[0], dict) else {"id": str(due[0]), "task": str(due[0])}
+                task_key = _run_task(task_run)
+                run_id = _run_id(task_run)
+                param_override = _run_param_override(task_run)
                 task_debug_mode = is_task_debug_mode(task_key)
+                skip_login_for_debug = task_debug_mode and not force_login
                 if not task_debug_mode:
                     only_debug_tasks_executed = False
 
-                logger.info("📅 发现 %d 个待执行任务: %s", len(due), due)
-                if task_debug_mode:
+                logger.info("📅 发现 %d 个待执行任务: %s", len(due), [
+                    _run_task(run) if isinstance(run, dict) else run for run in due
+                ])
+                if skip_login_for_debug:
                     logger.info("📅 debug_mode: 跳过自动登录与任务前重启: %s", task_key)
+                elif task_debug_mode:
+                    logger.info("📅 debug_mode: 跳过任务前重启，但按本次请求执行自动登录: %s", task_key)
                 else:
                     self._maybe_daily_restart(cfg)
 
-                # 必须先让模拟器在正常优先级下启动，启动完成后再温和 boost。
-                # 如果先 boost 再启动，MuMu 子进程会继承提升后的优先级，
-                # 可能导致虚拟化引擎误判权限状态 → "安卓设备无法启动"。
-                unboost()
                 try:
                     # 与 api.init() 不同：ensure_app_running 的返回值必须写入 runtime_ctx，
                     # 否则 mixctrl 仅存在于栈上，runtime_ctx.mixctrl 仍为 None（例如关机清理后）。
@@ -749,24 +848,23 @@ class Scheduler:
                         logger.info("⏹ 检测到取消请求，停止执行")
                         break
                     continue
-                boost(process_priority=ABOVE_NORMAL_PRIORITY_CLASS)
 
-                if not task_debug_mode:
+                if not skip_login_for_debug:
                     self._ensure_character_logged_in(cfg)
 
-                attempted_this_round.add((*char_key, task_key))
+                attempted_this_round.add((*char_key, run_id))
                 try:
-                    success, failed = _execute_task_attempt(task_key, retry_round)
+                    success, failed = _execute_task_attempt(task_key, retry_round, param_override)
                     if success:
                         total_success += success
                         self.record_result(success, 0)
                     elif failed:
                         if _task_is_human_takeover_blocked(task_key):
-                            logger.info("📅 任务需要人工处理，已标记红色冻结态并跳过自动重试: %s", task_key)
+                            logger.info("📅 任务需要人工处理，已标记红色冷却态并跳过本轮自动重试: %s", task_key)
                             total_failed += failed
                             self.record_result(1, 0)
                         elif retry_round < max_retry and not task_debug_mode:
-                            failed_next_round.append((char_key, task_key))
+                            failed_next_round.append((char_key, task_run))
                             logger.info(
                                 "📅 任务失败，跳过当前任务，等待本轮其他任务完成后重试: %s (%d/%d)",
                                 task_key,
@@ -774,7 +872,7 @@ class Scheduler:
                                 max_retry,
                             )
                         else:
-                            if explicit_tasks is None and not task_debug_mode:
+                            if scheduled_mode and not task_debug_mode:
                                 self._mark_retry_exhausted(char_key, task_key, max_retry)
                             total_failed += failed
                             self.record_result(0, failed)
@@ -787,9 +885,9 @@ class Scheduler:
                 except Exception as e:
                     logger.error("📅 执行异常: %s - %s", task_key, e)
                     if retry_round < max_retry and not task_debug_mode:
-                        failed_next_round.append((char_key, task_key))
+                        failed_next_round.append((char_key, task_run))
                     else:
-                        if explicit_tasks is None and not task_debug_mode:
+                        if scheduled_mode and not task_debug_mode:
                             self._mark_retry_exhausted(char_key, task_key, max_retry)
                         total_failed += 1
                         self._consecutive_errors += 1
@@ -802,24 +900,25 @@ class Scheduler:
                         self._apply_deferred_reload_if_needed()
                     else:
                         cfg.save_config()
-                        self._task_manager.reload_tasks()
+                        self._tasks_updated.set()
                 except Exception as e:
-                    logger.error("📅 配置保存/重载失败（将在下一轮重新收集任务）: %s", e)
+                    logger.error("📅 配置保存失败（将在下一轮重新收集任务）: %s", e)
 
         finally:
             self._pipeline_active.clear()
-            unboost()
 
         if total_success > 0 or total_failed > 0:
             logger.info("📅 执行完成: 成功 %d, 失败 %d", total_success, total_failed)
-            if total_failed > 0:
-                notify_from_config(
-                    title="AutoScriptor 任务失败",
-                    content=f"执行完成: 成功 {total_success}, 失败 {total_failed}"
-                )
+            title = "AutoScriptor 任务失败" if total_failed > 0 else "AutoScriptor 任务完成"
+            notify_runtime_event(
+                title=title,
+                content=f"执行完成: 成功 {total_success}, 失败 {total_failed}"
+            )
             if only_debug_tasks_executed:
                 logger.info("📅 debug_mode: 跳过 post_execution 收尾动作")
             else:
+                if scheduled_mode and self.state == SchedulerState.RUNNING:
+                    self._return_to_first_dispatch_character()
                 self._post_execution_action()
             self._tasks_updated.set()
         elif self._reload_deferred.is_set():
@@ -839,12 +938,37 @@ class Scheduler:
 
     # ── 单任务模式入口 ──
 
-    def run_direct(self, tasks: list[str]):
+    def run_direct(
+        self,
+        tasks: list[str],
+        *,
+        force_login: bool = False,
+        param_overrides: dict[str, dict] | None = None,
+    ):
         """单任务模式：执行外部指定的任务列表，共用管线，不激活调度器。"""
         if self._task_manager:
             self._task_manager._reset_cancel()
         self.invalidate_login()
-        self._run_task_pipeline(explicit_tasks=tasks)
+        self._run_task_pipeline(
+            explicit_tasks=tasks,
+            force_login=force_login,
+            param_overrides=param_overrides,
+        )
+
+    def run_direct_sequence(
+        self,
+        task_runs: list[dict],
+        *,
+        force_login: bool = False,
+    ):
+        """单任务模式的序列入口：允许同一任务路径携带不同一次性参数多次执行。"""
+        if self._task_manager:
+            self._task_manager._reset_cancel()
+        self.invalidate_login()
+        self._run_task_pipeline(
+            explicit_task_runs=task_runs,
+            force_login=force_login,
+        )
 
     def task_call(self, task_path: str):
         """将指定任务设为立即执行（next_exec_time=now, on=True），下一轮自动拾取。"""
@@ -882,9 +1006,6 @@ class Scheduler:
 
             runtime_ctx._release_nemu_ipc()
 
-            # 关闭模拟器前恢复正常优先级，防止 MuMu 子进程继承 HIGH_PRIORITY_CLASS
-            from AutoScriptor.utils.perf import unboost as _unboost
-            _unboost()
             from AutoScriptor.control.MumuAdaptor.mumu import Mumu
             mumu = Mumu().select(cfg["emulator"]["index"])
             mumu.power.shutdown(wait=True, timeout=30)

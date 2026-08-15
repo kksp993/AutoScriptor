@@ -2,11 +2,15 @@ from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.task_registry import task_registry
 from ZmxyOL.task.pkg_utils import (
     gather_py_files, sort_py_files, import_modules,
-    sort_tasks, update_order_files, normalize_cfg_tasks_to_cn,
+    sort_tasks, normalize_cfg_tasks_to_cn,
     migrate_hgwj_daily_task_leaf_to_wanjiefuben,
     migrate_remove_daily_login_task,
 )
-from ZmxyOL.task.custom_task_loader import load_custom_task_modules, prune_stale_custom_tasks
+from ZmxyOL.task.custom_task_loader import (
+    has_custom_task_load_errors,
+    load_custom_task_modules,
+    prune_stale_custom_tasks,
+)
 from .task_register import register_task
 from ZmxyOL.task.battle_task_params import (
     BattleFlowName,
@@ -37,7 +41,8 @@ def load_tasks():
     migrate_hgwj_daily_task_leaf_to_wanjiefuben(cfg["tasks"])
     prune_stale_custom_tasks()
     sort_tasks(cfg["tasks"])
-    update_order_files(sorted_files)
+    if has_custom_task_load_errors():
+        return
     cfg.save_config()
 
 

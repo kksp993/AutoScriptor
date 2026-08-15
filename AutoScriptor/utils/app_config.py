@@ -6,7 +6,9 @@ import copy
 import datetime
 import json
 import os
+import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -14,9 +16,16 @@ from AutoScriptor.crypto.config_manager import ConfigManager as CryptoConfigMana
 from AutoScriptor.utils.game_profession import DEFAULT_GAME_PROFESSION, normalize_game_profession
 from AutoScriptor.utils.logger import logger
 
+_DECRYPT_ERRORS = getattr(
+    CryptoConfigManager,
+    "DECRYPT_ERRORS",
+    (KeyError, TypeError, ValueError),
+)
+_SECURITY_KEY_CHECK_ERRORS = (OSError, AttributeError) + _DECRYPT_ERRORS
+
 _GLOBAL_KEYS = (
-    "app", "ocr", "emulator", "llm", "scheduler", "deploy", "notify",
-    "update", "remote_access", "accounts",
+    "app", "ocr", "emulator", "scheduler", "deploy", "notify",
+    "update", "remote_access", "task_ordering", "accounts",
 )
 
 _TEST_TASK_PATHS = (
@@ -34,6 +43,7 @@ _TEST_TASK_PATHS = (
 
 def _atomic_write_json(path: Path, data: Any) -> None:
     """Write JSON via same-directory temp file then atomic replace."""
+    start = time.perf_counter()
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
     tmp_path = Path(tmp_name)
@@ -42,14 +52,21 @@ def _atomic_write_json(path: Path, data: Any) -> None:
             json.dump(data, f, ensure_ascii=False, indent=4)
             f.write("\n")
             f.flush()
-            os.fsync(f.fileno())
+            if _strict_json_fsync_enabled():
+                os.fsync(f.fileno())
         os.replace(tmp_path, path)
-    except Exception:
+        elapsed = time.perf_counter() - start
+        if elapsed >= 1.0:
+            logger.warning("JSON 保存耗时 %.2fs: %s", elapsed, path)
+    finally:
         try:
             tmp_path.unlink(missing_ok=True)
-        except Exception:
+        except OSError:
             pass
-        raise
+
+
+def _strict_json_fsync_enabled() -> bool:
+    return str(os.environ.get("AUTOSCRIPTOR_STRICT_FSYNC", "")).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _has_task_path(tasks: dict[str, Any], task_path: str) -> bool:
@@ -183,7 +200,7 @@ class Account:
                     "password": dec.get("password", ""),
                 }
                 return True
-            except Exception as e:
+            except _DECRYPT_ERRORS as e:
                 logger.error(f"解密账号 {self.account_name} 失败: {e}")
         return False
 
@@ -230,10 +247,10 @@ class ConfigManager:
     def __init__(self):
         if hasattr(self, "_initialized"):
             return
-        from AutoScriptor.utils.paths import get_accounts_dir, get_data_root
-        self.data_root = Path(get_data_root())
+        from AutoScriptor.utils.paths import get_accounts_dir, get_config_path, get_editable_data_root
+        self.data_root = Path(get_editable_data_root())
         self.default_accounts_dir = Path(get_accounts_dir())
-        self._config_path: Path = self.data_root / "config.json"
+        self._config_path: Path = Path(get_config_path())
         self.global_cfg: dict[str, Any] = {}
         self.current_acc: Account | None = None
         self._initialized = True
@@ -245,6 +262,58 @@ class ConfigManager:
     @config_path.setter
     def config_path(self, p: Path | str) -> None:
         self._config_path = Path(p)
+
+    @staticmethod
+    def _is_under_path(child: Path, parent: Path) -> bool:
+        try:
+            child.resolve().relative_to(parent.resolve())
+            return True
+        except (OSError, ValueError):
+            return False
+
+    def _force_default_accounts_dir(self) -> bool:
+        return bool(os.environ.get("AUTOSCRIPTOR_DATA_DIR"))
+
+    def _load_default_global_config(self) -> dict[str, Any]:
+        template = self.config_path.with_name("config.template.json")
+        if not template.exists():
+            return {k: {} for k in _GLOBAL_KEYS}
+        with open(template, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {k: {} for k in _GLOBAL_KEYS}
+
+    def _merge_global_defaults(self) -> None:
+        def merge(dst: dict[str, Any], src: dict[str, Any]) -> None:
+            for key, value in src.items():
+                if key not in dst:
+                    dst[key] = copy.deepcopy(value)
+                elif isinstance(dst[key], dict) and isinstance(value, dict):
+                    merge(dst[key], value)
+
+        merge(self.global_cfg, self._load_default_global_config())
+
+    def _migrate_external_accounts_dir(self, source: Path) -> None:
+        if not source.is_dir():
+            return
+        try:
+            self.default_accounts_dir.mkdir(parents=True, exist_ok=True)
+            for src in source.glob("*.json"):
+                dst = self.default_accounts_dir / src.name
+                if not dst.exists():
+                    shutil.copy2(src, dst)
+        except OSError as e:
+            logger.warning("迁移旧账号目录失败: %s -> %s (%s)", source, self.default_accounts_dir, e)
+
+    def _normalize_accounts_dir_config(self) -> None:
+        accounts = self.global_cfg.setdefault("accounts", {})
+        raw = str((accounts or {}).get("dir") or "").strip()
+        if not raw:
+            return
+        p = Path(raw)
+        if p.is_absolute() and self._force_default_accounts_dir() and not self._is_under_path(p, self.data_root):
+            self._migrate_external_accounts_dir(p)
+            accounts["dir"] = ""
+            logger.warning("账号目录已切回 dataRoot/accounts: %s -> %s", p, self.default_accounts_dir)
 
     def resolved_accounts_dir(self) -> Path:
         raw = (self.global_cfg.get("accounts") or {}).get("dir") or ""
@@ -280,14 +349,9 @@ class ConfigManager:
         acc_dir = self.resolved_accounts_dir()
         path = acc_dir / f"{name}.json"
         if not path.exists():
-            try:
-                acc_dir.mkdir(parents=True, exist_ok=True)
-                _atomic_write_json(path, self._default_account_payload(name))
-                logger.info(f"已创建默认账号文件: {path}")
-            except OSError as e:
-                logger.warning(f"账号文件不存在且创建失败: {path} ({e})")
-                self.current_acc = None
-                return
+            acc_dir.mkdir(parents=True, exist_ok=True)
+            _atomic_write_json(path, self._default_account_payload(name))
+            logger.info(f"已创建默认账号文件: {path}")
         with open(path, "r", encoding="utf-8-sig") as f:
             data = json.load(f)
         self.current_acc = Account(name, data)
@@ -295,10 +359,11 @@ class ConfigManager:
 
     def load_all(self, pwd: str = "") -> None:
         if not self.config_path.exists():
-            self.global_cfg = {k: {} for k in _GLOBAL_KEYS}
+            self.global_cfg = self._load_default_global_config()
         else:
             with open(self.config_path, "r", encoding="utf-8-sig") as f:
                 self.global_cfg = json.load(f)
+            self._merge_global_defaults()
         self.global_cfg.setdefault("tasks", {})
         self.global_cfg.setdefault("status", {})
         self.global_cfg.setdefault("game", {})
@@ -306,6 +371,9 @@ class ConfigManager:
         self.global_cfg["scheduler"].setdefault("auto_start", False)
         self.global_cfg.setdefault("accounts", {})
         self.global_cfg["accounts"].setdefault("dir", "")
+        self.global_cfg.setdefault("ocr", {})
+        self.global_cfg["ocr"].setdefault("use_gpu", False)
+        self._normalize_accounts_dir_config()
         acc_name = self.global_cfg.get("current_account", "")
         if acc_name:
             self.load_account(acc_name, pwd)
@@ -345,14 +413,25 @@ class ConfigManager:
                 self.global_cfg[k] = copy.deepcopy(flat[k])
         self.global_cfg["current_account"] = flat.get("current_account", self.global_cfg.get("current_account", ""))
         self._update_runtime_dates()
-        safe_cfg = {k: self.global_cfg.get(k, {}) for k in _GLOBAL_KEYS}
-        safe_cfg["current_account"] = self.global_cfg.get("current_account", "")
-        _atomic_write_json(self.config_path, safe_cfg)
+        _atomic_write_json(self.config_path, self._persistable_global_config())
         if self.current_acc:
             self.current_acc.prepare_for_save(flat)
             _assert_no_testing_tasks_in_account(self.current_acc.root)
             acc_dir = self.resolved_accounts_dir()
             _atomic_write_json(acc_dir / f"{self.current_acc.account_name}.json", self.current_acc.to_persist_dict())
+
+    def save_global_only(self, flat: dict[str, Any]) -> None:
+        for k in _GLOBAL_KEYS:
+            if k in flat:
+                self.global_cfg[k] = copy.deepcopy(flat[k])
+        self.global_cfg["current_account"] = flat.get("current_account", self.global_cfg.get("current_account", ""))
+        self._update_runtime_dates()
+        _atomic_write_json(self.config_path, self._persistable_global_config())
+
+    def _persistable_global_config(self) -> dict[str, Any]:
+        safe_cfg = {k: self.global_cfg.get(k, {}) for k in _GLOBAL_KEYS}
+        safe_cfg["current_account"] = self.global_cfg.get("current_account", "")
+        return safe_cfg
 
     def save_account_file_only(self) -> None:
         if not self.current_acc:
@@ -374,9 +453,8 @@ class AutoConfig:
     def __init__(self):
         if hasattr(self, "_initialized"):
             return
-        from AutoScriptor.utils.paths import get_accounts_dir, get_data_root
-        data_root = str(get_data_root())
-        self.CONFIG_PATH = os.path.join(data_root, "config.json")
+        from AutoScriptor.utils.paths import get_accounts_dir, get_config_path
+        self.CONFIG_PATH = str(get_config_path())
         self.ACCOUNTS_DIR = str(get_accounts_dir())
         self._mgr = cfg_manager
         self._config: dict[str, Any] = {}
@@ -412,11 +490,23 @@ class AutoConfig:
 
     def save_config(self, *, quiet: bool = False) -> None:
         os.makedirs(os.path.dirname(self.CONFIG_PATH), exist_ok=True)
+        self._mgr.config_path = Path(self.CONFIG_PATH)
         try:
             self._mgr.save_all(self._config)
         except OSError as e:
             if quiet:
                 logger.debug("退出时保存配置失败，已忽略: %s", e)
+                return
+            raise
+
+    def save_global_config(self, *, quiet: bool = False) -> None:
+        os.makedirs(os.path.dirname(self.CONFIG_PATH), exist_ok=True)
+        self._mgr.config_path = Path(self.CONFIG_PATH)
+        try:
+            self._mgr.save_global_only(self._config)
+        except OSError as e:
+            if quiet:
+                logger.debug("退出时保存全局配置失败，已忽略: %s", e)
                 return
             raise
 
@@ -436,6 +526,33 @@ class AutoConfig:
     def has_decrypted_credentials(self) -> bool:
         game = self._config.get("game") or {}
         return bool(game.get("account") and game.get("password"))
+
+    def clear_decrypted_credentials(self) -> None:
+        """Clear in-memory plaintext credentials without touching encrypted account data."""
+        if self._mgr.current_acc:
+            self._mgr.current_acc.credentials = {"account": "", "password": ""}
+        game = self._config.setdefault("game", {})
+        game.pop("account", None)
+        game.pop("password", None)
+
+    def verify_account_security_key(self, name: str, security_key: str) -> bool:
+        """Return whether the security key can decrypt the named account credentials."""
+        name = (name or "").strip()
+        security_key = (security_key or "").strip()
+        if not name or not security_key:
+            return False
+        path = Path(self._account_path(name))
+        if not path.exists():
+            return False
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+            enc = data.get("encryption") or {}
+            if not enc.get("encrypted_data"):
+                return True
+            dec = CryptoConfigManager.decrypt_data(enc, security_key)
+            return bool(dec.get("account") and dec.get("password"))
+        except _SECURITY_KEY_CHECK_ERRORS:
+            return False
 
     def __setitem__(self, key, value):
         if isinstance(key, str) and "." in key:

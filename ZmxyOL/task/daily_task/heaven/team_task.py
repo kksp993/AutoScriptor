@@ -1,5 +1,3 @@
-
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.errors import TaskRequireReTry
@@ -7,15 +5,16 @@ from ZmxyOL.battle.tasks import get_task_table
 from time import time
 
 
-
-@register_task
+@register_task(
+    path_cn="每日任务/天庭/组队任务",
+    description="完成东天王殿组队流程。",
+)
 def zudui_task(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
     ensure_in("天庭",-1)
     click(ui["彩虹楼"].i)
     click(T("东天王殿"),delay=0.5)
     click(T("普通难度"))
-    click(T("组队挑战"))
-    wait_for_appear(T("队伍列表"))
+    click(T("组队挑战"), until=lambda: ui_T(T("队伍列表")))
     # 快速加入：失败则抛出可重试异常，让框架按 max_retry 重试
     try:
         click(T("快速加入"), until=lambda: ui_T(T("我的队伍")))
@@ -47,13 +46,3 @@ def zudui_task(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
     click(B(1050,50,30,30),delay=1.5)
     click(B(1200,30,30,30))
     wait_for_disappear(I("加载中"))
-
-
-if __name__ == "__main__":
-    try:
-        zudui_task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

@@ -12,28 +12,27 @@ import importlib
 import json
 import logging
 import os
-import shutil
 import time as _time
-import traceback
-import urllib.request
 import webbrowser
-from queue import Queue, Empty
-from typing import Set
+from http.cookies import CookieError, SimpleCookie
+from queue import Empty, Full, Queue
+from typing import Any, Set
 
 from AutoScriptor.utils.logger import logger, _TaskFilter as _LogTaskFilter
 
 from AutoScriptor.control.MumuAdaptor.device_facade import get_device_facade
 from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.game_profession import GAME_PROFESSIONS
+from AutoScriptor.utils.mumu_discovery import discover_mumu_setup
 from services.core.task_manager import TaskManager
 from services.core.banner import _print_banner
 from services.core.scheduler import scheduler, SchedulerState
-from AutoScriptor.utils.perf import set_thread_high_priority as _set_thread_high_priority
 from services.webui.api_response import api_error, api_ok
 from services.webui.lifecycle_service import WebUILifecycleService
 from services.webui.runtime_controller import RuntimeController
 from services.webui.state_version import bump_version, current_version
 from services.webui.task_tree_service import task_tree_service
+from services.core.task_ordering import summarize_ordering_generations
 
 
 def _battle_flow_allowed_for_task(flow_value: str, task_path: str | None) -> bool:
@@ -41,7 +40,7 @@ def _battle_flow_allowed_for_task(flow_value: str, task_path: str | None) -> boo
 
     return battle_flow_allowed_for_task(flow_value, task_path)
 
-# FastAPI Form/UploadFile 运行时依赖；Nuitka 不会从 fastapi 静态跟到该包，须显式 import 以打入 standalone
+# FastAPI Form/UploadFile 运行时依赖；显式导入以保证 multipart 解析可用。
 import multipart  # noqa: F401
 
 from fastapi import FastAPI, File, WebSocket, WebSocketDisconnect, Request, UploadFile
@@ -61,7 +60,6 @@ class _ColoredFormatter(logging.Formatter):
     }
     _RESET = '\033[0m'
     _DIM   = '\033[2m'
-    _BOLD  = '\033[1m'
 
     def format(self, record: logging.LogRecord) -> str:
         color = self._LEVEL_COLORS.get(record.levelname, '')
@@ -81,7 +79,7 @@ _plain_fmt    = logging.Formatter(
     datefmt="%H:%M:%S",
 )
 
-from AutoScriptor.utils.paths import get_logs_root, get_static_dir, get_vendor_dir
+from AutoScriptor.utils.paths import get_accounts_dir, get_app_root, get_data_root, get_logs_root, get_static_dir, get_vendor_dir
 from services.webui.error_archives import (
     delete_archives,
     get_archive_detail,
@@ -89,9 +87,8 @@ from services.webui.error_archives import (
     list_error_archives,
     read_archive_file,
 )
-sse_log_dir = str(get_logs_root())
-sse_log_path = os.path.join(sse_log_dir, 'webui_sse.log')
-file_handler = logging.FileHandler(sse_log_path, encoding='utf-8')
+webui_log_path = os.path.join(str(get_logs_root()), 'webui.log')
+file_handler = logging.FileHandler(webui_log_path, encoding='utf-8')
 file_handler.setLevel(logging.INFO)
 file_handler.setFormatter(_plain_fmt)
 file_handler.addFilter(_LogTaskFilter())
@@ -105,22 +102,24 @@ class QueueHandler(logging.Handler):
         super().__init__(level)
         self.q = q
 
-    def emit(self, record: logging.LogRecord):
+    def emit(self, record: logging.LogRecord) -> None:
         try:
             msg = self.format(record)
+        except Exception:
+            self.handleError(record)
+            return
+
+        try:
+            self.q.put_nowait(msg)
+        except Full:
+            try:
+                self.q.get_nowait()
+            except Empty:
+                pass
             try:
                 self.q.put_nowait(msg)
-            except Exception:
-                try:
-                    self.q.get_nowait()
-                except Exception:
-                    pass
-                try:
-                    self.q.put_nowait(msg)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+            except Full:
+                pass
 
 
 queue_handler = QueueHandler(log_queue, level=logging.DEBUG)
@@ -167,9 +166,6 @@ from services.webui.security import (
     check_request_freshness as _check_request_freshness,
     login_limiter as _login_limiter,
     verify_limiter as _verify_limiter,
-    content_update_check_limiter as _content_update_check_limiter,
-    content_update_apply_limiter as _content_update_apply_limiter,
-    content_update_apply_min_interval as _content_update_apply_min_interval,
     SESSION_TTL as _SESSION_TTL,
     grant_credential_unlock as _grant_credential_unlock,
     validate_credential_unlock as _validate_credential_unlock,
@@ -231,57 +227,9 @@ def _require_credential_unlock(request: Request) -> JSONResponse | None:
     return None
 
 
-# ── Vendor 文件管理 ──
-
-_HERE = os.path.dirname(__file__)
 VENDOR_DIR = str(get_vendor_dir())
 STATIC_DIR = str(get_static_dir())
-VENDOR_SOURCES = {
-    'tailwind.css': 'https://cdn.tailwindcss.com',
-    'vue.global.prod.js': 'https://unpkg.com/vue@3/dist/vue.global.prod.js',
-    'element-plus.css': 'https://unpkg.com/element-plus/dist/index.css',
-    'element-plus.full.js': 'https://unpkg.com/element-plus/dist/index.full.js',
-    'ansi_up.min.js': 'https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.min.js',
-    'font-awesome.min.css': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css',
-    'fonts/fontawesome-webfont.woff2': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/fonts/fontawesome-webfont.woff2',
-    'fonts/fontawesome-webfont.woff': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/fonts/fontawesome-webfont.woff',
-    'fonts/fontawesome-webfont.ttf': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/fonts/fontawesome-webfont.ttf',
-}
-
-
-def _ensure_vendor_files():
-    """确保 vendor 目录和字体子目录存在；缺失文件放到后台线程下载，不阻塞启动。"""
-    try:
-        os.makedirs(VENDOR_DIR, exist_ok=True)
-        os.makedirs(os.path.join(VENDOR_DIR, 'fonts'), exist_ok=True)
-    except Exception as e:
-        logger.warning("ensure vendor dir failed: %s", e)
-        return
-    missing = []
-    for name, url in VENDOR_SOURCES.items():
-        fpath = os.path.join(VENDOR_DIR, name)
-        os.makedirs(os.path.dirname(fpath), exist_ok=True)
-        if os.path.exists(fpath) and os.path.getsize(fpath) > 1024:
-            continue
-        missing.append((name, url, fpath))
-    if not missing:
-        return
-    import threading
-    def _download_missing():
-        for name, url, fpath in missing:
-            try:
-                logger.info("downloading vendor: %s", url)
-                with urllib.request.urlopen(url, timeout=10) as resp, open(fpath, 'wb') as f:
-                    shutil.copyfileobj(resp, f)
-            except Exception as e:
-                try:
-                    if os.path.exists(fpath) and os.path.getsize(fpath) <= 1024:
-                        os.remove(fpath)
-                except Exception:
-                    pass
-                logger.warning("download vendor failed: %s -> %s (%s)", url, fpath, e)
-    t = threading.Thread(target=_download_missing, daemon=True)
-    t.start()
+WEBAPP_ICON_PATH = os.path.join(str(get_app_root()), "webapp", "icon.png")
 
 
 # ── 辅助函数 ──
@@ -291,14 +239,50 @@ def read_config():
     ORDER_MAP = task_tree_service.read_order_map()
 
 
-def make_public_config():
+def _make_public_config_unlocked():
     data = task_tree_service.public_config()
     data["config_version"] = current_version()
     return data
 
 
+def _make_task_ordering_response_unlocked():
+    projection = task_tree_service.task_ordering_projection()
+    return api_ok(
+        status="ok",
+        config_version=current_version(),
+        projection=projection.to_public_dict(),
+        generations=summarize_ordering_generations(projection),
+        runtime=runtime_controller.status(),
+    )
+
+
+def make_public_config():
+    service = lifecycle_service
+    if service is None:
+        return _make_public_config_unlocked()
+    with service.config_operation():
+        return _make_public_config_unlocked()
+
+
 def _mark_config_changed(reason: str) -> int:
     return bump_version(reason)
+
+
+def _persistence_diagnostics() -> dict[str, str]:
+    return {
+        "data_root": str(get_data_root()),
+        "config_path": str(getattr(cfg, "CONFIG_PATH", "")),
+        "accounts_dir": str(getattr(cfg, "ACCOUNTS_DIR", get_accounts_dir())),
+        "current_account": str(cfg.current_account() or ""),
+    }
+
+
+def _persistence_error_message(action: str, exc: Exception) -> str:
+    diag = _persistence_diagnostics()
+    return (
+        f"{action}: {exc}; "
+        f"config={diag['config_path']}; accounts={diag['accounts_dir']}; dataRoot={diag['data_root']}"
+    )
 
 
 def _consume_runtime_config_updates() -> bool:
@@ -322,23 +306,72 @@ lifecycle_service = WebUILifecycleService(
     _apply_webui_log_level_from_config,
 )
 
+_GIFT_REDEEM_TASK_PATH = "一般任务/活动/兑换豪礼礼品兑换"
+
 
 # ── FastAPI 应用 ──
 
 app = FastAPI(title="AutoScriptor WebUI")
 
 
-@app.middleware("http")
-async def auth_middleware(request: Request, call_next):
-    """WebUI 密码保护中间件 — 使用安全会话令牌验证，仅拦截 /api/ 请求"""
-    password = cfg._config.get("deploy", {}).get("password")
-    if password and request.url.path.startswith("/api/"):
-        exempt = ("/api/auth", "/api/deploy")
-        if not any(request.url.path.startswith(p) for p in exempt):
-            token = request.cookies.get("auth_token") or request.headers.get("X-Auth-Token")
-            if not _validate_session(token):
-                return JSONResponse(status_code=401, content={"error": "unauthorized"})
-    return await call_next(request)
+def _scope_header(scope: dict, name: bytes) -> str:
+    for key, value in scope.get("headers", []) or []:
+        if key.lower() == name:
+            return value.decode("latin-1")
+    return ""
+
+
+def _scope_cookie(scope: dict, name: str) -> str | None:
+    raw = _scope_header(scope, b"cookie")
+    if not raw:
+        return None
+    try:
+        cookie = SimpleCookie()
+        cookie.load(raw)
+        morsel = cookie.get(name)
+        return morsel.value if morsel is not None else None
+    except CookieError:
+        return None
+
+
+class _AuthAndApiErrorMiddleware:
+    """ASGI middleware that avoids Starlette's request-body replay layer."""
+
+    def __init__(self, inner_app):
+        self.inner_app = inner_app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.inner_app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        method = scope.get("method", "")
+        try:
+            password = cfg._config.get("deploy", {}).get("password")
+            if password and path.startswith("/api/"):
+                exempt = ("/api/auth", "/api/deploy")
+                if not any(path.startswith(p) for p in exempt):
+                    token = _scope_cookie(scope, "auth_token") or _scope_header(scope, b"x-auth-token")
+                    if not _validate_session(token):
+                        response = JSONResponse(status_code=401, content={"error": "unauthorized"})
+                        await response(scope, receive, send)
+                        return
+            await self.inner_app(scope, receive, send)
+        except BaseException as e:
+            if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                raise
+            logger.exception("api middleware error: %s %s", method, path)
+            if path.startswith("/api/"):
+                response = api_error(
+                    500,
+                    _persistence_error_message(f"{path} 未捕获异常", e),
+                    code="unhandled_api_error",
+                    diagnostics=_persistence_diagnostics(),
+                )
+                await response(scope, receive, send)
+                return
+            raise
 
 
 @app.post("/api/auth")
@@ -375,26 +408,61 @@ async def auth_api(request: Request):
 
 
 # 编辑器 API 路由
-from services.webui.routes.editor import router as editor_router
+from services.webui.routes.editor import (
+    configure_editor_custom_task_save_controls,
+    configure_editor_execution_controls,
+    editor_execution_status,
+    router as editor_router,
+)
+runtime_controller.set_external_status_getter("editor", editor_execution_status)
+configure_editor_execution_controls(
+    request_cancel=TASK_MANAGER.request_cancel,
+    reset_cancel=TASK_MANAGER.reset_cancel,
+    runtime_busy=lambda: runtime_controller.busy_reason() in ("direct_run", "scheduler"),
+)
+configure_editor_custom_task_save_controls(
+    reload_custom_tasks=lambda: lifecycle_service.reload_all(reason="save editor custom task"),
+)
 app.include_router(editor_router)
-
-# 画布 API 路由
-from services.webui.routes.canvas import router as canvas_router
-app.include_router(canvas_router)
 
 # 资讯 API 路由
 from services.webui.routes.news import router as news_router
 app.include_router(news_router)
 
-@app.middleware("http")
-async def static_cache_headers(request: Request, call_next):
-    response = await call_next(request)
-    rpath = request.url.path
-    if rpath.startswith("/vendor/") or rpath.startswith("/fonts/"):
-        response.headers["Cache-Control"] = "public, max-age=86400"
-    elif rpath.startswith("/static/") and rpath.endswith((".js", ".css")):
-        response.headers["Cache-Control"] = "no-cache"
-    return response
+class _StaticCacheHeadersMiddleware:
+    def __init__(self, inner_app):
+        self.inner_app = inner_app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.inner_app(scope, receive, send)
+            return
+
+        rpath = scope.get("path", "")
+
+        async def send_with_cache(message):
+            if message.get("type") == "http.response.start":
+                cache_control = None
+                if rpath.startswith("/vendor/") or rpath.startswith("/fonts/"):
+                    cache_control = b"public, max-age=86400"
+                elif rpath.startswith("/static/") and rpath.endswith((".js", ".css")):
+                    cache_control = b"no-cache"
+                if cache_control is not None:
+                    headers = [
+                        (key, value)
+                        for key, value in message.get("headers", [])
+                        if key.lower() != b"cache-control"
+                    ]
+                    headers.append((b"cache-control", cache_control))
+                    message = dict(message)
+                    message["headers"] = headers
+            await send(message)
+
+        await self.inner_app(scope, receive, send_with_cache)
+
+
+app.add_middleware(_StaticCacheHeadersMiddleware)
+app.add_middleware(_AuthAndApiErrorMiddleware)
 
 # 静态文件挂载
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -430,28 +498,26 @@ async def websocket_logs(websocket: WebSocket):
 async def _log_broadcaster():
     """后台协程：从线程安全的日志队列取数据，广播给所有 WebSocket 客户端。"""
     while True:
-        try:
-            batch: list[str] = []
-            while True:
+        batch: list[str] = []
+        while True:
+            try:
+                batch.append(log_queue.get_nowait())
+            except Empty:
+                break
+        if batch:
+            payload = json.dumps({"data": "\n".join(batch)})
+            dead: set[WebSocket] = set()
+            for ws in ws_clients.copy():
                 try:
-                    batch.append(log_queue.get_nowait())
-                except Empty:
-                    break
-            if batch:
-                payload = json.dumps({"data": "\n".join(batch)})
-                dead: set[WebSocket] = set()
-                for ws in ws_clients.copy():
-                    try:
-                        await ws.send_text(payload)
-                    except Exception:
-                        dead.add(ws)
-                ws_clients.difference_update(dead)
-        except Exception:
-            pass
+                    await ws.send_text(payload)
+                except Exception:
+                    dead.add(ws)
+            ws_clients.difference_update(dead)
         await asyncio.sleep(0.5)
 
 
 _init_done = False
+_init_error = ""
 
 
 @app.on_event("startup")
@@ -462,12 +528,13 @@ async def _on_startup():
 
 async def _deferred_heavy_init():
     """在 uvicorn 已开始监听后，后台执行任务注册等轻量初始化。"""
-    global _init_done
+    global _init_done, _init_error
     loop = asyncio.get_event_loop()
+    _init_done = False
+    _init_error = ""
     try:
         logger.info("后台初始化：运行时/任务加载（不启动设备）...")
         await loop.run_in_executor(None, _do_heavy_init)
-        _init_done = True
         if cfg.get("scheduler.auto_start", False):
             if cfg.has_decrypted_credentials():
                 scheduler.activate()
@@ -475,31 +542,28 @@ async def _deferred_heavy_init():
                 logger.info("Scheduler auto-started from config")
             else:
                 logger.info("Scheduler auto-start is enabled but account is not verified yet")
+        _init_done = True
         logger.info("后台初始化完成")
     except Exception as e:
-        logger.error("后台初始化失败: %s", e)
-        _init_done = True
+        _init_error = str(e)
+        logger.exception("后台初始化失败")
 
 
 def _do_heavy_init():
     """同步版初始化：只做不触碰模拟器的准备工作。"""
-    try:
-        from services.core.runtime_context import runtime_ctx
-        runtime_ctx.init_bg()
-        runtime_ctx.init_vlm()
-    except Exception as e:
-        logger.error("运行时上下文初始化失败: %s", e)
+    from services.core.runtime_context import runtime_ctx
 
-    try:
-        TASK_MANAGER.reload_tasks()
-        read_config()
-    except Exception as e:
-        logger.error("任务加载失败: %s", e)
+    runtime_ctx.init_bg()
+    TASK_MANAGER.reload_tasks()
+    read_config()
 
 
 @app.get("/api/init-status")
 async def init_status():
-    return {"ready": _init_done}
+    payload = {"ready": _init_done}
+    if _init_error:
+        payload["error"] = _init_error
+    return payload
 
 
 @app.on_event("shutdown")
@@ -519,6 +583,15 @@ async def favicon():
     path = os.path.join(STATIC_DIR, 'favicon.ico')
     if os.path.exists(path):
         return FileResponse(path)
+    if os.path.exists(WEBAPP_ICON_PATH):
+        return FileResponse(WEBAPP_ICON_PATH, media_type="image/png")
+    return JSONResponse(status_code=404, content={})
+
+
+@app.get("/favicon.png")
+async def favicon_png():
+    if os.path.exists(WEBAPP_ICON_PATH):
+        return FileResponse(WEBAPP_ICON_PATH, media_type="image/png")
     return JSONResponse(status_code=404, content={})
 
 
@@ -527,10 +600,11 @@ async def favicon():
 @app.get("/api/refresh")
 async def refresh_config_api():
     try:
-        _consume_runtime_config_updates()
-        read_config()
-        _apply_webui_log_level_from_config()
-        return make_public_config()
+        with lifecycle_service.config_operation():
+            _consume_runtime_config_updates()
+            read_config()
+            _apply_webui_log_level_from_config()
+            return _make_public_config_unlocked()
     except Exception as e:
         logger.error("refresh error: %s", e)
         return api_error(500, str(e), code="refresh_failed")
@@ -542,11 +616,46 @@ async def reload_tasks_api():
     if busy is not None:
         return busy
     try:
-        lifecycle_service.reload_tasks()
-        return make_public_config()
+        with lifecycle_service.config_operation():
+            lifecycle_service.reload_task_state(reason="reload tasks")
+            return _make_public_config_unlocked()
     except Exception as e:
         logger.error("reload_tasks error: %s", e)
         return api_error(500, str(e), code="reload_tasks_failed")
+
+
+@app.post("/api/config/sync")
+async def sync_config_api(request: Request):
+    busy = _guard_runtime_idle("sync config")
+    if busy is not None:
+        return busy
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    security_key = data.get("security_key")
+    try:
+        version = lifecycle_service.sync_all_config(security_key, reason="sync config")
+        return api_ok(status="ok", config_version=version)
+    except Exception as e:
+        logger.error("sync_config error: %s", e)
+        return api_error(500, str(e), code="sync_config_failed")
+
+
+@app.post("/api/tasks/reload-all")
+async def reload_all_tasks_api():
+    busy = _guard_runtime_idle("reload all tasks")
+    if busy is not None:
+        return busy
+    try:
+        with lifecycle_service.config_operation():
+            lifecycle_service.reload_all(reason="reload all")
+            return _make_public_config_unlocked()
+    except Exception as e:
+        logger.error("reload_all_tasks error: %s", e)
+        return api_error(500, str(e), code="reload_all_tasks_failed")
 
 
 @app.post("/api/config")
@@ -561,6 +670,14 @@ async def save_config_api(request: Request):
         return api_ok(config_version=lifecycle_service.save_runtime_config(data))
     except (KeyError, ValueError) as e:
         return api_error(400, str(e), code="invalid_payload")
+    except Exception as e:
+        logger.error("save config error: %s", e)
+        return api_error(
+            500,
+            _persistence_error_message("保存配置失败", e),
+            code="save_config_failed",
+            diagnostics=_persistence_diagnostics(),
+        )
 
 
 @app.post("/api/tasks")
@@ -573,11 +690,78 @@ async def save_tasks_api(request: Request):
         tasks = payload.get('tasks', payload)
         if not isinstance(tasks, dict):
             return api_error(400, "invalid tasks payload", code="invalid_payload")
-        lifecycle_service.save_tasks(tasks)
-        return make_public_config()
+        with lifecycle_service.config_operation():
+            lifecycle_service.save_tasks(tasks)
+            return _make_public_config_unlocked()
     except Exception as e:
         logger.error("save_tasks error: %s", e)
-        return api_error(500, str(e), code="save_tasks_failed")
+        return api_error(
+            500,
+            _persistence_error_message("保存任务失败", e),
+            code="save_tasks_failed",
+            diagnostics=_persistence_diagnostics(),
+        )
+
+
+@app.get("/api/task-ordering")
+async def task_ordering_api():
+    try:
+        with lifecycle_service.config_operation():
+            return _make_task_ordering_response_unlocked()
+    except Exception as e:
+        logger.error("task_ordering read error: %s", e, exc_info=True)
+        return api_error(500, str(e), code="task_ordering_read_failed")
+
+
+@app.post("/api/task-ordering")
+async def save_task_ordering_api(request: Request):
+    busy = _guard_runtime_idle("save task ordering")
+    if busy is not None:
+        return busy
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            return api_error(400, "invalid task ordering payload", code="invalid_payload")
+        raw_overlay = payload.get("overlay", payload)
+        with lifecycle_service.config_operation():
+            lifecycle_service.save_task_ordering(raw_overlay)
+            return _make_task_ordering_response_unlocked()
+    except ValueError as e:
+        return api_error(400, str(e), code="invalid_task_ordering")
+    except Exception as e:
+        logger.error("save_task_ordering error: %s", e, exc_info=True)
+        return api_error(
+            500,
+            _persistence_error_message("保存任务排序失败", e),
+            code="save_task_ordering_failed",
+            diagnostics=_persistence_diagnostics(),
+        )
+
+
+@app.post("/api/task-ordering/layout")
+async def save_task_ordering_layout_api(request: Request):
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            return api_error(400, "invalid task ordering layout payload", code="invalid_payload")
+        raw_layout = payload.get("layout", payload)
+        config_version = lifecycle_service.save_task_ordering_layout(raw_layout)
+        projection = task_tree_service.task_ordering_projection()
+        return api_ok(
+            status="ok",
+            config_version=config_version,
+            projection=projection.to_public_dict(),
+        )
+    except ValueError as e:
+        return api_error(400, str(e), code="invalid_task_ordering_layout")
+    except Exception as e:
+        logger.error("save_task_ordering_layout error: %s", e, exc_info=True)
+        return api_error(
+            500,
+            _persistence_error_message("保存任务图布局失败", e),
+            code="save_task_ordering_layout_failed",
+            diagnostics=_persistence_diagnostics(),
+        )
 
 
 def _apply_run_character_from_body(body: dict):
@@ -687,7 +871,7 @@ async def run_tasks_api(request: Request):
         scheduler.run_direct(ts)
         logger.info("========== 所有任务执行完成 ==========")
 
-    runtime_controller.start_direct(_run, sorted_tasks, _set_thread_high_priority)
+    runtime_controller.start_direct(_run, sorted_tasks)
     return api_ok(status='ok', tasks=sorted_tasks, mode='direct')
 
 
@@ -695,6 +879,185 @@ async def run_tasks_api(request: Request):
 async def run_status_api():
     """轻量运行状态接口；统一前端状态以 /api/runtime/snapshot 为准。"""
     return {"running": runtime_controller.direct_run_alive(), "runtime": runtime_controller.status()}
+
+
+def _gift_redeem_character_options() -> list[dict[str, Any]]:
+    """Return account/character choices without exposing credentials, encryption, tasks, or status."""
+    accounts: list[dict[str, Any]] = []
+    current = cfg.current_account()
+    for name in cfg.list_accounts():
+        characters: dict[str, Any] = {}
+        if name == current:
+            characters = cfg.list_characters()
+        else:
+            path = os.path.join(cfg.ACCOUNTS_DIR, f"{name}.json")
+            try:
+                with open(path, "r", encoding="utf-8-sig") as f:
+                    payload = json.load(f)
+                raw_chars = payload.get("characters") or {}
+                if isinstance(raw_chars, dict):
+                    characters = raw_chars
+            except (OSError, json.JSONDecodeError):
+                characters = {}
+
+        roles: list[dict[str, str]] = []
+        for server, server_chars in characters.items():
+            if not isinstance(server_chars, dict):
+                continue
+            for char_name in server_chars.keys():
+                roles.append({
+                    "server": str(server),
+                    "name": str(char_name),
+                    "label": f"{server}:{char_name}",
+                })
+        accounts.append({
+            "name": name,
+            "current": name == current,
+            "roles": roles,
+        })
+    return accounts
+
+
+@app.get("/api/news/redeem_targets")
+async def news_redeem_targets_api():
+    return api_ok(
+        current_account=cfg.current_account(),
+        active_character=cfg.active_character(),
+        credential_unlocked=cfg.has_decrypted_credentials(),
+        accounts=_gift_redeem_character_options(),
+        runtime=runtime_controller.status(),
+    )
+
+
+def _credential_locked_response(message: str) -> JSONResponse:
+    return api_error(
+        403,
+        message,
+        code="credential_locked",
+        need_credential_unlock=True,
+        need_security_key=True,
+    )
+
+
+def _gift_redeem_codes_from_payload(data: dict[str, Any]) -> list[str]:
+    raw_codes = data.get("redeem_codes")
+    if isinstance(raw_codes, list):
+        candidates = raw_codes
+    else:
+        candidates = [data.get("redeem_code")]
+    codes: list[str] = []
+    seen: set[str] = set()
+    for raw in candidates:
+        code = str(raw or "").strip()
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        codes.append(code)
+    return codes
+
+
+@app.post("/api/news/gift_codes/redeem")
+async def news_gift_code_redeem_api(request: Request):
+    data = await request.json()
+    if not isinstance(data, dict):
+        return api_error(400, "invalid redeem payload", code="invalid_payload")
+    if not _check_request_freshness(data):
+        return api_error(400, "请求已过期，请重试", code="stale_request")
+    if runtime_controller.is_busy():
+        return runtime_controller.busy_response("redeem gift code")
+
+    redeem_codes = _gift_redeem_codes_from_payload(data)
+    account = str(data.get("account") or "").strip()
+    server = str(data.get("server") or "").strip()
+    character = str(data.get("character") or "").strip()
+    security_key = str(data.get("security_key") or "").strip()
+
+    if not redeem_codes:
+        return api_error(400, "兑换码不能为空", code="invalid_payload")
+    if len(redeem_codes) > 30:
+        return api_error(400, "一次最多兑换 30 个兑换码", code="invalid_payload")
+    if not account:
+        return api_error(400, "请选择账号", code="invalid_payload")
+    if not server or not character:
+        return api_error(400, "请选择角色", code="invalid_payload")
+
+    client_ip = request.client.host if request.client else "unknown"
+    if security_key and _is_verify_rate_limited(client_ip):
+        return api_error(429, "验证尝试过多，请5分钟后再试", code="rate_limited")
+    credential_granted = False
+
+    try:
+        if account != cfg.current_account():
+            if not security_key:
+                return _credential_locked_response("切换账号需要输入安全密码")
+            if not cfg.verify_account_security_key(account, security_key):
+                _record_verify_failure(client_ip)
+                return api_error(401, "安全密码错误", code="invalid_security_key", need_security_key=True)
+            lifecycle_service.switch_account(account, security_key)
+            credential_granted = True
+        elif not cfg.has_decrypted_credentials():
+            if cfg.has_encrypted_credentials():
+                if not security_key:
+                    return _credential_locked_response("请先输入安全密码以验证账号")
+                if not cfg.verify_account_security_key(account, security_key):
+                    _record_verify_failure(client_ip)
+                    return api_error(401, "安全密码错误", code="invalid_security_key", need_security_key=True)
+                lifecycle_service.reload_verified_account(security_key)
+                _mark_config_changed("redeem credential unlock")
+                credential_granted = True
+            else:
+                return _credential_locked_response("当前账号未配置游戏账号密码")
+
+        if not cfg.has_decrypted_credentials():
+            return _credential_locked_response("请先验证账号密码后再兑换")
+
+        lifecycle_service.switch_character(server, character, reason="redeem code select character")
+
+        from AutoScriptor.utils.task_registry import task_registry
+
+        if not task_registry.has_task(_GIFT_REDEEM_TASK_PATH):
+            lifecycle_service.reload_all(reason="reload redeem task")
+        if not task_registry.has_task(_GIFT_REDEEM_TASK_PATH):
+            return api_error(
+                404,
+                "未找到兑换码任务，请确认一般任务已加载",
+                code="redeem_task_missing",
+            )
+    except (KeyError, ValueError) as e:
+        return api_error(400, str(e), code="invalid_payload")
+    except Exception as e:
+        logger.error("gift code redeem prepare failed: %s", e, exc_info=True)
+        return api_error(500, "启动兑换任务失败", code="redeem_start_failed")
+
+    task_runs = [
+        {
+            "id": "redeem:batch",
+            "task": _GIFT_REDEEM_TASK_PATH,
+            "params": {"redeem_code": redeem_codes if len(redeem_codes) > 1 else redeem_codes[0]},
+        }
+    ]
+
+    def _run(runs):
+        scheduler.run_direct_sequence(runs, force_login=True)
+        logger.info("========== 兑换码任务执行完成，共 %d 个 ==========", len(redeem_codes))
+
+    runtime_controller.start_direct(_run, task_runs)
+    resp = JSONResponse(content=api_ok(
+        status="ok",
+        mode="direct",
+        task=_GIFT_REDEEM_TASK_PATH,
+        redeem_codes=redeem_codes,
+        redeem_count=len(redeem_codes),
+        account=cfg.current_account(),
+        active_character=cfg.active_character(),
+        config_version=current_version(),
+    ))
+    if credential_granted:
+        old_tok = _credential_unlock_from_request(request)
+        _revoke_credential_unlock(old_tok)
+        tok = _grant_credential_unlock()
+        return _attach_credential_unlock_cookie(resp, tok)
+    return resp
 
 
 @app.post("/api/stop")
@@ -715,8 +1078,12 @@ async def credential_status_api(request: Request):
 @app.post("/api/credential/revoke")
 async def credential_revoke_api(request: Request):
     """用户主动「重新验证」时吊销解锁令牌并清除 Cookie。"""
+    busy = _guard_runtime_idle("revoke credentials")
+    if busy is not None:
+        return busy
     old = _credential_unlock_from_request(request)
     _revoke_credential_unlock(old)
+    cfg.clear_decrypted_credentials()
     resp = JSONResponse(content={"status": "ok"})
     return _clear_credential_unlock_cookie(resp)
 
@@ -834,65 +1201,68 @@ async def enum_options_api(request: Request):
         else:
             task_path = None
         if not isinstance(paths, list):
-            return JSONResponse(status_code=400, content={'error': 'paths must be a list'})
+            return api_error(400, 'paths must be a list', code='invalid_payload')
         result = {}
         for p in paths:
-            try:
-                module_name, class_name = p.rsplit('.', 1)
-                mod = importlib.import_module(module_name)
-                EnumClass = getattr(mod, class_name)
-                opts = []
-                for m in EnumClass:
-                    if isinstance(m.value, str):
-                        label = m.value
-                    elif isinstance(m.value, int):
-                        label = str(m.value)
-                    else:
-                        label = m.name
-                    if (
-                        task_path
-                        and EnumClass.__name__ == 'BattleFlowName'
-                        and isinstance(m.value, str)
-                        and not _battle_flow_allowed_for_task(m.value, task_path)
-                    ):
-                        continue
-                    opts.append({"value": m.name, "label": label})
-                result[p] = opts
-            except Exception:
-                result[p] = []
+            if not isinstance(p, str) or '.' not in p:
+                return api_error(400, f'invalid enum path: {p!r}', code='invalid_payload')
+            module_name, class_name = p.rsplit('.', 1)
+            mod = importlib.import_module(module_name)
+            EnumClass = getattr(mod, class_name)
+            opts = []
+            for m in EnumClass:
+                if isinstance(m.value, str):
+                    label = m.value
+                elif isinstance(m.value, int):
+                    label = str(m.value)
+                else:
+                    label = m.name
+                if (
+                    task_path
+                    and EnumClass.__name__ == 'BattleFlowName'
+                    and isinstance(m.value, str)
+                    and not _battle_flow_allowed_for_task(m.value, task_path)
+                ):
+                    continue
+                opts.append({"value": m.name, "label": label})
+            result[p] = opts
         return result
     except Exception as e:
         logger.error("enum_options error: %s", e)
-        return JSONResponse(status_code=500, content={'error': str(e)})
+        return api_error(500, str(e), code='enum_options_failed')
 
 
 @app.get("/api/ocr-status")
 async def ocr_status_api():
     try:
         import paddle
-        from AutoScriptor.recognition.ocr_rec import ocr_manager
+        from AutoScriptor.recognition.ocr_rec import get_ocr_runtime_status
 
-        def _safe(call, default):
-            try:
-                return call()
-            except Exception:
-                return default
-
-        cfg_use_gpu = bool((cfg.get("ocr") or {}).get("use_gpu", cfg.get("ocr.use_gpu", False)))
-        compiled_with_cuda = _safe(lambda: paddle.device.is_compiled_with_cuda(), False)
-        gpu_count = _safe(lambda: paddle.device.cuda.device_count(), 0)
-        current_device = _safe(lambda: paddle.get_device(), "unknown")
-        engine_ready = _safe(lambda: ocr_manager.is_ready(), False)
+        runtime_status = get_ocr_runtime_status()
+        compiled_with_cuda = paddle.device.is_compiled_with_cuda()
+        gpu_count = paddle.device.cuda.device_count()
+        current_device = paddle.get_device()
         return {
-            "cfg_use_gpu": cfg_use_gpu,
+            "paddle_version": paddle.__version__,
+            "cfg_use_gpu": runtime_status["configured_use_gpu"],
+            "configured_use_gpu": runtime_status["configured_use_gpu"],
+            "runtime_use_gpu": runtime_status["runtime_use_gpu"],
+            "engine_use_gpu": runtime_status["engine_use_gpu"],
             "compiled_with_cuda": compiled_with_cuda,
             "gpu_count": gpu_count,
             "current_device": current_device,
-            "engine_ready": engine_ready,
+            "engine_device": runtime_status["engine_device"],
+            "engine_ready": runtime_status["engine_ready"],
+            "restart_required": runtime_status["restart_required"],
+            "initialization_error": runtime_status["initialization_error"],
+            "configured_model": runtime_status["configured_model"],
+            "runtime_model": runtime_status["runtime_model"],
+            "configured_digit_model": runtime_status["configured_digit_model"],
+            "runtime_digit_model": runtime_status["runtime_digit_model"],
         }
     except Exception as e:
         logger.error("ocr_status error: %s", e)
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return api_error(500, str(e), code="ocr_status_failed")
 
 
 @app.get("/api/scheduler/status")
@@ -939,7 +1309,7 @@ def _build_overview_payload(now_ts: float | None = None) -> dict:
                     disabled += 1
                 else:
                     enabled += 1
-                    blocked = is_human_takeover_blocked(val) or bool(val.get("error"))
+                    blocked = is_human_takeover_blocked(val, now_ts) or bool(val.get("error"))
                     due = False if blocked else is_task_due(val, path, now_ts)
                     if blocked:
                         error += 1
@@ -948,11 +1318,20 @@ def _build_overview_payload(now_ts: float | None = None) -> dict:
                     else:
                         scheduled += 1
                     status = 'error' if blocked else ('pending' if due else 'scheduled')
+                    task_status = ((cfg._config.get("status") or {}).get("tasks") or {}).get(path, {})
+                    progress = task_status.get("progress") if isinstance(task_status, dict) else None
+                    progress_display = None
+                    if progress is not None:
+                        from AutoScriptor.utils.task_state import progress_label
+
+                        progress_display = progress_label(progress) or str(progress)
                     upcoming.append({
                         'path': path,
                         'on': True,
                         'next_exec_time': calc_effective_next_time(val, now_ts),
                         'status': status,
+                        'progress': progress,
+                        'progress_display': progress_display,
                         'human_takeover_error': val.get('human_takeover_error'),
                         'human_takeover_at': val.get('human_takeover_at'),
                     })
@@ -1025,10 +1404,37 @@ async def device_diagnostics_api(screenshot: bool = False, require_app: bool = F
             include_screenshot=screenshot,
             require_app=require_app,
         )
+        diagnostics["discovery"] = discover_mumu_setup(cfg["emulator"], probe_adb=False)
         return api_ok(diagnostics=diagnostics)
     except Exception as e:
         logger.error("device diagnostics error: %s", e)
         return api_error(500, str(e), code="device_diagnostics_failed")
+
+
+@app.get("/api/device/discover")
+async def device_discover_api(probe_adb: bool = True):
+    try:
+        return api_ok(discovery=discover_mumu_setup(cfg["emulator"], probe_adb=probe_adb))
+    except Exception as e:
+        logger.error("device discovery error: %s", e)
+        return api_error(500, str(e), code="device_discovery_failed")
+
+
+@app.post("/api/device/discover/apply")
+async def device_discover_apply_api(request: Request):
+    busy = _guard_runtime_idle("apply device discovery")
+    if busy is not None:
+        return busy
+    try:
+        data = await request.json()
+        emulator = data.get("emulator", data) if isinstance(data, dict) else {}
+        version = lifecycle_service.apply_discovered_emulator_config(emulator)
+        return api_ok(config_version=version, discovery=discover_mumu_setup(cfg["emulator"], probe_adb=False))
+    except (KeyError, ValueError) as e:
+        return api_error(400, str(e), code="invalid_payload")
+    except Exception as e:
+        logger.error("device discovery apply error: %s", e)
+        return api_error(500, str(e), code="device_discovery_apply_failed")
 
 
 # ── 通知 API ──
@@ -1047,6 +1453,9 @@ async def notify_test_api(request: Request):
 
 @app.post("/api/notify/save")
 async def notify_save_api(request: Request):
+    busy = _guard_runtime_idle("save notify settings")
+    if busy is not None:
+        return busy
     data = await request.json()
     version = lifecycle_service.save_notify_settings(
         data.get("enabled", False),
@@ -1072,69 +1481,13 @@ async def update_check_api():
 
 @app.post("/api/update/run")
 async def update_run_api():
+    busy = _guard_runtime_idle("run source update")
+    if busy is not None:
+        return busy
     from services.core.updater import updater
     ok = updater.run_update()
     return {"success": ok, **updater.get_status()}
 
-
-# ── 内容增量更新（bsdiff / manifest，与 Git 更新独立）──
-
-@app.get("/api/content-update/status")
-async def content_update_status_api():
-    from services.core.content_delta_update import content_delta_updater
-    return content_delta_updater.get_status()
-
-
-@app.post("/api/content-update/check")
-async def content_update_check_api(request: Request):
-    client_ip = request.client.host if request.client else "unknown"
-    if not _content_update_check_limiter.allow(client_ip):
-        return JSONResponse(
-            status_code=429,
-            content={"error": "检查更新过于频繁，请稍后再试"},
-        )
-    from services.core.content_delta_update import content_delta_updater
-    has_update, message = content_delta_updater.check_has_update()
-    return {
-        "has_update": has_update,
-        "message": message,
-        **content_delta_updater.get_status(),
-    }
-
-
-@app.post("/api/content-update/apply")
-async def content_update_apply_api(request: Request):
-    client_ip = request.client.host if request.client else "unknown"
-    from services.core.content_delta_update import content_delta_updater
-
-    rem_cd = content_delta_updater.apply_cooldown_remaining_sec()
-    if rem_cd > 0:
-        return JSONResponse(
-            status_code=429,
-            content={
-                "error": f"全机冷却中，约 {int(rem_cd) + 1} 秒后再试",
-                "apply_cooldown_remaining_sec": round(rem_cd, 1),
-            },
-        )
-    if not _content_update_apply_min_interval.allow(client_ip):
-        return JSONResponse(
-            status_code=429,
-            content={"error": "操作过于频繁，请稍后再试"},
-        )
-    if not _content_update_apply_limiter.allow(client_ip):
-        return JSONResponse(
-            status_code=429,
-            content={"error": "应用更新过于频繁，请稍后再试"},
-        )
-    if content_delta_updater.requires_credential_unlock():
-        cred_err = _require_credential_unlock(request)
-        if cred_err is not None:
-            return cred_err
-    ok = content_delta_updater.apply_manifest()
-    return {"success": ok, **content_delta_updater.get_status()}
-
-
-# ── 远程访问 API ──
 
 @app.get("/api/remote-access")
 async def remote_access_status_api():
@@ -1225,6 +1578,8 @@ async def accounts_add_api(request: Request):
     if busy is not None:
         return busy
     data = await request.json()
+    if not _check_request_freshness(data):
+        return api_error(400, "请求已过期，请重试", code="stale_request")
     name = str(data.get("name", "") or "").strip()
     account = str(data.get("account", "") or "").strip()
     password = str(data.get("password", "") or "").strip()
@@ -1233,24 +1588,43 @@ async def accounts_add_api(request: Request):
     security_key = str(data.get("security_key", "") or "").strip()
 
     if not name:
-        return JSONResponse(status_code=400, content={"error": "账号名称不能为空"})
+        return api_error(400, "账号名称不能为空", code="invalid_payload")
     if not account:
-        return JSONResponse(status_code=400, content={"error": "游戏账号不能为空"})
+        return api_error(400, "游戏账号不能为空", code="invalid_payload")
     if not password:
-        return JSONResponse(status_code=400, content={"error": "游戏密码不能为空"})
+        return api_error(400, "游戏密码不能为空", code="invalid_payload")
     if not server:
-        return JSONResponse(status_code=400, content={"error": "服务器不能为空"})
+        return api_error(400, "服务器不能为空", code="invalid_payload")
     if not character_name:
-        return JSONResponse(status_code=400, content={"error": "角色名不能为空"})
+        return api_error(400, "角色名不能为空", code="invalid_payload")
     if not security_key:
-        return JSONResponse(status_code=400, content={"error": "安全密码不能为空"})
+        return api_error(400, "安全密码不能为空", code="invalid_payload")
 
     try:
         version = lifecycle_service.add_account(name, account, password, server, character_name, security_key)
-        return {"accounts": cfg.list_accounts(), "config_version": version}
+        old_tok = _credential_unlock_from_request(request)
+        _revoke_credential_unlock(old_tok)
+        tok = _grant_credential_unlock()
+        resp = JSONResponse(content=api_ok(
+            accounts=cfg.list_accounts(),
+            current_account=cfg.current_account(),
+            character_name=cfg._config.get("game", {}).get("character_name", ""),
+            active_character=cfg.active_character(),
+            characters=task_tree_service.characters_summary(),
+            credential={"unlocked": cfg.has_decrypted_credentials()},
+            config_version=version,
+        ))
+        return _attach_credential_unlock_cookie(resp, tok)
+    except ValueError as e:
+        return api_error(400, str(e), code="invalid_account")
     except Exception as e:
         logger.error("add account error: %s", e)
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return api_error(
+            500,
+            _persistence_error_message("创建账号失败", e),
+            code="add_account_failed",
+            diagnostics=_persistence_diagnostics(),
+        )
 
 
 @app.post("/api/accounts/delete")
@@ -1379,6 +1753,51 @@ async def characters_all_tasks_summary_api():
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+@app.get("/api/characters/task")
+async def get_character_task_api(server: str, character: str, path: str):
+    try:
+        node = task_tree_service.get_character_task_public(server, character, path)
+        if not node:
+            return api_error(404, "task not found", code="task_not_found")
+        return api_ok(task=node, path=path, server=server, character=character)
+    except Exception as e:
+        logger.error("get_character_task error: %s", e)
+        return api_error(500, str(e), code="get_character_task_failed")
+
+
+@app.post("/api/characters/task")
+async def save_character_task_api(request: Request):
+    busy = _guard_runtime_idle("save character task")
+    if busy is not None:
+        return busy
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            return api_error(400, "invalid payload", code="invalid_payload")
+        server = (body.get("server") or "").strip()
+        character = (body.get("character") or "").strip()
+        path = (body.get("path") or "").strip()
+        task = body.get("task")
+        if not server or not character or not path or not isinstance(task, dict):
+            return api_error(400, "invalid character task payload", code="invalid_payload")
+        lifecycle_service.save_character_task(server, character, path, task)
+        ac = cfg.active_character()
+        if ac.get("server") == server and ac.get("name") == character:
+            return make_public_config()
+        version = current_version()
+        return api_ok(config_version=version)
+    except (KeyError, ValueError) as e:
+        return api_error(400, str(e), code="invalid_payload")
+    except Exception as e:
+        logger.error("save_character_task error: %s", e)
+        return api_error(
+            500,
+            _persistence_error_message("保存任务失败", e),
+            code="save_character_task_failed",
+            diagnostics=_persistence_diagnostics(),
+        )
+
+
 # ── 调度队列 API ──
 
 @app.get("/api/dispatch/queue")
@@ -1456,7 +1875,7 @@ async def error_archives_file_api(folder: str, path: str):
         if not p:
             return JSONResponse(status_code=404, content={"error": "not found"})
         suffix = p.suffix.lower()
-        media = "image/png" if suffix == ".png" else "image/jpeg" if suffix in (".jpg", ".jpeg") else "application/octet-stream"
+        media = "image/png" if suffix == ".png" else "image/jpeg" if suffix in (".jpg", ".jpeg") else "video/mp4" if suffix == ".mp4" else "application/octet-stream"
         return FileResponse(p, media_type=media, filename=p.name)
     except Exception as e:
         logger.exception("error-archives file failed")
@@ -1551,7 +1970,6 @@ def run_webui(restart_event=None):
     global _server
     import uvicorn
 
-    _ensure_vendor_files()
     read_config()
     _apply_webui_log_level_from_config()
     _print_banner()
@@ -1599,7 +2017,6 @@ def shutdown_webui():
 
     _silent(scheduler.deactivate)
     _silent(lambda: scheduler.stop(timeout=3))
-    _silent(lambda: __import__("AutoScriptor.utils.perf", fromlist=["unboost"]).unboost())
     _silent(_shutdown_runtime)
     _silent(lambda: setattr(_server, "should_exit", True) if _server else None)
 
@@ -1614,12 +2031,4 @@ def _shutdown_runtime():
 if __name__ == '__main__':
     from services.single_instance import ensure_single_instance
     ensure_single_instance()
-
-    try:
-        run_webui()
-    except Exception as e:
-        logger.error("Error: %s", e)
-        traceback.print_exc()
-        logger.info("程序已退出")
-    finally:
-        shutdown_webui()
+    run_webui()

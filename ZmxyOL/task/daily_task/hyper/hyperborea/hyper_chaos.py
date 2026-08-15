@@ -1,4 +1,3 @@
-import traceback
 
 from ZmxyOL.battle.procedure.chaos import DEFAULT_LINGQI_PRIORITY_VALUES, sort_stage_lingqi_pairs
 from ZmxyOL.battle.tasks import JIBEI_CHAOS_TABLE, get_task_table
@@ -6,7 +5,10 @@ from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
 
-@register_task
+@register_task(
+    description="按灵气和难度选择极北混沌并挑战。",
+    path_cn="每日任务/极北/极北地区/极北混沌",
+)
 def task(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):
@@ -36,13 +38,4 @@ def task(
         h.set(has_cd=True,speed_x=3).battle_task(crash_suddenly=True)
     else:
         click(B(1200,30,30,30))
-        wait_for_appear(T("回家", box=Box(29,613,77,88).margin()))
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)
+        wait_for_appear(T("回家", box=Box(29,656,77,54).margin()))

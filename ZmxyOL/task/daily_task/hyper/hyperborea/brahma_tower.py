@@ -1,12 +1,12 @@
-import traceback
 from time import time
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
 
+
 def battle():
     wait_for_disappear(I("加载中"))
-    from ZmxyOL.battle.character.hero import h
+    from AutoScriptor.battle_character.hero import h
     sleep(0.5)
     h.skill(4, 0.95)
     h.zhenling()
@@ -34,6 +34,7 @@ def battle():
     click(T("确认"))
     wait_for_disappear(I("加载中"))
 
+
 def FTT_battle_one_round():
     final = False
     while not final:
@@ -50,7 +51,10 @@ def FTT_battle_one_round():
         wait_for_appear(T("入劫"))
 
 
-@register_task
+@register_task(
+    description="领取梵天塔每日 5 张度牒并扫荡梵天塔。",
+    path_cn="每日任务/极北/极北地区/梵天塔",
+)
 def fanTianTa(
     battle_times=1,
     claim_past=True,
@@ -67,6 +71,8 @@ def fanTianTa(
         click(B(30,30,30,30))
     click(T("现在"),offset=(0,100))
     sleep(3)
+    if ui_T(T("入劫", box=Box(597,430,87,38).margin())):
+        click(B(931,134,43,50))
     click(T("确认"), if_exist=True)
     sleep(1)
     for _ in range(battle_times):
@@ -75,7 +81,7 @@ def fanTianTa(
         else:
             click(T("碾压"))
             wait_for_appear(T("优先级"))
-            remains = extract_info(B(341,505,310,57), post_process=lambda s: int(s.strip()[-2]), ensure_not_empty=True)
+            remains = extract_info(B(328,529,333,21), post_process=lambda s: int(s.strip()[-3]), ensure_not_empty=True)
             if remains > 0:
                 click(T("烦恼"))
                 click(T("立即碾压"))
@@ -86,14 +92,3 @@ def fanTianTa(
     click(B(30,30,30,30))
     sleep(1)
     click(B(30,30,30,30))
-
-
-
-if __name__ == "__main__":
-    try:
-        fanTianTa()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

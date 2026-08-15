@@ -10,17 +10,13 @@ const APP_MENU = [
   {
     group: 'TASKS',
     items: [
-      { id: 'daily',   label: '每日任务', icon: 'fa-sun-o' },
-      { id: 'weekly',  label: '每周任务', icon: 'fa-calendar' },
-      { id: 'general', label: '一般任务', icon: 'fa-tasks' },
-      { id: 'custom',  label: '自定义任务', icon: 'fa-code' },
+      { id: 'tasks', label: '任务列表', icon: 'fa-sitemap' },
     ],
   },
   {
     group: 'TOOLS',
     items: [
       { id: 'editor',   label: '编辑器',   icon: 'fa-pencil-square-o' },
-      { id: 'canvas',   label: '脚本画布', icon: 'fa-object-group' },
       { id: 'errorArchives', label: '错误汇总', icon: 'fa-exclamation-triangle' },
       { id: 'updater',  label: '检查更新', icon: 'fa-cloud-download' },
       { id: 'settings', label: '设置',     icon: 'fa-cog' },
@@ -39,7 +35,6 @@ const AppSidebar = {
     theme:           { type: String,  default: 'light' },
     schedulerStatus: { type: Object,  required: true },
     characterName:   { type: String,  default: '' },
-    featureScriptCanvas: { type: Boolean, default: true },
   },
   emits: ['navigate'],
   data() {
@@ -50,11 +45,7 @@ const AppSidebar = {
   },
   computed: {
     menu() {
-      if (this.featureScriptCanvas) return APP_MENU;
-      return APP_MENU.map((g) => ({
-        ...g,
-        items: g.items.filter((it) => it.id !== 'canvas'),
-      }));
+      return APP_MENU;
     },
     schedDot() {
       return {

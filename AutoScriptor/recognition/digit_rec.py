@@ -5,10 +5,10 @@ from typing import Any
 
 import cv2
 import numpy as np
-from paddleocr import PaddleOCR
 
 from AutoScriptor.core.targets import BoxTarget
-from AutoScriptor.utils.app_config import cfg
+from AutoScriptor.recognition.paddle_ocr_compat import CompatiblePaddleOCR
+from AutoScriptor.recognition.ocr_runtime_config import ocr_runtime_config
 from AutoScriptor.utils.box import Box
 from AutoScriptor.utils.logger import logger
 
@@ -47,6 +47,7 @@ _MIN_CONFIDENCE = 0.85
 _MAX_ROW_ITEMS = 6
 _digit_engine = None
 _digit_engine_lock = threading.Lock()
+DIGIT_OCR_MODEL_PROFILE = ocr_runtime_config.digit_model_profile
 
 
 def _get_digit_engine():
@@ -54,12 +55,10 @@ def _get_digit_engine():
     if _digit_engine is None:
         with _digit_engine_lock:
             if _digit_engine is None:
-                _digit_engine = PaddleOCR(
-                    use_gpu=cfg["ocr.use_gpu"],
-                    enable_mkldnn=True,
-                    use_angle_cls=False,
-                    lang="en",
-                    show_log=False,
+                _digit_engine = CompatiblePaddleOCR(
+                    model_profile_name=DIGIT_OCR_MODEL_PROFILE,
+                    language="en",
+                    use_gpu=ocr_runtime_config.use_gpu,
                 )
     return _digit_engine
 
@@ -91,7 +90,7 @@ def _as_box(target: Any) -> Box | None:
         return target
     if hasattr(target, "box") and isinstance(target.box, Box):
         return target.box
-    raise TypeError(f"digit_only expects Box/BoxTarget, got {type(target)!r}")
+    raise TypeError(f"digital_only mode expects Box/BoxTarget, got {type(target)!r}")
 
 
 def _shape_boxes(target: Any) -> tuple[str, list[list[Box | None]]]:
@@ -100,7 +99,10 @@ def _shape_boxes(target: Any) -> tuple[str, list[list[Box | None]]]:
     if isinstance(target, (BoxTarget, Box)) or (hasattr(target, "box") and isinstance(target.box, Box)):
         return "single", [[_as_box(target)]]
     if not isinstance(target, (list, tuple)):
-        raise TypeError(f"digit_only expects Box, list[Box], or list[list[Box]], got {type(target)!r}")
+        raise TypeError(
+            "digital_only mode expects Box, list[Box], or list[list[Box]], "
+            f"got {type(target)!r}"
+        )
     if len(target) == 0:
         return "row", [[]]
     if isinstance(target[0], (list, tuple)):

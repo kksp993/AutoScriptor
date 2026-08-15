@@ -1,9 +1,14 @@
-import traceback
 from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.utils.logger import logger
 
-@register_task(sched_window_hours=(10, 22))
+@register_task(
+    path_cn="每日任务/村庄/妖兽",
+    description="在开放时段挑战灵域妖兽。",
+    task_doc="【注意】需要解锁法相，只在周五至周日的开放时段挑战灵域妖兽。",
+    sched_window_hours=(10, 22),
+    allowed_weekdays=[5, 6, 7],
+)
 def task(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):
@@ -26,8 +31,7 @@ def task(
     elif ui_F(T("进入",color="绿色"), 3):
         logger.info("当前妖兽任务已结束")
     else:
-        click(T("进入",color="绿色"))
-        sleep(1)
+        click(T("进入",color="绿色"),until=lambda:ui_T(I("加载中")))
         wait_for_disappear(ui["加载中"].i)
         with bg.scope("妖兽") as scope:
             scope.add(
@@ -40,17 +44,6 @@ def task(
                     bg.set_signal("try_exit", True),
                 ],
             )
-            h.set(has_cd=False,speed_x=1).battle_loop(battle_weight=100000)
+            flow_name = getattr(battle_flow, "value", battle_flow)
+            h.set(has_cd=False,speed_x=1).battle_loop(flow_name=flow_name)
         click((T("退出副本"),T("确定")), until=lambda:ui_T(I("加载中")), interval=1)
-
-
-
-if __name__ == "__main__":
-    try:
-        task()
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)
-

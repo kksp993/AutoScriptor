@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import threading
 import time
@@ -166,16 +167,6 @@ def import_device_facade_for_test():
     autoscriptor.__path__ = [str(ROOT / "AutoScriptor")]
     utils_pkg = types.ModuleType("AutoScriptor.utils")
     utils_pkg.__path__ = [str(ROOT / "AutoScriptor" / "utils")]
-    perf = types.ModuleType("AutoScriptor.utils.perf")
-
-    class DummySafeSubprocess:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-    perf.mumu_safe_subprocess = lambda: DummySafeSubprocess()
 
     module_name = "device_facade_under_test"
     spec = importlib.util.spec_from_file_location(
@@ -186,7 +177,6 @@ def import_device_facade_for_test():
     with patch.dict(sys.modules, {
         "AutoScriptor": autoscriptor,
         "AutoScriptor.utils": utils_pkg,
-        "AutoScriptor.utils.perf": perf,
     }):
         assert spec.loader is not None
         spec.loader.exec_module(module)
@@ -216,18 +206,16 @@ def import_api_for_test():
     constant.AndroidKey = SimpleNamespace()
     control_mod = mod("AutoScriptor.core.control")
     targets = mod("AutoScriptor.core.targets")
-    locate_dispatch = mod("AutoScriptor.core.locate_dispatch")
     ocr_rec = mod("AutoScriptor.recognition.ocr_rec")
     rec = mod("AutoScriptor.recognition.rec")
+    recognition_trace = mod("AutoScriptor.recognition.recognition_trace")
     box = mod("AutoScriptor.utils.box")
     logger = mod("AutoScriptor.utils.logger")
     app_config = mod("AutoScriptor.utils.app_config")
     app_resolve = mod("AutoScriptor.utils.app_package_resolve")
     mumu_mod = mod("AutoScriptor.control.MumuAdaptor.mumu")
-    edit_img = mod("AutoScriptor.utils.edit_img")
     cancel = mod("AutoScriptor.utils.cancel")
     tracer = mod("AutoScriptor.utils.tracer")
-    perf = mod("AutoScriptor.utils.perf")
 
     class Target:
         pass
@@ -248,6 +236,7 @@ def import_api_for_test():
         def __init__(self):
             self.running = False
             self.started = False
+            self.ready_checks = 0
 
         def is_running(self):
             return self.running
@@ -257,6 +246,12 @@ def import_api_for_test():
                 cancel_check()
             self.started = True
             self.running = True
+            return True
+
+        def wait_until_android_ready(self, timeout=90.0, interval=2.0, cancel_check=None):
+            if cancel_check:
+                cancel_check()
+            self.ready_checks += 1
             return True
 
     class FakeApp:
@@ -284,29 +279,26 @@ def import_api_for_test():
     targets.ImageTarget = type("ImageTarget", (Target,), {})
     targets.TextTarget = type("TextTarget", (Target,), {})
     targets.BoxTarget = type("BoxTarget", (Target,), {"box": None})
-    targets.VLMTarget = type("VLMTarget", (Target,), {})
     control_mod.MixControl = FakeMixControl
-    locate_dispatch.has_handler = lambda typ: False
-    locate_dispatch.dispatch_locate = lambda target, frame: None
+    control_mod.ControlModeProxy = lambda *args, **kwargs: SimpleNamespace()
     ocr_rec.ocr_for_box = lambda *args, **kwargs: None
     rec.get_box_color = lambda *args, **kwargs: None
+    recognition_trace.create_recognition_result = lambda **kwargs: kwargs
+    recognition_trace.record_recognition_result = lambda result: None
     box.Box = Box
     box.b2p = lambda *args, **kwargs: (0, 0)
     logger.logger = logger_stub()
-    logger.setup_task_aware_logging = lambda: None
     logger.setup_logfile = lambda *args, **kwargs: None
     tracer.save_debug_screenshot = lambda *args, **kwargs: None
     app_config.cfg = {
         "emulator": {"emu_path": "mumu.exe", "index": 2, "adb_addr": "addr"},
         "app": {
             "app_to_start": "pkg",
-            "auto_start": False,
             "run_in_background": False,
         },
     }
     app_resolve.resolve_app_to_start = lambda mumu, cancel_check=None: "resolved.pkg"
     mumu_mod.Mumu = FakeMumu
-    edit_img.launch_editor = lambda *args, **kwargs: None
     cancel.check_cancel_raise = lambda: None
     cancel.cancellable_sleep = lambda seconds, chunk=0.05: None
 
@@ -321,13 +313,13 @@ def import_api_for_test():
     cancel.sleep_with_cancel = lambda seconds, cancel_check=None, chunk=0.05: (
         cancel_check() if cancel_check else None
     )
-    perf.unboost = lambda: None
     cv2_stub.__version__ = "test"
 
     with patch.dict(sys.modules, modules):
         assert spec.loader is not None
         spec.loader.exec_module(module)
     module.FakeMumu = FakeMumu
+    module.FakePower = FakePower
     module.stub_modules = modules
     return module
 
@@ -404,6 +396,35 @@ class TestMuMuPowerLifecycle(unittest.TestCase):
 
         self.assertTrue(module.Power(utils).is_running())
         self.assertEqual(utils.commands, [("info", [])])
+
+    def test_start_waits_for_android_after_launch_command_succeeds(self):
+        module = import_power_for_test()
+        ready_checks = []
+
+        class FakeUtils:
+            def __init__(self):
+                self.commands = []
+
+            def get_vm_id(self):
+                return "1"
+
+            def set_operate(self, operate):
+                self.operate = operate
+
+            def run_command(self, args):
+                self.commands.append((self.operate, args))
+                return 0, "launch accepted"
+
+        def ready():
+            ready_checks.append(True)
+            return len(ready_checks) >= 2
+
+        utils = FakeUtils()
+        module.test_facade.adb_device_ready = ready
+
+        self.assertTrue(module.Power(utils).start(cancel_check=lambda: None))
+        self.assertEqual(utils.commands, [("control", ["launch"])])
+        self.assertEqual(len(ready_checks), 2)
 
 
 class TestMuMuAppLifecycle(unittest.TestCase):
@@ -499,6 +520,71 @@ class TestMuMuAdbLifecycle(unittest.TestCase):
                 patch.object(module, "configured_adb_host_port", return_value=("127.0.0.1", "16416")):
             self.assertEqual(module.Adb(FakeUtils()).get_connect_info(), ("127.0.0.1", "16416"))
 
+    def test_mumu_manager_command_reads_replace_bad_bytes(self):
+        module_name = "mumu_utils_under_test"
+        spec = importlib.util.spec_from_file_location(
+            module_name,
+            ROOT / "AutoScriptor/control/MumuAdaptor/utils.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        with patch.object(module.subprocess, "run", return_value=SimpleNamespace(returncode=1, stdout="", stderr="bad")) as run:
+            ret_code, retval = module.utils().run_command(["MuMuManager.exe", "info"])
+
+        self.assertEqual(ret_code, 1)
+        self.assertEqual(retval, "bad")
+        self.assertEqual(run.call_args.kwargs.get("encoding"), "utf-8")
+        self.assertEqual(run.call_args.kwargs.get("errors"), "replace")
+
+
+class TestMumuDiscovery(unittest.TestCase):
+    def test_derive_paths_from_nx_main_folder(self):
+        from AutoScriptor.utils.mumu_discovery import derive_paths_from_folder, discover_mumu_setup
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "MuMu"
+            nx = root / "nx_main"
+            nx.mkdir(parents=True)
+            manager = nx / "MuMuManager.exe"
+            adb = nx / "adb.exe"
+            manager.write_text("", encoding="utf-8")
+            adb.write_text("", encoding="utf-8")
+
+            paths = derive_paths_from_folder(root)
+
+            self.assertEqual(paths["mumu_folder"], str(root))
+            self.assertEqual(paths["emu_path"], str(manager))
+            self.assertEqual(paths["adb_path"], str(adb))
+            with patch("AutoScriptor.utils.mumu_discovery.search_mumu_folders", return_value=[root]):
+                report = discover_mumu_setup({
+                    "mumu_folder": "YOUR_MUMU_FOLDER",
+                    "emu_path": "YOUR_EMU_PATH",
+                    "adb_path": "YOUR_ADB_PATH",
+                    "adb_addr": "127.0.0.1:16384",
+                }, probe_adb=False)
+
+            self.assertFalse(report["needs_manual_paths"])
+            self.assertEqual(report["emulator"]["mumu_folder"], str(root))
+            self.assertEqual(report["emulator"]["emu_path"], str(manager))
+            self.assertEqual(report["emulator"]["adb_path"], str(adb))
+
+    def test_discovery_subprocess_reads_replace_bad_bytes(self):
+        from AutoScriptor.utils import mumu_discovery
+
+        adb = Path("C:/MuMu/adb.exe")
+        manager = Path("C:/MuMu/MuMuManager.exe")
+        with patch.object(Path, "is_file", return_value=True), \
+                patch.object(mumu_discovery.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="", stderr="")) as run:
+            mumu_discovery._adb_device_rows(str(adb))
+            mumu_discovery._mumu_info_rows(str(manager))
+
+        self.assertTrue(run.called)
+        for call in run.call_args_list:
+            self.assertEqual(call.kwargs.get("encoding"), "utf-8")
+            self.assertEqual(call.kwargs.get("errors"), "replace")
+
 
 class TestDeviceFacadeDiagnostics(unittest.TestCase):
     def _facade(self, module, adb_path: str, emu_path: str):
@@ -539,10 +625,16 @@ class TestDeviceFacadeDiagnostics(unittest.TestCase):
 
             with patch.object(module.subprocess, "run", side_effect=fake_run), \
                     patch.dict(sys.modules, {
-                        "AutoScriptor.recognition.ocr_rec": SimpleNamespace(
-                            ocr_manager=SimpleNamespace(is_ready=lambda: True),
-                            ocr_config={"use_gpu": False},
-                        ),
+                "AutoScriptor.recognition.ocr_rec": SimpleNamespace(
+                    ocr_manager=SimpleNamespace(is_ready=lambda: True),
+                    get_ocr_runtime_status=lambda: {
+                        "configured_use_gpu": False,
+                        "runtime_use_gpu": False,
+                        "engine_device": "cpu",
+                        "restart_required": False,
+                        "initialization_error": None,
+                    },
+                ),
                         "AutoScriptor.utils.ui_map": SimpleNamespace(
                             ui_manager=SimpleNamespace(_ui={"x": object()}),
                         ),
@@ -616,9 +708,229 @@ class TestDeviceFacadeDiagnostics(unittest.TestCase):
         self.assertEqual(device_only["overall"]["status"], "ok")
         self.assertEqual(task_required["overall"]["status"], "error")
 
+    def test_adb_device_check_reconnects_configured_tcp_serial(self):
+        module = import_device_facade_for_test()
+        with tempfile.TemporaryDirectory() as tmp:
+            adb_path = str(Path(tmp) / "adb.exe")
+            emu_path = str(Path(tmp) / "MuMuManager.exe")
+            Path(adb_path).write_text("", encoding="utf-8")
+            Path(emu_path).write_text("", encoding="utf-8")
+            facade = self._facade(module, adb_path, emu_path)
+            calls = []
+            get_state_calls = 0
+
+            def fake_run(cmd, **kwargs):
+                nonlocal get_state_calls
+                calls.append(cmd)
+                if cmd == [adb_path, "-s", "127.0.0.1:16416", "get-state"]:
+                    get_state_calls += 1
+                    if get_state_calls == 1:
+                        return SimpleNamespace(
+                            returncode=1,
+                            stdout="",
+                            stderr="error: device '127.0.0.1:16416' not found",
+                        )
+                    return SimpleNamespace(returncode=0, stdout="device\n", stderr="")
+                if cmd == [adb_path, "disconnect", "127.0.0.1:16416"]:
+                    return SimpleNamespace(returncode=0, stdout="disconnected 127.0.0.1:16416\n", stderr="")
+                if cmd == [adb_path, "connect", "127.0.0.1:16416"]:
+                    return SimpleNamespace(returncode=0, stdout="connected to 127.0.0.1:16416\n", stderr="")
+                if cmd == [adb_path, "-s", "127.0.0.1:16416", "shell", "getprop", "sys.boot_completed"]:
+                    return SimpleNamespace(returncode=0, stdout="1\n", stderr="")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with patch.object(module.subprocess, "run", side_effect=fake_run):
+                check = facade._adb_device_check()
+
+        self.assertEqual(check["status"], "ok")
+        self.assertEqual(check["message"], "ADB device is ready after reconnect")
+        self.assertIn("connected to 127.0.0.1:16416", check["reconnect"])
+        self.assertIn([adb_path, "disconnect", "127.0.0.1:16416"], calls)
+        self.assertIn([adb_path, "connect", "127.0.0.1:16416"], calls)
+
+    def test_adb_device_ready_reconnects_before_boot_probe(self):
+        module = import_device_facade_for_test()
+        with tempfile.TemporaryDirectory() as tmp:
+            adb_path = str(Path(tmp) / "adb.exe")
+            emu_path = str(Path(tmp) / "MuMuManager.exe")
+            Path(adb_path).write_text("", encoding="utf-8")
+            Path(emu_path).write_text("", encoding="utf-8")
+            facade = self._facade(module, adb_path, emu_path)
+            get_state_calls = 0
+
+            def fake_run(cmd, **kwargs):
+                nonlocal get_state_calls
+                if cmd == [adb_path, "-s", "127.0.0.1:16416", "get-state"]:
+                    get_state_calls += 1
+                    if get_state_calls == 1:
+                        return SimpleNamespace(returncode=1, stdout="", stderr="not found")
+                    return SimpleNamespace(returncode=0, stdout="device\n", stderr="")
+                if cmd == [adb_path, "disconnect", "127.0.0.1:16416"]:
+                    return SimpleNamespace(returncode=0, stdout="disconnected 127.0.0.1:16416\n", stderr="")
+                if cmd == [adb_path, "connect", "127.0.0.1:16416"]:
+                    return SimpleNamespace(returncode=0, stdout="connected\n", stderr="")
+                if cmd == [adb_path, "-s", "127.0.0.1:16416", "shell", "getprop", "sys.boot_completed"]:
+                    return SimpleNamespace(returncode=0, stdout="1\n", stderr="")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with patch.object(module.subprocess, "run", side_effect=fake_run):
+                ready = facade.adb_device_ready()
+
+        self.assertTrue(ready)
+        self.assertEqual(get_state_calls, 2)
+
+
+    def test_adb_device_ready_heals_offline_tcp_serial_with_disconnect_connect(self):
+        module = import_device_facade_for_test()
+        with tempfile.TemporaryDirectory() as tmp:
+            adb_path = str(Path(tmp) / "adb.exe")
+            emu_path = str(Path(tmp) / "MuMuManager.exe")
+            Path(adb_path).write_text("", encoding="utf-8")
+            Path(emu_path).write_text("", encoding="utf-8")
+            facade = self._facade(module, adb_path, emu_path)
+            calls = []
+            get_state_calls = 0
+
+            def fake_run(cmd, **kwargs):
+                nonlocal get_state_calls
+                calls.append(cmd)
+                if cmd == [adb_path, "-s", "127.0.0.1:16416", "get-state"]:
+                    get_state_calls += 1
+                    if get_state_calls == 1:
+                        return SimpleNamespace(returncode=0, stdout="offline\n", stderr="")
+                    return SimpleNamespace(returncode=0, stdout="device\n", stderr="")
+                if cmd == [adb_path, "disconnect", "127.0.0.1:16416"]:
+                    return SimpleNamespace(returncode=0, stdout="disconnected 127.0.0.1:16416\n", stderr="")
+                if cmd == [adb_path, "connect", "127.0.0.1:16416"]:
+                    return SimpleNamespace(returncode=0, stdout="connected to 127.0.0.1:16416\n", stderr="")
+                if cmd == [adb_path, "-s", "127.0.0.1:16416", "shell", "getprop", "sys.boot_completed"]:
+                    return SimpleNamespace(returncode=0, stdout="1\n", stderr="")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with patch.object(module.subprocess, "run", side_effect=fake_run):
+                ready = facade.adb_device_ready()
+
+        self.assertTrue(ready)
+        self.assertEqual(get_state_calls, 2)
+        self.assertIn([adb_path, "disconnect", "127.0.0.1:16416"], calls)
+        self.assertIn([adb_path, "connect", "127.0.0.1:16416"], calls)
+
+    def test_adb_device_check_heals_offline_tcp_serial_with_disconnect_connect(self):
+        module = import_device_facade_for_test()
+        with tempfile.TemporaryDirectory() as tmp:
+            adb_path = str(Path(tmp) / "adb.exe")
+            emu_path = str(Path(tmp) / "MuMuManager.exe")
+            Path(adb_path).write_text("", encoding="utf-8")
+            Path(emu_path).write_text("", encoding="utf-8")
+            facade = self._facade(module, adb_path, emu_path)
+            calls = []
+            get_state_calls = 0
+
+            def fake_run(cmd, **kwargs):
+                nonlocal get_state_calls
+                calls.append(cmd)
+                if cmd == [adb_path, "-s", "127.0.0.1:16416", "get-state"]:
+                    get_state_calls += 1
+                    if get_state_calls == 1:
+                        return SimpleNamespace(returncode=0, stdout="offline\n", stderr="")
+                    return SimpleNamespace(returncode=0, stdout="device\n", stderr="")
+                if cmd == [adb_path, "disconnect", "127.0.0.1:16416"]:
+                    return SimpleNamespace(returncode=0, stdout="disconnected 127.0.0.1:16416\n", stderr="")
+                if cmd == [adb_path, "connect", "127.0.0.1:16416"]:
+                    return SimpleNamespace(returncode=0, stdout="connected to 127.0.0.1:16416\n", stderr="")
+                if cmd == [adb_path, "-s", "127.0.0.1:16416", "shell", "getprop", "sys.boot_completed"]:
+                    return SimpleNamespace(returncode=0, stdout="1\n", stderr="")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with patch.object(module.subprocess, "run", side_effect=fake_run):
+                check = facade._adb_device_check()
+
+        self.assertEqual(check["status"], "ok")
+        self.assertEqual(check["message"], "ADB device is ready after reconnect")
+        self.assertIn("disconnected 127.0.0.1:16416", check["reconnect"])
+        self.assertIn("connected to 127.0.0.1:16416", check["reconnect"])
+        self.assertIn([adb_path, "disconnect", "127.0.0.1:16416"], calls)
+        self.assertIn([adb_path, "connect", "127.0.0.1:16416"], calls)
+
+    def test_adb_device_ready_skips_reconnect_when_already_device(self):
+        module = import_device_facade_for_test()
+        with tempfile.TemporaryDirectory() as tmp:
+            adb_path = str(Path(tmp) / "adb.exe")
+            emu_path = str(Path(tmp) / "MuMuManager.exe")
+            Path(adb_path).write_text("", encoding="utf-8")
+            Path(emu_path).write_text("", encoding="utf-8")
+            facade = self._facade(module, adb_path, emu_path)
+            calls = []
+
+            def fake_run(cmd, **kwargs):
+                calls.append(cmd)
+                if cmd == [adb_path, "-s", "127.0.0.1:16416", "get-state"]:
+                    return SimpleNamespace(returncode=0, stdout="device\n", stderr="")
+                if cmd == [adb_path, "-s", "127.0.0.1:16416", "shell", "getprop", "sys.boot_completed"]:
+                    return SimpleNamespace(returncode=0, stdout="1\n", stderr="")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with patch.object(module.subprocess, "run", side_effect=fake_run):
+                ready = facade.adb_device_ready()
+
+        self.assertTrue(ready)
+        self.assertNotIn([adb_path, "disconnect", "127.0.0.1:16416"], calls)
+        self.assertNotIn([adb_path, "connect", "127.0.0.1:16416"], calls)
+
+    def test_adb_device_check_reports_detected_mumu_serial_when_configured_serial_is_wrong(self):
+        module = import_device_facade_for_test()
+        with tempfile.TemporaryDirectory() as tmp:
+            adb_path = str(Path(tmp) / "adb.exe")
+            emu_path = str(Path(tmp) / "MuMuManager.exe")
+            Path(adb_path).write_text("", encoding="utf-8")
+            Path(emu_path).write_text("", encoding="utf-8")
+            facade = self._facade(module, adb_path, emu_path)
+            facade.emulator["adb_addr"] = "127.0.0.1:16384"
+            facade.emulator["index"] = 0
+            facade.vm_index = "0"
+
+            def fake_run(cmd, **kwargs):
+                if cmd == [adb_path, "-s", "127.0.0.1:16384", "get-state"]:
+                    return SimpleNamespace(returncode=1, stdout="", stderr="error: device '127.0.0.1:16384' not found")
+                if cmd == [adb_path, "disconnect", "127.0.0.1:16384"]:
+                    return SimpleNamespace(returncode=0, stdout="", stderr="")
+                if cmd == [adb_path, "connect", "127.0.0.1:16384"]:
+                    return SimpleNamespace(returncode=1, stdout="", stderr="cannot connect")
+                if cmd == [adb_path, "start-server"]:
+                    return SimpleNamespace(returncode=0, stdout="", stderr="")
+                if cmd == [adb_path, "devices"]:
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout="List of devices attached\n127.0.0.1:16416\tdevice\n",
+                        stderr="",
+                    )
+                if cmd == [emu_path, "info", "-v", "all"]:
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout=json.dumps({
+                            "index": "1",
+                            "is_process_started": True,
+                            "is_android_started": True,
+                            "player_state": "start_finished",
+                            "adb_host_ip": "127.0.0.1",
+                            "adb_port": 16416,
+                        }),
+                        stderr="",
+                    )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with patch.object(module.subprocess, "run", side_effect=fake_run):
+                check = facade._adb_device_check()
+
+        self.assertEqual(check["status"], "error")
+        self.assertEqual(check["suggested_adb_addr"], "127.0.0.1:16416")
+        self.assertEqual(check["fallback_serial"], "127.0.0.1:16416")
+        self.assertEqual(check["detected_index"], 1)
+        self.assertEqual(check["connected_devices"], ["127.0.0.1:16416"])
+
 
 class TestEnsureAppRunningLifecycle(unittest.TestCase):
-    def test_execution_start_ignores_legacy_auto_start_false(self):
+    def test_execution_start_uses_explicit_device_flags(self):
         module = import_api_for_test()
 
         with patch.dict(sys.modules, module.stub_modules):
@@ -633,6 +945,28 @@ class TestEnsureAppRunningLifecycle(unittest.TestCase):
 
         self.assertIs(mumu, module.FakeMumu.selected)
         self.assertTrue(mumu.power.started)
+        self.assertEqual(mumu.power.ready_checks, 1)
+        self.assertEqual(mumu.app.launched, ["resolved.pkg"])
+        self.assertEqual(mixctrl.serial, "127.0.0.1:16448")
+
+    def test_running_emulator_still_waits_for_adb_and_android(self):
+        module = import_api_for_test()
+
+        with (
+            patch.dict(sys.modules, module.stub_modules),
+            patch.object(module.FakePower, "is_running", return_value=True),
+        ):
+            mixctrl, mumu = module.ensure_app_running(
+                2,
+                "127.0.0.1:16448",
+                "pkg",
+                start_emulator=True,
+                launch_app=True,
+                cancel_check=lambda: None,
+            )
+
+        self.assertFalse(mumu.power.started)
+        self.assertEqual(mumu.power.ready_checks, 1)
         self.assertEqual(mumu.app.launched, ["resolved.pkg"])
         self.assertEqual(mixctrl.serial, "127.0.0.1:16448")
 

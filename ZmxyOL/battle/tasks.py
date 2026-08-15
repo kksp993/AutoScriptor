@@ -1,5 +1,5 @@
-from AutoScriptor import *
-from ZmxyOL.battle.character.hero import combo
+﻿from AutoScriptor import *
+from AutoScriptor.battle_character.hero import combo
 from ZmxyOL.nav.api import ensure_in, try_close_via_x
 EXIT_RADIUS=0  # 退出范围 for safety
 
@@ -35,8 +35,9 @@ TASK_TABLE = {
     "狼王星宫":{"location":("极寒深渊",0),"target":T("狼王星宫", box=Box(0,319,1280,39).margin()),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},   
     "虎王星宫":{"location":("极寒深渊",0),"target":T("虎王星宫", box=Box(0,340,1280,33).margin()),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
     "獐王星宫":{"location":("极寒深渊",0),"target":T("獐王星宫", box=Box(537,611,159,53).margin()),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
-    "犴神星宫":{"location":("极寒深渊",1),"target":B(970,610,30,30),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":True},
-    "兔神星宫":{"location":("极寒深渊",0),"target":T("兔神星宫", box=Box(0,136,1280,28).margin()),"idx":0, "exit_loc":330-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
+    "犴神星宫":{"location":("极寒深渊",1),"target":B(970,610,30,30),"idx":0, "exit_loc":230-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":True},
+    "兔神星宫":{"location":("极寒深渊",0),"target":T("兔神星宫", box=Box(0,136,1280,28).margin()),"idx":0, "exit_loc":230-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
+    "猪王星宫":{"location":("极寒深渊",0),"target":B(1070,253,155,184),"idx":0, "exit_loc":230-EXIT_RADIUS,"diff":["普通", "困难", "噩梦", "灵狱"],"crash_suddenly":False},
 }
 
 TASK_TABLE_LIST = [
@@ -80,7 +81,6 @@ JIBEI_CHAOS_TABLE=[
     "猴王星宫",
 ]
 
-# 顺序与各关卡任务参数（YanHao、QuanShen…TuShen）一致，见 polar_abyss/hyper_abyss_task.py
 JHSY_CHAOS_TABLE=[
     "岩貉星宫",
     "犬神星宫",
@@ -88,7 +88,8 @@ JHSY_CHAOS_TABLE=[
     "虎王星宫",
     "獐王星宫",
     "犴神星宫",
-    "兔神星宫"    #打不过，能打过的自己解开注释
+    "兔神星宫",    #打不过，能打过的自己解开注释
+    "猪王星宫",
 ]
 
 
@@ -100,17 +101,17 @@ def get_task_table(task_name:str|list[str]|tuple[str]):
     
 
 def challenge_task():
-    from ZmxyOL.battle.character.hero import h
+    from AutoScriptor.battle_character.hero import h
     h.battle_tasks(set(TASK_TABLE_LIST).union(set(JIYUAN_TASK_TABLE)))
 
 
 def challenge_task_jiyuan():
-    from ZmxyOL.battle.character.hero import h
+    from AutoScriptor.battle_character.hero import h
     h.battle_tasks(JIYUAN_TASK_TABLE)
 
 
 def challenge_task_daily():
-    from ZmxyOL.battle.character.hero import h
+    from AutoScriptor.battle_character.hero import h
     h.battle_tasks(TASK_TABLE_LIST)
 
 
@@ -119,7 +120,9 @@ def battle_tasks(self:"Hero", task_table:list[str], speed_x:int=1, flow_name: st
     if isinstance(task_table, str): task_table = [task_table]
     if flow_name is None:
         flow_name = getattr(self, "task_context_battle_flow", None) or "战斗循环"
-    for v in get_task_table(task_table).values():
+    for task_name, v in get_task_table(task_table).items():
+        from AutoScriptor.utils.logger import logger
+        logger.info(f"开始挑战 {task_name} @ {v['location']}")
         ensure_in(*v["location"])
         click(v["target"])
         wait_for_appear(v["target"].set_box(Box(136,0,988,84)))
@@ -127,12 +130,30 @@ def battle_tasks(self:"Hero", task_table:list[str], speed_x:int=1, flow_name: st
         click(T("开始挑战"))
         if ui_T(I("加载中"),3):
             wait_for_disappear(I("加载中"))
+            if task_name == "九重天":
+                # 开场赶路：先按下向右不松，再按 0.8/1.2 节奏点跳，最后松开。
+                # Nemu 按住向右；跳跃走 ADB 另一路触点，避免单指 up 把右键松开。
+                jump_hold_intervals = (0.8, 1.2, 0.8, 1.2, 0.8, 1.2, 0.8, 1.2)
+                import AutoScriptor.core.api as core_api
+                from AutoScriptor.core.api import b2p, locate
+                from AutoScriptor.utils.cancel import cancellable_sleep, check_cancel_raise
+
+                right_point = b2p(locate(B("战斗-右"), timeout=2, assure_stable=False))
+                jump_point = b2p(locate(B("战斗-跳跃"), timeout=2, assure_stable=False))
+                mixctrl = core_api.mixctrl
+                nemu_wrapper = mixctrl.nemu_control.nemu_ipc
+                try:
+                    with nemu_wrapper._ipc_lock:
+                        nemu_wrapper.nemu_ipc.down(int(right_point[0]), int(right_point[1]))
+                    for hold_seconds in jump_hold_intervals:
+                        check_cancel_raise()
+                        cancellable_sleep(hold_seconds)
+                        mixctrl.mumu.adb.click(int(jump_point[0]), int(jump_point[1]))
+                finally:
+                    mixctrl.release_all_keys()
             self.set(has_cd=False, speed_x=speed_x).heaven_battle(exit_loc=v["exit_loc"], flow_name=flow_name)
         else:
             click(T("确定",box=Box(658,495,142,82)), if_exist=True)
             click(B(1061,172,47,50), until=lambda: ui_F(T("副本奖励")))
 
         
-
-
-

@@ -10,6 +10,7 @@
 """
 
 from AutoScriptor import *
+import AutoScriptor.core.api as _core_api
 from AutoScriptor.core.api import ui_idx
 from ZmxyOL.nav.envs.decorators import LOC_ENV
 from .map_manager import mm
@@ -55,11 +56,8 @@ def check_env_idx(env_list: list[str]) -> int:
 
 def locate_region(cnt = 0, check_only = False) -> tuple[str, str]:
     if cnt == 0:
-        try:
-            mixctrl.app.launch(cfg["app"]["app_to_start"])
-            sleep(2)
-        except Exception:
-            pass
+        _core_api.mixctrl.app.launch(cfg["app"]["app_to_start"])
+        sleep(2)
     """
         按优先级检查当前位置
     """
@@ -78,12 +76,14 @@ def locate_region(cnt = 0, check_only = False) -> tuple[str, str]:
         return mm.set_region(list(mm.envs.keys())[idx])
     
     logger.debug("# 1.4 检查所有loc")
-    idx = check_loc_idx(mm.locs.keys())
+    loc_names = list(mm.locs.keys())
+    idx = check_loc_idx(loc_names)
 
     if check_only: return "当前位置未知, 请自行判断下一步并尝试再次调用，请先根据当前的图像一步步关闭窗口，直至没有返回或关闭，再调用本工具"
     if idx >= 0:
-        print(list(mm.locs.keys())[idx])
-        loc = mm.locs[list(mm.locs.keys())[idx]]
+        loc_name = loc_names[idx]
+        logger.debug("定位命中位置: %s", loc_name)
+        loc = mm.locs[loc_name]
         return mm.set_region(loc.envs[0].name, loc.name)
     if cnt % 2 == 0:
         try_close_via_x()
@@ -124,7 +124,7 @@ def try_close_via_x():
         (I("x"), I("x")),
         (I("x-in"), B(1061,178,39,47)),
         (I("菜单-宠物"), B(10,10)),
-        # (T("回家", box=Box(29,613,77,88).margin()), T("回家", box=Box(29,613,77,88).margin())),
+        # (T("回家", box=Box(29,656,77,54).margin()), T("回家", box=Box(29,656,77,54).margin())),
         (T("确认"), T("确认")),
         (T("返回地图"), T("返回地图")),
         (T("返回大厅"), T("返回大厅")),

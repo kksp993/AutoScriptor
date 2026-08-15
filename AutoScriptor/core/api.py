@@ -1,26 +1,24 @@
 import os
-import sys
 import threading
 import time
-import traceback
-import getpass
-import cv2
-from typing import Callable
+from typing import Any, Callable, Literal
 from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
-from AutoScriptor.core.control import MixControl
+from AutoScriptor.core.control import MixControl, ControlModeProxy
+from AutoScriptor.core.background import bg
 from AutoScriptor.core.targets import Target, B
-from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget,VLMTarget
-from AutoScriptor.core.locate_dispatch import has_handler, dispatch_locate
+from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget
 from AutoScriptor.recognition.ocr_rec import ocr_for_box
 from AutoScriptor.recognition.rec import get_box_color
+from AutoScriptor.recognition.recognition_trace import (
+    create_recognition_result,
+    record_recognition_result,
+)
 from AutoScriptor.utils.box import Box, b2p
-from AutoScriptor.utils.logger import setup_task_aware_logging
 from AutoScriptor.utils.tracer import save_debug_screenshot
 from AutoScriptor.utils.logger import logger, setup_logfile
 from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.app_package_resolve import resolve_app_to_start
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
-from AutoScriptor.utils.edit_img import launch_editor
 from AutoScriptor.utils.cancel import check_cancel_raise, cancellable_sleep, join_with_cancel, sleep_with_cancel
 
 def ensure_all_environment_ready():
@@ -32,7 +30,6 @@ def ensure_all_environment_ready():
     os.makedirs(log_dir, exist_ok=True)
     timestamp = datetime.now().strftime('%y%m%d_%H%M%S')
     setup_logfile(os.path.join(log_dir, f"[{timestamp}].log"))
-    setup_task_aware_logging()
     selected_emulator_index = cfg["emulator"]["index"]
     adb_addr = cfg["emulator"]["adb_addr"]
     app_to_start = cfg["app"]["app_to_start"]
@@ -43,38 +40,27 @@ def ensure_app_running(
     adb_addr,
     app_to_start,
     *,
-    start_emulator: bool | None = None,
-    launch_app: bool | None = None,
+    start_emulator: bool = True,
+    launch_app: bool = True,
     cancel_check: Callable[[], None] | None = None,
 ):
     """
     确保当前配置的 MuMu 实例可控制，并按需启动游戏。
 
     start_emulator:
-        True 表示执行链需要 MuMu，未运行时必须启动。None 兼容旧语义，
-        使用 cfg["app"]["auto_start"]。
+        True 表示执行链需要 MuMu，未运行时必须启动。
     launch_app:
-        True 表示启动/拉起 app_to_start。None 兼容旧语义，使用
-        cfg["app"]["auto_start"]。
+        True 表示启动/拉起 app_to_start。
     cancel_check:
         协作式取消检查；WebUI 停止按钮会通过它快速打断启动、解析和探测等待。
     """
     cancel_check = cancel_check or check_cancel_raise
-    if start_emulator is None:
-        start_emulator = bool(cfg["app"].get("auto_start", True))
-    if launch_app is None:
-        launch_app = bool(cfg["app"].get("auto_start", True))
 
     mumu_manager_path = cfg["emulator"]["emu_path"]
     logger.debug(
         "ensure_app_running: index=%s, adb=%s, app=%s, emu=%s, start_emulator=%s, launch_app=%s",
         selected_emulator_index, adb_addr, app_to_start, mumu_manager_path, start_emulator, launch_app,
     )
-    # 启动模拟器前必须恢复正常进程优先级。
-    # boost() 会将 Python 设为 HIGH_PRIORITY_CLASS，subprocess 子进程默认继承，
-    # MuMu Hypervisor 在高优先级下启动会误判权限 → "安卓设备无法启动"。
-    from AutoScriptor.utils.perf import unboost as _unboost
-    _unboost()
     mumu = Mumu().select(selected_emulator_index)
     cancel_check()
 
@@ -87,7 +73,16 @@ def ensure_app_running(
     if not is_running:
         raise RuntimeError("ensure_app_running: 模拟器启动失败")
 
-    # app_to_start 为空或未安装时由 resolve_app_to_start 枚举候选包并写回 config.json。
+    # MuMuManager may report a running process while its TCP ADB endpoint is
+    # still offline. Do not create controls or launch the app until the
+    # configured serial is connected and Android has completed booting.
+    logger.info("正在确认模拟器 ADB 与 Android 启动状态")
+    if not mumu.power.wait_until_android_ready(cancel_check=cancel_check):
+        raise RuntimeError(
+            f"ensure_app_running: ADB 设备 {adb_addr} 未就绪或 Android 启动未完成"
+        )
+
+    # app_to_start 为空或未安装时由 resolve_app_to_start 枚举候选包并写回 data/config.json。
     # 解析只在需要拉起应用时进行，避免 WebUI 初始化或纯设备探测误触 MuMuManager。
     if launch_app:
         cancel_check()
@@ -161,7 +156,18 @@ def init():
     _core_pkg.mixctrl = mixctrl
 
 
+def _validate_timeout(timeout, caller: str) -> None:
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+        hint = ""
+        if isinstance(timeout, Target):
+            hint = "；多个目标请用 tuple/list 包起来，例如 wait_for_appear((T(...), T(...)))"
+        raise TypeError(
+            f"{caller} 的 timeout 必须是数字秒数，收到 {type(timeout).__name__}: {timeout!r}{hint}"
+        )
+
+
 def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->int:
+    _validate_timeout(timeout, "ui_idx")
     target = [t for t in target]
     boxes = locate(target, timeout, assure_stable=False)
     if not first(boxes): return -1
@@ -169,6 +175,7 @@ def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->in
 
 
 def ui_T(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, *, screenshot=None)->bool:
+    _validate_timeout(timeout, "ui_T")
     boxes = locate(target, timeout, assure_stable=False, screenshot=screenshot)
     if isinstance(target, list):
         return full(boxes)
@@ -266,6 +273,73 @@ def _first_hit_path(boxes: list, target: Target|list[Target]|tuple[Target, ...])
     return None
 
 
+def match(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, *, screenshot=None) -> dict | None:
+    """
+    结构化匹配目标，沿用 locate 的组合语义，并返回命中细节。
+
+    target:
+        Target 表示查找单个目标。
+        tuple[Target, ...] 表示 OR，任一目标命中即成功。
+        list[Target] 表示 AND，全部目标命中才成功。
+    timeout:
+        最长等待秒数；0 表示只检查当前画面一次。
+    screenshot:
+        可传入固定截图帧，复用同一帧做定位，适合截图测试或批量识别。
+
+    返回:
+        None 表示未满足 target 对应的组合条件。
+        dict 表示匹配成功，常用字段如下：
+            all: 是否按 list 的 AND 语义匹配。
+            index: 扁平目标列表中的首个命中下标。
+            path: 目标结构中的嵌套位置，不是文件路径；如 (1, 0) 表示第 1 组里的第 0 个目标。
+            target: 首个命中的目标对象。
+            box: 首个命中的 Box。
+            boxes: 完整定位结果矩阵。
+    """
+    _validate_timeout(timeout, "match")
+    check_cancel_raise()
+    is_all_match = isinstance(target, list)
+    if isinstance(target, Target):
+        normalized_targets = [target]
+        target_for_paths = target
+    elif isinstance(target, (list, tuple)):
+        normalized_targets = target
+        target_for_paths = target
+    else:
+        raise TypeError(f"match 目标必须是 Target/list/tuple，收到 {type(target)!r}: {target!r}")
+
+    boxes = locate(
+        normalized_targets,
+        timeout,
+        assure_stable=False,
+        is_simplify=False,
+        screenshot=screenshot,
+    )
+    if not boxes:
+        return None
+    if is_all_match:
+        if not full(boxes):
+            return None
+    elif first(boxes) is None:
+        return None
+
+    matched_index = index(boxes)
+    flattened_targets = _flatten_target_paths(target_for_paths)
+    if 0 <= matched_index < len(flattened_targets):
+        matched_path, matched_target = flattened_targets[matched_index]
+    else:
+        matched_path, matched_target = (matched_index,), None
+    matched_box = first([boxes[matched_index]]) if matched_index >= 0 else None
+    return {
+        "all": is_all_match,
+        "index": matched_index,
+        "path": matched_path,
+        "target": matched_target,
+        "box": matched_box,
+        "boxes": boxes,
+    }
+
+
 def switch_base(base: str):
     if base == "mumu":
         mixctrl.switch_to_mumu()
@@ -273,6 +347,60 @@ def switch_base(base: str):
         mixctrl.switch_to_nemu()
     else:
         raise ValueError(f"Invalid base: {base}")
+
+
+def _current_control():
+    return mixctrl
+
+
+ctrl_nemu = ControlModeProxy("nemu", _current_control)
+ctrl_mumu = ControlModeProxy("mumu", _current_control)
+
+
+def _locate_targets_with_trace(
+    targets,
+    target_triples,
+    screenshot,
+    *,
+    frame_source: str | None = None,
+):
+    started_at = time.perf_counter()
+    resolved_frame_source = frame_source or (
+        "injected" if screenshot is not None else "live"
+    )
+    try:
+        boxes = mixctrl.locate(target_triples, screenshot=screenshot)
+    except Exception as error:
+        record_recognition_result(
+            create_recognition_result(
+                operation="locate",
+                success=False,
+                target=targets,
+                result=None,
+                started_at=started_at,
+                frame_source=resolved_frame_source,
+                frame=screenshot,
+                engine="locate_on_screen",
+                error=error,
+                metadata={"target_count": len(targets)},
+            )
+        )
+        raise
+
+    record_recognition_result(
+        create_recognition_result(
+            operation="locate",
+            success=first(boxes) is not None,
+            target=targets,
+            result=boxes,
+            started_at=started_at,
+            frame_source=resolved_frame_source,
+            frame=screenshot,
+            engine="locate_on_screen",
+            metadata={"target_count": len(targets)},
+        )
+    )
+    return boxes
 
 
 def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=None, image_first: bool = False)->list[list[Box]]:
@@ -291,47 +419,49 @@ def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=No
         else:
             raise ValueError(f"Unsupported target type: {type(target)}")
 
-    dispatched: dict[int, Target] = {}
-    batch: list[tuple[int, Target]] = []
-    for i, tgt in enumerate(target):
-        if has_handler(type(tgt)):
-            dispatched[i] = tgt
-        else:
-            batch.append((i, tgt))
-
     boxes: list[list[Box] | None] = [None] * len(target)
+    frame_source = "injected" if screenshot is not None else "live"
 
-    if batch:
-        if image_first:
-            img_items = [(idx, t) for idx, t in batch if isinstance(t, ImageTarget)]
-            rest_items = [(idx, t) for idx, t in batch if not isinstance(t, ImageTarget)]
+    if image_first:
+        img_items = [(idx, t) for idx, t in enumerate(target) if isinstance(t, ImageTarget)]
+        rest_items = [(idx, t) for idx, t in enumerate(target) if not isinstance(t, ImageTarget)]
 
-            if img_items:
-                img_triples = [genertate_source(t) for _, t in img_items]
-                frame = screenshot if screenshot is not None else mixctrl.screenshot()
-                img_boxes = mixctrl.locate(img_triples, screenshot=frame)
-                for j, (orig_idx, _) in enumerate(img_items):
-                    boxes[orig_idx] = img_boxes[j]
-                if first(boxes):
-                    return boxes
-                screenshot = frame
+        if img_items:
+            img_triples = [genertate_source(t) for _, t in img_items]
+            frame = screenshot if screenshot is not None else mixctrl.screenshot()
+            img_targets = [target_item for _, target_item in img_items]
+            img_boxes = _locate_targets_with_trace(
+                img_targets,
+                img_triples,
+                frame,
+                frame_source=frame_source,
+            )
+            for j, (orig_idx, _) in enumerate(img_items):
+                boxes[orig_idx] = img_boxes[j]
+            if first(boxes):
+                return boxes
+            screenshot = frame
 
-            if rest_items:
-                rest_triples = [genertate_source(t) for _, t in rest_items]
-                rest_boxes = mixctrl.locate(rest_triples, screenshot=screenshot)
-                for j, (orig_idx, _) in enumerate(rest_items):
-                    boxes[orig_idx] = rest_boxes[j]
-        else:
-            ordered_targets = [t for _, t in batch]
-            tgt_triples = [genertate_source(t) for t in ordered_targets]
-            batch_boxes = mixctrl.locate(tgt_triples, screenshot=screenshot)
-            for j, (orig_idx, _) in enumerate(batch):
-                boxes[orig_idx] = batch_boxes[j]
-
-    if dispatched:
-        frame = screenshot if screenshot is not None else mixctrl.screenshot()
-        for idx, tgt in dispatched.items():
-            boxes[idx] = dispatch_locate(tgt, frame)
+        if rest_items:
+            rest_triples = [genertate_source(t) for _, t in rest_items]
+            rest_targets = [target_item for _, target_item in rest_items]
+            rest_boxes = _locate_targets_with_trace(
+                rest_targets,
+                rest_triples,
+                screenshot,
+                frame_source=frame_source,
+            )
+            for j, (orig_idx, _) in enumerate(rest_items):
+                boxes[orig_idx] = rest_boxes[j]
+    else:
+        target_items = list(target)
+        target_triples = [genertate_source(target_item) for target_item in target_items]
+        return _locate_targets_with_trace(
+            target_items,
+            target_triples,
+            screenshot,
+            frame_source=frame_source,
+        )
 
     return boxes
 
@@ -344,7 +474,7 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
         timeout: 超时时间
         assure_stable: 是否保证稳定,如果为True，则每次定位都会保证稳定，直到找到目标或超时
     """
-    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
+    _validate_timeout(timeout, "locate")
     check_cancel_raise()
     first_attempt = True
     _stable_retry = False
@@ -374,7 +504,6 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
                         _stable_retry = True
                     continue
             if first(boxes): return first(boxes) if is_simplify else boxes  # 确保返回单个Box或None
-            # if delta > 5 and cfg["llm"]["use_agent"]:
         # 超时未找到目标时，保存搜索失败截图
         if timeout >= 5:
             try:
@@ -421,12 +550,14 @@ def wait_for_appear(target: Target|tuple[Target, ...], timeout: float=30) -> Box
     """等待目标出现并返回 Box。超时抛 TimeoutError（与 wait_for_disappear 对称）。"""
     if not isinstance(target, (Target, tuple, list)):
         raise TypeError(f"wait_for_appear 期望 Target/tuple/list，收到 {type(target).__name__!r}: {target!r}")
+    _validate_timeout(timeout, "wait_for_appear")
     result = locate(target, timeout, assure_stable=False)
     if result is None:
         raise TimeoutError(f"wait_for_appear({target}) 超时 ({timeout}s)")
     return result
 
 def wait_for_disappear(target: Target|tuple[Target, ...], timeout: float=30)->bool:
+    _validate_timeout(timeout, "wait_for_disappear")
     locate(target, timeout=5, assure_stable=False)
     t = time.time()
     while locate(target, timeout=0, assure_stable=False) is not None:
@@ -444,14 +575,13 @@ def click(
         if_exist: bool = False,
         repeat: int = 1,
         delay: float = 0,
-        interval: float = 0,
+        interval: float | None = None,
         offset:tuple=(0,0), 
         resize:tuple=(-1,-1),
         until: callable = None,
         assure_stable: bool = True,
         save_screenshot: bool = True
 ):
-    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     """
     点击目标元素
     
@@ -471,7 +601,7 @@ def click(
         
         delay: 点击前延迟（秒），默认0
         
-        interval: 多次点击之间的间隔（秒），默认0
+        interval: 多次点击之间的间隔（秒）。普通点击默认0；click(..., until=...)未显式传入时默认0.5秒。
         
         offset: 点击位置偏移量 (x, y)，相对于定位到的Box左上角
             - 示例: offset=(120, 120) 表示在定位到的Box基础上，向右偏移120px，向下偏移120px
@@ -517,12 +647,14 @@ def click(
         click(T("确定"), until=lambda: ui_F(T("确定")))
     """
     check_cancel_raise()
+    click_interval = 0 if interval is None else interval
+    until_interval = 0.5 if interval is None else interval
     if until:
         t = time.time()
-        click(target, long_click_duration_s, timeout=timeout, if_exist=False, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize,assure_stable=assure_stable)
+        click(target, long_click_duration_s, timeout=timeout, if_exist=False, repeat=repeat, delay=delay, interval=until_interval, offset=offset, resize=resize,assure_stable=assure_stable)
         while not until():
             check_cancel_raise()
-            click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize,assure_stable=assure_stable)
+            click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=until_interval, offset=offset, resize=resize,assure_stable=assure_stable)
             if time.time() - t > timeout:
                 try:
                     save_debug_screenshot(
@@ -535,7 +667,7 @@ def click(
     if isinstance(target, list): target = tuple(target)
     if isinstance(target, BoxTarget): box = target.box
     else:
-        box = locate(target, timeout if not if_exist else max(2, timeout) if timeout != 30 else 2, assure_stable)    # 至少2s
+        box = locate(target, timeout if not if_exist else max(1, timeout) if timeout != 30 else 2, assure_stable)    # 至少1s
     if if_exist and first(box) is None: return False
     if first(box) is None:
         try:
@@ -552,7 +684,7 @@ def click(
             mixctrl.long_click(*pt, duration=long_click_duration_s)
         else:
             mixctrl.click(*pt)
-        cancellable_sleep(interval)
+        cancellable_sleep(click_interval)
     if pt is None:
         return True
     if isinstance(target, BoxTarget):
@@ -572,7 +704,6 @@ def swipe(
         delay: float = 0,
         ensure_stable_after_swipe: bool = True,
     ):
-    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     check_cancel_raise()
     start_box = locate(start_target, 3) if not isinstance(start_target, BoxTarget) else start_target.box
     end_box = locate(end_target, 3, assure_stable=False) if not isinstance(end_target, BoxTarget) else end_target.box
@@ -584,7 +715,6 @@ def swipe(
     return True
 
 def input(text: str, target_field: Target|tuple[Target, ...] = None):
-    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     check_cancel_raise()
     if target_field:
         click(target_field)
@@ -597,52 +727,162 @@ def key_event(key_code: int):
 
 def extract_info(
     target,
-    post_process: callable = None,
+    post_process: Callable[[Any], Any] | None = None,
     ensure_not_empty: bool = True,
     save_screenshot: bool = True,
     *,
-    digit_only: bool = False,
-    digital: bool | None = None,
+    mode: Literal["digital_only", "text", "img", "both"] = "text",
     ocr_ttl: float = 0.5,
     max_retries: int = 10,
     screenshot_frame=None,
-)->str|None:
-    """若传入 *screenshot_frame*（BGR ndarray），则在该帧上 OCR，且重试时不再刷新画面；
-    用于 Web 编辑器导入图片与模拟执行时与画布一致。未传入时仍每次重试从 mixctrl 截屏。"""
-    if digital is not None:
-        digit_only = bool(digital)
-    if digit_only:
-        from AutoScriptor.recognition.digit_rec import extract_digits
-        screenshot = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
-        res = extract_digits(screenshot, target)
-        if post_process:
-            res = post_process(res)
-        return res
+) -> Any:
+    """Extract numbers, OCR text, or registered UI image keys from Box targets.
 
-    res = None
+    ``target`` may be one Box-like target, a row, or a two-dimensional grid.
+    Row and grid inputs preserve their original result shape. ``both`` checks
+    registered ``ui_map`` images first for each box and runs OCR only for image
+    misses. Supplying ``screenshot_frame`` keeps every recognition operation on
+    that fixed BGR frame.
+    """
+    supported_modes = {"digital_only", "text", "img", "both"}
+    if mode not in supported_modes:
+        raise ValueError(
+            f"Unsupported extract_info mode {mode!r}; expected one of {sorted(supported_modes)}"
+        )
+
+    if mode == "digital_only":
+        from AutoScriptor.recognition.digit_rec import extract_digits
+
+        started_at = time.perf_counter()
+        screenshot = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
+        try:
+            result = extract_digits(screenshot, target)
+            if post_process:
+                result = post_process(result)
+        except Exception as error:
+            record_recognition_result(
+                create_recognition_result(
+                    operation="extract_info",
+                    success=False,
+                    target=target,
+                    result=None,
+                    started_at=started_at,
+                    frame_source="injected" if screenshot_frame is not None else "live",
+                    frame=screenshot,
+                    engine="digital_only",
+                    error=error,
+                    metadata={"mode": mode, "attempt_count": 1},
+                )
+            )
+            raise
+        record_recognition_result(
+            create_recognition_result(
+                operation="extract_info",
+                success=result is not None,
+                target=target,
+                result=result,
+                started_at=started_at,
+                frame_source="injected" if screenshot_frame is not None else "live",
+                frame=screenshot,
+                engine="digital_only",
+                metadata={"mode": mode, "attempt_count": 1},
+            )
+        )
+        return result
+
+    from AutoScriptor.recognition.info_rec import (
+        BoxTargetLayout,
+        extract_registered_image_keys,
+    )
+
+    target_layout = BoxTargetLayout.from_target(target)
+
+    def contains_information(value: Any) -> bool:
+        if isinstance(value, (list, tuple)):
+            return any(contains_information(item) for item in value)
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        return True
+
+    started_at = time.perf_counter()
+    result = None
+    recognition_frame = None
+    attempt_count = 0
     last_ocr_at: float | None = None
-    for _ in range(max_retries):
+    last_post_process_error: Exception | None = None
+    for attempt_index in range(max_retries):
+        attempt_count = attempt_index + 1
         check_cancel_raise()
-        if last_ocr_at is not None:
+        needs_text_recognition = mode in {"text", "both"}
+        if needs_text_recognition and last_ocr_at is not None:
             wait = ocr_ttl - (time.monotonic() - last_ocr_at)
             if wait > 0:
                 cancellable_sleep(wait)
+
         screenshot = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
-        res = ocr_for_box(screenshot, target.box, ttl=ocr_ttl)
-        last_ocr_at = time.monotonic()
-        logger.debug(f"Extract info {target} raw_res: {res}")
+        recognition_frame = screenshot
+        flat_values: list[Any] = [None] * target_layout.box_count
+
+        if mode in {"img", "both"}:
+            image_result = extract_registered_image_keys(screenshot, target)
+            flat_values = target_layout.flatten_values(image_result)
+
+        if needs_text_recognition:
+            for target_index, target_box in enumerate(target_layout.flat_boxes):
+                if mode == "both" and flat_values[target_index] is not None:
+                    continue
+                flat_values[target_index] = ocr_for_box(screenshot, target_box, ttl=ocr_ttl)
+            last_ocr_at = time.monotonic()
+
+        raw_result = target_layout.restore_values(flat_values)
+        logger.debug("Extract info %s mode=%s raw_res: %s", target, mode, raw_result)
+        result = raw_result
         if post_process:
             try:
-                res = post_process(res)
-            except Exception as e:
-                logger.error(f"Extract info {target} failed, raw_res: {res}, for {e}")
+                result = post_process(raw_result)
+                last_post_process_error = None
+            except Exception as error:
+                result = None
+                last_post_process_error = error
+                logger.error(
+                    "Extract info %s mode=%s failed, raw_res: %s, for %s",
+                    target,
+                    mode,
+                    raw_result,
+                    error,
+                )
                 continue
-        if ensure_not_empty and isinstance(res, str) and len(res) == 0: continue
-        if res is not None: break
+
+        if not ensure_not_empty or contains_information(result):
+            break
+
+    record_recognition_result(
+        create_recognition_result(
+            operation="extract_info",
+            success=contains_information(result),
+            target=target,
+            result=result,
+            started_at=started_at,
+            frame_source="injected" if screenshot_frame is not None else "live",
+            frame=recognition_frame,
+            engine=mode,
+            error=last_post_process_error,
+            metadata={"mode": mode, "attempt_count": attempt_count},
+        )
+    )
+
     if save_screenshot and cfg["app"]["debug_mode"]:
-        dbg = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
-        save_debug_screenshot(target=target, screenshot=dbg, box=target.box, ocr_text=res, prefix="e")
-    return res
+        debug_screenshot = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
+        save_debug_screenshot(
+            target=target,
+            screenshot=debug_screenshot,
+            box=target_layout.bounding_box,
+            ocr_text=result,
+            prefix="e",
+        )
+    return result
 
 def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), resize: tuple = (-1, -1))->list[str|None]:
     """
@@ -662,10 +902,7 @@ def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), re
         for i in range(len(boxes)):
             if boxes[i]:
                 for j in range(len(boxes[i])):
-                    offset_tuple = (offset[0], offset[1], 
-                                  resize[0] if resize[0] != -1 else boxes[i][j].width,
-                                  resize[1] if resize[1] != -1 else boxes[i][j].height)
-                    boxes[i][j] = boxes[i][j] + offset_tuple
+                    boxes[i][j] = boxes[i][j] + {"offset": offset, "resize": resize}
     
     colors = [[] for _ in range(len(boxes))]
     for i in range(len(boxes)):
@@ -677,11 +914,77 @@ def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), re
     logger.debug(f"get_colors {targets} colors: {colors}")
     return colors
 
+
+def coloris(targets: Target|tuple[Target, ...]|list[Target], color: str, timeout: float=0, *, offset: tuple = (0, 0), resize: tuple = (-1, -1))->bool:
+    """
+    判断目标区域颜色是否匹配，是 get_colors 的布尔快捷入口。
+
+    targets:
+        Target 表示判断单个目标区域。
+        tuple[Target, ...] 表示 OR，任一目标区域颜色匹配即返回 True。
+        list[Target] 表示 AND，全部目标区域颜色都匹配才返回 True。
+    color:
+        期望颜色名称，例如 "绿色"、"红色"、"灰色"；按 get_colors 返回值精确比较。
+    timeout:
+        最长等待秒数；0 表示只检查当前画面一次。
+    offset:
+        颜色采样区域相对定位 Box 的偏移量。
+    resize:
+        颜色采样区域大小；(-1, -1) 表示保持定位 Box 原大小。
+
+    返回:
+        True 表示颜色满足 targets 的组合语义，False 表示超时或不匹配。
+    """
+    _validate_timeout(timeout, "coloris")
+    if hasattr(targets, '__iter__') and not isinstance(targets, (list, tuple, str)):
+        targets = list(targets)
+    is_all_match = isinstance(targets, list)
+
+    def color_matches_once() -> bool:
+        color_matrix = get_colors(targets, offset=offset, resize=resize)
+        matched_by_target = []
+        for target_colors in color_matrix:
+            matched_by_target.append(any(color_value == color for color_value in target_colors))
+        return all(matched_by_target) if is_all_match else any(matched_by_target)
+
+    first_attempt = True
+    start_time = time.time()
+    while first_attempt or time.time() - start_time < timeout:
+        check_cancel_raise()
+        first_attempt = False
+        if color_matches_once():
+            return True
+        if timeout <= 0:
+            break
+        cancellable_sleep(0.5)
+    return False
+
 def sleep(seconds: float):
     cancellable_sleep(seconds)
 
-def edit_img():
-    launch_editor(mixctrl,is_screenshot=True) 
+
+def wait_for_signal(
+    signal: str,
+    expected: bool = True,
+    seconds: float = 0,
+    *,
+    timeout: float | None = None,
+    start: float | None = None,
+) -> bool:
+    start = time.time() if start is None else start
+    end = time.time() + max(seconds, 0)
+    while True:
+        check_cancel_raise()
+        now = time.time()
+        if timeout is not None and now - start > timeout:
+            raise RuntimeError(f"等待信号 {signal!r} 超时: {timeout}秒, 条件 {repr(expected)} 未满足")
+        if bool(bg.signal(signal, False)) is expected:
+            return True
+        remaining = end - now
+        if remaining <= 0:
+            return False
+        sleep(min(0.05, remaining))
+
 
 def detect_floating_window(debug: bool = False) -> dict:
     """
@@ -733,13 +1036,3 @@ def dismiss_floating_window(max_retries: int = 1, debug: bool = False) -> bool:
         logger.warning(f"⚠️ 悬浮窗关闭后仍检测到: {verify['edge']}边 {verify['box']}")
 
     return False
-
-_boosted = False
-def _ensure_boosted():
-    """延迟 boost：只在首次真正使用 API 时才执行性能优化。"""
-    global _boosted
-    if _boosted:
-        return
-    _boosted = True
-    from AutoScriptor.utils.perf import ABOVE_NORMAL_PRIORITY_CLASS, boost
-    boost(process_priority=ABOVE_NORMAL_PRIORITY_CLASS)  # 温和提升 Python 自身；不提升 MuMu，避免干扰其他程序

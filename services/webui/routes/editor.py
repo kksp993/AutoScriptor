@@ -12,9 +12,14 @@ import asyncio
 import base64
 import csv
 import builtins
+import json
+import keyword
 import os
+import textwrap
 import traceback
 import types
+from threading import Lock
+from typing import Callable
 
 import cv2
 import numpy as np
@@ -23,8 +28,9 @@ from fastapi.responses import JSONResponse
 from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.logger import logger
 from AutoScriptor.utils.box import b2p
-from AutoScriptor.utils.cancel import suppress_cancel_checks
+from AutoScriptor.utils.cancel import TaskCancelled, check_cancel_raise, suppress_cancel_checks
 from AutoScriptor.core.targets import B
+from services.webui.api_response import api_error, api_ok
 
 router = APIRouter(prefix="/api/editor", tags=["editor"])
 
@@ -89,15 +95,111 @@ def _get_runtime():
     return runtime_ctx
 
 
+_editor_exec_lock = Lock()
+_editor_exec_running = False
+_editor_exec_stopping = False
+_editor_request_cancel: Callable[[], None] | None = None
+_editor_reset_cancel: Callable[[], None] | None = None
+_editor_runtime_busy: Callable[[], bool] | None = None
+_editor_reload_custom_tasks: Callable[[], int] | None = None
+
+
+def configure_editor_execution_controls(
+    *,
+    request_cancel: Callable[[], None],
+    reset_cancel: Callable[[], None],
+    runtime_busy: Callable[[], bool],
+) -> None:
+    """Register runtime cancellation hooks without importing server.py here."""
+    global _editor_request_cancel, _editor_reset_cancel, _editor_runtime_busy
+    _editor_request_cancel = request_cancel
+    _editor_reset_cancel = reset_cancel
+    _editor_runtime_busy = runtime_busy
+
+
+def configure_editor_custom_task_save_controls(
+    *,
+    reload_custom_tasks: Callable[[], int] | None = None,
+) -> None:
+    """Register optional lifecycle hooks for editor-saved custom task scripts."""
+    global _editor_reload_custom_tasks
+    _editor_reload_custom_tasks = reload_custom_tasks
+
+
+def _begin_editor_execution() -> JSONResponse | None:
+    if _editor_runtime_busy is not None and _editor_runtime_busy():
+        return api_error(
+            409,
+            "当前已有任务在运行，请先终止当前任务后再执行编辑器代码",
+            code="runtime_busy",
+        )
+    with _editor_exec_lock:
+        global _editor_exec_running, _editor_exec_stopping
+        if _editor_exec_running:
+            return api_error(
+                409,
+                "编辑器自定义代码正在执行，请先终止或等待完成",
+                code="editor_execution_busy",
+            )
+        _editor_exec_running = True
+        _editor_exec_stopping = False
+    if _editor_reset_cancel is not None:
+        _editor_reset_cancel()
+    return None
+
+
+def _end_editor_execution() -> None:
+    with _editor_exec_lock:
+        global _editor_exec_running, _editor_exec_stopping
+        was_stopping = _editor_exec_stopping
+        _editor_exec_running = False
+        _editor_exec_stopping = False
+    if was_stopping and _editor_reset_cancel is not None:
+        _editor_reset_cancel()
+
+
+def _request_editor_execution_stop() -> dict:
+    with _editor_exec_lock:
+        global _editor_exec_stopping
+        if not _editor_exec_running:
+            return api_ok(
+                status="idle",
+                running=False,
+                stopping=False,
+                message="当前没有编辑器代码在执行",
+            )
+        _editor_exec_stopping = True
+    if _editor_request_cancel is not None:
+        _editor_request_cancel()
+    return api_ok(
+        status="stopping",
+        running=True,
+        stopping=True,
+        message="已发送终止执行请求",
+    )
+
+
+def editor_execution_status() -> dict:
+    """Return editor execute-code state for the shared runtime projection."""
+    with _editor_exec_lock:
+        running = _editor_exec_running
+        stopping = _editor_exec_stopping
+    return {
+        "running": running,
+        "busy": running,
+        "stopping": stopping,
+    }
+
+
 def _ignore_cancel() -> None:
     return None
 
 
-def _ensure_editor_mixctrl(reason: str):
+def _ensure_editor_mixctrl(reason: str, *, cancel_check: Callable[[], None] | None = _ignore_cancel):
     """Acquire live device controls only for explicit editor device actions."""
     return _get_runtime().ensure_device_session(
         reason=f"editor/{reason}",
-        cancel_check=_ignore_cancel,
+        cancel_check=cancel_check,
         launch_app=False,
     )[0]
 
@@ -210,6 +312,323 @@ def _safe_asset_stem(raw: str) -> str:
     return stem or "template"
 
 
+def _safe_custom_task_stem(raw: str) -> str:
+    stem = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in raw).strip("_")
+    stem = stem[:80].strip("_") or "editor_custom_task"
+    reserved = {
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    }
+    if stem.upper() in reserved:
+        stem = f"{stem}_script"
+    return stem
+
+
+def _safe_custom_task_title(raw: str, fallback: str) -> str:
+    title = "".join(ch if ch not in "\r\n\t\\/:*?\"<>|" else "_" for ch in raw).strip(" _")
+    return title[:80].strip(" _") or fallback
+
+
+def _normalize_editor_custom_task_filename(raw: str) -> str:
+    name = str(raw or "").replace("\\", "/").split("/")[-1].strip()
+    if name.lower().endswith(".py"):
+        name = name[:-3]
+    return f"{_safe_custom_task_stem(name)}.py"
+
+
+def _normalize_editor_task_path(raw: str | None, fallback: str) -> str:
+    value = str(fallback if raw is None else raw).replace("\\", "/").strip()
+    if not value:
+        raise ValueError("脚本名称不能为空")
+    parts = []
+    for part in value.split("/"):
+        cleaned = _safe_custom_task_title(part, "")
+        if cleaned:
+            parts.append(cleaned)
+    if not parts:
+        raise ValueError("脚本名称不能为空")
+    if parts[0] != "自定义任务":
+        parts.insert(0, "自定义任务")
+    if len(parts) < 2:
+        raise ValueError("脚本名称必须包含自定义任务下的具体路径")
+    return "/".join(parts)
+
+
+_EDITOR_PARAM_TYPE_ALIASES = {
+    "str": "str",
+    "string": "str",
+    "文本": "str",
+    "字符串": "str",
+    "int": "int",
+    "integer": "int",
+    "整数": "int",
+    "float": "float",
+    "number": "float",
+    "数字": "float",
+    "浮点": "float",
+    "bool": "bool",
+    "boolean": "bool",
+    "布尔": "bool",
+    "enum": "enum",
+    "enum_single": "enum",
+    "enum-single": "enum",
+    "enum(单选)": "enum",
+    "单选": "enum",
+    "枚举": "enum",
+    "enum_multi": "enum_multi",
+    "enum_multiple": "enum_multi",
+    "enum-multiple": "enum_multi",
+    "enum(多选)": "enum_multi",
+    "多选": "enum_multi",
+    "枚举多选": "enum_multi",
+}
+
+
+def _normalize_editor_param_type(raw: object) -> str:
+    key = str(raw or "str").strip()
+    normalized = _EDITOR_PARAM_TYPE_ALIASES.get(key.lower()) or _EDITOR_PARAM_TYPE_ALIASES.get(key)
+    if not normalized:
+        raise ValueError(f"不支持的字段类型: {key}")
+    return normalized
+
+
+def _normalize_editor_enum_options(raw: object, field_name: str) -> list[str]:
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            raise ValueError(f"Enum 参数 {field_name} 必须填写选项")
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Enum 参数 {field_name} 的选项必须是 JSON 字符串数组") from e
+    elif isinstance(raw, (list, tuple)):
+        parsed = raw
+    else:
+        raise ValueError(f"Enum 参数 {field_name} 的选项必须是数组")
+
+    if not isinstance(parsed, (list, tuple)):
+        raise ValueError(f"Enum 参数 {field_name} 的选项必须是数组")
+    seen = set()
+    options: list[str] = []
+    for item in parsed:
+        option = str(item).strip()
+        if not option:
+            raise ValueError(f"Enum 参数 {field_name} 包含空选项")
+        if option in seen:
+            continue
+        seen.add(option)
+        options.append(option)
+    if not options:
+        raise ValueError(f"Enum 参数 {field_name} 必须至少包含一个选项")
+    return options
+
+
+def _normalize_editor_param_specs(raw_params: object) -> list[dict[str, object]]:
+    if raw_params in (None, "", []):
+        return []
+    if not isinstance(raw_params, list):
+        raise ValueError("参数设置必须是列表")
+
+    specs: list[dict[str, object]] = []
+    seen_names: set[str] = set()
+    for idx, item in enumerate(raw_params, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"第 {idx} 个参数设置无效")
+        raw_name = str(item.get("name") or item.get("field_name") or item.get("fieldName") or item.get("field") or "").strip()
+        raw_type = item.get("type") or item.get("field_type") or item.get("fieldType") or "str"
+        description = str(item.get("description") or item.get("desc") or item.get("explanation") or "").strip()
+        enum_options = item.get("enum_options", item.get("enumOptions", item.get("options")))
+        if not raw_name and not description and enum_options in (None, "", []):
+            continue
+        if not raw_name:
+            raise ValueError(f"第 {idx} 个参数缺少字段名称")
+        if not raw_name.isidentifier() or keyword.iskeyword(raw_name):
+            raise ValueError(f"字段名称必须是合法 Python 参数名: {raw_name}")
+        if raw_name in seen_names:
+            raise ValueError(f"字段名称重复: {raw_name}")
+        seen_names.add(raw_name)
+
+        param_type = _normalize_editor_param_type(raw_type)
+        spec: dict[str, object] = {
+            "name": raw_name,
+            "type": param_type,
+            "description": description,
+        }
+        if param_type in {"enum", "enum_multi"}:
+            spec["enum_options"] = _normalize_editor_enum_options(enum_options, raw_name)
+        specs.append(spec)
+    return specs
+
+
+def _editor_task_doc_with_param_descriptions(task_doc: str, params: list[dict[str, object]]) -> str:
+    doc = str(task_doc or "").strip()
+    param_lines = [
+        f"- {param['name']}: {param['description']}"
+        for param in params
+        if str(param.get("description") or "").strip()
+    ]
+    if not param_lines:
+        return doc
+    param_doc = "参数说明:\n" + "\n".join(param_lines)
+    return f"{doc}\n\n{param_doc}" if doc else param_doc
+
+
+def _decorator_ref_is_register_task(expr: ast.expr) -> bool:
+    if isinstance(expr, ast.Name):
+        return expr.id == "register_task"
+    if isinstance(expr, ast.Attribute):
+        return expr.attr == "register_task"
+    return False
+
+
+def _register_task_decorator_info(tree: ast.AST) -> tuple[bool, bool]:
+    has_register_task = False
+    missing_path_cn = False
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            if isinstance(decorator, ast.Call):
+                if not _decorator_ref_is_register_task(decorator.func):
+                    continue
+                has_register_task = True
+                if not any(keyword.arg == "path_cn" for keyword in decorator.keywords):
+                    missing_path_cn = True
+            elif _decorator_ref_is_register_task(decorator):
+                has_register_task = True
+                missing_path_cn = True
+    return has_register_task, missing_path_cn
+
+
+def _editor_enum_class_source(class_name: str, enum_options: list[str]) -> str:
+    lines = [f"class {class_name}(str, enum.Enum):"]
+    for idx, option in enumerate(enum_options, start=1):
+        lines.append(f"    OPTION_{idx} = {option!r}")
+    return "\n".join(lines)
+
+
+def _editor_task_signature(params: list[dict[str, object]]) -> tuple[str, list[str]]:
+    if not params:
+        return "def task():\n", []
+
+    enum_sources: list[str] = []
+    signature_args: list[str] = []
+    enum_index = 0
+    for param in params:
+        name = str(param["name"])
+        param_type = str(param["type"])
+        if param_type == "enum":
+            enum_index += 1
+            class_name = f"EditorParam{enum_index}Enum"
+            enum_sources.append(_editor_enum_class_source(class_name, list(param["enum_options"])))
+            signature_args.append(f"{name}: {class_name} = {class_name}.OPTION_1")
+        elif param_type == "enum_multi":
+            enum_index += 1
+            class_name = f"EditorParam{enum_index}Enum"
+            enum_sources.append(_editor_enum_class_source(class_name, list(param["enum_options"])))
+            signature_args.append(f"{name}: list = [{class_name}.OPTION_1]")
+        elif param_type == "int":
+            signature_args.append(f"{name}: int = 0")
+        elif param_type == "float":
+            signature_args.append(f"{name}: float = 0.0")
+        elif param_type == "bool":
+            signature_args.append(f"{name}: bool = False")
+        else:
+            signature_args.append(f"{name}: str = ''")
+
+    signature = "def task(\n" + "".join(f"    {arg},\n" for arg in signature_args) + "):\n"
+    return signature, enum_sources
+
+
+def _build_wrapped_custom_task_source(name: str, code: str, metadata: dict | None = None) -> tuple[str, str]:
+    clean_name = str(name or "").replace("\\", "/").split("/")[-1].strip()
+    if clean_name.lower().endswith(".py"):
+        clean_name = clean_name[:-3]
+    stem = _safe_custom_task_stem(clean_name)
+    title = _safe_custom_task_title(clean_name, stem)
+
+    metadata = metadata if isinstance(metadata, dict) else {}
+    raw_task_path = metadata.get("task_path") if "task_path" in metadata else None
+    task_path = _normalize_editor_task_path(raw_task_path, f"自定义任务/编辑器保存/{title}")
+    description = str(metadata.get("description") or "").strip() or "从编辑器保存的自定义脚本"
+    task_doc = str(metadata.get("task_doc") or metadata.get("task_docs") or "").strip()
+    params = _normalize_editor_param_specs(metadata.get("params"))
+    final_task_doc = _editor_task_doc_with_param_descriptions(task_doc, params)
+    register_kwargs = dict(path_cn=task_path, description=description, task_doc=final_task_doc)
+
+    signature, enum_sources = _editor_task_signature(params)
+    body = textwrap.indent(code.rstrip() or "pass", "    ")
+    imports = [
+        "from AutoScriptor import *",
+        "from ZmxyOL.nav.api import *",
+        "from ZmxyOL.nav.envs.decorators import *",
+        "from ZmxyOL.task.task_register import register_task",
+    ]
+    if enum_sources:
+        imports.insert(0, "import enum")
+    decorator = (
+        "@register_task(\n"
+        f"    path_cn={register_kwargs['path_cn']!r},\n"
+        f"    description={register_kwargs['description']!r},\n"
+        f"    task_doc={register_kwargs['task_doc']!r},\n"
+        ")"
+    )
+    sections = ["\n".join(imports), *enum_sources, f"{decorator}\n{signature}{body}"]
+    return "\n\n".join(sections).rstrip() + "\n", task_path
+
+
+def _prepare_editor_custom_task_source(name: str, code: str, metadata: dict | None = None) -> tuple[str, bool, str | None]:
+    code = (code or "").strip()
+    if not code:
+        raise ValueError("代码为空")
+    if len(code) > _MAX_SNIPPET_LEN:
+        raise ValueError(f"代码过长（上限 {_MAX_SNIPPET_LEN} 字符）")
+    tree = ast.parse(code)
+    has_register_task, missing_path_cn = _register_task_decorator_info(tree)
+    if has_register_task:
+        if missing_path_cn:
+            raise ValueError('data/custom_task 下的 @register_task 必须显式传入 path_cn="自定义任务/..."')
+        return code.rstrip() + "\n", False, None
+    source, task_path = _build_wrapped_custom_task_source(name, code, metadata)
+    ast.parse(source)
+    return source, True, task_path
+
+
+def _editor_script_write_busy() -> JSONResponse | None:
+    if _editor_runtime_busy is not None and _editor_runtime_busy():
+        return api_error(
+            409,
+            "当前已有任务在运行，请先终止当前任务后再保存脚本",
+            code="runtime_busy",
+        )
+    with _editor_exec_lock:
+        if _editor_exec_running:
+            return api_error(
+                409,
+                "编辑器自定义代码正在执行，请先终止或等待完成后再保存脚本",
+                code="editor_execution_busy",
+            )
+    return None
+
+
+def _public_module_symbols(module) -> dict:
+    names = getattr(module, "__all__", None) or [name for name in dir(module) if not name.startswith("_")]
+    return {name: getattr(module, name) for name in names if not name.startswith("_")}
+
+
+def _editor_nav_namespace() -> dict:
+    from ZmxyOL.nav import api as nav_api
+    from ZmxyOL.nav.envs import decorators as nav_decorators
+
+    symbols = {}
+    symbols.update(_public_module_symbols(nav_decorators))
+    symbols.update(_public_module_symbols(nav_api))
+    symbols["ensure_in"] = nav_api.ensure_in
+    symbols["LOC_ENV"] = nav_decorators.LOC_ENV
+    return symbols
+
+
 def _read_ui_map_rows(csv_path: str) -> list[dict]:
     if not os.path.exists(csv_path):
         return []
@@ -248,6 +667,41 @@ def _write_ui_map_rows(csv_path: str, rows: list[dict]) -> None:
         writer.writeheader()
         for key in order:
             writer.writerow(deduped[key])
+
+
+# ── GET /api/editor/navigation-options ──
+
+def _build_editor_navigation_options() -> list[dict]:
+    """Return registered environment/location names without touching device state."""
+    from ZmxyOL.nav import envs as _registered_navigation_envs  # noqa: F401
+    from ZmxyOL.nav.map_manager import mm
+
+    if not mm.envs:
+        raise RuntimeError("导航环境尚未注册")
+
+    options = []
+    for environment_name, environment in mm.envs.items():
+        location_names = []
+        for location_name in environment.locs:
+            if location_name not in mm.locs:
+                raise RuntimeError(f"导航位置注册不一致: {environment_name}/{location_name}")
+            if location_name != environment_name:
+                location_names.append(location_name)
+        options.append({"name": environment_name, "locations": location_names})
+    return options
+
+
+@router.get("/navigation-options")
+async def editor_navigation_options():
+    try:
+        return api_ok(items=_build_editor_navigation_options())
+    except Exception as exception:
+        logger.error("editor/navigation-options error: %s", exception)
+        return api_error(
+            500,
+            f"加载导航选项失败: {exception}",
+            code="editor_navigation_options_failed",
+        )
 
 
 # ── GET /api/editor/screenshot ──
@@ -675,7 +1129,6 @@ async def editor_remote_swipe(request: Request):
         # 直接走 mixctrl，避免 api.swipe 开头的 check_cancel_raise 在「已停止」后仍拦截遥控
         from AutoScriptor.core import api as core_api
 
-        core_api._ensure_boosted()
         start_b = B(x1, y1, 1, 1).box
         end_b = B(x2, y2, 1, 1).box
         try:
@@ -779,7 +1232,7 @@ def _run_editor_snippet(
     import time as time_mod
     import traceback as tb_mod
 
-    from AutoScriptor.core.targets import B, I, T, V
+    from AutoScriptor.core.targets import B, I, T
     from AutoScriptor.utils.box import Box
     from AutoScriptor.utils.box_grid import indexof, make_box_grid
 
@@ -827,7 +1280,6 @@ def _run_editor_snippet(
         "B": B,
         "T": T,
         "I": I,
-        "V": V,
         "click": api_mod.click,
         "swipe": api_mod.swipe,
         "input": api_mod.input,
@@ -839,6 +1291,7 @@ def _run_editor_snippet(
         "extract_info": api_mod.extract_info,
         "sleep": getattr(api_mod, "sleep", time_mod.sleep),
     }
+    ns.update(_editor_nav_namespace())
 
     code = (code or "").strip()
     if not code:
@@ -898,7 +1351,7 @@ def _run_editor_snippet(
             mc.screenshot = types.MethodType(_v_screenshot, mc)
 
     try:
-        with suppress_cancel_checks():
+        with contextlib.nullcontext():
             with contextlib.redirect_stdout(stdout_buf):
                 body = tree.body
                 if not body:
@@ -930,6 +1383,13 @@ def _run_editor_snippet(
                     payload["virtual_clicks"] = virtual_clicks
                     payload["virtual_swipes"] = virtual_swipes
                 return payload
+    except TaskCancelled as e:
+        logger.info("editor/execute-code stopped: %s", e)
+        return {
+            "ok": False,
+            "error": str(e),
+            "code": "editor_execution_stopped",
+        }
     except BaseException as e:
         logger.warning("editor/execute-code snippet error: %s\n%s", e, tb_mod.format_exc())
         return {
@@ -947,6 +1407,19 @@ def _run_editor_snippet(
             api_mod.mixctrl = original_mixctrl
 
 
+def _execute_editor_code_sync(code: str, virtual_only: bool) -> dict:
+    try:
+        virtual_mixctrl = None
+        if virtual_only and _last_screenshot is not None:
+            virtual_mixctrl = _EditorVirtualMixControl(_last_screenshot)
+        else:
+            _ensure_editor_mixctrl("execute-code", cancel_check=check_cancel_raise)
+        return _run_editor_snippet(code, virtual_only=virtual_only, virtual_mixctrl=virtual_mixctrl)
+    except TaskCancelled as e:
+        logger.info("editor/execute-code stopped before snippet: %s", e)
+        return {"ok": False, "error": str(e), "code": "editor_execution_stopped"}
+
+
 @router.post("/validate-code")
 async def editor_validate_code(request: Request):
     """校验自定义 Python 片段的语法，并提示执行器会拦截的明显问题。"""
@@ -958,28 +1431,101 @@ async def editor_validate_code(request: Request):
         return {"ok": False, "error": str(e)}
 
 
+@router.post("/save-custom-task")
+async def editor_save_custom_task(request: Request):
+    """Save editor code as a UTF-8 custom task script under data/custom_task/."""
+    busy = _editor_script_write_busy()
+    if busy is not None:
+        return busy
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            return api_error(400, "无效的保存请求", code="invalid_payload")
+        code = data.get("code", "")
+        raw_filename = str(data.get("filename") or data.get("name") or "editor_custom_task.py")
+        filename = _normalize_editor_custom_task_filename(raw_filename)
+        raw_name = str(data.get("name") or os.path.splitext(filename)[0])
+        source, wrapped, task_path = _prepare_editor_custom_task_source(raw_name, code, data)
+
+        from AutoScriptor.utils.paths import get_custom_task_dir
+
+        root = get_custom_task_dir()
+        root.mkdir(parents=True, exist_ok=True)
+        root_resolved = root.resolve()
+        target_path = (root / filename).resolve()
+        if target_path.parent != root_resolved:
+            return api_error(400, "脚本文件名非法", code="invalid_filename")
+        compile(source, str(target_path), "exec")
+
+        tmp_path = target_path.with_name(f".{target_path.name}.tmp")
+        with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(source)
+        os.replace(tmp_path, target_path)
+
+        config_version = None
+        reloaded = False
+        if _editor_reload_custom_tasks is not None:
+            try:
+                config_version = _editor_reload_custom_tasks()
+                reloaded = True
+            except Exception as e:
+                logger.error("editor/save-custom-task reload error: %s\n%s", e, traceback.format_exc())
+                return api_error(
+                    500,
+                    f"脚本已保存，但任务重载失败: {e}",
+                    code="reload_custom_task_failed",
+                    filename=target_path.name,
+                    path=str(target_path),
+                )
+
+        message = "已保存脚本并重载任务" if reloaded else "已保存脚本，任务列表将在下次重载后更新"
+        return api_ok(
+            message=message,
+            filename=target_path.name,
+            path=str(target_path),
+            wrapped=wrapped,
+            task_path=task_path,
+            reloaded=reloaded,
+            config_version=config_version,
+        )
+    except SyntaxError as e:
+        loc = f"第 {e.lineno} 行"
+        if e.offset:
+            loc += f" 第 {e.offset} 列"
+        return api_error(400, f"语法错误（{loc}）: {e.msg}", code="syntax_error")
+    except ValueError as e:
+        return api_error(400, str(e), code="invalid_payload")
+    except Exception as e:
+        logger.error("editor/save-custom-task error: %s\n%s", e, traceback.format_exc())
+        return api_error(500, str(e), code="save_custom_task_failed")
+
+
+@router.post("/execute-code/stop")
+async def editor_stop_execution():
+    """Request cooperative cancellation for the current editor custom-code run."""
+    return _request_editor_execution_stop()
+
+
 @router.post("/execute-code")
 async def editor_execute_code(request: Request):
     """执行自定义 Python 片段（与脚本相同的 API 命名空间），永不抛未捕获异常。"""
+    busy = _begin_editor_execution()
+    if busy is not None:
+        return busy
     try:
         data = await request.json()
         code = data.get("code", "")
         virtual_only = bool(data.get("virtual_only", False))
-        virtual_mixctrl = None
-        if virtual_only and _last_screenshot is not None:
-            virtual_mixctrl = _EditorVirtualMixControl(_last_screenshot)
-        else:
+        if not (virtual_only and _last_screenshot is not None):
             locked = _require_editor_device_unlock(request)
             if locked is not None:
                 return locked
-            try:
-                _ensure_editor_mixctrl("execute-code")
-            except Exception as e:
-                return {"ok": False, "error": f"设备会话初始化失败: {e}"}
-        return _run_editor_snippet(code, virtual_only=virtual_only, virtual_mixctrl=virtual_mixctrl)
+        return await asyncio.to_thread(_execute_editor_code_sync, code, virtual_only)
     except Exception as e:
         logger.error("editor/execute-code error: %s\n%s", e, traceback.format_exc())
         return {"ok": False, "error": str(e)}
+    finally:
+        _end_editor_execution()
 
 
 # ── POST /api/editor/preview-extract ──

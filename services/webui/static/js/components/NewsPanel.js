@@ -1,7 +1,10 @@
-const NEWS_REDEEM_PAGE_URL = 'https://yxhhd2.5054399.com/2021/yxgjml/game.php?game_id=26444';
+const NEWS_GIFT_CODES_PAGE_URL = '/api/news/gift_codes/page';
 
 const NewsPanel = {
   name: 'NewsPanel',
+  props: {
+    refreshKey: { type: Number, default: 0 },
+  },
   data() {
     return {
       posts: [],
@@ -15,6 +18,7 @@ const NewsPanel = {
       giftDialogVisible: false,
       giftIframeKey: 0,
       giftLoading: true,
+      giftFrameSrc: NEWS_GIFT_CODES_PAGE_URL,
     };
   },
   computed: {
@@ -29,6 +33,11 @@ const NewsPanel = {
   },
   mounted() {
     this.fetchPosts(true);
+  },
+  watch: {
+    refreshKey() {
+      this.fetchPosts(true);
+    },
   },
   methods: {
     async fetchPosts(force = false) {
@@ -66,19 +75,30 @@ const NewsPanel = {
       if (parts.length === 3) return parseInt(parts[1]) + '月' + parseInt(parts[2]) + '日';
       return dateStr;
     },
-    openGiftCodes() {
+    async refreshGiftCodes() {
       this.giftLoading = true;
+      try {
+        const res = await fetch('/api/news/gift_codes?refresh=1', { credentials: 'same-origin' });
+        const raw = await res.text();
+        const data = raw ? JSON.parse(raw) : {};
+        if (!res.ok) throw new Error(data.detail || data.message || raw || res.statusText);
+        if (data.error) throw new Error(data.error);
+        this.giftIframeKey += 1;
+      } catch (e) {
+        ElementPlus.ElMessage.error('兑换码刷新失败: ' + (e.message || e));
+      } finally {
+        this.giftLoading = false;
+      }
+    },
+    openGiftCodes() {
       this.giftDialogVisible = true;
+      this.refreshGiftCodes();
     },
     refreshGiftFrame() {
-      this.giftLoading = true;
-      this.giftIframeKey += 1;
+      this.refreshGiftCodes();
     },
     onGiftFrameLoad() {
       this.giftLoading = false;
-    },
-    openGiftExternal() {
-      window.open(NEWS_REDEEM_PAGE_URL, '_blank', 'noopener,noreferrer');
     },
   },
   template: `
@@ -105,7 +125,7 @@ const NewsPanel = {
           <i class="fa fa-newspaper-o text-primary mr-1"></i>游戏资讯
         </h2>
         <span class="text-xs text-gray-400">造梦西游OL · 官方公告</span>
-        <span v-if="bbsSessionEligible" class="text-xs text-emerald-600" title="已验证安全密码且配置中有游戏账密时，内嵌原文将尝试经通行证登录后拉取">
+        <span v-if="bbsSessionEligible" class="text-xs text-emerald-600" title="配置中有可用于资讯代理的通行证；非公开凭据需先验证安全密码">
           <i class="fa fa-unlock-alt"></i> 通行证代拉已就绪
         </span>
       </div>
@@ -205,13 +225,10 @@ const NewsPanel = {
                destroy-on-close
                class="news-dialog news-gift-dialog">
       <div class="news-gift-frame-toolbar">
-        <span class="text-xs text-slate-500">4399 礼包码查询器</span>
+        <span class="text-xs text-slate-500">官方公告兑换码</span>
         <div class="flex items-center gap-2">
-          <el-button size="small" @click="refreshGiftFrame">
+          <el-button size="small" :loading="giftLoading" @click="refreshGiftFrame">
             <i class="fa fa-refresh mr-1"></i>刷新
-          </el-button>
-          <el-button size="small" type="primary" @click="openGiftExternal">
-            打开原页 <i class="fa fa-external-link ml-1"></i>
           </el-button>
         </div>
       </div>
@@ -222,9 +239,9 @@ const NewsPanel = {
         </div>
         <iframe
           :key="giftIframeKey"
-          :src="NEWS_REDEEM_PAGE_URL"
+          :src="giftFrameSrc"
           frameborder="0"
-          title="4399礼包码查询器"
+          title="兑换码"
           class="news-gift-frame"
           allow="clipboard-read; clipboard-write"
           referrerpolicy="no-referrer-when-downgrade"

@@ -1,13 +1,13 @@
 """
 调试截图工具类：用于保存带标注的调试截图
 """
-import os
 import cv2
 import numpy as np
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 from AutoScriptor.utils.logger import logger
-from AutoScriptor.core.targets import Target, BoxTarget
+from AutoScriptor.core.targets import Target
 from AutoScriptor.utils.box import Box
 
 try:
@@ -18,8 +18,8 @@ except ImportError:
 
 # 调试截图目录
 from AutoScriptor.utils.paths import get_logs_root
-CLICK_DIR = str(get_logs_root() / 'debug_screenshot')
-os.makedirs(CLICK_DIR, exist_ok=True)
+CLICK_DIR = get_logs_root() / "debug_screenshot"
+CLICK_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _draw_text_with_bg(img, text: str, position: tuple[int, int], font_scale: float = 0.6, thickness: int = 2):
@@ -31,15 +31,16 @@ def _draw_text_with_bg(img, text: str, position: tuple[int, int], font_scale: fl
         try:
             img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
             draw = ImageDraw.Draw(img_pil)
-            font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", int(20 * font_scale)) if os.path.exists("C:/Windows/Fonts/msyh.ttc") else ImageFont.load_default()
+            font_path = Path("C:/Windows/Fonts/msyh.ttc")
+            font = ImageFont.truetype(str(font_path), int(20 * font_scale)) if font_path.exists() else ImageFont.load_default()
             bbox = draw.textbbox((0, 0), text, font=font)
             w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
             draw.rectangle([(text_x - 2, text_y - h - 2), (text_x + w + 2, text_y + 2)], fill=bg_color)
             draw.text((text_x, text_y - h), text, fill=text_color, font=font)
             img[:] = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
             return h + 4
-        except:
-            pass
+        except (OSError, ValueError, RuntimeError):
+            logger.debug("PIL text drawing failed; using OpenCV text renderer")
     font = cv2.FONT_HERSHEY_SIMPLEX
     (text_width, text_height), baseline = cv2.getTextSize(text, font, font_scale, thickness)
     cv2.rectangle(img, (text_x - 2, text_y - text_height - 2), (text_x + text_width + 2, text_y + baseline + 2), bg_color, -1)
@@ -163,33 +164,37 @@ def save_debug_screenshot(
         
         # 保存截图：时间戳在前，类型前缀在后，便于按文件名排序即按时间排序
         ts = datetime.now().strftime('%y%m%d_%H%M%S_%f')
-        cv2.imwrite(os.path.join(CLICK_DIR, f'{ts}_{prefix}.png'), img)
+        output_path = CLICK_DIR / f'{ts}_{prefix}.png'
+        if not cv2.imwrite(str(output_path), img):
+            raise OSError(f"failed to write debug screenshot: {output_path}")
         
         # 按类型保留最新截图：c 30 + s 10 + e 5 = 45 张（兼容旧名 c_/s_/e_ 前缀）
-        files = sorted([f for f in os.listdir(CLICK_DIR)], key=lambda x: os.path.getmtime(os.path.join(CLICK_DIR, x)), reverse=True)
+        files = sorted(
+            [p for p in CLICK_DIR.iterdir() if p.is_file()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
 
-        def _files_of_type(letter: str) -> list[str]:
+        def _files_of_type(letter: str) -> list[Path]:
             suf = f"_{letter}.png"
             pre = f"{letter}_"
-            return [f for f in files if f.endswith(suf) or (f.startswith(pre) and f.endswith(".png"))]
+            return [p for p in files if p.name.endswith(suf) or (p.name.startswith(pre) and p.name.endswith(".png"))]
 
         c_files = _files_of_type("c")
         s_files = _files_of_type("s")
         e_files = _files_of_type("e")
         keep = set(c_files[:30] + s_files[:10] + e_files[:5])
-        files_to_remove = [f for f in files if f not in keep]
-        for f in files_to_remove: 
-            os.remove(os.path.join(CLICK_DIR, f))
-    except Exception as e:
+        for path in (p for p in files if p not in keep):
+            path.unlink()
+    except (OSError, cv2.error, AttributeError, TypeError, ValueError) as e:
         logger.debug(f"保存调试截图失败: {e}")
 
 
 def clear_debug_screenshots():
     """清空调试截图目录，在每个任务开始前调用，确保截图都属于当前任务"""
     try:
-        for f in os.listdir(CLICK_DIR):
-            fp = os.path.join(CLICK_DIR, f)
-            if os.path.isfile(fp):
-                os.remove(fp)
-    except Exception as e:
+        for path in CLICK_DIR.iterdir():
+            if path.is_file():
+                path.unlink()
+    except OSError as e:
         logger.debug(f"清理调试截图目录失败: {e}")
