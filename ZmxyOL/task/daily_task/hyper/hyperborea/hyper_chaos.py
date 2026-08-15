@@ -38,4 +38,4 @@ def task(
         h.set(has_cd=True,speed_x=3).battle_task(crash_suddenly=True)
     else:
         click(B(1200,30,30,30))
-        wait_for_appear(T("回家", box=Box(29,613,77,88).margin()))
+        wait_for_appear(T("回家", box=Box(29,656,77,54).margin()))

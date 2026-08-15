@@ -3,8 +3,8 @@ from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import RequestHumanTake
 from ZmxyOL import *
 from AutoScriptor import *
 
-def destory_item():
-    click((I("A"), I("B")))
+def destroy_item(item_box):
+    click(B(item_box))
     sleep(0.5)
     click(T("选择", color="红色"))
     click(T("炼化", box=Box(416,581,164,69)), delay=1)
@@ -13,7 +13,7 @@ def destory_item():
     sleep(0.5)
 
 
-def make_more_for_destory(nums: int=1):
+def make_more_for_destroy(nums: int=1):
     Material_not_sufficent=False
     click(B(890,50,30,30))
     ensure_in("法相")
@@ -43,19 +43,20 @@ def make_more_for_destory(nums: int=1):
     task_doc="材料不够会自行合成。",
     path_cn="每日任务/极北/极北村庄/仙宝炼化",
 )
-def lianqishi_destory():
+def lianqishi_destroy():
     ensure_in("炼器师")
     res = extract_info(B(1000,430,130,42), lambda x: x)
     cur, limit = int(res.split("/")[0]), int(res.split("/")[1][:-1])
     click(I('炼器炉'))
     wait_for_appear(T("选择仙器法宝"))
     while cur < limit:
-        if ui_T((I("A"), I("B")),2):
-            destory_item()
+        item_box = locate((I("A"), I("B")), timeout=2)
+        if item_box:
+            destroy_item(item_box)
             cur += 1
         else:
             try:
-                make_more_for_destory((limit-cur)*2)
+                make_more_for_destroy((limit-cur)*2)
             except RequestHumanTakeover:
                 raise RequestHumanTakeover(f"材料不足，无法炼化({cur}/{limit})")
     click(B(890,50,30,30))

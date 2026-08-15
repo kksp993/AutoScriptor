@@ -161,7 +161,7 @@ progress = get_task_status("progress")
 - 所有截图、模板、`B/Box` 和点击坐标都按 `1280x720` 横屏绝对像素编写；`B(x, y, width, height)` 使用左上角与宽高，不编写相对坐标或静默缩放逻辑。
 - 截图尺寸不符合合同时运行时只会节流 warning 并继续任务，不会自动缩放；应修正 MuMu 分辨率，不要修改任务坐标去适配错误尺寸。
 - 任务脚本只依赖现有公共识别 API，不导入或依赖内部 `RecognitionResult` 追踪结构。
-- `extract_info(..., mode=...)` 使用 `digital_only`（仅数字）、`text`（仅 OCR 文本）、`img`（仅返回 `ui_map` 图片 key）或 `both`（逐格优先图片，未命中再 OCR）；Box 列表和二维网格会保持返回形状。
+- `extract_info(..., mode=...)` 使用 `digital_only`（仅数字）、`text`（仅 OCR 文本）、`img`（仅返回 `ui_map` 图片 key）或 `both`（逐格优先图片，未命中再 OCR）；Box 列表和二维网格会保持返回形状。`post_process` 解析失败会继续重试，最终仍失败时返回 `None`，任务逻辑不要把原始 OCR 文本当作已解析业务值使用。
 - 不直接调用 MuMuManager subprocess；设备会话由调度器、WebUI 或 runtime context 管。
 - 纯坐标点击用 `B(x, y, w, h)`；OCR 语义和业务语义分开处理。
 - 多个识别目标必须包成 tuple/list：`(T("A"), T("B"))` 表示任一命中，`[T("A"), T("B")]` 表示全部命中；`locate()`、`match()`、`coloris()` 均沿用这套组合语义。不要写 `wait_for_appear(T("A"), T("B"))`，第二个位置参数是 `timeout`。

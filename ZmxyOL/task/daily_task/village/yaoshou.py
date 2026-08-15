@@ -31,8 +31,7 @@ def task(
     elif ui_F(T("进入",color="绿色"), 3):
         logger.info("当前妖兽任务已结束")
     else:
-        click(T("进入",color="绿色"))
-        sleep(1)
+        click(T("进入",color="绿色"),until=lambda:ui_T(I("加载中")))
         wait_for_disappear(ui["加载中"].i)
         with bg.scope("妖兽") as scope:
             scope.add(

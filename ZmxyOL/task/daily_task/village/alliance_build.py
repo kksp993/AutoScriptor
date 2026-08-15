@@ -16,7 +16,7 @@ def daily_alliance_task():
     click(B(925,220,120,40))
     click(T("确定",color="绿色"))
     wait_for_appear(T("优秀建设"))
-    click(B(1200,30,30,30))
+    click(B(1200,30,30,30), until=lambda:ui_F(T("优秀建设")))
     logger.info("====日常任务====")
     sleep(2)
     click(I("导航-任务"))

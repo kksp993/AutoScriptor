@@ -12,9 +12,7 @@
 
 ## 辅助脚本
 
-- `launcher.ps1` / `launcher.bat`：兼容旧入口，只转发到运行脚本。
-- `bootstrap-python310.ps1`：通过 uv 确保 Python 3.10.15 可用于 `.venv`。
-- `collect_zmxy_redeem_2026.py`：4399 官方公告礼包码增量采集器，默认写入 `logs/zmxy_redeem_codes.json`。
+
 
 ## 边界
 

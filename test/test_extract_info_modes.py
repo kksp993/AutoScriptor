@@ -10,6 +10,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from AutoScriptor.core.api import extract_info
 from AutoScriptor.recognition.info_rec import extract_registered_image_keys
+from AutoScriptor.recognition.recognition_trace import (
+    clear_recognition_trace,
+    get_last_recognition_result,
+)
 from AutoScriptor.utils.box import Box
 
 
@@ -122,6 +126,54 @@ class TestExtractInfoModes(unittest.TestCase):
 
         self.assertEqual(result, ["物品甲", "文字-10"])
         self.assertEqual(mocked_ocr.call_count, 1)
+
+    def test_post_process_failure_returns_none_after_retries_exhausted(self):
+        clear_recognition_trace()
+
+        def parse_wave_number(raw_text):
+            return int(raw_text.strip().split("/")[0])
+
+        with patch("AutoScriptor.core.api.ocr_for_box", return_value="牛"):
+            result = extract_info(
+                Box(652, 85, 82, 54),
+                parse_wave_number,
+                ensure_not_empty=False,
+                max_retries=1,
+                save_screenshot=False,
+                screenshot_frame=object(),
+            )
+
+        recognition_result = get_last_recognition_result()
+        self.assertIsNone(result)
+        self.assertIsNotNone(recognition_result)
+        self.assertFalse(recognition_result.success)
+        self.assertIn("ValueError", recognition_result.error)
+
+    def test_post_process_failure_retries_until_processed_value_is_valid(self):
+        clear_recognition_trace()
+
+        def parse_wave_number(raw_text):
+            return int(raw_text.strip().split("/")[0])
+
+        with patch(
+            "AutoScriptor.core.api.ocr_for_box",
+            side_effect=["牛", "7/12"],
+        ) as mocked_ocr:
+            result = extract_info(
+                Box(652, 85, 82, 54),
+                parse_wave_number,
+                ensure_not_empty=False,
+                max_retries=2,
+                save_screenshot=False,
+                screenshot_frame=object(),
+            )
+
+        recognition_result = get_last_recognition_result()
+        self.assertEqual(result, 7)
+        self.assertEqual(mocked_ocr.call_count, 2)
+        self.assertIsNotNone(recognition_result)
+        self.assertTrue(recognition_result.success)
+        self.assertIsNone(recognition_result.error)
 
 
 if __name__ == "__main__":

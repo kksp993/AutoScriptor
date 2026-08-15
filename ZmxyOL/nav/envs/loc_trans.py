@@ -117,7 +117,7 @@ for dst_loc in available_dst_locs:
 "=======================    荒古村庄    ======================="
 @path(LOC_ENV, "荒古村庄")
 def way():
-    click(T("回家", box=Box(29,613,77,88).margin()))
+    click(T("回家", box=Box(29,656,77,54).margin()))
     mm.set_loc("荒古村庄")
 
 def way(env_name: str):

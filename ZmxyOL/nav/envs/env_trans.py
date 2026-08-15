@@ -52,7 +52,7 @@ def way():
 "=======================    极北    ======================="
 @path("极北", "极北村庄")
 def way():
-    click(T("回家", box=Box(29,613,77,88).margin()))
+    click(T("回家", box=Box(29,656,77,54).margin()),until=lambda:ui_T(I("加载中")))
     wait_for_disappear(I("加载中"))
     wait_for_appear(I("极北村庄背景"))
     sleep(2)
@@ -78,7 +78,7 @@ def way():
 "=======================    村庄    ======================="
 @path(["天庭", "地狱"], "村庄")
 def way():
-    click(T("回家", box=Box(29,613,77,88).margin()))
+    click(T("回家", box=Box(29,656,77,54).margin()))
     wait_for_disappear(I("加载中"))
     mm.set_region("村庄")
     sleep(1)
