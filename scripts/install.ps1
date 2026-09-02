@@ -19,6 +19,8 @@ $RuntimeConfig = Join-Path $Root "data\config.json"
 $WebappDir = Join-Path $Root "webapp"
 $PythonVersion = "3.10.15"
 $NodeMinimumVersion = [version]"22.12.0"
+$SetuptoolsUpperBound = "81"
+$SetuptoolsRequirement = "setuptools<$SetuptoolsUpperBound"
 
 function Refresh-ProcessPath {
     $pathValues = @(
@@ -237,6 +239,14 @@ function Test-PaddleRuntime {
     }
 }
 
+function Test-PythonRuntimeCompatibility {
+    $probe = "from importlib.metadata import version; from packaging.version import Version; setuptools_version = Version(version('setuptools')); assert setuptools_version < Version('$SetuptoolsUpperBound'), f'$SetuptoolsRequirement is required, got {setuptools_version}'; import pkg_resources; import packaging.tags; import distutils.util; import adbutils; import uiautomator2; print(f'python runtime compatibility ready: setuptools={setuptools_version}')"
+    & $VenvPy -X utf8 -W "ignore:pkg_resources is deprecated as an API:UserWarning" -c $probe
+    if ($LASTEXITCODE -ne 0) {
+        throw "Python runtime compatibility validation failed with exit code $LASTEXITCODE. Re-run scripts\install.bat python."
+    }
+}
+
 function Install-PythonDeps {
     $selectedPaddleVariant = Resolve-PaddleVariant
     $variantRequirements = if ($selectedPaddleVariant -eq "gpu") { $GpuRequirements } else { $CpuRequirements }
@@ -269,7 +279,14 @@ function Install-PythonDeps {
         throw "Paddle $selectedPaddleVariant installation failed with exit code $LASTEXITCODE"
     }
 
+    Write-Host "Reapplying legacy adbutils compatibility requirement $SetuptoolsRequirement ..."
+    & $uv pip install --python $VenvPy $SetuptoolsRequirement
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to install $SetuptoolsRequirement with exit code $LASTEXITCODE"
+    }
+
     Test-PaddleRuntime -SelectedVariant $selectedPaddleVariant
+    Test-PythonRuntimeCompatibility
 }
 
 function Install-ElectronDeps {

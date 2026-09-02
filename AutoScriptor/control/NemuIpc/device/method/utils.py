@@ -5,6 +5,8 @@ import socket
 import time
 import typing as t
 
+# Initialize setuptools' distutils shim before legacy adbutils imports packaging.tags.
+import setuptools
 import uiautomator2 as u2
 import uiautomator2cache
 from adbutils import AdbTimeout

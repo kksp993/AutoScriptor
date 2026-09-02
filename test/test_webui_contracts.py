@@ -413,18 +413,47 @@ class TestRuntimeControllerContract(unittest.TestCase):
         })
         with patch.dict(sys.modules, modules):
             sys.modules.pop("services.webui.runtime_controller", None)
-            from services.webui.runtime_controller import RuntimeController
+            from services.webui.runtime_controller import RuntimeController, RuntimeExecutionBusyError
 
         cls.RuntimeController = RuntimeController
+        cls.RuntimeExecutionBusyError = RuntimeExecutionBusyError
+
+    class FakeScheduler:
+        def __init__(self, state, *, scheduled_execution=False):
+            self.state = state
+            self.is_scheduled_execution = scheduled_execution
+            self.execution_owner = None
+            self.calls = []
+
+        def status_dict(self):
+            return {
+                "state": self.state.value,
+                "enabled": self.state == TestRuntimeControllerContract.SchedulerState.RUNNING,
+                "executing": self.is_scheduled_execution,
+                "busy": self.is_scheduled_execution,
+            }
+
+        def acquire_execution(self, owner, *, blocking=True):
+            if self.execution_owner is not None:
+                return False
+            self.execution_owner = owner
+            self.calls.append(("acquire_execution", owner, blocking))
+            return True
+
+        def release_execution(self, owner):
+            if self.execution_owner != owner:
+                raise RuntimeError("execution owner mismatch")
+            self.execution_owner = None
+            self.calls.append(("release_execution", owner))
+
+        def request_stop(self):
+            self.calls.append("scheduler_stop")
+
+        def invalidate_login(self):
+            self.calls.append("invalidate_login")
 
     def _controller(self, scheduler=None, task_manager=None):
-        scheduler = scheduler or SimpleNamespace(
-            state=self.SchedulerState.PENDING,
-            is_executing=False,
-            status_dict=lambda: {"state": "stopped"},
-            request_stop=lambda: None,
-            invalidate_login=lambda: None,
-        )
+        scheduler = scheduler or self.FakeScheduler(self.SchedulerState.PENDING)
         task_manager = task_manager or SimpleNamespace(request_cancel=lambda: None)
         return self.RuntimeController(scheduler, task_manager)
 
@@ -440,14 +469,19 @@ class TestRuntimeControllerContract(unittest.TestCase):
         self.assertIsNone(status["reason"])
         self.assertFalse(controller._stop_requested)
 
-    def test_scheduler_busy_blocks_runtime(self):
+    def test_scheduler_enabled_but_idle_does_not_block_runtime(self):
+        controller = self._controller(scheduler=self.FakeScheduler(self.SchedulerState.RUNNING))
+
+        self.assertIsNone(controller.busy_reason())
+        self.assertFalse(controller.is_busy())
+        self.assertIsNone(controller.status()["reason"])
+        self.assertTrue(controller.status()["scheduler"]["enabled"])
+
+    def test_scheduler_execution_blocks_runtime_until_current_cycle_finishes(self):
         controller = self._controller(
-            scheduler=SimpleNamespace(
-                state=self.SchedulerState.RUNNING,
-                is_executing=False,
-                status_dict=lambda: {"state": "running"},
-                request_stop=lambda: None,
-                invalidate_login=lambda: None,
+            scheduler=self.FakeScheduler(
+                self.SchedulerState.RUNNING,
+                scheduled_execution=True,
             )
         )
 
@@ -463,18 +497,35 @@ class TestRuntimeControllerContract(unittest.TestCase):
         thread.join(timeout=2)
 
         self.assertEqual(completed, ["a", "b"])
+        self.assertEqual(
+            controller.scheduler.calls,
+            [
+                ("acquire_execution", "direct_run", False),
+                ("release_execution", "direct_run"),
+            ],
+        )
         self.assertFalse(controller.direct_run_alive())
         self.assertFalse(controller.is_busy())
 
+    def test_direct_run_cannot_race_with_scheduled_execution_gate(self):
+        scheduler = self.FakeScheduler(
+            self.SchedulerState.RUNNING,
+            scheduled_execution=True,
+        )
+        scheduler.execution_owner = "scheduler"
+        controller = self._controller(scheduler=scheduler)
+
+        with self.assertRaises(self.RuntimeExecutionBusyError):
+            controller.start_direct(lambda tasks: None, ["a"])
+
+        self.assertFalse(controller.direct_run_alive())
+        self.assertEqual(scheduler.execution_owner, "scheduler")
+
     def test_request_stop_notifies_task_manager_and_scheduler_when_idle(self):
         calls = []
-        scheduler = SimpleNamespace(
-            state=self.SchedulerState.PENDING,
-            is_executing=False,
-            status_dict=lambda: {"state": "stopped"},
-            request_stop=lambda: calls.append("scheduler_stop"),
-            invalidate_login=lambda: calls.append("invalidate_login"),
-        )
+        scheduler = self.FakeScheduler(self.SchedulerState.PENDING)
+        scheduler.request_stop = lambda: calls.append("scheduler_stop")
+        scheduler.invalidate_login = lambda: calls.append("invalidate_login")
         task_manager = SimpleNamespace(request_cancel=lambda: calls.append("cancel"))
         controller = self._controller(scheduler=scheduler, task_manager=task_manager)
 
@@ -770,6 +821,28 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
                 "mark_tasks_updated",
                 "read_config",
                 ("bump", "select run character"),
+            ],
+        )
+
+    def test_task_list_character_selection_preserves_login_cache(self):
+        service, _cfg = self._service()
+
+        version = service.switch_character(
+            "s1",
+            "hero",
+            reason="select task list run character",
+            invalidate_login=False,
+        )
+
+        self.assertEqual(version, 42)
+        self.assertEqual(
+            self.calls,
+            [
+                "lock",
+                ("switch_character", "s1", "hero"),
+                "mark_tasks_updated",
+                "read_config",
+                ("bump", "select task list run character"),
             ],
         )
 
@@ -1142,6 +1215,50 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertNotIn("fetchAccounts", content)
         self.assertNotIn("loadDispatchQueue", content)
 
+    def test_task_list_and_overview_refresh_use_full_task_reload(self):
+        content = (ROOT / "services/webui/static/js/app.js").read_text(encoding="utf-8")
+
+        reload_start = content.index("    async function reloadTasks(")
+        reload_end = content.index("    // ── WebSocket for logs", reload_start)
+        reload_body = content[reload_start:reload_end]
+        self.assertIn("await waitForTaskPersistenceOperations()", reload_body)
+        self.assertIn("API.request('POST', '/tasks/reload-all'", reload_body)
+        self.assertNotIn("API.request('POST', '/tasks/reload'", reload_body)
+        self.assertIn("if (pendingRuntimeSnapshot) await pendingRuntimeSnapshot", reload_body)
+        self.assertIn("await fetchRuntimeSnapshot({ refreshConfigIfChanged: false })", reload_body)
+
+        overview_start = content.index("    async function refreshOverviewPanel()")
+        overview_end = content.index("    watch(activeTab", overview_start)
+        overview_body = content[overview_start:overview_end]
+        self.assertIn("await reloadTasks(", overview_body)
+        self.assertNotIn("await refreshConfig(true)", overview_body)
+
+    def test_task_list_run_requests_skip_character_login_without_changing_scheduler_start(self):
+        content = (ROOT / "services/webui/static/js/app.js").read_text(encoding="utf-8")
+
+        payload_start = content.index("    function taskListRunPayload(")
+        payload_end = content.index("    async function startRun()", payload_start)
+        payload_body = content[payload_start:payload_end]
+        self.assertIn("execution_source: 'task_list'", payload_body)
+        self.assertIn("activate_scheduler: false", payload_body)
+        self.assertIn("...runCharacterPayload()", payload_body)
+
+        start_run_start = content.index("    async function startRun()")
+        start_run_end = content.index("    async function runTaskRange", start_run_start)
+        start_run_body = content[start_run_start:start_run_end]
+        self.assertIn("startSchedulerRun(", start_run_body)
+        self.assertIn("taskListRunPayload(tasks)", start_run_body)
+
+        task_range_start = content.index("    async function runTaskRange(")
+        task_range_end = content.index("    async function runSingleTask", task_range_start)
+        task_range_body = content[task_range_start:task_range_end]
+        self.assertIn("taskListRunPayload(tasks)", task_range_body)
+
+        single_task_start = content.index("    async function runSingleTask(")
+        single_task_end = content.index("    async function unifiedStop", single_task_start)
+        single_task_body = content[single_task_start:single_task_end]
+        self.assertIn("taskListRunPayload([fullPath])", single_task_body)
+
     def test_frontend_stop_does_not_wait_for_full_runtime_snapshot(self):
         content = (ROOT / "services/webui/static/js/app.js").read_text(encoding="utf-8")
         start = content.index("    async function unifiedStop()")
@@ -1157,12 +1274,14 @@ class TestWebUIFrontendContract(unittest.TestCase):
 
     def test_task_and_scheduler_stop_buttons_use_overview_stop_action(self):
         index = (ROOT / "services/webui/static/index.html").read_text(encoding="utf-8")
+        overview = (ROOT / "services/webui/static/js/components/Overview.js").read_text(encoding="utf-8")
         task_panel = (ROOT / "services/webui/static/js/components/TaskPanel.js").read_text(encoding="utf-8")
         scheduler_panel = (ROOT / "services/webui/static/js/components/SchedulerPanel.js").read_text(encoding="utf-8")
 
         self.assertIn('@stop-dispatch="stopDispatch"', index)
         self.assertNotIn('@stop-run="stopRun"', index)
         self.assertNotIn("function stopRun()", (ROOT / "services/webui/static/js/app.js").read_text(encoding="utf-8"))
+        self.assertIn("$emit('stop-dispatch')", overview)
         self.assertIn("'stop-dispatch'", task_panel)
         self.assertIn("'stop-dispatch'", scheduler_panel)
         self.assertIn("$emit('stop-dispatch')", task_panel)
@@ -1244,6 +1363,20 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertIn("task_overall", content)
         self.assertIn("@click=\"refresh(true)\"", content)
         self.assertIn("默认轻量检查，不会主动读取模拟器截图", content)
+
+    def test_diagnostics_detail_rows_localize_ocr_fields_without_overlap(self):
+        component = (ROOT / "services/webui/static/js/components/DiagnosticsPanel.js").read_text(encoding="utf-8")
+        style = (ROOT / "services/webui/static/css/style.css").read_text(encoding="utf-8")
+        index = (ROOT / "services/webui/static/index.html").read_text(encoding="utf-8")
+
+        self.assertIn("configured_use_gpu: '配置使用 GPU'", component)
+        self.assertIn("engine_use_gpu: '引擎使用 GPU'", component)
+        self.assertIn("engine_device: '引擎设备'", component)
+        self.assertIn("restart_required: '需要重启'", component)
+        self.assertIn("grid-template-columns: minmax(0, 112px) minmax(0, 1fr)", style)
+        self.assertIn("overflow-wrap: anywhere", style)
+        self.assertIn("style.css?v=44", index)
+        self.assertIn("DiagnosticsPanel.js?v=3", index)
 
 
 class TestWebUIServerRouteContract(unittest.TestCase):
@@ -1337,6 +1470,44 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         end = content.index("@app.post(\"/api/config\")", start)
         full_reload_body = content[start:end]
         self.assertIn("lifecycle_service.reload_all", full_reload_body)
+
+    def test_run_route_scopes_character_login_skip_to_task_list_source(self):
+        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        start = content.index("@app.post(\"/api/run\")")
+        end = content.index("@app.get(\"/api/run/status\")", start)
+        body = content[start:end]
+
+        self.assertIn('execution_source = str(body.get("execution_source")', body)
+        self.assertIn(
+            'skip_character_login = not activate_sched and execution_source == "task_list"',
+            body,
+        )
+        self.assertIn(
+            "_apply_run_character_from_body(body, skip_character_login=skip_character_login)",
+            body,
+        )
+        self.assertIn("scheduler.run_direct(ts, skip_character_login=skip_character_login)", body)
+        self.assertNotIn("if scheduler.state == SchedulerState.RUNNING:", body)
+        self.assertIn("except RuntimeExecutionBusyError:", body)
+
+    def test_frontend_busy_projection_does_not_treat_enabled_scheduler_as_execution(self):
+        content = (ROOT / "services/webui/static/js/app.js").read_text(encoding="utf-8")
+        start = content.index("    const executionBusy = computed(() => {")
+        end = content.index("    });", start) + len("    });")
+        body = content[start:end]
+
+        self.assertIn("schedulerStatus.busy === true", body)
+        self.assertIn("schedulerStatus.executing === true", body)
+        self.assertNotIn("schedulerStatus.state === 'running'", body)
+
+    def test_editor_and_direct_run_share_scheduler_execution_gate(self):
+        server = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        runtime_controller = (ROOT / "services/webui/runtime_controller.py").read_text(encoding="utf-8")
+        editor = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
+
+        self.assertIn('acquire_execution=lambda: scheduler.acquire_execution("editor", blocking=False)', server)
+        self.assertIn('self.scheduler.acquire_execution("direct_run", blocking=False)', runtime_controller)
+        self.assertIn("_editor_acquire_execution()", editor)
 
     def test_frontend_api_error_message_accepts_fastapi_detail(self):
         content = (ROOT / "services/webui/static/js/core/api.js").read_text(encoding="utf-8")
@@ -1641,7 +1812,16 @@ print("OK")
 
     def test_editor_click_recording_keeps_offset_out_of_target_box(self):
         content = (ROOT / "services/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
+        backend = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
 
+        self.assertIn("if (freeX.value) { left = 0; w = imgWidth.value; }", content)
+        self.assertIn("if (freeY.value) { top = 0; h = imgHeight.value; }", content)
+        self.assertIn("const isFullFrame =", content)
+        self.assertIn(".margin(frame_size=(${imgWidth.value},${imgHeight.value}))", content)
+        self.assertGreaterEqual(
+            backend.count("frame_size=(frame_width, frame_height)"),
+            2,
+        )
         self.assertIn("function buildClickCodeAt(x, y)", content)
         self.assertIn("if (t) {", content)
         self.assertIn("if (useImage.value) return iCode.value;", content)
@@ -2748,9 +2928,9 @@ class TestTaskOrderingStaticContract(unittest.TestCase):
         self.assertIn("<task-panel v-if=\"activeTab==='tasks'\"", index_html)
         self.assertNotIn("activeTab==='tasks' || activeTab==='task-graph'", index_html)
         self.assertIn("AppSidebar.js?v=17", index_html)
-        self.assertIn("style.css?v=43", index_html)
+        self.assertIn("style.css?v=44", index_html)
         self.assertIn("TaskPanel.js?v=23", index_html)
-        self.assertIn("app.js?v=39", index_html)
+        self.assertIn("app.js?v=41", index_html)
         self.assertIn('@run-task-range="runTaskRange"', index_html)
         self.assertIn(':runtime-status="runtimeStatus"', index_html)
         self.assertNotIn("TaskDagCanvas.js", index_html)

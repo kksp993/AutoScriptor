@@ -10,6 +10,7 @@ class LoginClient(Enum):
     UC = "com.zmxyol.union.uc"  # 9游
     DANGLE = "com.zmxyol.union.dn"
     VIVO = "com.sy4399.zmxyol.vivo"
+    HZ4399 = "com.m4399.gamecenter"
 
     @classmethod
     def all(cls):
@@ -245,10 +246,15 @@ _login = PageRouter()
 
 @_login.page("角色选择", T("进入游戏", box=Box(543,586,190,62).margin()))
 def _on_character_select(ctx):
-    _select_character()
+    if ctx.login_client() != LoginClient.HZ4399:
+        _select_character()
     ctx.done = True
 
-@_login.page("初始授权", T("已阅读并同意"), clients=LoginClient.H4399)
+@_login.page(
+    "初始授权",
+    T("已阅读并同意"),
+    clients=(LoginClient.H4399, LoginClient.HZ4399),
+)
 def _on_authorization(ctx):
     click(T("账号登录"), if_exist=True)
     click(T("已阅读并同意"))
@@ -262,13 +268,22 @@ def _on_authorization(ctx):
         _handle_post_login_popups()
 
 
-@_login.page("账号密码登录", T("账号密码登录"), clients=LoginClient.H4399)
+@_login.page(
+    "账号密码登录",
+    T("账号密码登录"),
+    clients=(LoginClient.H4399, LoginClient.HZ4399),
+)
 def _on_password_login(ctx):
     _fill_account_password(ctx)
     _handle_post_login_popups()
 
 
-@_login.page("快速登录", T("手机号登录"), T("账号登录"), clients=LoginClient.H4399)
+@_login.page(
+    "快速登录",
+    T("手机号登录"),
+    T("账号登录"),
+    clients=(LoginClient.H4399, LoginClient.HZ4399),
+)
 def _on_quick_login(ctx):
     click(T("账号登录", box=Box(384,444,84,22).margin()))
     sleep(1)
@@ -368,5 +383,3 @@ def login(account: str = None, password: str = None,
     """4399 登录全流程（页面状态机驱动）。仅在用到账密时才触发解密。"""
     ctx = LoginCtx(account, password, character_name, character_index, client=client)
     _login.run(ctx)
-
-

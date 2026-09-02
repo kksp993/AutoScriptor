@@ -60,7 +60,7 @@ def way():
         from ZmxyOL.nav.api import ensure_in
         ensure_in("极北")
         ensure_in("炼器师")
-    click(T('炼器师'),until=lambda:ui_T(I('炼器炉')))
+    click(T('炼器师'),until=lambda:ui_T(T("+", box=Box(259,374,101,112).margin())))
     
 
 @path("背包", LOC_ENV)

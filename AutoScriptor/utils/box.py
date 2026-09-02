@@ -162,12 +162,24 @@ class Box(collections.namedtuple('Box', 'left top width height')):
             raise TypeError("Box - 仅支持与另一个 Box 相减")
         return box_sub_as_delta(self, other)
 
-    def margin(self, margin: int=20) -> 'Box':
-        "扩大box的区域，用于ocr识别（自动裁剪到屏幕范围 0,0,1280,720）"
+    def margin(
+        self,
+        margin: int = 20,
+        *,
+        frame_size: tuple[int, int] = (1280, 720),
+    ) -> 'Box':
+        """扩大识别区域，并裁剪到指定截图尺寸。
+
+        ``frame_size`` 使用 ``(width, height)``。默认值保持项目内置游戏任务的
+        1280x720 横屏合同；编辑器处理其他尺寸截图时必须显式传入真实帧尺寸。
+        """
+        frame_width, frame_height = frame_size
+        if frame_width <= 0 or frame_height <= 0:
+            raise ValueError(f"frame_size 必须为正数，收到 {frame_size!r}")
         l = max(0, self.left - margin)
         t = max(0, self.top - margin)
-        r = min(1280, self.left + self.width + margin)
-        b = min(720, self.top + self.height + margin)
+        r = min(frame_width, self.left + self.width + margin)
+        b = min(frame_height, self.top + self.height + margin)
         return Box(l, t, max(0, r - l), max(0, b - t))
 
 

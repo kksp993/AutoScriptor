@@ -7,7 +7,7 @@ AutoScriptor 后台定时调度器
   PENDING ─── activate() ───▶ RUNNING
   RUNNING ─── request_stop()/deactivate() ──▶ PENDING
   RUNNING ─── 连续错误 ≥3 ────────────────▶ ERROR
-  ERROR   ─── reset() ────────▶ PENDING
+  ERROR   ─── reset()/request_stop() ─────▶ PENDING
 
 安全策略：
   - 不使用 os.execv / PyThreadState_SetAsyncExc
@@ -232,6 +232,9 @@ class Scheduler:
         self._wake = threading.Event()
         self._tasks_updated = threading.Event()
         self._pipeline_active = threading.Event()
+        self._execution_gate = threading.Lock()
+        self._execution_owner_lock = threading.Lock()
+        self._execution_owner: str | None = None
         self._reload_deferred = threading.Event()
         self._consecutive_errors = 0
         self._logged_in_character: tuple[str, str] | None = None  # (server, name)
@@ -276,17 +279,17 @@ class Scheduler:
 
     def reset(self):
         self._transition(SchedulerState.PENDING)
-        self._consecutive_errors = 0
-        self._clear_retry_exhaustion()
+        self._restore_error_recovery_budget()
         if self._task_manager:
             self._task_manager._reset_cancel()
 
     def request_stop(self):
-        """Ctrl+C 时由主线程调用：cooperative cancel + 回到 PENDING。"""
+        """Cooperatively cancel execution and restore scheduler recovery state."""
         logger.info("⏹ 收到停止请求，正在优雅停止任务...")
         if self._task_manager:
             self._task_manager.request_cancel()
         self.deactivate()
+        self._restore_error_recovery_budget()
         self._wake.set()
 
     def wake(self):
@@ -295,8 +298,12 @@ class Scheduler:
     def mark_tasks_updated(self) -> None:
         self._tasks_updated.set()
 
+    def _is_cancel_requested(self) -> bool:
+        cancel_event = getattr(self._task_manager, "_cancel_event", None)
+        return bool(cancel_event is not None and cancel_event.is_set())
+
     def _check_cancel_requested(self) -> None:
-        if self._task_manager and self._task_manager._cancel_event.is_set():
+        if self._is_cancel_requested():
             raise TaskCancelled("scheduler stop requested")
 
     def stop(self, timeout: float | None = None):
@@ -313,7 +320,42 @@ class Scheduler:
 
     @property
     def is_executing(self) -> bool:
+        """Whether any task pipeline is currently executing."""
         return self._pipeline_active.is_set()
+
+    @property
+    def execution_owner(self) -> str | None:
+        """Return the participant that currently owns exclusive device execution."""
+        with self._execution_owner_lock:
+            return self._execution_owner
+
+    @property
+    def is_scheduled_execution(self) -> bool:
+        """Whether the activated scheduler currently owns the execution gate."""
+        return self.execution_owner == "scheduler"
+
+    def acquire_execution(self, owner: str, *, blocking: bool = True) -> bool:
+        """Acquire exclusive task/device execution without changing scheduler activation."""
+        normalized_owner = str(owner or "").strip()
+        if not normalized_owner:
+            raise ValueError("execution owner 不能为空")
+        acquired = self._execution_gate.acquire(blocking=blocking)
+        if not acquired:
+            return False
+        with self._execution_owner_lock:
+            self._execution_owner = normalized_owner
+        return True
+
+    def release_execution(self, owner: str) -> None:
+        """Release execution previously acquired by the matching participant."""
+        normalized_owner = str(owner or "").strip()
+        with self._execution_owner_lock:
+            if self._execution_owner != normalized_owner:
+                raise RuntimeError(
+                    f"execution owner 不匹配: current={self._execution_owner!r}, release={normalized_owner!r}"
+                )
+            self._execution_owner = None
+        self._execution_gate.release()
 
     def _reload_tasks_from_disk(self, *, reason: str) -> bool:
         """Reload config/tasks at a safe boundary."""
@@ -361,6 +403,9 @@ class Scheduler:
     # ── 结果反馈 ──
 
     def record_result(self, success: int, failed: int):
+        if failed > 0 and self._is_cancel_requested():
+            logger.info("⏹ 用户终止后的任务失败不计入连续错误恢复额度")
+            return
         if failed == 0:
             self._consecutive_errors = 0
         else:
@@ -377,10 +422,18 @@ class Scheduler:
     def _clear_retry_exhaustion(self) -> None:
         self._retry_exhausted_tasks.clear()
 
+    def _restore_error_recovery_budget(self) -> None:
+        """Restore consecutive-error and retry-exhaustion recovery budgets."""
+        self._consecutive_errors = 0
+        self._clear_retry_exhaustion()
+
     def _is_retry_exhausted(self, char_key: tuple[str, str], task_key: str) -> bool:
         return self._retry_key(char_key, task_key) in self._retry_exhausted_tasks
 
     def _mark_retry_exhausted(self, char_key: tuple[str, str], task_key: str, max_retry: int) -> None:
+        if self._is_cancel_requested():
+            logger.info("⏹ 用户终止后的任务不再标记为 retry 耗尽: %s", task_key)
+            return
         key = self._retry_key(char_key, task_key)
         if key in self._retry_exhausted_tasks:
             return
@@ -501,9 +554,7 @@ class Scheduler:
                     self._check_and_run()
                 except Exception as e:
                     logger.error("📅 调度执行意外崩溃，将在下一轮重试: %s", e, exc_info=True)
-                    self._consecutive_errors += 1
-                    if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                        self.mark_error()
+                    self.record_result(0, 1)
                 finally:
                     # Scheduler/task execution persists task state and next_exec_time.
                     # Those self-writes should update WebUI state, but should not be
@@ -672,6 +723,7 @@ class Scheduler:
         explicit_tasks: list[str] | None = None,
         *,
         force_login: bool = False,
+        skip_character_login: bool = False,
         param_overrides: dict[str, dict] | None = None,
         explicit_task_runs: list[dict] | None = None,
     ):
@@ -813,12 +865,15 @@ class Scheduler:
                 param_override = _run_param_override(task_run)
                 task_debug_mode = is_task_debug_mode(task_key)
                 skip_login_for_debug = task_debug_mode and not force_login
+                skip_login_for_task = skip_character_login or skip_login_for_debug
                 if not task_debug_mode:
                     only_debug_tasks_executed = False
 
                 logger.info("📅 发现 %d 个待执行任务: %s", len(due), [
                     _run_task(run) if isinstance(run, dict) else run for run in due
                 ])
+                if skip_character_login:
+                    logger.info("📅 任务列表直跑: 跳过当前角色校验与自动登录: %s", task_key)
                 if skip_login_for_debug:
                     logger.info("📅 debug_mode: 跳过自动登录与任务前重启: %s", task_key)
                 elif task_debug_mode:
@@ -835,9 +890,8 @@ class Scheduler:
                     break
                 except Exception as e:
                     logger.error("📅 模拟器启动失败: %s", e, exc_info=True)
-                    self._consecutive_errors += 1
-                    if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                        self.mark_error()
+                    self.record_result(0, 1)
+                    if self.state == SchedulerState.ERROR:
                         break
                     delay = min(30, 10 * self._consecutive_errors)
                     logger.info("📅 %d 秒后重试 (%d/%d)",
@@ -849,7 +903,7 @@ class Scheduler:
                         break
                     continue
 
-                if not skip_login_for_debug:
+                if not skip_login_for_task:
                     self._ensure_character_logged_in(cfg)
 
                 attempted_this_round.add((*char_key, run_id))
@@ -890,9 +944,8 @@ class Scheduler:
                         if scheduled_mode and not task_debug_mode:
                             self._mark_retry_exhausted(char_key, task_key, max_retry)
                         total_failed += 1
-                        self._consecutive_errors += 1
-                        if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                            self.mark_error()
+                        self.record_result(0, 1)
+                        if self.state == SchedulerState.ERROR:
                             break
 
                 try:
@@ -928,13 +981,20 @@ class Scheduler:
 
     def _check_and_run(self):
         """调度模式：清屏 → 重置取消标记 → 共用管线（自动收集到期任务）。"""
-        if not os.environ.get('UVICORN_LOG_LEVEL'):
-            os.system('cls' if os.name == 'nt' else 'clear')
-        # 每个调度周期开始前重置取消标记，防止上一轮中断后残留的取消状态
-        # 阻断后续所有周期（deactivate 已将 state 切回 PENDING，能到这里说明 state 仍为 RUNNING）
-        if self._task_manager:
-            self._task_manager._reset_cancel()
-        self._run_task_pipeline(explicit_tasks=None)
+        self.acquire_execution("scheduler")
+        try:
+            # 调度线程可能在等待手动执行释放闸门期间被停用。
+            if self._stop.is_set() or self.state != SchedulerState.RUNNING:
+                return
+            if not os.environ.get('UVICORN_LOG_LEVEL'):
+                os.system('cls' if os.name == 'nt' else 'clear')
+            # 每个调度周期开始前重置取消标记，防止上一轮中断后残留的取消状态
+            # 阻断后续所有周期（deactivate 已将 state 切回 PENDING，能到这里说明 state 仍为 RUNNING）
+            if self._task_manager:
+                self._task_manager._reset_cancel()
+            self._run_task_pipeline(explicit_tasks=None)
+        finally:
+            self.release_execution("scheduler")
 
     # ── 单任务模式入口 ──
 
@@ -943,15 +1003,19 @@ class Scheduler:
         tasks: list[str],
         *,
         force_login: bool = False,
+        skip_character_login: bool = False,
         param_overrides: dict[str, dict] | None = None,
     ):
         """单任务模式：执行外部指定的任务列表，共用管线，不激活调度器。"""
         if self._task_manager:
             self._task_manager._reset_cancel()
-        self.invalidate_login()
+        should_skip_character_login = skip_character_login and not force_login
+        if not should_skip_character_login:
+            self.invalidate_login()
         self._run_task_pipeline(
             explicit_tasks=tasks,
             force_login=force_login,
+            skip_character_login=should_skip_character_login,
             param_overrides=param_overrides,
         )
 
@@ -1109,13 +1173,15 @@ class Scheduler:
         return _STATE_LABELS.get(self.state.value, "")
 
     def status_dict(self) -> dict:
+        scheduled_execution = self.is_scheduled_execution
         return {
             "state": self.state.value,
             "label": self.state_label,
             "color": _STATE_COLORS.get(self.state.value, "gray"),
             "consecutive_errors": self._consecutive_errors,
-            "executing": self.is_executing,
-            "busy": self.state == SchedulerState.RUNNING or self.is_executing,
+            "executing": scheduled_execution,
+            "busy": scheduled_execution,
+            "enabled": self.state == SchedulerState.RUNNING,
             "reload_deferred": self._reload_deferred.is_set(),
         }
 

@@ -10,11 +10,15 @@ from threading import Lock, Thread, current_thread
 from typing import Any, Callable, Literal
 
 from AutoScriptor.utils.logger import logger
-from services.core.scheduler import Scheduler, SchedulerState
+from services.core.scheduler import Scheduler
 from services.core.task_manager import TaskManager
 from services.webui.api_response import api_error
 
 RuntimeReason = Literal["direct_run", "scheduler", "editor"]
+
+
+class RuntimeExecutionBusyError(RuntimeError):
+    """Raised when another participant owns exclusive runtime execution."""
 
 
 class RuntimeController:
@@ -45,10 +49,7 @@ class RuntimeController:
             return False
 
     def scheduler_busy(self) -> bool:
-        return (
-            self.scheduler.state == SchedulerState.RUNNING
-            or getattr(self.scheduler, "is_executing", False)
-        )
+        return bool(getattr(self.scheduler, "is_scheduled_execution", False))
 
     def _external_statuses(self) -> dict[RuntimeReason, dict[str, Any]]:
         with self._lock:
@@ -111,9 +112,13 @@ class RuntimeController:
     def busy_response(self, action: str = "modify runtime config"):
         reason = self.busy_reason() or "runtime"
         reason_label = {"direct_run": "直接执行任务", "scheduler": "调度器", "editor": "编辑器代码"}.get(reason, "运行任务")
+        if reason == "scheduler":
+            message = "当前调度任务正在执行，请等待本轮结束后再继续；无需停止已启用的调度。"
+        else:
+            message = f"当前{reason_label}正在运行，请等待完成或点击「终止执行」后再继续。"
         return api_error(
             409,
-            f"当前{reason_label}正在运行，请先点击「终止执行」再继续操作。",
+            message,
             code="runtime_busy",
             reason=reason,
             action=action,
@@ -130,7 +135,9 @@ class RuntimeController:
         tasks: list[Any],
     ) -> Thread:
         if self.direct_run_alive():
-            raise RuntimeError("direct run is already running")
+            raise RuntimeExecutionBusyError("direct run is already running")
+        if not self.scheduler.acquire_execution("direct_run", blocking=False):
+            raise RuntimeExecutionBusyError("runtime execution is already owned")
         with self._lock:
             self._stop_requested = False
 
@@ -138,15 +145,25 @@ class RuntimeController:
             try:
                 target(tasks)
             finally:
-                with self._lock:
-                    if self._direct_thread is current_thread():
-                        self._direct_thread = None
-                    self._stop_requested = False
+                try:
+                    self.scheduler.release_execution("direct_run")
+                finally:
+                    with self._lock:
+                        if self._direct_thread is current_thread():
+                            self._direct_thread = None
+                        self._stop_requested = False
 
         thread = Thread(target=_wrapped, daemon=True, name="WebUI-DirectRun")
         with self._lock:
             self._direct_thread = thread
-        thread.start()
+        try:
+            thread.start()
+        except BaseException:
+            with self._lock:
+                if self._direct_thread is thread:
+                    self._direct_thread = None
+            self.scheduler.release_execution("direct_run")
+            raise
         return thread
 
     def request_stop(self) -> str:

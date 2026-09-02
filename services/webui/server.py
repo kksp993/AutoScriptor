@@ -29,7 +29,7 @@ from services.core.banner import _print_banner
 from services.core.scheduler import scheduler, SchedulerState
 from services.webui.api_response import api_error, api_ok
 from services.webui.lifecycle_service import WebUILifecycleService
-from services.webui.runtime_controller import RuntimeController
+from services.webui.runtime_controller import RuntimeController, RuntimeExecutionBusyError
 from services.webui.state_version import bump_version, current_version
 from services.webui.task_tree_service import task_tree_service
 from services.core.task_ordering import summarize_ordering_generations
@@ -418,7 +418,9 @@ runtime_controller.set_external_status_getter("editor", editor_execution_status)
 configure_editor_execution_controls(
     request_cancel=TASK_MANAGER.request_cancel,
     reset_cancel=TASK_MANAGER.reset_cancel,
-    runtime_busy=lambda: runtime_controller.busy_reason() in ("direct_run", "scheduler"),
+    runtime_busy=runtime_controller.is_busy,
+    acquire_execution=lambda: scheduler.acquire_execution("editor", blocking=False),
+    release_execution=lambda: scheduler.release_execution("editor"),
 )
 configure_editor_custom_task_save_controls(
     reload_custom_tasks=lambda: lifecycle_service.reload_all(reason="save editor custom task"),
@@ -764,10 +766,11 @@ async def save_task_ordering_layout_api(request: Request):
         )
 
 
-def _apply_run_character_from_body(body: dict):
+def _apply_run_character_from_body(body: dict, *, skip_character_login: bool = False):
     """
     若请求携带 server + character，在后端切换当前角色并写回 config/账号文件，
-    再使调度器下次执行前重新登录，避免前端已选角色与进程内 cfg 不一致。
+    默认使调度器下次执行前重新登录，避免前端已选角色与进程内 cfg 不一致。
+    任务列表直跑会保留当前游戏登录状态，只切换任务配置投影。
     成功返回 None，失败返回 JSONResponse。
     """
     server = (body.get("server") or "").strip()
@@ -775,7 +778,12 @@ def _apply_run_character_from_body(body: dict):
     if not server or not character:
         return None
     try:
-        lifecycle_service.switch_character(server, character, reason="select run character")
+        lifecycle_service.switch_character(
+            server,
+            character,
+            reason="select run character",
+            invalidate_login=not skip_character_login,
+        )
         logger.info("Selected role for execution: %s/%s", server, character)
     except (KeyError, ValueError) as e:
         return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
@@ -803,6 +811,8 @@ async def run_tasks_api(request: Request):
         return err
 
     activate_sched = bool(body.get("activate_scheduler", True))
+    execution_source = str(body.get("execution_source") or "").strip()
+    skip_character_login = not activate_sched and execution_source == "task_list"
     direct_busy = runtime_controller.direct_run_alive()
     if activate_sched:
         if runtime_controller.is_busy():
@@ -826,7 +836,7 @@ async def run_tasks_api(request: Request):
     elif runtime_controller.is_busy():
         return runtime_controller.busy_response("run task")
 
-    err = _apply_run_character_from_body(body)
+    err = _apply_run_character_from_body(body, skip_character_login=skip_character_login)
     if err is not None:
         return err
 
@@ -836,8 +846,12 @@ async def run_tasks_api(request: Request):
                             content={'status': 'error', 'message': '请先验证账号密码后再执行任务'})
 
     tasks = body.get("tasks", [])
-
-    logger.debug("Received tasks: %s, activate_scheduler: %s", tasks, activate_sched)
+    logger.debug(
+        "Received tasks: %s, activate_scheduler: %s, execution_source: %s",
+        tasks,
+        activate_sched,
+        execution_source or "default",
+    )
     sorted_tasks = sorted(tasks, key=lambda x: ORDER_MAP.get(x, float('inf')))
 
     if activate_sched:
@@ -859,19 +873,14 @@ async def run_tasks_api(request: Request):
             code="runtime_busy",
             reason="direct_run",
         )
-    if scheduler.state == SchedulerState.RUNNING:
-        return api_error(
-            409,
-            "调度器运行中，请先停止调度或结束当前调度周期后再执行单任务",
-            code="runtime_busy",
-            reason="scheduler",
-        )
-
     def _run(ts):
-        scheduler.run_direct(ts)
+        scheduler.run_direct(ts, skip_character_login=skip_character_login)
         logger.info("========== 所有任务执行完成 ==========")
 
-    runtime_controller.start_direct(_run, sorted_tasks)
+    try:
+        runtime_controller.start_direct(_run, sorted_tasks)
+    except RuntimeExecutionBusyError:
+        return runtime_controller.busy_response("run task")
     return api_ok(status='ok', tasks=sorted_tasks, mode='direct')
 
 
@@ -1041,7 +1050,10 @@ async def news_gift_code_redeem_api(request: Request):
         scheduler.run_direct_sequence(runs, force_login=True)
         logger.info("========== 兑换码任务执行完成，共 %d 个 ==========", len(redeem_codes))
 
-    runtime_controller.start_direct(_run, task_runs)
+    try:
+        runtime_controller.start_direct(_run, task_runs)
+    except RuntimeExecutionBusyError:
+        return runtime_controller.busy_response("redeem gift code")
     resp = JSONResponse(content=api_ok(
         status="ok",
         mode="direct",

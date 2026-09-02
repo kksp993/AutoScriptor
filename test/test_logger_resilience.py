@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import sys
 import unittest
 
@@ -22,6 +23,48 @@ def _record(message: str) -> logging.LogRecord:
 
 
 class LoggerResilienceTest(unittest.TestCase):
+    def test_internal_log_record_uses_first_external_project_caller(self):
+        synthetic_internal_path = os.path.join(
+            logger_module._AUTOSCRIPTOR_PACKAGE_ROOT,
+            "core",
+            "synthetic_internal_logger.py",
+        )
+        synthetic_namespace = {}
+        exec(
+            compile(
+                "def apply_filter(record, caller_filter):\n"
+                "    return caller_filter.filter(record)\n",
+                synthetic_internal_path,
+                "exec",
+            ),
+            synthetic_namespace,
+        )
+        record = logging.LogRecord(
+            name="AutoScriptor",
+            level=logging.INFO,
+            pathname=synthetic_internal_path,
+            lineno=12,
+            msg="internal operation",
+            args=(),
+            exc_info=None,
+        )
+        expected_line_number = sys._getframe().f_lineno + 1
+        synthetic_namespace["apply_filter"](record, logger_module._ExternalCallerFilter())
+
+        self.assertEqual(os.path.normcase(record.pathname), os.path.normcase(__file__))
+        self.assertEqual(record.filename, os.path.basename(__file__))
+        self.assertEqual(record.module, os.path.splitext(os.path.basename(__file__))[0])
+        self.assertEqual(record.lineno, expected_line_number)
+        self.assertEqual(record.funcName, self.test_internal_log_record_uses_first_external_project_caller.__name__)
+
+    def test_external_log_record_keeps_original_caller(self):
+        record = _record("external operation")
+
+        logger_module._ExternalCallerFilter().filter(record)
+
+        self.assertEqual(os.path.normcase(record.pathname), os.path.normcase(__file__))
+        self.assertEqual(record.lineno, 1)
+
     def test_safe_stream_handler_rebinds_closed_stream(self):
         closed_stream = io.StringIO()
         closed_stream.close()

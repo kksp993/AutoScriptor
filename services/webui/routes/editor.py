@@ -101,6 +101,9 @@ _editor_exec_stopping = False
 _editor_request_cancel: Callable[[], None] | None = None
 _editor_reset_cancel: Callable[[], None] | None = None
 _editor_runtime_busy: Callable[[], bool] | None = None
+_editor_acquire_execution: Callable[[], bool] | None = None
+_editor_release_execution: Callable[[], None] | None = None
+_editor_execution_slot_acquired = False
 _editor_reload_custom_tasks: Callable[[], int] | None = None
 
 
@@ -109,12 +112,17 @@ def configure_editor_execution_controls(
     request_cancel: Callable[[], None],
     reset_cancel: Callable[[], None],
     runtime_busy: Callable[[], bool],
+    acquire_execution: Callable[[], bool] | None = None,
+    release_execution: Callable[[], None] | None = None,
 ) -> None:
     """Register runtime cancellation hooks without importing server.py here."""
     global _editor_request_cancel, _editor_reset_cancel, _editor_runtime_busy
+    global _editor_acquire_execution, _editor_release_execution
     _editor_request_cancel = request_cancel
     _editor_reset_cancel = reset_cancel
     _editor_runtime_busy = runtime_busy
+    _editor_acquire_execution = acquire_execution
+    _editor_release_execution = release_execution
 
 
 def configure_editor_custom_task_save_controls(
@@ -130,19 +138,26 @@ def _begin_editor_execution() -> JSONResponse | None:
     if _editor_runtime_busy is not None and _editor_runtime_busy():
         return api_error(
             409,
-            "当前已有任务在运行，请先终止当前任务后再执行编辑器代码",
+            "当前任务正在执行，请等待完成后再执行编辑器代码；调度保持启用无需停止。",
             code="runtime_busy",
         )
     with _editor_exec_lock:
-        global _editor_exec_running, _editor_exec_stopping
+        global _editor_exec_running, _editor_exec_stopping, _editor_execution_slot_acquired
         if _editor_exec_running:
             return api_error(
                 409,
                 "编辑器自定义代码正在执行，请先终止或等待完成",
                 code="editor_execution_busy",
             )
+        if _editor_acquire_execution is not None and not _editor_acquire_execution():
+            return api_error(
+                409,
+                "执行权刚被其他任务占用，请等待当前任务完成后重试；无需停止已启用的调度。",
+                code="runtime_busy",
+            )
         _editor_exec_running = True
         _editor_exec_stopping = False
+        _editor_execution_slot_acquired = _editor_acquire_execution is not None
     if _editor_reset_cancel is not None:
         _editor_reset_cancel()
     return None
@@ -150,12 +165,18 @@ def _begin_editor_execution() -> JSONResponse | None:
 
 def _end_editor_execution() -> None:
     with _editor_exec_lock:
-        global _editor_exec_running, _editor_exec_stopping
+        global _editor_exec_running, _editor_exec_stopping, _editor_execution_slot_acquired
         was_stopping = _editor_exec_stopping
+        execution_slot_acquired = _editor_execution_slot_acquired
         _editor_exec_running = False
         _editor_exec_stopping = False
-    if was_stopping and _editor_reset_cancel is not None:
-        _editor_reset_cancel()
+        _editor_execution_slot_acquired = False
+    try:
+        if execution_slot_acquired and _editor_release_execution is not None:
+            _editor_release_execution()
+    finally:
+        if was_stopping and _editor_reset_cancel is not None:
+            _editor_reset_cancel()
 
 
 def _request_editor_execution_stop() -> dict:
@@ -189,6 +210,34 @@ def editor_execution_status() -> dict:
         "busy": running,
         "stopping": stopping,
     }
+
+
+def _acquire_editor_device_action() -> tuple[JSONResponse | None, bool]:
+    """Reserve one short remote device action without changing editor-code status."""
+    if _editor_runtime_busy is not None and _editor_runtime_busy():
+        return (
+            api_error(
+                409,
+                "当前任务正在执行，请等待完成后再操作模拟器；调度保持启用无需停止。",
+                code="runtime_busy",
+            ),
+            False,
+        )
+    if _editor_acquire_execution is not None and not _editor_acquire_execution():
+        return (
+            api_error(
+                409,
+                "执行权刚被其他任务占用，请等待当前任务完成后重试；无需停止已启用的调度。",
+                code="runtime_busy",
+            ),
+            False,
+        )
+    return None, _editor_acquire_execution is not None
+
+
+def _release_editor_device_action(execution_slot_acquired: bool) -> None:
+    if execution_slot_acquired and _editor_release_execution is not None:
+        _editor_release_execution()
 
 
 def _ignore_cancel() -> None:
@@ -830,9 +879,6 @@ async def editor_locate(request: Request):
         if not text:
             return {"found": False, "boxes": [], "scale_results": empty_scales}
 
-        from AutoScriptor.utils.box import Box
-        tgt_box = Box(left, top, width, height).margin()
-
         screenshot = _last_screenshot
         if screenshot is None:
             try:
@@ -842,6 +888,12 @@ async def editor_locate(request: Request):
             if screenshot is None:
                 return JSONResponse(status_code=500, content={"error": "截图返回空"})
             _last_screenshot = screenshot
+
+        from AutoScriptor.utils.box import Box
+        frame_height, frame_width = screenshot.shape[:2]
+        tgt_box = Box(left, top, width, height).margin(
+            frame_size=(frame_width, frame_height),
+        )
 
         scale_results = {}
         all_boxes = []
@@ -902,10 +954,13 @@ async def editor_locate_image(request: Request):
         from AutoScriptor.utils.box import Box
         from AutoScriptor.recognition.img_rec import _locateAll_opencv
 
-        tgt_box = Box(left, top, width, height).margin()
-        region = (tgt_box.left, tgt_box.top, tgt_box.width, tgt_box.height)
         screenshot = _last_screenshot
         template = _last_template
+        frame_height, frame_width = screenshot.shape[:2]
+        tgt_box = Box(left, top, width, height).margin(
+            frame_size=(frame_width, frame_height),
+        )
+        region = (tgt_box.left, tgt_box.top, tgt_box.width, tgt_box.height)
 
         scale_cfgs = {
             "0.5":  (0.4, 0.6),
@@ -1097,6 +1152,9 @@ async def editor_remote_click(request: Request):
     locked = _require_editor_device_unlock(request)
     if locked is not None:
         return locked
+    busy, execution_slot_acquired = _acquire_editor_device_action()
+    if busy is not None:
+        return busy
     try:
         data = await request.json()
         x, y = int(data["x"]), int(data["y"])
@@ -1111,6 +1169,8 @@ async def editor_remote_click(request: Request):
     except Exception as e:
         logger.error("editor/remote/click error: %s", e)
         return _device_action_failed(e)
+    finally:
+        _release_editor_device_action(execution_slot_acquired)
 
 
 # ── POST /api/editor/remote/swipe ──
@@ -1121,6 +1181,9 @@ async def editor_remote_swipe(request: Request):
     locked = _require_editor_device_unlock(request)
     if locked is not None:
         return locked
+    busy, execution_slot_acquired = _acquire_editor_device_action()
+    if busy is not None:
+        return busy
     try:
         data = await request.json()
         x1, y1 = int(data["x1"]), int(data["y1"])
@@ -1143,6 +1206,8 @@ async def editor_remote_swipe(request: Request):
     except Exception as e:
         logger.error("editor/remote/swipe error: %s", e)
         return _device_action_failed(e)
+    finally:
+        _release_editor_device_action(execution_slot_acquired)
 
 
 # ── POST /api/editor/execute-code ──

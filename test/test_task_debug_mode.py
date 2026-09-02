@@ -204,6 +204,74 @@ class TestTaskDebugMode(unittest.TestCase):
             (["测试/任务"], {"测试/任务": {"redeem_code": "B"}}),
         ])
 
+    def test_task_list_direct_run_skips_character_login_only_when_requested(self):
+        from services.core.scheduler import Scheduler
+
+        self._install_task_config(debug_mode=False)
+
+        class SuccessfulTaskManager:
+            def __init__(self):
+                self._cancel_event = Event()
+                self.executed = []
+
+            def execute_tasks(self, tasks):
+                self.executed.extend(tasks)
+                return 1, 0
+
+            def _reset_cancel(self):
+                self._cancel_event.clear()
+
+        def run_direct(*, skip_character_login: bool, force_login: bool = False):
+            task_manager = SuccessfulTaskManager()
+            scheduler = Scheduler()
+            scheduler.set_task_manager(task_manager)
+
+            with (
+                patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}),
+                patch.object(cfg, "save_config"),
+                patch("services.core.scheduler.runtime_ctx.refresh"),
+                patch("services.core.scheduler.notify_runtime_event"),
+                patch.object(scheduler, "invalidate_login") as invalidate_login,
+                patch.object(scheduler, "_maybe_daily_restart") as daily_restart,
+                patch.object(scheduler, "_ensure_character_logged_in") as ensure_login,
+                patch.object(scheduler, "_post_execution_action") as post_action,
+            ):
+                scheduler.run_direct(
+                    ["测试/任务"],
+                    force_login=force_login,
+                    skip_character_login=skip_character_login,
+                )
+
+            return task_manager, invalidate_login, daily_restart, ensure_login, post_action
+
+        task_manager, invalidate_login, daily_restart, ensure_login, post_action = run_direct(
+            skip_character_login=True,
+        )
+        self.assertEqual(task_manager.executed, ["测试/任务"])
+        invalidate_login.assert_not_called()
+        ensure_login.assert_not_called()
+        daily_restart.assert_called_once()
+        post_action.assert_called_once()
+
+        task_manager, invalidate_login, daily_restart, ensure_login, post_action = run_direct(
+            skip_character_login=False,
+        )
+        self.assertEqual(task_manager.executed, ["测试/任务"])
+        invalidate_login.assert_called_once()
+        ensure_login.assert_called_once()
+        daily_restart.assert_called_once()
+        post_action.assert_called_once()
+
+        task_manager, invalidate_login, daily_restart, ensure_login, post_action = run_direct(
+            skip_character_login=True,
+            force_login=True,
+        )
+        self.assertEqual(task_manager.executed, ["测试/任务"])
+        invalidate_login.assert_called_once()
+        ensure_login.assert_called_once()
+        daily_restart.assert_called_once()
+        post_action.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

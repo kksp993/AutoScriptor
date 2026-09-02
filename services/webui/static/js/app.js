@@ -140,11 +140,11 @@ const app = createApp({
     /** 后端 RuntimeController 的统一 busy 投影，包含 direct_run / scheduler / editor。 */
     const runtimeStatus = reactive({ running: false, busy: false, stopping: false, reason: null, external: {} });
 
-    /** 总调度 / 调度模式 / 单任务互斥：任一路径占用即禁止其它入口 */
+    /** 仅表示当前执行权被占用；调度器已启用但等待下次执行时不算忙碌。 */
     const executionBusy = computed(() => {
       if (directRunRunning.value) return true;
       if (runtimeStatus.busy === true || runtimeStatus.running === true) return true;
-      return schedulerStatus.state === 'running' || schedulerStatus.busy === true || schedulerStatus.executing === true;
+      return schedulerStatus.busy === true || schedulerStatus.executing === true;
     });
 
     // ── 密码保护 ──
@@ -366,18 +366,26 @@ const app = createApp({
       }, 300);
     }
 
-    async function reloadTasks() {
+    async function reloadTasks(successMessage = '任务列表已重新加载') {
       if (!ensureIdle('执行中不能重载任务，请先终止当前任务')) return;
       try {
-        const { ok, data } = await API.request('POST', '/tasks/reload', {});
+        await waitForTaskPersistenceOperations();
+        const { ok, data } = await API.request('POST', '/tasks/reload-all', {});
         if (!ok) {
-          showApiError(data, '重载任务失败');
+          showApiError(data, '重新加载任务列表失败');
           return;
         }
         applyPublicConfigPayload(data);
-        ElementPlus.ElMessage.success('任务已重载');
+        const pendingRuntimeSnapshot = _runtimeSnapshotPromise;
+        if (pendingRuntimeSnapshot) await pendingRuntimeSnapshot;
+        const runtimeSnapshotUpdated = await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
+        if (!runtimeSnapshotUpdated) {
+          ElementPlus.ElMessage.warning('任务列表已重新加载，但运行状态刷新失败');
+          return;
+        }
+        ElementPlus.ElMessage.success(successMessage);
       } catch (e) {
-        ElementPlus.ElMessage.error('重载任务失败: ' + e);
+        ElementPlus.ElMessage.error('重新加载任务列表失败: ' + e);
       }
     }
 
@@ -558,6 +566,15 @@ const app = createApp({
       return tasks;
     }
 
+    function taskListRunPayload(tasks) {
+      return {
+        tasks,
+        activate_scheduler: false,
+        execution_source: 'task_list',
+        ...runCharacterPayload(),
+      };
+    }
+
     async function startRun() {
       if (schedulerViewActive()) {
         await startSchedulerRun('调度器已启动，到期任务将自动执行');
@@ -571,11 +588,7 @@ const app = createApp({
         return;
       }
       try {
-        const result = await API.request('POST', '/run', {
-          tasks,
-          activate_scheduler: false,
-          ...runCharacterPayload(),
-        });
+        const result = await API.request('POST', '/run', taskListRunPayload(tasks));
         const data = await handleRunStartResponse(result, '启动执行失败');
         if (data) ElementPlus.ElMessage.success('已开始执行当前任务列表');
       } catch (e) { ElementPlus.ElMessage.error('执行失败: ' + e); }
@@ -591,7 +604,7 @@ const app = createApp({
         return;
       }
       try {
-        const result = await API.request('POST', '/run', { tasks, activate_scheduler: false, ...runCharacterPayload() });
+        const result = await API.request('POST', '/run', taskListRunPayload(tasks));
         const data = await handleRunStartResponse(result, '启动执行失败');
         if (data) ElementPlus.ElMessage.success(`已从选中任务开始执行，共 ${tasks.length} 个任务`);
       } catch (e) { ElementPlus.ElMessage.error('执行失败: ' + e); }
@@ -601,7 +614,7 @@ const app = createApp({
       if (!ensureRunReady('已有任务正在执行，请先终止后再跑单任务')) return;
       const fullPath = (activeTabLabel.value ? activeTabLabel.value + '/' : '') + taskPath;
       try {
-        const result = await API.request('POST', '/run', { tasks: [fullPath], activate_scheduler: false, ...runCharacterPayload() });
+        const result = await API.request('POST', '/run', taskListRunPayload([fullPath]));
         const data = await handleRunStartResponse(result, '执行失败');
         if (data) ElementPlus.ElMessage.success('已加入队列: ' + taskPath.split('/').pop());
       } catch (e) { ElementPlus.ElMessage.error('执行失败: ' + e); }
@@ -1432,8 +1445,7 @@ const app = createApp({
 
     // ── init ──
     async function refreshOverviewPanel() {
-      await refreshConfig(true);
-      await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
+      await reloadTasks('任务列表和总览已刷新');
     }
 
     watch(activeTab, (v) => {
