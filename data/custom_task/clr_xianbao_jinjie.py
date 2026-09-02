@@ -25,6 +25,6 @@ def test_task(xianbao_idx=1):
         click(T("确定进阶", box=Box(269,574,240,89).margin()));sleep(2)
         click(B(71,261))
         click(T("取消选择", box=Box(889,576,147,60).margin()))
-    click(B(1204,21,47,42),until=lambda:ui_T(T("菜单", box=Box(1151,24,98,77).margin())),interval=1)
+    click(B(1204,21,47,42),until=lambda:ui_T(T("菜单", box=Box(1151,33,107,83).margin())),interval=1)
     sleep(1)
-    click(T("菜单", box=Box(1151,24,98,77).margin()))
+    click(B(1151,33,107,83))   # type: ignore

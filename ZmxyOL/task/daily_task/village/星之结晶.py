@@ -9,11 +9,15 @@ from AutoScriptor import *
 )
 def task(购买灵力滴液=True, 购买灵力真酿=True):
     ensure_in("村庄")
-    click(T("活动", box=Box(706,27,89,101).margin()))
+    while ui_F(T("仙盟",box=Box(16,30,130,400)), 3):
+        click(I("导航-按钮收缩"))
+        if ui_T(T("精彩活动"), 2): click(B(1100, 40, 40, 40))
+        sleep(2)
+    click(T("活动", box=Box(255,127,103,101).margin()))
     for _ in range(10):
-        if ui_T(T("兑换豪礼", box=Box(633,112,111,100).margin())): break
+        if ui_T(T("兑换豪礼", box=Box(0,112,1280,100).margin())): break
         swipe(B(989,170), B(345,160), duration_s=0.1)
-    click(T("兑换豪礼", box=Box(633,112,111,100).margin()))
+    click(T("兑换豪礼", box=Box(0,112,1280,100).margin()))
     click(T("星之结晶", box=Box(202,280,217,306).margin()))
     for _ in range(6):swipe(B(763,639), B(764,269), duration_s=0.1);sleep(1)
     buylist = []

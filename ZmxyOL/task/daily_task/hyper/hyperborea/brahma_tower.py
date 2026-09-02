@@ -81,7 +81,8 @@ def fanTianTa(
         else:
             click(T("碾压"))
             wait_for_appear(T("优先级"))
-            remains = extract_info(B(328,529,333,21), post_process=lambda s: int(s.strip()[-3]), ensure_not_empty=True)
+            info = extract_info(B(322,529,345,21), post_process=lambda s: s.strip(), ensure_not_empty=True, mode="text")
+            remains = int("".join(ch for ch in info if ch.isdigit()))
             if remains > 0:
                 click(T("烦恼"))
                 click(T("立即碾压"))

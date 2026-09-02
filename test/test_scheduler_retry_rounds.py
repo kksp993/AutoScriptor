@@ -1,6 +1,6 @@
 import copy
 import unittest
-from threading import Event
+from threading import Event, Thread
 from unittest.mock import patch
 
 from AutoScriptor.utils.app_config import cfg
@@ -31,6 +31,95 @@ class FakeRoundTaskManager:
     def switch_character_and_reload(self, server, character):
         self.full_character_reload_switches.append((server, character))
         self.reload_tasks()
+
+
+class TestSchedulerExecutionGate(unittest.TestCase):
+    def test_enabled_idle_scheduler_is_not_busy(self):
+        from services.core.scheduler import Scheduler, SchedulerState
+
+        scheduler = Scheduler()
+        scheduler.state = SchedulerState.RUNNING
+
+        status = scheduler.status_dict()
+
+        self.assertTrue(status["enabled"])
+        self.assertFalse(status["executing"])
+        self.assertFalse(status["busy"])
+
+    def test_scheduler_waits_for_direct_execution_without_deactivating(self):
+        from services.core.scheduler import Scheduler, SchedulerState
+
+        scheduler = Scheduler()
+        scheduler.state = SchedulerState.RUNNING
+        scheduler_attempted_execution = Event()
+        scheduler_pipeline_started = Event()
+        original_acquire_execution = scheduler.acquire_execution
+
+        def acquire_execution(owner, *, blocking=True):
+            if owner == "scheduler":
+                scheduler_attempted_execution.set()
+            return original_acquire_execution(owner, blocking=blocking)
+
+        self.assertTrue(scheduler.acquire_execution("direct_run", blocking=False))
+        with (
+            patch.object(scheduler, "acquire_execution", side_effect=acquire_execution),
+            patch.object(
+                scheduler,
+                "_run_task_pipeline",
+                side_effect=lambda *args, **kwargs: scheduler_pipeline_started.set(),
+            ),
+            patch("services.core.scheduler.os.system"),
+        ):
+            scheduler_thread = Thread(target=scheduler._check_and_run, daemon=True)
+            scheduler_thread.start()
+
+            self.assertTrue(scheduler_attempted_execution.wait(timeout=1))
+            self.assertFalse(scheduler_pipeline_started.wait(timeout=0.05))
+
+            scheduler.release_execution("direct_run")
+            self.assertTrue(scheduler_pipeline_started.wait(timeout=1))
+            scheduler_thread.join(timeout=1)
+
+        self.assertFalse(scheduler_thread.is_alive())
+        self.assertEqual(scheduler.state, SchedulerState.RUNNING)
+        self.assertIsNone(scheduler.execution_owner)
+
+    def test_scheduler_does_not_start_after_being_deactivated_while_waiting(self):
+        from services.core.scheduler import Scheduler, SchedulerState
+
+        scheduler = Scheduler()
+        scheduler.state = SchedulerState.RUNNING
+        scheduler_attempted_execution = Event()
+        scheduler_pipeline_started = Event()
+        original_acquire_execution = scheduler.acquire_execution
+
+        def acquire_execution(owner, *, blocking=True):
+            if owner == "scheduler":
+                scheduler_attempted_execution.set()
+            return original_acquire_execution(owner, blocking=blocking)
+
+        self.assertTrue(scheduler.acquire_execution("editor", blocking=False))
+        with (
+            patch.object(scheduler, "acquire_execution", side_effect=acquire_execution),
+            patch.object(
+                scheduler,
+                "_run_task_pipeline",
+                side_effect=lambda *args, **kwargs: scheduler_pipeline_started.set(),
+            ),
+            patch("services.core.scheduler.os.system"),
+        ):
+            scheduler_thread = Thread(target=scheduler._check_and_run, daemon=True)
+            scheduler_thread.start()
+
+            self.assertTrue(scheduler_attempted_execution.wait(timeout=1))
+            scheduler.deactivate()
+            scheduler.release_execution("editor")
+            scheduler_thread.join(timeout=1)
+
+        self.assertFalse(scheduler_thread.is_alive())
+        self.assertFalse(scheduler_pipeline_started.is_set())
+        self.assertEqual(scheduler.state, SchedulerState.PENDING)
+        self.assertIsNone(scheduler.execution_owner)
 
 
 class TestSchedulerRetryRounds(unittest.TestCase):
@@ -213,6 +302,44 @@ class TestSchedulerRetryRounds(unittest.TestCase):
                 with patch("AutoScriptor.utils.task_registry.task_registry.has_task", return_value=True):
                     self.assertEqual(sched._collect_active_times(), [])
                     self.assertEqual(sched._get_wait_interval(), CHECK_INTERVAL)
+
+    def test_stop_restores_error_budget_without_clearing_cancel_signal(self):
+        from services.core.scheduler import Scheduler, SchedulerState
+
+        class CancellableTaskManager:
+            def __init__(self):
+                self._cancel_event = Event()
+
+            def request_cancel(self):
+                self._cancel_event.set()
+
+            def _reset_cancel(self):
+                self._cancel_event.clear()
+
+        task_manager = CancellableTaskManager()
+        sched = Scheduler()
+        sched.set_task_manager(task_manager)
+        sched.state = SchedulerState.ERROR
+        sched._consecutive_errors = 3
+        sched._mark_retry_exhausted(("s1", "c1"), "A", 2)
+
+        sched.request_stop()
+
+        self.assertEqual(sched.state, SchedulerState.PENDING)
+        self.assertEqual(sched._consecutive_errors, 0)
+        self.assertEqual(sched._retry_exhausted_tasks, set())
+        self.assertTrue(task_manager._cancel_event.is_set())
+        self.assertTrue(sched._wake.is_set())
+
+        sched.record_result(0, 1)
+        self.assertEqual(sched._consecutive_errors, 0)
+        self.assertEqual(sched.state, SchedulerState.PENDING)
+
+        sched._mark_retry_exhausted(("s1", "c1"), "A", 2)
+        self.assertEqual(sched._retry_exhausted_tasks, set())
+
+        sched.reset()
+        self.assertFalse(task_manager._cancel_event.is_set())
 
     def test_scheduled_pipeline_returns_to_first_dispatch_character(self):
         from services.core.scheduler import Scheduler, SchedulerState

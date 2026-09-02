@@ -11,6 +11,8 @@ Read this when changing WebUI, the source Electron shell, source update UI, or 4
 - Frontend pulls config through `GET /api/refresh`; do not reintroduce Jinja config injection.
 - Public config must strip sensitive fields such as encryption, account, password, and runtime-only task fields.
 - Task save must strip runtime fields through `TaskTreeService.strip_runtime_fields()`; WebUI projections may inject fields such as `param_meta`, `param_keys`, `beta`, `custom`, `debug_mode`, `task_description`, `task_doc_flow`, `_due`, and `progress_display`.
+- Task-list run actions must send `execution_source=task_list`; this preserves the current in-game login and skips character validation only for those direct runs. Do not spread this policy to scheduler, cross-character, default direct-run, or gift-code execution, and do not bypass credential unlock or runtime busy guards.
+- Overview, scheduler, and task-list stop buttons must share `stop-dispatch` and `/api/stop`. Stopping preserves cooperative cancel until workers exit, but immediately restores scheduler `pending`, consecutive-error budget, and retry-exhaustion budget; post-cancel failures must not consume the restored budget.
 - Component state is managed in `app.js`; components receive props and emit events upward.
 
 Component convention:

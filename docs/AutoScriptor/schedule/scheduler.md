@@ -67,9 +67,25 @@
 关键点：
 
 - `activate()` 只会从非错误态进入 `running`；如果当前是 `error`，直接调用 `activate()` 不会恢复。
-- 恢复错误态必须先 `reset()`，WebUI 对应 `/api/scheduler/reset` 和“恢复调度”按钮。
-- `request_stop()` 会通知 `TaskManager` cooperative cancel，并把状态切回 `pending`。
+- `running` 表示调度长期启用，不表示当前正在执行任务。`status.enabled=true` 对应该激活态；只有调度取得共享执行闸门时 `status.executing/busy=true`。
+- 恢复错误态可调用 `reset()`、使用 WebUI“恢复调度”，或通过统一终止入口恢复；三者都重置错误额度，终止入口额外保留 cooperative cancel。
+- `request_stop()` 会通知 `TaskManager` cooperative cancel，把状态切回 `pending`，清零连续错误次数并清除本调度周期 retry 耗尽记录；它不会清除取消信号。
 - `wake()` 只打断等待，让后台线程重新检查；它本身不改变状态。
+
+## 执行互斥
+
+调度激活状态和设备执行权是两个独立生命周期。调度器、任务列表直接执行和 Editor 设备操作共享一个执行闸门：
+
+```text
+调度 running + 闸门空闲
+  ├─ 手动任务/Editor 先取得闸门 → 调度到期后阻塞等待
+  └─ 调度先取得闸门 → 手动入口等待本轮结束后重试
+
+手动执行释放闸门
+  └─ 等待中的调度继续收集到期任务，state 仍为 running
+```
+
+调度 `_check_and_run()` 阻塞取得闸门，并在取得后再次检查状态；如果等待期间被停止，则直接释放闸门，不再启动任务。任务列表和 Editor 使用非阻塞取得，避免请求线程长期悬挂；冲突返回 `409 runtime_busy`，但提示用户等待当前执行结束，而不是要求关闭调度。预检和闸门取得必须同时存在：预检提供准确状态提示，闸门负责消除两个入口同时通过预检的竞态。
 
 ## 到期判定
 
@@ -136,7 +152,7 @@ else:
   ├─ 对每个任务:
   │    ├─ 非 debug 任务先做每日重启检查
   │    ├─ runtime_ctx.refresh() 确保设备与 App 可用
-  │    ├─ 非 debug 任务确认角色登录
+  │    ├─ 非任务列表直跑时确认角色登录；任务列表来源直接复用当前游戏状态
   │    ├─ TaskManager.execute_tasks([task], max_attempts=1, attempt_offset=retry_round)
   │    ├─ 成功：累计成功，清除连续错误
   │    ├─ 人工接管冷却：计入失败展示，但不增加连续错误
@@ -147,6 +163,8 @@ else:
 ```
 
 调度器不会在同一轮里反复撞同一个失败任务。失败任务会等本轮其他任务结束后进入下一 retry 轮；达到 `max_retry` 后，在本次调度激活周期内跳过，直到重新启动调度或 reset 清理 retry exhaustion。
+
+任务列表页的三个直接执行入口通过 `execution_source=task_list` 进入 `run_direct(skip_character_login=True)`。这条策略只跳过登录缓存失效和 `_ensure_character_logged_in()`；普通任务的每日重启检查、设备/App 就绪、retry、状态保存、通知和 `post_execution` 都保持原语义。默认 `run_direct()`、自动调度和跨角色切换仍失效登录缓存并校验目标角色，显式 `force_login=True` 始终覆盖跳过策略。
 
 ## 单任务执行语义
 
@@ -194,7 +212,7 @@ clear_task_status("progress")
 - `RequestHumanTakeover` 或进度未完成后被标记为人工接管冷却。
 - 用户手动停止导致的 cooperative cancel。
 
-连续错误达到 3 后进入 `error`，调度暂停，并同步发送 Windows 桌面/配置通知。必须先调用 `reset()` 或通过 WebUI “恢复调度”按钮恢复；单纯调用 `activate()` 不会从 `error` 自动恢复。
+连续错误达到 3 后进入 `error`，调度暂停，并同步发送 Windows 桌面/配置通知。可以调用 `reset()`、使用 WebUI“恢复调度”按钮，或点击总览/调度/任务列表任一“终止”按钮恢复到 `pending` 并获得新的 3 次连续错误额度；终止还会清除本调度周期 retry 耗尽记录。单纯调用 `activate()` 不会从 `error` 自动恢复。任务仍在协作退出时，取消信号保持有效，其随后上报的失败不重新计入连续错误。
 
 ## 人工接管与进度
 

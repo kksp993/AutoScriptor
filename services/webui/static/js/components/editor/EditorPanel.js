@@ -489,8 +489,8 @@ const EditorPanel = {
       if (!s) return null;
       let left = s.left, top = s.top;
       let w = s.right - s.left, h = s.bottom - s.top;
-      if (freeX.value) { left = 0; w = 1280; }
-      if (freeY.value) { top = 0; h = 720; }
+      if (freeX.value) { left = 0; w = imgWidth.value; }
+      if (freeY.value) { top = 0; h = imgHeight.value; }
       return { left, top, width: w, height: h };
     }
 
@@ -521,12 +521,21 @@ const EditorPanel = {
       return (s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').trim();
     }
 
+    function targetBoxPart(b) {
+      const isFullFrame = b.left === 0 && b.top === 0
+        && b.width === imgWidth.value && b.height === imgHeight.value;
+      if (isFullFrame) return '';
+      const marginCall = imgWidth.value === 1280 && imgHeight.value === 720
+        ? '.margin()'
+        : `.margin(frame_size=(${imgWidth.value},${imgHeight.value}))`;
+      return `, box=Box(${b.left},${b.top},${b.width},${b.height})${marginCall}`;
+    }
+
     const tCode = computed(() => {
       const b = effectiveBox();
       if (!b) return '';
       const t = escapeText(name.value);
-      let boxPart = `, box=Box(${b.left},${b.top},${b.width},${b.height}).margin()`;
-      if (b.left === 0 && b.top === 0 && b.width === 1280 && b.height === 720) boxPart = '';
+      const boxPart = targetBoxPart(b);
       let colorPart = '';
       if (lockColor.value && colorText.value) colorPart = `, color="${escapeText(colorText.value)}"`;
       return `T("${t}"${boxPart}${colorPart})`;
@@ -536,8 +545,7 @@ const EditorPanel = {
       const b = effectiveBox();
       if (!b) return '';
       const t = escapeText(name.value);
-      let boxPart = `, box=Box(${b.left},${b.top},${b.width},${b.height}).margin()`;
-      if (b.left === 0 && b.top === 0 && b.width === 1280 && b.height === 720) boxPart = '';
+      const boxPart = targetBoxPart(b);
       let colorPart = '';
       if (lockColor.value && colorText.value) colorPart = `, color="${escapeText(colorText.value)}"`;
       return `I("${t}"${boxPart}${colorPart})`;

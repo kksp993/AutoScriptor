@@ -6,6 +6,7 @@ import numpy as np
 import AutoScriptor
 from AutoScriptor.core.control import MixControl
 from AutoScriptor.core.display_contract import EXPECTED_FRAME_SIZE, get_frame_size
+from AutoScriptor.utils.box import Box
 
 
 class _FakeScreenshotControl:
@@ -33,6 +34,20 @@ class ResolutionContractTests(unittest.TestCase):
 
         self.assertEqual(EXPECTED_FRAME_SIZE, (1280, 720))
         self.assertEqual(get_frame_size(frame), EXPECTED_FRAME_SIZE)
+
+    def test_margin_can_clamp_to_explicit_portrait_frame_size(self):
+        portrait_target = Box(277, 1231, 166, 23)
+
+        expanded_target = portrait_target.margin(frame_size=(720, 1280))
+
+        self.assertEqual(expanded_target, Box(257, 1211, 206, 63))
+
+    def test_margin_keeps_landscape_contract_by_default(self):
+        landscape_target = Box(1153, 684, 126, 30)
+
+        expanded_target = landscape_target.margin()
+
+        self.assertEqual(expanded_target, Box(1133, 664, 147, 56))
 
     def test_mismatch_warns_once_and_returns_original_frame(self):
         frame = np.zeros((576, 1024, 3), dtype=np.uint8)

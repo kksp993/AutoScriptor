@@ -14,7 +14,7 @@ WebUI 后端是 FastAPI；静态前端位于 `services/webui/static/`，源码 E
 {
   "ok": false,
   "error": "runtime_busy",
-  "message": "当前调度器正在运行，请先点击「终止执行」再继续操作。",
+  "message": "当前调度任务正在执行，请等待本轮结束后再继续；无需停止已启用的调度。",
   "code": "runtime_busy"
 }
 ```
@@ -37,10 +37,14 @@ WebUI 后端是 FastAPI；静态前端位于 `services/webui/static/`，源码 E
 | `GET /api/refresh` | 公开配置快照；会消费配置变更、重读任务投影 |
 | `GET /api/runtime/snapshot` | 主轮询入口：运行状态、调度器、任务汇总、下次执行、`config_version` |
 | `GET /api/run/status` | 直接运行线程状态 |
-| `POST /api/run` | 直接运行任务，或启用调度模式 |
-| `POST /api/stop` | 请求协作式停止；返回轻量 `runtime` 投影供前端立即更新停止状态 |
+| `POST /api/run` | 直接运行任务，或启用调度模式；任务列表直跑使用 `execution_source=task_list` |
+| `POST /api/stop` | 请求协作式停止，恢复连续错误/retry 额度；返回轻量 `runtime` 投影 |
 
-前端不要新增散落的账号、调度器、运行状态多路轮询；主界面以 `runtime/snapshot` 为准。停止按钮是控制信号入口：`POST /api/stop` 返回后先应用响应中的轻量 `runtime` 状态，不能在点击处理函数里同步等待完整 `/api/runtime/snapshot` 或 `/api/refresh`，完整任务树/配置投影由后台刷新或常规轮询补齐。总览、调度页、每日/每周/通用/自定义任务页的“终止执行”必须复用总览 `stop-dispatch` 前端事件和同一个 `stopDispatch()` action，不要为任务页或调度页另接停止 API。
+前端不要新增散落的账号、调度器、运行状态多路轮询；主界面以 `runtime/snapshot` 为准。停止按钮是统一控制入口：`POST /api/stop` 会发送 cooperative cancel、恢复调度器到 `pending`、清零连续错误次数并清除 retry exhaustion，但不会提前清除取消信号。响应返回后先应用其中的轻量 `runtime` 状态，不能在点击处理函数里同步等待完整 `/api/runtime/snapshot` 或 `/api/refresh`，完整任务树/配置投影由后台刷新或常规轮询补齐。总览、调度页和任务列表页的“终止执行”必须复用总览 `stop-dispatch` 前端事件和同一个 `stopDispatch()` action，不要另接停止或恢复 API。
+
+`scheduler.state="running"` 只表示调度已启用，不能直接映射为 `runtime.busy=true`。调度状态还会返回 `enabled`、`executing` 和 `busy`：空闲等待时 `enabled=true, executing=false, busy=false`；只有当前调度周期取得共享执行闸门时后两项为 `true`，同时统一 runtime 投影才使用 `reason="scheduler"`。任务列表和 Editor 可在调度空闲时执行，不需要先停止调度；若调度当前正在执行则返回 `409`，等待本轮结束后可重试。
+
+任务列表页的“开始运行”、单任务运行和“从选中处执行”都在 `/api/run` 请求中标记 `execution_source=task_list`。后端仍要求 credential unlock、有效账号配置、runtime idle，并同步前端选中的角色配置，但保留当前游戏登录缓存，执行管线不核对或自动登录该配置角色。未携带该来源的直接执行、调度模式、跨角色调度和兑换码执行继续使用原有登录校验；兑换码的 `force_login` 优先于任何跳过策略。
 
 ## 配置和任务
 
@@ -135,7 +139,7 @@ Reload 边界：所有 reload 类操作都会清 `bg`；纯配置同步 `POST /a
 `cfg_use_gpu` 暂时保留为 `configured_use_gpu` 的兼容别名。Paddle 导入或设备探测失败时
 返回 `500 ocr_status_failed`，不得用默认值把失败表示为 CPU 正常。
 
-Editor 真实设备动作需要 credential unlock；模拟执行且已有缓存图时应使用虚拟 `mixctrl`，不触碰真实设备。`/api/editor/execute-code` 的 running/stopping 状态会通过 `RuntimeController` 投影为 `reason="editor"`，因此运行期间配置、任务、账号、角色和 reload 类接口都应返回 `409 runtime_busy`。
+Editor 真实设备动作需要 credential unlock；模拟执行且已有缓存图时应使用虚拟 `mixctrl`，不触碰真实设备。Editor 坐标使用当前缓存截图的原生宽高；非 1280x720 画面生成的识别目标须携带 `.margin(frame_size=(width, height))`，`remote/click`、真实 `execute-code` 和保存脚本不做隐式缩放。`remote/click`、`remote/swipe` 和 `/api/editor/execute-code` 必须先取得与调度/任务列表共用的执行闸门，避免执行中插入错误点击；仅调度已启用但空闲时允许取得。`execute-code` 的 running/stopping 状态会通过 `RuntimeController` 投影为 `reason="editor"`，因此运行期间配置、任务、账号、角色和 reload 类接口都应返回 `409 runtime_busy`。
 
 `GET /api/editor/navigation-options` 只读取 `ZmxyOL.nav.envs` 已注册到 `mm` 的名称，不执行导航、识别或设备初始化。响应按注册顺序返回 `items: [{"name": "村庄", "locations": ["法相", "背包"]}]`；环境自身的同名根位置不重复列入 `locations`。导入或注册异常返回 `500 editor_navigation_options_failed`，前端不得把失败伪装成空菜单。
 

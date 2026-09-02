@@ -241,10 +241,18 @@ class WebUILifecycleService:
             self.scheduler.wake()
             return self._refresh_task_projection("save character task")
 
-    def switch_character(self, server: str, character: str, *, reason: str = "switch character") -> int:
+    def switch_character(
+        self,
+        server: str,
+        character: str,
+        *,
+        reason: str = "switch character",
+        invalidate_login: bool = True,
+    ) -> int:
         with self.task_manager.config_transaction():
             self.cfg.switch_character(server, character)
-        self.scheduler.invalidate_login()
+        if invalidate_login:
+            self.scheduler.invalidate_login()
         return self._refresh_task_projection(reason)
 
     def switch_account(self, name: str, security_key: str) -> int:

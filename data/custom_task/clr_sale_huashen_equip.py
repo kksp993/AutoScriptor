@@ -20,13 +20,14 @@ def test_task():
     click(T("化身背包", box=Box(118,614,119,96).margin()))
     click(T("装备", box=Box(296,37,150,96).margin()))
     while True:
-        info = extract_info(B(234,630,150,48), post_process=lambda s: int(s.strip().split("/")[1]), ensure_not_empty=True)
+        # info = extract_info(B(234,630,150,48), post_process=lambda s: int(s.strip().split("/")[1]), ensure_not_empty=True)
         # 当1/1时额外触发一轮
         click(T("批量出售", box=Box(808,613,114,65).margin()))
         click(T("全选", box=Box(529,602,136,87).margin()))
         click(T("键出售", box=Box(808,613,113,65).margin()))
+        if ui_T(T("请至少选择一个道具", box=Box(438,336,405,45).margin()), timeout=2):
+            sleep(2);break
         click(T("确定", box=Box(964,568,165,87).margin()), if_exist=True, timeout=3);sleep(1)
-        if info == 1: break
     click(B(1199,10,51,68));sleep(1)
     click(B(1165,12,83,63));sleep(1)
     click(I("导航-菜单"), delay=1)

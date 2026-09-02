@@ -73,6 +73,12 @@ git branch --show-current
    默认 `PaddleVariant=auto`：存在 `data/config.json` 时读取
    `ocr.use_gpu`，缺少配置文件时选择 CPU。
 
+   公共依赖固定 `setuptools<81`，用于兼容当前 `adbutils 1.2.15` 仍经过的
+   `pkg_resources -> packaging -> distutils.util` 导入链。Python 安装结束时会
+   检查 setuptools 版本并实际导入该链；校验失败时安装不会伪装成功。已有环境若出现
+   `ModuleNotFoundError: No module named 'distutils.util'`，重新运行
+   `scripts\install.bat python` 恢复依赖合同。
+
 5. 准备 Electron：
 
    ```powershell

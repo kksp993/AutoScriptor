@@ -12,6 +12,9 @@
 - Paddle/PaddleOCR 的 Python 运行时导入和 OCR 模型构造都在 OCR 后台线程执行。
   模型文件命中本地缓存仍需完成每个新进程的运行时导入和模型构造；启动日志分别记录
   运行时导入、模型阶段和总耗时，`Model files already exist` 表示模型文件缓存已命中。
+- 导入 `MumuAdaptor.mumu` 不得通过 `api.screen.gui` 提前启动 OCR 后台线程；`Mumu.auto`
+  在实际访问时才按需导入 GUI/OCR。这样 NemuIpc 的 `uiautomator2/adbutils/pkg_resources`
+  兼容依赖会先完成主线程导入，避免与 Paddle 后台导入争用 Python import 状态。
 - Electron/Chromium 的渲染模式与 Paddle OCR 设备互相独立；关闭 Electron 硬件加速
   不会阻止 OCR 使用 CUDA GPU。
 - WebUI 启动后只做静态服务、日志 WebSocket、任务注册和后台监控代理。
@@ -62,20 +65,24 @@
 | 状态来源 | 说明 |
 |----------|------|
 | direct_run | WebUI 直接执行指定任务 |
-| scheduler | 调度器后台执行 |
+| scheduler | 调度器当前正在执行一轮到期任务；单纯 `state=running` 不算占用 |
 | editor | Editor `/api/editor/execute-code` 自定义代码执行 |
 
-保存配置、同步配置、保存通知设置、保存任务、切换账号/角色、重载任务、重新验证/吊销凭据、源码更新执行等会先走 `guard_idle()`。运行中请求会返回 `409 runtime_busy`。停止按钮会同时：
+调度激活状态与执行占用状态必须分开：`SchedulerState.RUNNING` 表示后台调度保持启用并等待下一执行点，`scheduler.executing/busy` 只表示调度当前持有共享执行闸门。调度已启用但空闲时，任务列表、Editor 和配置操作均可继续；它们取得闸门后，调度线程若到期会阻塞等待，释放后自动继续且仍保持 `running`。调度当前正在执行时，手动入口返回 `409 runtime_busy` 并提示等待本轮结束，不要求停止调度。
+
+任务列表直接执行、Editor 代码执行以及 Editor `remote/click` / `remote/swipe` 都使用同一个执行闸门。入口的状态预检仅用于友好提示，真正互斥由非阻塞取得闸门保证，避免“检查时空闲、启动时撞上调度”的竞态。调度线程使用阻塞取得闸门，因此不会与已经开始的手动操作并发点击。
+
+保存配置、同步配置、保存通知设置、保存任务、切换账号/角色、重载任务、重新验证/吊销凭据、源码更新执行等会先走 `guard_idle()`。真正执行中请求会返回 `409 runtime_busy`；调度仅启用但空闲时不阻断。停止按钮会同时：
 
 - `TaskManager.request_cancel()`
 - `Scheduler.request_stop()`
 - `Scheduler.invalidate_login()`
 
-`/api/stop` 只负责发出协作式取消信号并返回轻量 runtime 状态，前端应立即使用该状态呈现停止中/待运行，不在按钮回调里同步等待完整任务树快照或配置刷新；完整 `/api/runtime/snapshot` 由后台刷新和常规轮询补齐，避免调度收尾写状态时把 UI 操作卡住。总览、调度页、每日/每周/通用/自定义任务页必须统一走总览 `stop-dispatch` / `stopDispatch()` 前端入口。
+`/api/stop` 发出协作式取消信号，同时把调度器恢复为 `pending`、清零连续错误次数并清除本调度周期 retry 耗尽记录；取消信号会保留到任务协作退出，终止后的失败结果不重新占用错误额度。接口仍只返回轻量 runtime 状态，前端应立即呈现停止中/待运行，不在按钮回调里同步等待完整任务树快照或配置刷新；完整 `/api/runtime/snapshot` 由后台刷新和常规轮询补齐，避免调度收尾写状态时把 UI 操作卡住。总览、调度页和任务列表页必须统一走总览 `stop-dispatch` / `stopDispatch()` 前端入口。
 
 任务脚本必须使用可取消 API，例如 `AutoScriptor.sleep()`。
 
-Editor 自定义代码执行由 `/api/editor/execute-code` 拥有路由内执行状态，并通过 `RuntimeController` 的 `editor` 外部状态投影进入统一 busy/stop/status：接口会拒绝与 direct run / scheduler 并行运行，运行期间配置保存、任务保存、账号/角色切换和 reload 也会被 `guard_idle()` 拦截。执行体放入工作线程，避免阻塞 FastAPI 事件循环；前端“终止执行”调用 `POST /api/editor/execute-code/stop`，后端复用 `TaskManager.request_cancel()` 触发 `AutoScriptor.sleep()`、`click()`、`locate()` 等协作式取消点。执行结束后会清理本次 editor 执行状态和取消标记。
+Editor 自定义代码执行由 `/api/editor/execute-code` 拥有路由内执行状态，并通过 `RuntimeController` 的 `editor` 外部状态投影进入统一 busy/stop/status：接口会拒绝与当前 direct run / scheduler execution 并行运行，但不因调度器仅保持激活而拒绝。运行期间配置保存、任务保存、账号/角色切换和 reload 仍会被 `guard_idle()` 拦截。执行体放入工作线程，避免阻塞 FastAPI 事件循环；前端“终止执行”调用 `POST /api/editor/execute-code/stop`，后端复用 `TaskManager.request_cancel()` 触发 `AutoScriptor.sleep()`、`click()`、`locate()` 等协作式取消点。执行结束后会清理本次 editor 执行状态、取消标记并释放执行闸门。
 
 ## 配置与账号
 
@@ -118,6 +125,8 @@ WebUI reload 分三类：
 1. 轻量 reload：`POST /api/tasks/reload` 要求 runtime idle，执行 `bg.clear(clear_signals=True)`，刷新调度器任务更新标记、任务树投影、order map 和公开配置；不重新加载 `cfg`，不清 `ZmxyOL.*` 模块，不重载职业脚本，不调用 `force_reload_tasks()`。
 2. 配置同步：`POST /api/config/sync` 执行 `cfg.reload_preserving_decrypted_credentials(security_key)`，刷新 order map，应用 WebUI log level，并递增 `config_version`；它不属于 reload，不清 `bg`，不重载任务注册表。
 3. 完整 reload：`POST /api/tasks/reload-all`、Editor 保存自定义任务、启动初始化、调度器安全边界处理脚本变更，以及兑换码任务注册缺失兜底，走 `TaskManager.reload_tasks()`，并刷新 `AutoScriptor.utils.ui_map` 模块级 `ui` 缓存。所有 reload 类操作最终都要清 `bg`；配置同步不清 `bg`。
+
+任务列表页和总览页的“刷新”都使用完整 reload，随后读取一次运行时快照。这样新增、删除或修改任务脚本后，手动刷新会重新扫描任务、重建注册表，并同步任务树与总览汇总；运行时忙碌期间仍拒绝重载。
 
 自定义任务导入失败会记录到公开配置的 `custom_task_load_errors`。本轮自定义任务存在导入错误时，任务加载会跳过 stale 自定义任务配置清理和本轮 `cfg.save_config()`，避免把临时坏脚本误判为已删除任务并持久化清空用户配置。
 

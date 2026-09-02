@@ -29,6 +29,10 @@ const DIAGNOSTIC_DETAIL_LABELS = {
   elapsed_ms: '耗时',
   shape: '截图尺寸',
   use_gpu: 'GPU',
+  configured_use_gpu: '配置使用 GPU',
+  engine_use_gpu: '引擎使用 GPU',
+  engine_device: '引擎设备',
+  restart_required: '需要重启',
   entries: '条目数',
 };
 

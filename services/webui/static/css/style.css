@@ -2352,15 +2352,18 @@ html.light .bg-white {
 }
 .diagnostics-detail-row {
   display: grid;
-  grid-template-columns: 70px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 112px) minmax(0, 1fr);
   gap: 8px;
   font-size: var(--as-text-xs);
   line-height: var(--as-leading);
 }
 .diagnostics-detail-key {
+  min-width: 0;
   color: #94a3b8;
+  overflow-wrap: anywhere;
 }
 .diagnostics-detail-value {
+  min-width: 0;
   color: #475569;
   overflow: hidden;
   text-overflow: ellipsis;

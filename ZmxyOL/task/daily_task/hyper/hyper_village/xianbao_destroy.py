@@ -7,9 +7,10 @@ def destroy_item(item_box):
     click(B(item_box))
     sleep(0.5)
     click(T("选择", color="红色"))
+    click(T("确定", box=Box(733,606,137,65).margin()))
     click(T("炼化", box=Box(416,581,164,69)), delay=1)
     click(T("确定"))  # 炼化
-    click(I("炼器炉"))
+    click(T("+", box=Box(259,374,101,112).margin()))
     sleep(0.5)
 
 
@@ -33,7 +34,7 @@ def make_more_for_destroy(nums: int=1):
     click(B(1200,30,30,30),repeat=2)
     if Material_not_sufficent: raise RequestHumanTakeover("材料不足，无法炼化")
     ensure_in("炼器师")
-    click(I('炼器炉'))
+    click(T("+", box=Box(259,374,101,112).margin()))
     sleep(0.5)
     
 
@@ -47,17 +48,17 @@ def lianqishi_destroy():
     ensure_in("炼器师")
     res = extract_info(B(1000,430,130,42), lambda x: x)
     cur, limit = int(res.split("/")[0]), int(res.split("/")[1][:-1])
-    click(I('炼器炉'))
-    wait_for_appear(T("选择仙器法宝"))
+    click(T("+", box=Box(259,374,101,112).margin()))
+    if ui_T(T("没有可以选择的仙器法宝", box=Box(393,336,494,45).margin()), timeout=2):
+        make_more_for_destroy((limit-cur)*2)
+    else:
+        wait_for_appear(T("选择仙器法宝"))
     while cur < limit:
         item_box = locate((I("A"), I("B")), timeout=2)
         if item_box:
             destroy_item(item_box)
             cur += 1
         else:
-            try:
-                make_more_for_destroy((limit-cur)*2)
-            except RequestHumanTakeover:
-                raise RequestHumanTakeover(f"材料不足，无法炼化({cur}/{limit})")
+            make_more_for_destroy((limit-cur)*2)
     click(B(890,50,30,30))
 

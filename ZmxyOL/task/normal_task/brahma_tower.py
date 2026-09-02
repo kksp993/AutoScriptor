@@ -11,8 +11,8 @@ class FFT_difficulty(Enum):
 
 class FFT_preference(Enum):
     yellow = "烦恼"
-    purple = "恶意"
-    red = "恶语"
+    purple = "业障"
+    red = "智慧"
 
 
 def battle():
@@ -71,6 +71,7 @@ def FTT_TianMo():
 @register_task(
     path_cn="一般任务/梵天塔",
     description="挑战梵天塔，按配置处理天魔和层数。",
+    debug=True,
 )
 def fanTianTa(
     battle_times=50, 
@@ -82,13 +83,9 @@ def fanTianTa(
     ensure_in("极北",-1)
     click(B(0,120,90,100))
     sleep(3)
-    for diff in ["现在", "过去"]:
-        click(T(diff),offset=(0,100))
-        sleep(3)
-        click(T("确认"), if_exist=True)
-        sleep(3)
-        click(B(30,30,30,30))
     click(T(difficulty.value),offset=(0,100))
+    sleep(3)
+    click(T("确认"), if_exist=True)
     sleep(3)
     if ui_T(T("入劫", box=Box(597,430,87,38).margin())):
         click(B(931,134,43,50))

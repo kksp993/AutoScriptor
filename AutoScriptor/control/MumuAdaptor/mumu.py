@@ -5,7 +5,7 @@
 # @File : mumu.py
 # @Software: PyCharm
 import os.path
-from typing import Union
+from typing import TYPE_CHECKING, Union
 
 from AutoScriptor.control.MumuAdaptor.api.adb.Adb import Adb
 from AutoScriptor.control.MumuAdaptor.api.core.Core import Core
@@ -19,10 +19,12 @@ from AutoScriptor.control.MumuAdaptor.api.develop.androidevent import AndroidEve
 from AutoScriptor.control.MumuAdaptor.api.driver.Driver import Driver
 from AutoScriptor.control.MumuAdaptor.api.network.Network import Network
 from AutoScriptor.control.MumuAdaptor.api.permission.Permission import Permission
-from AutoScriptor.control.MumuAdaptor.api.screen.gui import Gui
 from AutoScriptor.control.MumuAdaptor.api.setting.setting import Setting
 from AutoScriptor.control.MumuAdaptor.utils import utils
 from AutoScriptor.control.MumuAdaptor.api.screen.screen import Screen
+
+if TYPE_CHECKING:
+    from AutoScriptor.control.MumuAdaptor.api.screen.gui import Gui
 
 
 class Mumu:
@@ -208,9 +210,11 @@ class Mumu:
         return Adb(self.generate_utils())
 
     @property
-    def auto(self) -> Gui:
+    def auto(self) -> "Gui":
         """
             GUI自动化类
         :return:
         """
+        from AutoScriptor.control.MumuAdaptor.api.screen.gui import Gui
+
         return Gui(self.generate_utils())

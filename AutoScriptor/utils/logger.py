@@ -1,6 +1,7 @@
 """Source runtime logging utilities."""
 from __future__ import annotations
 
+import inspect
 import logging
 import os
 import sys
@@ -82,6 +83,40 @@ def _make_console() -> Console:
 
 _console = _make_console()
 _task_ctx = threading.local()
+_AUTOSCRIPTOR_PACKAGE_ROOT = os.path.normcase(
+    os.path.realpath(os.path.join(os.path.dirname(__file__), os.pardir))
+)
+_PROJECT_ROOT = os.path.normcase(
+    os.path.realpath(os.path.join(_AUTOSCRIPTOR_PACKAGE_ROOT, os.pardir))
+)
+
+
+def _normalize_source_path(path: str) -> str:
+    return os.path.normcase(os.path.realpath(path))
+
+
+def _is_path_within(path: str, parent: str) -> bool:
+    try:
+        return os.path.commonpath((_normalize_source_path(path), parent)) == parent
+    except (OSError, ValueError):
+        return False
+
+
+def _find_external_project_caller():
+    """Return the first project caller outside the AutoScriptor package."""
+    current_frame = inspect.currentframe()
+    try:
+        current_frame = current_frame.f_back if current_frame is not None else None
+        while current_frame is not None:
+            source_path = current_frame.f_code.co_filename
+            is_project_source = _is_path_within(source_path, _PROJECT_ROOT)
+            is_autoscriptor_source = _is_path_within(source_path, _AUTOSCRIPTOR_PACKAGE_ROOT)
+            if is_project_source and not is_autoscriptor_source:
+                return source_path, current_frame.f_lineno, current_frame.f_code.co_name
+            current_frame = current_frame.f_back
+    finally:
+        del current_frame
+    return None
 
 
 def set_current_task(name: str | None):
@@ -93,6 +128,26 @@ class _TaskFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         task_name = getattr(_task_ctx, "name", None)
         record.task_prefix = f"[{task_name}] " if task_name else ""
+        return True
+
+
+class _ExternalCallerFilter(logging.Filter):
+    """Show the business-script caller for logs emitted by AutoScriptor internals."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not _is_path_within(record.pathname, _AUTOSCRIPTOR_PACKAGE_ROOT):
+            return True
+
+        external_caller = _find_external_project_caller()
+        if external_caller is None:
+            return True
+
+        source_path, line_number, function_name = external_caller
+        record.pathname = source_path
+        record.filename = os.path.basename(source_path)
+        record.module = os.path.splitext(record.filename)[0]
+        record.lineno = line_number
+        record.funcName = function_name
         return True
 
 
@@ -144,6 +199,7 @@ if not logger.handlers:
         )
         rich_handler.setLevel(logging.DEBUG)
         rich_handler.addFilter(_TaskFilter())
+        rich_handler.addFilter(_ExternalCallerFilter())
         logger.addHandler(rich_handler)
     except (OSError, RuntimeError, TypeError, ValueError):
         plain_handler = _SafeStreamHandler(stream=_safe_stderr())
@@ -152,6 +208,7 @@ if not logger.handlers:
             logging.Formatter(_CONSOLE_PLAIN_FMT, datefmt=_CONSOLE_DATEFMT)
         )
         plain_handler.addFilter(_TaskFilter())
+        plain_handler.addFilter(_ExternalCallerFilter())
         logger.addHandler(plain_handler)
 
 
@@ -173,6 +230,7 @@ def setup_logfile(path: str, encoding: str = "utf-8"):
     _file_handler.setLevel(logging.DEBUG)
     _file_handler.setFormatter(logging.Formatter(_FILE_FMT, datefmt=_FILE_DATEFMT))
     _file_handler.addFilter(_TaskFilter())
+    _file_handler.addFilter(_ExternalCallerFilter())
     logger.addHandler(_file_handler)
 
 
