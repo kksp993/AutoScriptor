@@ -86,8 +86,8 @@ def task(
                 identifier=(T("胜利", box=Box(568,30,161,85).margin()),T("确定", box=Box(571,509,135,66).margin()),T("联赛排行"),T("回家")),
                 callback=lambda : [
                     logger.info("战斗结束"),
-                    bg.set_signal("try_exit", True),
-                    bg.set_signal("failed", True),
+                    bg.set_signal(BG_SIGNALS.TRY_EXIT, True),
+                    bg.set_signal(BG_SIGNALS.FAILED, True),
                     click(T("确定"),until=lambda:ui_F(T("确定"))),
                     h.heaven_draw_card_exit(),
                 ],

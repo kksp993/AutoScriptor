@@ -8,14 +8,14 @@
 |------|----------|
 | 实例 | `bg` 是懒加载 `BackgroundProxy`，首次访问时创建 `BackgroundMonitor` 线程 |
 | 默认间隔 | `DEFAULT_INTERVAL = 1.0` 秒 |
-| 临时加速 | 延迟敏感流程可用 `bg.interval(...)` 临时降低轮询间隔，例如天庭组队战斗结束/抽牌检测使用 `bg.interval(0.2)` |
+| 临时加速 | 延迟敏感流程可用 `bg.interval(...)` 临时降低轮询间隔，例如天庭组队战斗结束/抽牌检测使用 `bg.interval(0.1)` |
 | 截图策略 | 主循环每轮尽量共享一张截图，批量 `_locate_all()`，避免每个回调单独截图 |
 | throttle | 全部回调都在冷却内时不截图，直接等待 |
 | 普通回调 | `allow_concurrent=False`，按 `priority` 从高到低扫描 |
 | 并发回调 | `allow_concurrent=True`，优先扫描；普通回调执行期间会由 `BG-Concurrent` 子线程继续扫描 |
 | 事件历史 | `get_event_history()` 返回最近 50 条回调、信号、clear 记录 |
 | 运行期异常 | 截图或识别异常会写入事件历史并限频 warning；监控线程继续运行 |
-| 信号 | `set_signal()` / `signal()` / `wait_signal()` 线程安全 |
+| 信号 | `set_signal()` / `signal()` / `wait_signal()` 线程安全；旧信号别名会先归一到当前 key |
 
 ## 注册与清理
 
@@ -84,6 +84,7 @@ with bg.scope("battle") as watch:
 | `PAUSE_BATTLE` | `Pause_battle` | 暂停战斗循环 |
 | `BUILTIN_ADVANCE` | `_builtin_advance` | 内置“前进”检测 |
 | `FAILED` | `failed` | 失败信号 |
+| `FAILED_LEGACY` | `Failed` | 历史别名，运行时归一到 `failed`，不是独立状态 |
 | `EXIT` | `Exit` | 历史退出信号 |
 
 ```python

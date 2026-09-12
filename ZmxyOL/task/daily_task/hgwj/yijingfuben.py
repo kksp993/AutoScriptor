@@ -25,12 +25,37 @@ _CLICK_TARGETS = {
 
 _DEFAULT_BATTLE_CONFIG = TableParam(
     {
-        "虎神之崖": {"difficulty": YijingNandu.灾厄, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
-        "苍龙幽谷": {"difficulty": YijingNandu.灾厄, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
-        "溟海之渊": {"difficulty": YijingNandu.灾厄, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
-        "雀炎之地": {"difficulty": YijingNandu.灾厄, "cancel_on_failed": True, "battle_flow": DEFAULT_BATTLE_FLOW},
+        "虎神之崖": {
+            "difficulty": YijingNandu.灾厄,
+            "cancel_on_failed": True,
+            "fight_pioneer": False,
+            "battle_flow": DEFAULT_BATTLE_FLOW,
+        },
+        "苍龙幽谷": {
+            "difficulty": YijingNandu.灾厄,
+            "cancel_on_failed": True,
+            "fight_pioneer": False,
+            "battle_flow": DEFAULT_BATTLE_FLOW,
+        },
+        "溟海之渊": {
+            "difficulty": YijingNandu.灾厄,
+            "cancel_on_failed": True,
+            "fight_pioneer": False,
+            "battle_flow": DEFAULT_BATTLE_FLOW,
+        },
+        "雀炎之地": {
+            "difficulty": YijingNandu.灾厄,
+            "cancel_on_failed": True,
+            "fight_pioneer": True,
+            "battle_flow": DEFAULT_BATTLE_FLOW,
+        },
     },
-    column_labels={"difficulty": "难度", "cancel_on_failed": "不用点券复活", "battle_flow": "战斗招式"},
+    column_labels={
+        "difficulty": "难度",
+        "cancel_on_failed": "不用点券复活",
+        "fight_pioneer": "打先锋本",
+        "battle_flow": "战斗招式",
+    },
 )
 
 _DIFF_ORDER = {"初难": 1, "灾厄": 2, "浩劫": 3}
@@ -52,6 +77,7 @@ def task(
             logger.info(f"{name} 不打")
             continue
         cancel_on_failed = row.get("cancel_on_failed", True)
+        fight_pioneer = row.get("fight_pioneer", False)
         flow_name = getattr(row.get("battle_flow"), "value", None)
         target = _CLICK_TARGETS[name]
         for _ in range(2):
@@ -86,4 +112,5 @@ def task(
                 crash_suddenly=True, bonus_x=bonus_x,
                 cancel_on_failed=cancel_on_failed, flow_name=flow_name,
                 check_pioneer=True,
+                fight_pioneer=fight_pioneer,
             )

@@ -2,9 +2,9 @@ from ZmxyOL.nav.map_manager import Loc, Env
 from AutoScriptor import *
 from ZmxyOL.nav.envs.decorators import *
 
-Env('世界地图',I("世界地图-极北"))
+Env('世界地图',(T("庭", box=Box(429,126,80,87).margin()),I("世界地图-极北")))
 Env('村庄',(I("导航-奇闻录"), T("即将开启",box=Box(1146,128,118,400))))
-Env('天庭',I("神兽森林",box=Box(320,439,382,255)))
+Env('天庭',T("九重天", box=Box(438,365,118,59).margin()))
 Env('极北',I("极北背景"))
 Env('地狱',I("地狱鬼城"))
 Env('极寒深渊',I("极寒深渊背景"))

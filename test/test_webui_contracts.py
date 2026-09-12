@@ -1838,6 +1838,28 @@ print("OK")
         self.assertNotIn("B(${x},${y},1,1)", content)
         self.assertNotIn(".margin()+(", content)
 
+    def test_editor_inserts_targets_conditions_and_click_until_at_cursor(self):
+        frontend = (
+            ROOT / "services/webui/static/js/components/editor/EditorPanel.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("生成对象", frontend)
+        self.assertIn('@click="insertCurrentTargetObject"', frontend)
+        self.assertIn("function insertSnippetAtActiveCursor", frontend)
+        self.assertIn("input.getSelectionRange()", frontend)
+        self.assertIn("input.replaceRange", frontend)
+        self.assertIn("insertSnippetAtActiveCursor(target)", frontend)
+        self.assertIn("insertSnippetAtActiveCursor(line", frontend)
+
+        self.assertIn("key: 'click-once'", frontend)
+        self.assertIn("key: 'click-until-appear'", frontend)
+        self.assertIn("key: 'click-until-disappear'", frontend)
+        self.assertIn("key: 'click-next-until'", frontend)
+        self.assertIn("click(${target}, until=lambda: ui_T())", frontend)
+        self.assertIn("click(${target}, until=lambda: ui_F())", frontend)
+        self.assertIn("click(B(0,0), until=lambda: ui_T(${target}))", frontend)
+        self.assertNotIn("lambda=ui_T", frontend)
+
     def test_editor_match_action_is_available_in_region_recognition_menu(self):
         frontend = (
             ROOT / "services/webui/static/js/components/editor/EditorPanel.js"
@@ -1930,7 +1952,7 @@ print("OK")
         self.assertNotIn("recorded_code: recordedCode.value || ''", frontend)
         self.assertNotIn("custom_exec_code: customExecCode.value || ''", frontend)
         self.assertIn("PythonCodeEditor.js?v=3", index)
-        self.assertIn("EditorPanel.js?v=34", index)
+        self.assertIn("EditorPanel.js?v=35", index)
 
         self.assertIn('@router.post("/save-custom-task")', backend)
         self.assertIn("def _normalize_editor_custom_task_filename", backend)
@@ -2016,6 +2038,7 @@ print("OK")
         self.assertTrue(wrapped)
         self.assertEqual(task_path, "自定义任务/示例/操作设置")
         self.assertIn("import enum", source)
+        self.assertIn("from ZmxyOL.battle import h", source)
         self.assertIn("class EditorParam1Enum(str, enum.Enum):", source)
         self.assertIn("class EditorParam2Enum(str, enum.Enum):", source)
         self.assertIn("@register_task(", source)
@@ -2067,7 +2090,7 @@ print("OK")
         self.assertIn("function appendUiExists()", frontend)
         self.assertIn("const tgt = buildTarget();", frontend)
         self.assertIn("const line = tgt ? `ui_T(${tgt})` : 'ui_T()'", frontend)
-        self.assertIn("appendRecordedSnippet(line, tgt ? null : line.indexOf('(') + 1)", frontend)
+        self.assertIn("insertSnippetAtActiveCursor(line, tgt ? null : line.indexOf('(') + 1)", frontend)
         self.assertIn("recordedTextareaElement()", frontend)
         self.assertIn("ta.focus()", frontend)
         self.assertIn("appendUiExists", frontend)
@@ -2165,6 +2188,9 @@ print("OK")
         self.assertIn('"B": B', backend)
         self.assertIn('"T": T', backend)
         self.assertIn('"I": I', backend)
+        self.assertIn("def _editor_battle_namespace()", backend)
+        self.assertIn('return {"h": h}', backend)
+        self.assertIn("ns.update(_editor_battle_namespace())", backend)
 
     def test_editor_save_keeps_template_crop_separate_from_search_box(self):
         backend = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
@@ -2927,10 +2953,10 @@ class TestTaskOrderingStaticContract(unittest.TestCase):
 
         self.assertIn("<task-panel v-if=\"activeTab==='tasks'\"", index_html)
         self.assertNotIn("activeTab==='tasks' || activeTab==='task-graph'", index_html)
-        self.assertIn("AppSidebar.js?v=17", index_html)
+        self.assertIn("AppSidebar.js?v=18", index_html)
         self.assertIn("style.css?v=44", index_html)
         self.assertIn("TaskPanel.js?v=23", index_html)
-        self.assertIn("app.js?v=41", index_html)
+        self.assertIn("app.js?v=42", index_html)
         self.assertIn('@run-task-range="runTaskRange"', index_html)
         self.assertIn(':runtime-status="runtimeStatus"', index_html)
         self.assertNotIn("TaskDagCanvas.js", index_html)

@@ -40,8 +40,8 @@ def task(
                 callback=lambda: [
                     logger.info("妖兽突发事件"),
                     sleep(0.03),
-                    bg.set_signal("failed", True),
-                    bg.set_signal("try_exit", True),
+                    bg.set_signal(BG_SIGNALS.FAILED, True),
+                    bg.set_signal(BG_SIGNALS.TRY_EXIT, True),
                 ],
             )
             flow_name = getattr(battle_flow, "value", battle_flow)

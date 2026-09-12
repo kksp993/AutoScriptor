@@ -19,7 +19,9 @@ class BgSignals:
     """Well-known signal names used by battle/task code.
 
     The values intentionally keep the legacy strings so existing scripts that
-    call bg.signal("try_exit") continue to work.
+    call bg.signal("try_exit") continue to work. Deprecated aliases such as
+    "Failed" are canonicalized by BackgroundMonitor so old scripts read and
+    write the same state as current code.
     """
 
     TRY_EXIT = "try_exit"
@@ -31,6 +33,10 @@ class BgSignals:
 
 
 BG_SIGNALS = BgSignals
+
+_SIGNAL_ALIASES = {
+    BG_SIGNALS.FAILED_LEGACY: BG_SIGNALS.FAILED,
+}
 
 
 class BackgroundScope:
@@ -466,17 +472,33 @@ class BackgroundMonitor(Thread):
         if current_thread() is not self and self.is_alive():
             self.join()
 
+    def _canonical_signal_key(self, key: str):
+        """Map deprecated signal names to the single runtime storage key."""
+        return _SIGNAL_ALIASES.get(key, key)
+
+    def _drop_alias_signal_keys(self, canonical_key: str):
+        for alias_key, alias_target_key in _SIGNAL_ALIASES.items():
+            if alias_target_key == canonical_key and alias_key != canonical_key:
+                self._signals.pop(alias_key, None)
+
     def signal(self, key: str, default: Any = None):
+        canonical_key = self._canonical_signal_key(key)
         with self._lock:
-            return self._signals.get(key, default)
+            if canonical_key in self._signals:
+                return self._signals[canonical_key]
+            if canonical_key != key:
+                return self._signals.get(key, default)
+            return default
 
     def set_signal(self, key: str, value: Any):
+        canonical_key = self._canonical_signal_key(key)
         with self._lock:
-            old_value = self._signals.get(key, '<unset>')
-            self._signals[key] = value
+            old_value = self._signals.get(canonical_key, self._signals.get(key, '<unset>'))
+            self._signals[canonical_key] = value
+            self._drop_alias_signal_keys(canonical_key)
         if old_value != value:
-            logger.info('📡 signal %s: %s → %s', key, old_value, value)
-            self._record_event(f"signal {key}: {old_value} → {value}")
+            logger.info('📡 signal %s: %s → %s', canonical_key, old_value, value)
+            self._record_event(f"signal {canonical_key}: {old_value} → {value}")
         return value
 
     def wait_signal(

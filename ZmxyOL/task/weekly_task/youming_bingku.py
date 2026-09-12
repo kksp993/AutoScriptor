@@ -33,7 +33,7 @@ def bingku_battle():
         h.move_right(110, directly=True) 
     sleep(0.1)
     h.huashen()
-    while not (bg.signal("Failed",False) or bg.signal("Exit",False)):
+    while not (bg.signal(BG_SIGNALS.FAILED, False) or bg.signal(BG_SIGNALS.EXIT, False)):
         Wave = extract_info(B(652,85,82,54), lambda x: int(x.strip().split("/")[0]), ensure_not_empty=False, max_retries=1)
         if Wave:
             if Wave==12:
@@ -44,8 +44,8 @@ def bingku_battle():
                 Normal_handle_bk()
             click(T("确定"),if_exist=True)
         else:
-            if ui_T(T("下一轮")): bg.set_signal("Exit",True)
-            elif ui_T(T("重新挑战")): bg.set_signal("Failed",True)
+            if ui_T(T("下一轮")): bg.set_signal(BG_SIGNALS.EXIT, True)
+            elif ui_T(T("重新挑战")): bg.set_signal(BG_SIGNALS.FAILED, True)
             else: sleep(0.5)
     switch_base("mumu")
 

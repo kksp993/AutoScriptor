@@ -137,6 +137,7 @@ class LoginCtx:
     # 仅保存“入口传参”，不预先解密，实现到用时才解密
     account: str = None
     password: str = None
+    server_name: str = None
     character_name: str = None
     character_index: int = 0
     done: bool = False
@@ -208,16 +209,27 @@ def _handle_post_login_popups():
     wait_for_appear(T("进入游戏", box=Box(543,586,190,62).margin()), timeout=10)
 
 
-def _select_character():
-    """在角色选择页进入游戏；服务器与角色名仅来自已加载的 cfg['game']（Web 验证或 load_config 已写入），此处不解析、不触发解密。"""
+def _finish_account_login(ctx: LoginCtx):
+    """按客户端结束账号登录；4399 游戏盒不进入游戏角色页。"""
+    if ctx.login_client() == LoginClient.HZ4399:
+        logger.info("4399游戏盒账号登录完成")
+        ctx.done = True
+        return
+    _handle_post_login_popups()
+
+
+def _select_character(ctx: LoginCtx):
+    """在角色选择页进入游戏；入口参数优先，未传时才读取 cfg。"""
     click(T("开心收下"), if_exist=True, timeout=3)
     click(B(805,209,35,35))
     click(B(640, 575), if_exist=True)
 
     g = cfg["game"]
-    assert g.get("server_name") and g.get("character_name"), "请先配置服务器和角色"
-    ensure_server(g["server_name"])
-    ensure_character(g["character_name"])
+    server_name = ctx.server_name or g.get("server_name")
+    character_name = ctx.character_name or g.get("character_name")
+    assert server_name and character_name, "请先传入服务器和角色，或先配置服务器和角色"
+    ensure_server(server_name)
+    ensure_character(character_name)
 
     # 部分客户端，需要每次请求才给登录
     if first(get_colors(B(277,686,6,13))) != "绿色": click(B(277,686,6,13))
@@ -247,7 +259,7 @@ _login = PageRouter()
 @_login.page("角色选择", T("进入游戏", box=Box(543,586,190,62).margin()))
 def _on_character_select(ctx):
     if ctx.login_client() != LoginClient.HZ4399:
-        _select_character()
+        _select_character(ctx)
     ctx.done = True
 
 @_login.page(
@@ -265,7 +277,7 @@ def _on_authorization(ctx):
     click(T("账号登录"), if_exist=True, delay=1)
     if ui_T(T("请输入手机号或用户名"), 3) or ui_T(T("账号密码登录"), 3):
         _fill_account_password(ctx)
-        _handle_post_login_popups()
+        _finish_account_login(ctx)
 
 
 @_login.page(
@@ -275,7 +287,7 @@ def _on_authorization(ctx):
 )
 def _on_password_login(ctx):
     _fill_account_password(ctx)
-    _handle_post_login_popups()
+    _finish_account_login(ctx)
 
 
 @_login.page(
@@ -288,7 +300,7 @@ def _on_quick_login(ctx):
     click(T("账号登录", box=Box(384,444,84,22).margin()))
     sleep(1)
     _fill_account_password(ctx)
-    _handle_post_login_popups()
+    _finish_account_login(ctx)
 
 # 当乐
 
@@ -369,8 +381,8 @@ def ensure_server(server_name:str):
 def ensure_character(character_name:str):
     click(B(104,16,60,26))
     for _ in range(2):
-        if ui_T(T(character_name, box=Box(17,54,254,433).margin())):
-            return click(T(character_name, box=Box(17,54,254,433).margin()))
+        if ui_T(T(character_name, box=Box(21,54,260,465).margin()), timeout=2):
+            return click(T(character_name, box=Box(21,54,260,465).margin()))
         click(B(104,516,63,26))
     raise Exception(f"角色{character_name}不存在,请检查账户服务器是否正确")
 
@@ -379,7 +391,14 @@ def ensure_character(character_name:str):
 # ── 登录入口 ──
 def login(account: str = None, password: str = None,
           character_name: str = None, character_index: int = 0,
-          client: LoginClient = None):
-    """4399 登录全流程（页面状态机驱动）。仅在用到账密时才触发解密。"""
-    ctx = LoginCtx(account, password, character_name, character_index, client=client)
+          client: LoginClient = None, server_name: str = None):
+    """4399 登录全流程；server_name/character_name 仅覆盖本次调用，不写入配置。"""
+    ctx = LoginCtx(
+        account=account,
+        password=password,
+        server_name=server_name,
+        character_name=character_name,
+        character_index=character_index,
+        client=client,
+    )
     _login.run(ctx)

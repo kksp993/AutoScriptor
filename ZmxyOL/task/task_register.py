@@ -14,7 +14,22 @@ from ZmxyOL.nav.api import locate_region
 registration_counter = 0
 _CUSTOM_TASK_ROOT_KEY = normalize_cfg_key("custom_task")
 
- 
+
+def _merge_table_param_defaults(default_data: dict, existing_data: object) -> object:
+    """补齐新增的默认行/列，同时保留用户已经保存的表格值。"""
+    if not isinstance(existing_data, dict):
+        return deepcopy(existing_data)
+
+    merged_data = deepcopy(default_data)
+    for row_key, existing_row in existing_data.items():
+        default_row = merged_data.get(row_key)
+        if isinstance(default_row, dict) and isinstance(existing_row, dict):
+            default_row.update(deepcopy(existing_row))
+        else:
+            merged_data[row_key] = deepcopy(existing_row)
+    return merged_data
+
+
 def _find_cfg_leaf(root: dict, keys: list[str]) -> tuple[dict | None, dict | None]:
     node = root
     for key in keys[:-1]:
@@ -257,8 +272,16 @@ def register_task(
     if task_cfg is not None:
         # params 是用户可编辑配置，留在 cfg
         existing_params = task_cfg.get("params", {})
-        merged_params = defaults.copy()
-        merged_params.update(existing_params)
+        if not isinstance(existing_params, dict):
+            existing_params = {}
+        merged_params = deepcopy(defaults)
+        for name, existing_value in existing_params.items():
+            if name not in defaults:
+                continue
+            if param_meta.get(name, {}).get("type") == "table":
+                merged_params[name] = _merge_table_param_defaults(defaults[name], existing_value)
+            else:
+                merged_params[name] = existing_value
         # 仅保留当前签名中的参数名，丢弃已迁移的旧键（如独立难度、battle_flow 等）
         task_cfg["params"] = {k: merged_params[k] for k in defaults}
 

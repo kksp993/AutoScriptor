@@ -24,4 +24,6 @@ __all__ = [
     # 核心服务函数
     'ensure_in',
     'try_close_via_x',
-] 
+    'LoginClient',
+    'login',
+]

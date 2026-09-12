@@ -629,6 +629,19 @@ class Hero:
     def add_skill(cls, skill_name: str, fn):
         cls._class_skills[skill_name] = fn
 
+    @classmethod
+    def register_flow(cls, flow_name: str, method, *, task: str = None):
+        """在当前 Python 进程中注册一个临时战斗流程。
+
+        该接口适合独立脚本按需扩展流程；它不会写入职业文件，也不会
+        影响下次启动。流程方法应接收一个 Hero 实例作为唯一参数。
+        """
+        if not isinstance(flow_name, str) or not flow_name.strip():
+            raise ValueError("flow_name 必须是非空字符串")
+        if not callable(method):
+            raise TypeError("method 必须是可调用的 Hero 流程方法")
+        cls._flows[(flow_name, task)] = method
+
 
 # ── 别名 & 自注册 ────────────────────────────────────
 

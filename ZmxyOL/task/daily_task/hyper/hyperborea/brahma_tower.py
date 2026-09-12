@@ -15,15 +15,15 @@ def battle():
     h.sleep(0.5)
     h.skill(6)
     cnt = 1
-    bg.set_signal("try_exit", False)
+    bg.set_signal(BG_SIGNALS.TRY_EXIT, False)
     deadline = time() + 120
     with bg.scope("每日梵天塔") as scope:
         scope.add(
             name="战斗结束",
             identifier=(T("确认"),T("入劫")),
-            callback=lambda: bg.set_signal("try_exit", True)
+            callback=lambda: bg.set_signal(BG_SIGNALS.TRY_EXIT, True)
         )
-        while not bg.signal("try_exit"):
+        while not bg.signal(BG_SIGNALS.TRY_EXIT):
             if time() >= deadline:
                 raise TimeoutError("每日梵天塔战斗等待结束超时")
             if cnt % 2 == 0:

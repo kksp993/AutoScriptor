@@ -20,7 +20,7 @@ def bonus_callback(start_game: bool = True) -> str:
     last_state_check = 0.0
     hit_count = 0
     # 与 battle_loop 一致：try_exit 为 True 时退出；未设置时 .signal(..., False) 为 False，应继续打地鼠
-    while not bg.signal("try_exit", False) and time() - start < 120:
+    while not bg.signal(BG_SIGNALS.TRY_EXIT, False) and time() - start < 120:
         check_cancel_raise()
         now = time()
         if now - last_state_check >= 0.8:
@@ -35,7 +35,7 @@ def bonus_callback(start_game: bool = True) -> str:
             click(B(box), save_screenshot=False)
         else:
             sleep(0.03)
-    if bg.signal("try_exit", False):
+    if bg.signal(BG_SIGNALS.TRY_EXIT, False):
         logger.info("打地鼠结束：收到退出信号，命中 %d 次", hit_count)
         return "settlement"
     logger.warning("打地鼠超时退出，命中 %d 次，准备检查结算界面", hit_count)
@@ -57,8 +57,8 @@ _FAIL_IDF = (
 
 
 def _stop_battle():
-    bg.set_signal("Pause_battle", True)
-    bg.set_signal("try_exit", True)
+    bg.set_signal(BG_SIGNALS.PAUSE_BATTLE, True)
+    bg.set_signal(BG_SIGNALS.TRY_EXIT, True)
 
 
 def _stop_for_bonus(kind: str):
@@ -174,15 +174,15 @@ def task(
 
         round_result = "unknown"
         bg.set_signal(_BONUS_SIGNAL, False)
-        bg.set_signal("try_exit", False)
-        bg.set_signal("Pause_battle", False)
+        bg.set_signal(BG_SIGNALS.TRY_EXIT, False)
+        bg.set_signal(BG_SIGNALS.PAUSE_BATTLE, False)
         with bg.scope("荒古万界") as scope:
             scope.add(name="settle", identifier=_SETTLE_IDF, callback=_stop_battle)
             scope.add(name="fail", identifier=_FAIL_IDF, callback=_stop_battle)
             if ui_T(_BONUS_RULE_IDF, 8):
                 logger.info("检测到打地鼠规则页，进入打地鼠分支")
                 round_result = _run_bonus_and_handle_settlement(start_game=True)
-            elif bg.signal("try_exit", False):
+            elif bg.signal(BG_SIGNALS.TRY_EXIT, False):
                 round_result = _handle_settlement(wait_timeout=3)
             else:
                 scope.add(

@@ -50,6 +50,14 @@ class NemuIpcControl(BaseMumuControl):
     def swipe(self, x1, y1, x2, y2, duration_s=0.5)->None:
         self.nemu_ipc.swipe_nemu_ipc((x1, y1), (x2, y2), speed=0.2)
 
+    def swipe_precise(self, x1, y1, x2, y2, duration_s=0.5)->None:
+        """通过 Nemu IPC 按固定直线、端点和时长滑动。"""
+        self.nemu_ipc.swipe_precise_nemu_ipc(
+            (x1, y1),
+            (x2, y2),
+            duration_s=duration_s,
+        )
+
     def input_text(self, text)->None:
         self.mumu.adb.input_text(text)
 
@@ -118,6 +126,18 @@ class MixControl(BaseMumuControl):
             self.mumu.adb.swipe(x1, y1, x2, y2, int(duration_s*1000))
         else:
             self.nemu_control.swipe(x1, y1, x2, y2, duration_s)
+
+    def swipe_precise(self, x1, y1, x2, y2, duration_s=1)->None:
+        """通过当前 MuMu 实例的 ADB 按指定端点和时长滑动。
+
+        精确滑动不经过 Nemu IPC 的随机贝塞尔轨迹，也不使用 ``b2p`` 的
+        随机点击偏移，适合拖动滑块或需要稳定起止坐标的页面操作。
+        """
+        self._log_action(
+            "PreciseSwipe",
+            f"({x1},{y1}) -> ({x2},{y2}), duration={duration_s:.3f}s",
+        )
+        self.nemu_control.swipe_precise(x1, y1, x2, y2, duration_s)
 
     def input_text(self, text)->None:
         if self.mode=="mumu":

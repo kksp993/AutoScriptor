@@ -42,6 +42,9 @@ const EditorPanel = {
         <el-button type="primary" size="small" class="!flex-1 min-w-0" @click="refreshScreenshot" :loading="loadingScreenshot">
           <i class="fa fa-camera mr-0.5"></i><span class="truncate">刷新截图</span>
         </el-button>
+        <el-button type="success" size="small" class="!flex-1 min-w-0" @click="insertCurrentTargetObject" :disabled="!optimizedSel">
+          <i class="fa fa-code mr-0.5"></i><span class="truncate">生成对象</span>
+        </el-button>
         <el-button size="small" class="!flex-1 min-w-0" @click="saveSelection" :disabled="!selection">
           <i class="fa fa-save mr-0.5"></i><span class="truncate">保存选区</span>
         </el-button>
@@ -689,6 +692,54 @@ const EditorPanel = {
       appendSnippetToActiveCode(line, cursorOffset);
     }
 
+    function insertSnippetAtActiveCursor(snippet, cursorOffset = null) {
+      if (!snippet) return false;
+      const target = activeCodeTarget();
+      const input = target.input.value;
+      const current = target.model.value || '';
+      let selectionRange = null;
+
+      if (input && typeof input.getSelectionRange === 'function') {
+        selectionRange = input.getSelectionRange();
+      }
+      if (!selectionRange) {
+        const textarea = codeTextareaElement(target);
+        if (textarea) {
+          const selectionStart = textarea.selectionStart || 0;
+          selectionRange = {
+            start: selectionStart,
+            end: textarea.selectionEnd || selectionStart,
+          };
+        }
+      }
+
+      const rawStart = selectionRange ? selectionRange.start : current.length;
+      const rawEnd = selectionRange ? selectionRange.end : rawStart;
+      const insertionStart = Math.max(0, Math.min(rawStart, current.length));
+      const insertionEnd = Math.max(insertionStart, Math.min(rawEnd, current.length));
+      const replacement = String(snippet);
+
+      if (input && typeof input.replaceRange === 'function') {
+        input.replaceRange(insertionStart, insertionEnd, replacement);
+      } else {
+        target.model.value = current.slice(0, insertionStart) + replacement + current.slice(insertionEnd);
+      }
+
+      const nextCursor = insertionStart + (cursorOffset == null ? replacement.length : cursorOffset);
+      focusCodeTargetAt(target, nextCursor);
+      return true;
+    }
+
+    function insertCurrentTargetObject() {
+      const target = buildTarget();
+      if (!target) {
+        ElementPlus.ElMessage.warning('请先框选区域');
+        return;
+      }
+      insertSnippetAtActiveCursor(target);
+      ElementPlus.ElMessage.success('已在光标处生成目标对象');
+    }
+
     function appendEnsureInAction(targetName) {
       appendCode(`ensure_in(${JSON.stringify(String(targetName || ''))})`);
       ElementPlus.ElMessage.success(`已添加「导航到 ${targetName}」`);
@@ -755,15 +806,15 @@ const EditorPanel = {
     function appendUiExists() {
       const tgt = buildTarget();
       const line = tgt ? `ui_T(${tgt})` : 'ui_T()';
-      appendRecordedSnippet(line, tgt ? null : line.indexOf('(') + 1);
-      ElementPlus.ElMessage.success('已添加「判断存在」');
+      insertSnippetAtActiveCursor(line, tgt ? null : line.indexOf('(') + 1);
+      ElementPlus.ElMessage.success('已在光标处添加「判断存在」');
     }
 
     function appendUiNotExists() {
       const tgt = buildTarget();
       const line = tgt ? `ui_F(${tgt})` : 'ui_F()';
-      appendRecordedSnippet(line, tgt ? null : line.indexOf('(') + 1);
-      ElementPlus.ElMessage.success('已添加「判断不在」');
+      insertSnippetAtActiveCursor(line, tgt ? null : line.indexOf('(') + 1);
+      ElementPlus.ElMessage.success('已在光标处添加「判断不在」');
     }
 
     function appendWaitAppear() {
@@ -793,6 +844,29 @@ const EditorPanel = {
       const cy = Math.floor((s.top + s.bottom) / 2);
       appendCode(buildClickCodeAt(cx, cy));
       ElementPlus.ElMessage.success('已添加「点击」');
+    }
+
+    function appendClickUntilAppear() {
+      const target = buildTarget();
+      if (!target) { ElementPlus.ElMessage.warning('请先框选点击目标'); return; }
+      const line = `click(${target}, until=lambda: ui_T())`;
+      insertSnippetAtActiveCursor(line, line.indexOf('ui_T(') + 'ui_T('.length);
+      ElementPlus.ElMessage.success('已添加「点击直到出现」，请生成条件目标');
+    }
+
+    function appendClickUntilDisappear() {
+      const target = buildTarget();
+      if (!target) { ElementPlus.ElMessage.warning('请先框选点击目标'); return; }
+      const line = `click(${target}, until=lambda: ui_F())`;
+      insertSnippetAtActiveCursor(line, line.indexOf('ui_F(') + 'ui_F('.length);
+      ElementPlus.ElMessage.success('已添加「点击直到消失」，请生成条件目标');
+    }
+
+    function appendClickNextUntil() {
+      const target = buildTarget();
+      if (!target) { ElementPlus.ElMessage.warning('请先框选下一步等待的目标'); return; }
+      insertSnippetAtActiveCursor(`click(B(0,0), until=lambda: ui_T(${target}))`);
+      ElementPlus.ElMessage.success('已添加「下一步直到」');
     }
 
     function appendSwipeAction() {
@@ -1097,7 +1171,12 @@ const EditorPanel = {
         { key: 'save-as', label: '另存为', icon: 'fa fa-files-o', action: () => ElementPlus.ElMessage.info('另存为暂未实现') },
       ] },
       { label: '操作', items: [
-        { key: 'click', label: '点击', icon: 'fa fa-mouse-pointer', action: appendClickAction, disabled: () => !optimizedSel.value },
+        { key: 'click', label: '点击', icon: 'fa fa-mouse-pointer', children: [
+          { key: 'click-once', label: '点击', icon: 'fa fa-mouse-pointer', action: appendClickAction, disabled: () => !optimizedSel.value },
+          { key: 'click-until-appear', label: '直到出现', icon: 'fa fa-eye', action: appendClickUntilAppear, disabled: () => !optimizedSel.value },
+          { key: 'click-until-disappear', label: '直到消失', icon: 'fa fa-eye-slash', action: appendClickUntilDisappear, disabled: () => !optimizedSel.value },
+          { key: 'click-next-until', label: '下一步直到', icon: 'fa fa-step-forward', action: appendClickNextUntil, disabled: () => !optimizedSel.value },
+        ] },
         { key: 'swipe', label: '滑动', icon: 'fa fa-hand-pointer-o', action: appendSwipeAction, disabled: () => !optimizedSel.value },
         { key: 'long-click', label: '长按', icon: 'fa fa-hand-rock-o', action: appendLongClickAction, disabled: () => !optimizedSel.value },
         { key: 'input', label: '输入', icon: 'fa fa-keyboard-o', action: appendInputTextAction },
@@ -1886,11 +1965,12 @@ const EditorPanel = {
       refreshScreenshot,
       onCanvasDragOver, onCanvasDragLeave, onCanvasDrop,
       onSelectionChange, onThresholdRelease,
-      saveSelection, onCopy, remoteClick, remoteSwipe,
+      saveSelection, insertCurrentTargetObject, onCopy, remoteClick, remoteSwipe,
       onCanvasRemoteClick, onCanvasRemoteSwipe,
       copyRecordedCode, saveCustomScript, stopCustomCodeExecution, onCustomExecKeydown, executeCustomCode,
       closeRecorderMenu, toggleRecorderGroup, toggleRecorderSubmenu, toggleRecorderNestedSubmenu, runRecorderMenuAction,
       appendLocate, appendUiExists, appendUiNotExists, appendWaitAppear, appendWaitDisappear, appendSleepWait,
+      appendClickUntilAppear, appendClickUntilDisappear, appendClickNextUntil,
       appendExtractInfo, appendExtractColor, appendExtractGridInfo,
       appendBgScope, appendBgLambdaListener, appendBgFunctionListener, appendBgNewSignal, appendBgSignalIfTrue,
       appendBgWaitSignalTrue, appendBgClearSignal, appendBgClearAllSignals, appendBgIntervalScope,

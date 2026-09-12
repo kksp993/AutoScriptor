@@ -2,6 +2,8 @@
 
 错误归档用于任务失败后保存足够还原现场的信息。当前 `src` 分支只保留源码运行路径，归档目录由 `AutoScriptor.utils.paths.get_error_archives_dir()` 决定，通常是仓库 `logs/errors/`。
 
+源码终端使用 Rich 显示调用文件和行号。Windows 文件超链接必须转换为标准 `file:///D:/...` URI，并对空格和非 ASCII 路径做 URL 编码；日志文字和落盘日志仍保留本机路径，避免终端把 `file://D:\\...` 错误解析为根目录 `\\`。
+
 ## 产生位置
 
 `TaskManager._execute_single_task()` 捕获普通异常时调用 `archive_error()`。以下情况不作为普通错误归档：
@@ -13,13 +15,13 @@
 
 ## 归档内容
 
-| 文件/目录 | 内容 |
-|-----------|------|
-| `error.log` | 最近日志、异常信息、上下文、完整堆栈和局部变量 |
-| `current_screenshot.png` | 捕获异常时的当前画面 |
-| `timed_screenshot_1.png` ~ `timed_screenshot_3.png` | 后续每秒一张 |
-| `click_screenshots/` | 本任务调试截图副本 |
-| `task_record.mp4` | 任务级 `debug_mode` 下失败保留的 ADB 录屏；任务成功或取消时删除 |
+| 文件/目录　　　　　　　　　　　　　　　　　　　　　 | 内容　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
+| -----------------------------------------------------| -----------------------------------------------------------------|
+| `error.log`　　　　　　　　　　　　　　　　　　　　 | 最近日志、异常信息、上下文、完整堆栈和局部变量　　　　　　　　　|
+| `current_screenshot.png`　　　　　　　　　　　　　　| 捕获异常时的当前画面　　　　　　　　　　　　　　　　　　　　　　|
+| `timed_screenshot_1.png` ~ `timed_screenshot_3.png` | 后续每秒一张　　　　　　　　　　　　　　　　　　　　　　　　　　|
+| `click_screenshots/`　　　　　　　　　　　　　　　　| 本任务调试截图副本　　　　　　　　　　　　　　　　　　　　　　　|
+| `task_record.mp4`　　　　　　　　　　　　　　　　　 | 任务级 `debug_mode` 下失败保留的 ADB 录屏；任务成功或取消时删除 |
 
 调试截图来自 `get_logs_root()/debug_screenshot/`。任务开始前会清空，归档后也会清空，保证归档里的截图属于本任务。任务录屏由 `AutoScriptor.utils.task_video_recorder` 挂载在 `TaskManager`，顶部硬编码开关可临时关闭或删除工具卸载。
 

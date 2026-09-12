@@ -38,7 +38,7 @@ def daily_arena_task(
         scope.add(
             name="try_exit",
             identifier=T("决斗场"),
-            callback=lambda: bg.set_signal("try_exit", True),
+            callback=lambda: bg.set_signal(BG_SIGNALS.TRY_EXIT, True),
         )
         h.set(True,1).jjc_battle()
     click(B(1210,20,40,40))
