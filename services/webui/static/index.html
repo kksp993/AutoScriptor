@@ -207,6 +207,9 @@
 
         <update-panel v-if="activeTab==='updater'"></update-panel>
 
+        <notifications-panel v-if="activeTab==='notifications'"
+          :execution-busy="executionBusy"></notifications-panel>
+
         <settings-panel v-if="activeTab==='settings'"
           :filtered-config="filteredConfig"
           :execution-busy="executionBusy"
@@ -497,24 +500,25 @@
 
   <!-- Vue 组件 -->
   <script src="/static/js/components/NewsPanel.js?v=4"></script>
-  <script src="/static/js/components/AppSidebar.js?v=17"></script>
+  <script src="/static/js/components/AppSidebar.js?v=18"></script>
   <script src="/static/js/core/taskStatusTheme.js?v=1"></script>
   <script src="/static/js/components/TaskTree.js?v=15"></script>
   <script src="/static/js/components/Overview.js?v=19"></script>
   <script src="/static/js/components/SchedulerPanel.js?v=15"></script>
   <script src="/static/js/components/TaskPanel.js?v=23"></script>
   <script src="/static/js/components/Settings.js?v=10"></script>
+  <script src="/static/js/components/NotificationsPanel.js?v=2"></script>
   <script src="/static/js/components/AboutPanel.js?v=1"></script>
   <script src="/static/js/components/UpdatePanel.js?v=1"></script>
   <script src="/static/js/components/editor/EditorCanvas.js?v=10"></script>
   <script src="/static/js/components/editor/EditorControls.js?v=14"></script>
   <script src="/static/js/components/editor/PythonCodeEditor.js?v=3"></script>
-<script src="/static/js/components/editor/EditorPanel.js?v=34"></script>
+<script src="/static/js/components/editor/EditorPanel.js?v=35"></script>
   <script src="/static/js/components/DiagnosticsPanel.js?v=3"></script>
   <script src="/static/js/components/ErrorArchivesPanel.js?v=4"></script>
   <script src="/static/js/task_help_docs.js?v=1"></script>
   <script src="/static/js/core/api.js?v=1"></script>
   <script src="/static/js/stores/runtimeStore.js?v=1"></script>
-  <script src="/static/js/app.js?v=41"></script>
+  <script src="/static/js/app.js?v=42"></script>
 </body>
 </html>

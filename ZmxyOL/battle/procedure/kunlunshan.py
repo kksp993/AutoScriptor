@@ -21,7 +21,7 @@ def kls_yxd_callback(registry=bg):
     # 消耗玉虚殿门票，设置为False并保存
     cfg.set("status.kunlunshan.has_YuxuDian_ticket", False)
     
-    bg.set_signal("Pause_battle", True)
+    bg.set_signal(BG_SIGNALS.PAUSE_BATTLE, True)
     try:
         h.move_right().travel()
         cur, pre = 0,99999
@@ -38,19 +38,19 @@ def kls_yxd_callback(registry=bg):
             name="玉虚殿-战斗结束",
             identifier=T(key="昆仑山-退出关卡"),
             callback=lambda: [
-                bg.set_signal("try_exit", True)
+                bg.set_signal(BG_SIGNALS.TRY_EXIT, True)
             ],
         )
     finally:
-        bg.set_signal("Pause_battle", False)
+        bg.set_signal(BG_SIGNALS.PAUSE_BATTLE, False)
 
 def _request_try_exit_with_confirm_guard(max_wait: float = 180, interval: float = 1.0):
     """请求 battle_loop 退出，并在退出信号复位前顺手处理可能出现的「确定」弹窗。"""
-    bg.set_signal("try_exit", True)
+    bg.set_signal(BG_SIGNALS.TRY_EXIT, True)
     start = time()
     confirm_target = (T("确定", color="绿色"), T("确定"))
 
-    while bg.signal("try_exit", False):
+    while bg.signal(BG_SIGNALS.TRY_EXIT, False):
         if time() - start > max_wait:
             logger.warning("昆仑山退出确认守护等待 try_exit 复位超时，结束本次回调")
             return
@@ -80,12 +80,12 @@ def _schedule_zhuque_try_exit(round_token: str, delay: float = _ZHUQUE_EXIT_DELA
     def _worker():
         start = time()
         while time() - start < delay:
-            if bg.signal(_ZHUQUE_TOKEN_SIGNAL) != round_token or bg.signal("try_exit", False):
+            if bg.signal(_ZHUQUE_TOKEN_SIGNAL) != round_token or bg.signal(BG_SIGNALS.TRY_EXIT, False):
                 return
             sleep(max(0.05, min(1.0, delay - (time() - start))))
-        if bg.signal(_ZHUQUE_TOKEN_SIGNAL) == round_token and not bg.signal("try_exit", False):
+        if bg.signal(_ZHUQUE_TOKEN_SIGNAL) == round_token and not bg.signal(BG_SIGNALS.TRY_EXIT, False):
             logger.info("朱雀神殿兜底等待结束，触发 try_exit")
-            bg.set_signal("try_exit", True)
+            bg.set_signal(BG_SIGNALS.TRY_EXIT, True)
 
     Thread(target=_worker, daemon=True, name="KunlunshanZhuqueExit").start()
 
@@ -95,7 +95,7 @@ def kunlunshan_battle(num: int = 5, flow_name: str | None = None, equipment: str
     for round_idx in range(1, num + 1):
         logger.info("昆仑山轮次 %d/%d 开始", round_idx, num)
         h.set(has_cd=False, speed_x=3)   
-        bg.set_signal("try_exit", False)
+        bg.set_signal(BG_SIGNALS.TRY_EXIT, False)
         bg.set_signal("kunlunshan_hidden_seen", False)
         zhuque_round_token = f"{round_idx}:{time()}"
         bg.set_signal(_ZHUQUE_TOKEN_SIGNAL, zhuque_round_token)
@@ -140,7 +140,7 @@ def kunlunshan_battle(num: int = 5, flow_name: str | None = None, equipment: str
                     ),
                     callback=lambda: [
                         h.set(has_cd=False, speed_x=1 if ui_T((B(803,546,46,19, color="白色"),B(1022,535,7,27, color="白色")),2) else 3),
-                        bg.set_signal("try_exit", True)
+                        bg.set_signal(BG_SIGNALS.TRY_EXIT, True)
                     ],
                     once=True,
                 )
@@ -153,7 +153,7 @@ def kunlunshan_battle(num: int = 5, flow_name: str | None = None, equipment: str
                     wait_for_disappear(I("加载中"))
                     logger.info("昆仑山轮次 %d/%d 结束", round_idx, num)
                 finally:
-                    bg.set_signal("try_exit", False)
+                    bg.set_signal(BG_SIGNALS.TRY_EXIT, False)
                     bg.set_signal("hidden", False)
                     bg.set_signal("kunlunshan_hidden_seen", False)
                     bg.set_signal(_ZHUQUE_TOKEN_SIGNAL, None)

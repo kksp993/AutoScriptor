@@ -18,7 +18,7 @@
 
 AutoScriptor 的内置游戏截图、模板、`Box` 和点击坐标统一使用 **1280x720 横屏绝对像素**。`Box(x, y, width, height)` 表示左上角坐标与宽高；运行时不会自动缩放截图、模板或坐标。
 
-Editor 遥控和自定义脚本可以操作其他应用的原生截图尺寸，例如 720x1280 竖屏。纯坐标 `click(B(x, y))` 直接使用该原生坐标；需要扩大 OCR/模板区域时必须写明截图尺寸，例如 `Box(...).margin(frame_size=(720, 1280))`。Editor 在非 1280x720 截图上生成 T/I 代码时会自动携带该参数，左侧执行栏和保存后的脚本使用同一代码语义。这里不做坐标换算；执行时应用方向必须与录制时一致。
+Editor 遥控和自定义脚本可以操作其他应用的原生截图尺寸，例如 720x1280 竖屏。纯坐标 `click(B(x, y))` 直接使用该原生坐标；单个区域可写 `Box(...).margin(frame_size=(720, 1280))`。整份独立脚本也可先调用 `setFrameSize(MUMU_SIZE_720_1280)`，之后的 `Box(...).margin()` 会按该尺寸裁剪。Editor 在非 1280x720 截图上仍生成显式 `frame_size`，避免共享进程中的全局尺寸泄漏。这里不做坐标换算；执行时应用方向必须与录制时一致。
 
 `MixControl.screenshot()` 会检查实际帧尺寸。尺寸不符时会输出带实际值和期望值的中文 warning，同一异常尺寸 60 秒内节流；原始帧会原样返回，不抛异常、不改尺寸。运行内置游戏任务时应修正 MuMu 分辨率；明确操作竖屏外部应用时则保留原生尺寸，并为识别区域显式声明 `frame_size`。
 
@@ -61,14 +61,29 @@ from AutoScriptor import *
 | 类型　　　　　| 名称　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
 | ---------------| ----------------------------------------------------------------------------|
 | 目标　　　　　| `B`、`I`、`T`、`Box`、`Target`、`ui`　　　　　　　　　　　　　　　　　　　 |
-| 操作　　　　　| `click`、`swipe`、`input`、`key_event`、`sleep`　　　　　　　　　　　　　　|
+| 操作　　　　　| `click`、`click_all`、`swipe`、`swipe_precise`、`input`、`key_event`、`sleep` |
 | 定位/区域识别 | `locate`、`match`、`ui_T`、`ui_F`、`wait_for_appear`、`wait_for_disappear` |
 | OCR/提取颜色　| `extract_info`、`get_colors`、`coloris`　　　　　　　　　　　　　　　　　　|
 | 后台　　　　　| `bg`、`BG_SIGNALS`　　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
-| 配置/状态　　 | `cfg`、`get_task_status`、`set_task_status`　　　　　　　　　　　　　　　　|
+| 配置/状态　　 | `cfg`、`logger`、`get_task_status`、`set_task_status`　　　　　　　　　　　|
+| 初始化/App　　| `init`、`launch_app`、`close_app`、`go_home`　　　　　　　　　　　　　　　|
+| 帧尺寸　　　　| `setFrameSize`、`getFrameSize`、`MUMU_SIZE_1280_720`、`MUMU_SIZE_720_1280` |
 | 错误　　　　　| `TaskRequireReTry`、`RequestHumanTakeover`　　　　　　　　　　　　　　　　 |
 
 `clear_task_status` 目前不是 `AutoScriptor.__all__` 公共导出；需要清理状态时从 `AutoScriptor.utils.task_state` 导入。
+
+独立设备脚本直接调用 `init()`；若目标是游戏盒等其他 App，不希望先拉起配置中的游戏，则调用 `init(launch_app=False)`，然后使用 `launch_app(package_name)`、`close_app(package_name)` 和 `go_home()`。不要从星号导入后长期保存 `mixctrl/mumu` 快照。
+
+造梦业务接口可从聚合入口导入，例如：
+
+```python
+from AutoScriptor import *
+from ZmxyOL import *
+
+setFrameSize(MUMU_SIZE_720_1280)
+init(launch_app=False)
+login(client=LoginClient.HZ4399)
+```
 
 ## 定位
 
@@ -117,7 +132,9 @@ if hit:
 click(T("确定"), timeout=10)
 click((T("知道了"), T("取消")), if_exist=True)
 click(B(100, 200, 40, 40), repeat=2, interval=0.2)
+click_all(T("领取", box=Box(900, 400, 120, 220)), if_exist=True)
 swipe(B(600, 600, 1, 1), B(600, 200, 1, 1), duration_s=1)
+swipe_precise(B(600, 600, 1, 1), B(600, 200, 1, 1), duration_s=1)
 input("hello", T("请输入"))
 key_event(4)
 sleep(1)
@@ -127,6 +144,8 @@ sleep(1)
 
 - `sleep()` 是可取消等待；任务脚本不要直接 `time.sleep()`。
 - `click(..., if_exist=True)` 找不到目标时返回 `False`，不会抛错。
+- `click_all(target)` 固定当前一帧内单个目标的全部命中框，按从上到下、同一行从左到右各点一次并返回点击数量；`click(..., repeat=N)` 仍是重复点击同一个命中框。
+- `swipe()` 保留随机偏移和 Nemu IPC 的拟人化轨迹；需要稳定起止坐标时使用 `swipe_precise()`，它取目标框中心并通过 Nemu IPC 发送固定直线和指定时长的触摸轨迹。
 - `click(..., until=callable)` 会循环点击直到条件满足或超时；未传 `interval` 时循环间隔默认 0.5 秒，普通 `click()` 默认仍为 0 秒。
 - `offset` / `resize` 和 `Box + {"offset": ..., "resize": ...}` 使用同一坐标语义。
 - `click()`、`locate()` 超时较长时会保存失败截图到调试截图目录。
@@ -143,6 +162,8 @@ values = extract_info(box_grid, mode="both")
 ```
 
 `extract_info` 的 `mode` 只接受 `digital_only`、`text`、`img`、`both`：分别表示仅数字、仅 OCR 文本、仅匹配 `ui_map` 已登记图片并返回条目 key，以及逐格优先图片、未命中时再 OCR。单个 Box、Box 列表和二维 Box 网格会保持对应的返回形状；未识别的格子保留 `None` 或空字符串。`post_process` 解析失败会记录为本次识别失败并继续重试，重试耗尽后返回 `None`，不会把原始 OCR 文本当作处理后结果返回。`extract_info(..., screenshot_frame=frame)` 会固定使用同一帧，适合在线截图测试、Editor 导入图和批量识别，避免 UI 漂移。OCR 层应保留识别语义，业务层再决定是否转成数量 `0` 或 `1`。
+
+OCR 短时缓存按完整图像内容摘要区分帧，不能用稀疏像素采样代替，否则相同背景上的不同文字可能误命中旧结果。`click()` 返回只表示输入事件已经发送，不表示游戏已经渲染下一帧；点击后立即读取会遇到旧画面时，应等待名称、模板或目标区域等可观察状态发生变化，再识别变化后的帧，而不是依赖 `ensure_not_empty` 接受仍非空的旧值。
 
 ### 提取颜色
 

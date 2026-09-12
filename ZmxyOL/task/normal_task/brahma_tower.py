@@ -24,13 +24,13 @@ def battle():
         scope.add(
             name="战斗结束",
             identifier=(T("确认"),T("前往新一层")),
-            callback=lambda: bg.set_signal("try_exit", True)
+            callback=lambda: bg.set_signal(BG_SIGNALS.TRY_EXIT, True)
         )
         scope.add(
             name="捷径",
             identifier=T("入劫"),
             callback=lambda: [
-                bg.set_signal("try_exit", True),
+                bg.set_signal(BG_SIGNALS.TRY_EXIT, True),
                 bg.set_signal("short_cut", True),
             ]
         )

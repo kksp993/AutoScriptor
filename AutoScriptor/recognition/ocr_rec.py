@@ -1,3 +1,4 @@
+import hashlib
 import threading
 import time
 
@@ -178,13 +179,19 @@ _frame_cache: dict[tuple, dict] = {}
 _FRAME_CACHE_MAX = 4
 
 
-_SAMPLE_N = 7  # 7×7 = 49 均匀采样点
 def _frame_fingerprint(img):
-    """7×7 均匀网格采样指纹，覆盖全图，避免局部变化漏检。"""
-    h, w = img.shape[:2]
-    rs = np.linspace(0, h - 1, _SAMPLE_N, dtype=int)
-    cs = np.linspace(0, w - 1, _SAMPLE_N, dtype=int)
-    return (h, w, img[np.ix_(rs, cs)].tobytes())
+    """Return a compact fingerprint that changes with any image content.
+
+    Sparse pixel sampling is unsafe for OCR regions: two labels can share the
+    same background and differ only between sampled pixels, which makes the
+    cache return text recognized from an older frame.
+    """
+    contiguous_image = np.ascontiguousarray(img)
+    content_digest = hashlib.blake2b(
+        contiguous_image.tobytes(),
+        digest_size=16,
+    ).digest()
+    return contiguous_image.shape, contiguous_image.dtype.str, content_digest
 
 
 def _raw_ocr_cached(img_for_ocr, ttl=0.5):

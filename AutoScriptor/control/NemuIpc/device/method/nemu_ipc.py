@@ -696,6 +696,42 @@ class NemuIpc():
             self.nemu_ipc.up()
             time.sleep(0.050 / speed)
 
+    def swipe_precise_nemu_ipc(self, p1, p2, duration_s: float = 0.5):
+        """按固定直线和时间表发送一次完整触摸手势。
+
+        与 ``swipe_nemu_ipc`` 的拟人化轨迹不同，这里不生成随机控制点，
+        而是让每个触摸更新点落在线段 ``p1 -> p2`` 上。Nemu IPC 没有
+        单独的 move 接口，连续的 touch-down 事件就是移动事件。
+        """
+        if duration_s <= 0:
+            raise ValueError("duration_s 必须大于 0")
+
+        start_x, start_y = int(p1[0]), int(p1[1])
+        end_x, end_y = int(p2[0]), int(p2[1])
+        # 约每 10ms 一个触摸更新点；至少保留起点和终点两个事件。
+        point_count = max(2, min(240, int(round(duration_s * 100)) + 1))
+        interval_s = duration_s / (point_count - 1)
+
+        with self._ipc_lock:
+            gesture_started = False
+            gesture_start_time = time.perf_counter()
+            try:
+                for point_index in range(point_count):
+                    progress = point_index / (point_count - 1)
+                    current_x = round(start_x + (end_x - start_x) * progress)
+                    current_y = round(start_y + (end_y - start_y) * progress)
+                    self.nemu_ipc.down(current_x, current_y)
+                    gesture_started = True
+
+                    target_time = gesture_start_time + point_index * interval_s
+                    remaining_s = target_time - time.perf_counter()
+                    if remaining_s > 0:
+                        time.sleep(remaining_s)
+            finally:
+                if gesture_started:
+                    self.nemu_ipc.up()
+            time.sleep(0.050)
+
     def drag_nemu_ipc(self, p1, p2, point_random=(-10, -10, 10, 10), speed:float=0.2):
         with self._ipc_lock:
             p1 = np.array(p1) - random_rectangle_point(point_random)

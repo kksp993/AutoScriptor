@@ -166,13 +166,17 @@ class Box(collections.namedtuple('Box', 'left top width height')):
         self,
         margin: int = 20,
         *,
-        frame_size: tuple[int, int] = (1280, 720),
+        frame_size: tuple[int, int] | None = None,
     ) -> 'Box':
         """扩大识别区域，并裁剪到指定截图尺寸。
 
-        ``frame_size`` 使用 ``(width, height)``。默认值保持项目内置游戏任务的
-        1280x720 横屏合同；编辑器处理其他尺寸截图时必须显式传入真实帧尺寸。
+        ``frame_size`` 使用 ``(width, height)``。未显式传入时读取
+        ``setFrameSize()`` 设置的当前脚本帧尺寸，默认仍为 1280x720 横屏。
         """
+        if frame_size is None:
+            from AutoScriptor.core.display_contract import getFrameSize
+
+            frame_size = getFrameSize()
         frame_width, frame_height = frame_size
         if frame_width <= 0 or frame_height <= 0:
             raise ValueError(f"frame_size 必须为正数，收到 {frame_size!r}")

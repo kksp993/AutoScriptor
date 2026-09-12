@@ -26,7 +26,7 @@ def task(
             scope.add(
                 name="try_exit",
                 identifier=T("确定"),
-                callback=lambda: bg.set_signal("try_exit", True),
+                callback=lambda: bg.set_signal(BG_SIGNALS.TRY_EXIT, True),
                 once=True
             )
             flow_name = getattr(battle_flow, "value", battle_flow)

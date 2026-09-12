@@ -8,6 +8,7 @@ __all__ = [
     "h","combo",
     # nav
     'MapManager', 'Loc', 'Env', 'mm', 'path', 'ensure_in', 'try_close_via_x',
+    'LoginClient', 'login',
     # task
     'register_task', "task_registry", "get_task_table",
     "get_task_status", "set_task_status",

@@ -610,6 +610,7 @@ def _build_wrapped_custom_task_source(name: str, code: str, metadata: dict | Non
     body = textwrap.indent(code.rstrip() or "pass", "    ")
     imports = [
         "from AutoScriptor import *",
+        "from ZmxyOL.battle import h",
         "from ZmxyOL.nav.api import *",
         "from ZmxyOL.nav.envs.decorators import *",
         "from ZmxyOL.task.task_register import register_task",
@@ -676,6 +677,13 @@ def _editor_nav_namespace() -> dict:
     symbols["ensure_in"] = nav_api.ensure_in
     symbols["LOC_ENV"] = nav_decorators.LOC_ENV
     return symbols
+
+
+def _editor_battle_namespace() -> dict:
+    """Expose the shared runtime hero used by editor battle snippets."""
+    from AutoScriptor.battle_character.hero import h
+
+    return {"h": h}
 
 
 def _read_ui_map_rows(csv_path: str) -> list[dict]:
@@ -1357,6 +1365,7 @@ def _run_editor_snippet(
         "sleep": getattr(api_mod, "sleep", time_mod.sleep),
     }
     ns.update(_editor_nav_namespace())
+    ns.update(_editor_battle_namespace())
 
     code = (code or "").strip()
     if not code:

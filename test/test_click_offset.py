@@ -6,6 +6,51 @@ from AutoScriptor.utils.box import Box
 
 
 class ClickOffsetSemanticsTest(unittest.TestCase):
+    @patch("AutoScriptor.core.api.cancellable_sleep")
+    @patch("AutoScriptor.core.api.mixctrl")
+    def test_click_all_clicks_every_match_in_visual_order(self, mock_ctrl, mock_sleep):
+        from AutoScriptor.core.api import click_all
+
+        target = T("领取", box=Box(900, 400, 120, 220))
+        mock_ctrl.locate.return_value = [[
+            Box(930, 520, 60, 30),
+            Box(940, 430, 60, 30),
+            Box(850, 430, 60, 30),
+        ]]
+
+        with patch("AutoScriptor.utils.box.random.randint", return_value=0):
+            clicked_count = click_all(
+                target,
+                timeout=0,
+                interval=0.2,
+                assure_stable=False,
+                save_screenshot=False,
+            )
+
+        self.assertEqual(clicked_count, 3)
+        self.assertEqual(
+            mock_ctrl.click.call_args_list,
+            [call(880, 445), call(970, 445), call(960, 535)],
+        )
+        self.assertEqual(mock_sleep.call_args_list, [call(0), call(0.2), call(0.2), call(0.2)])
+
+    @patch("AutoScriptor.core.api.mixctrl")
+    def test_click_all_returns_zero_when_optional_target_is_absent(self, mock_ctrl):
+        from AutoScriptor.core.api import click_all
+
+        mock_ctrl.locate.return_value = [[]]
+
+        clicked_count = click_all(
+            T("领取"),
+            timeout=0,
+            if_exist=True,
+            assure_stable=False,
+            save_screenshot=False,
+        )
+
+        self.assertEqual(clicked_count, 0)
+        mock_ctrl.click.assert_not_called()
+
     @patch("AutoScriptor.core.api.mixctrl")
     def test_click_offset_does_not_move_locate_target_box(self, mock_ctrl):
         from AutoScriptor.core.api import click

@@ -34,6 +34,15 @@ class EditorCoordinateExecutionTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["result"], "257,1211,206,63")
 
+    def test_execute_code_exposes_shared_battle_hero(self):
+        recording_mix_control = _RecordingMixControl()
+
+        with patch.object(core_api, "mixctrl", recording_mix_control):
+            result = _run_editor_snippet("h.skill(1)")
+
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(len(recording_mix_control.clicked_points), 1)
+
 
 class EditorExecutionGateTests(unittest.TestCase):
     def setUp(self):

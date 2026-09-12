@@ -197,6 +197,8 @@ def import_api_for_test():
 
     autoscriptor = mod("AutoScriptor")
     autoscriptor.__path__ = [str(ROOT / "AutoScriptor")]
+    core_pkg = mod("AutoScriptor.core")
+    core_pkg.__path__ = [str(ROOT / "AutoScriptor" / "core")]
     cv2_stub = mod("cv2")
     utils_pkg = mod("AutoScriptor.utils")
     utils_pkg.__path__ = [str(ROOT / "AutoScriptor" / "utils")]
@@ -930,6 +932,48 @@ class TestDeviceFacadeDiagnostics(unittest.TestCase):
 
 
 class TestEnsureAppRunningLifecycle(unittest.TestCase):
+    def test_init_can_connect_without_launching_configured_app(self):
+        module = import_api_for_test()
+        cancel_checks = []
+
+        with patch.dict(sys.modules, module.stub_modules):
+            module.init(
+                start_emulator=True,
+                launch_app=False,
+                cancel_check=lambda: cancel_checks.append("checked"),
+            )
+
+        self.assertTrue(module.FakeMumu.selected.power.started)
+        self.assertEqual(module.FakeMumu.selected.app.launched, [])
+        self.assertGreater(len(cancel_checks), 0)
+        self.assertIs(module.stub_modules["AutoScriptor"].mixctrl, module.mixctrl)
+        self.assertIs(module.stub_modules["AutoScriptor.core"].mixctrl, module.mixctrl)
+
+    def test_public_app_helpers_use_active_device_session(self):
+        module = import_api_for_test()
+        app_calls = []
+        home_calls = []
+        module.mixctrl = SimpleNamespace(
+            app=SimpleNamespace(
+                launch=lambda package_name: app_calls.append(("launch", package_name)),
+                close=lambda package_name: app_calls.append(("close", package_name)),
+            ),
+            androidEvent=SimpleNamespace(go_home=lambda: home_calls.append("home")),
+        )
+
+        module.close_app("com.example.gamecenter")
+        module.launch_app("com.example.gamecenter")
+        module.go_home()
+
+        self.assertEqual(
+            app_calls,
+            [
+                ("close", "com.example.gamecenter"),
+                ("launch", "com.example.gamecenter"),
+            ],
+        )
+        self.assertEqual(home_calls, ["home"])
+
     def test_execution_start_uses_explicit_device_flags(self):
         module = import_api_for_test()
 

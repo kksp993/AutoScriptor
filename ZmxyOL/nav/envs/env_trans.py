@@ -13,7 +13,7 @@ def way():
     from ZmxyOL.nav.api import ensure_in
     ensure_in(mm.get_region()[0])
     logger.debug(f"当前区域: {mm.get_region()[0]}==>世界地图")
-    click(I("导航-世界地图"), until=lambda: ui_T(I("世界地图-极北")))
+    click(I("导航-世界地图"), until=lambda: ui_T(I("世界地图-极北")) or ui_T(T("庭", box=Box(429,126,80,87).margin())))
     # mm.set_region("世界地图")
 
 def way(env_name: str):

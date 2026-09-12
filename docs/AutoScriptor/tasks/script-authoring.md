@@ -1,6 +1,10 @@
 # Task Script Authoring 当前规则
 
-任务脚本可以继续使用 `from AutoScriptor import *`，但要遵守当前任务注册、状态、调度和 WebUI 投影规则。
+任务脚本可以继续使用 `from AutoScriptor import *`；造梦导航、登录、战斗和任务公共符号优先使用 `from ZmxyOL import *`。只有聚合 API 尚未提供的内部能力才直达子模块，同时应评估是否应补到公共出口。任务仍须遵守当前注册、状态、调度和 WebUI 投影规则。
+
+独立脚本可直接 `init()`。操作配置游戏以外的 App 时用 `init(launch_app=False)`，并通过 `launch_app()`、`close_app()`、`go_home()` 操作当前设备。竖屏脚本可调用 `setFrameSize(MUMU_SIZE_720_1280)`，随后统一使用 `Box(...).margin()`；共享 WebUI/调度进程中的任务更适合继续为每个区域显式传入 `frame_size`，避免改变其他任务的默认裁剪尺寸。
+
+位于 `test/scripts/` 且按 `.py` 文件路径直接启动的独立脚本没有包上下文；引用同目录辅助模块时使用 `from base import ...` 等同目录导入，不要使用 `from .base import ...`。只有通过 `python -m package.module` 启动的真实包模块才能使用相对导入。
 
 ## 注册位置
 
@@ -26,6 +30,8 @@ WebUI Editor 的“保存脚本”接口 `/api/editor/save-custom-task` 也必�
 Editor 操作录制区的“工具 > 导航到...”按 `ZmxyOL.nav.envs` 的环境和位置层级展示导航目标。点击环境或位置会在当前代码目标中插入 `ensure_in("目标名称")`；位置名可包含 `天庭#1` 等索引后缀。
 
 Editor 操作录制区的“定位 > 区域识别 > 匹配目标（match）”会根据当前选区生成 `B/T/I` 目标，并在当前代码目标中插入 `match(...)`。复杂的 tuple（OR）或 list（AND）目标可在插入后继续编辑。
+
+图片编辑器顶部的“生成对象”会将当前选区生成的 `B/T/I` 目标插入录制区或函数编辑窗口的当前光标/选区。“判断存在/判断不在”同样在光标处生成；“操作 > 点击 > 直到出现/直到消失”先生成带空 `ui_T()` / `ui_F()` 的 `until=lambda:` 条件并将光标放在括号内，可重新框选条件目标后点击“生成对象”补入。“下一步直到”使用当前目标生成 `click(B(0,0), until=lambda: ui_T(...))`。
 
 编辑器保存裸片段时会按表单生成 `@register_task(path_cn="自定义任务/...", description=..., task_doc=...)`，并把参数设置转换为函数签名、本地 `enum.Enum` 类和默认值；如果传入的是完整自定义任务文件，文件内的 `@register_task` 必须显式提供 `path_cn`，已有装饰器元数据由文件自身负责。只落盘未注册的 Python 片段不会出现在 WebUI 任务树中。
 
@@ -68,6 +74,8 @@ WebUI 的“任务列表”使用全局 `task_ordering` 覆盖层保存用户拖
 - `enum.Enum`：JSON 存枚举 `.name`，执行前恢复为枚举对象。
 - `list[Enum]` / `tuple[Enum]`：保存 name 列表。
 - `TableParam`：保存 dict-of-dicts，并通过 `param_meta` 恢复列类型。
+
+任务升级为 `TableParam` 增加默认行或列时，注册阶段会逐行补齐新默认值，同时保留已有用户值，避免旧账号看不到新配置项。
 
 ```python
 import enum
@@ -157,9 +165,9 @@ progress = get_task_status("progress")
 
 ## 设备和识别
 
-- 普通任务只调用 `click/locate/match/swipe/input/key_event/extract_info/get_colors/coloris`。
+- 普通任务只调用 `click/click_all/locate/match/swipe/input/key_event/extract_info/get_colors/coloris`。同屏多个相同按钮使用 `click_all(target)`；`click(..., repeat=N)` 只用于重复点击同一个命中位置。
 - 内置游戏任务的截图、模板、`B/Box` 和点击坐标都按 `1280x720` 横屏绝对像素编写；`B(x, y, width, height)` 使用左上角与宽高，不编写相对坐标或静默缩放逻辑。
-- 内置游戏截图尺寸不符合合同时运行时只会节流 warning 并继续任务，不会自动缩放；应修正 MuMu 分辨率。明确操作竖屏外部应用时可使用其原生坐标，但 OCR/模板区域的 `.margin()` 必须传 `frame_size=(width, height)`，且执行方向必须与录制方向一致。
+- 内置游戏截图尺寸不符合合同时运行时只会节流 warning 并继续任务，不会自动缩放；应修正 MuMu 分辨率。明确操作竖屏外部应用时可使用其原生坐标；独立脚本先调用 `setFrameSize(...)` 后可直接使用 `.margin()`，共享进程任务则应显式传 `frame_size=(width, height)`。执行方向必须与录制方向一致。
 - 任务脚本只依赖现有公共识别 API，不导入或依赖内部 `RecognitionResult` 追踪结构。
 - `extract_info(..., mode=...)` 使用 `digital_only`（仅数字）、`text`（仅 OCR 文本）、`img`（仅返回 `ui_map` 图片 key）或 `both`（逐格优先图片，未命中再 OCR）；Box 列表和二维网格会保持返回形状。`post_process` 解析失败会继续重试，最终仍失败时返回 `None`，任务逻辑不要把原始 OCR 文本当作已解析业务值使用。
 - 不直接调用 MuMuManager subprocess；设备会话由调度器、WebUI 或 runtime context 管。

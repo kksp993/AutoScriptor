@@ -5,7 +5,13 @@ import numpy as np
 
 import AutoScriptor
 from AutoScriptor.core.control import MixControl
-from AutoScriptor.core.display_contract import EXPECTED_FRAME_SIZE, get_frame_size
+from AutoScriptor.core.display_contract import (
+    EXPECTED_FRAME_SIZE,
+    MUMU_SIZE_1280_720,
+    MUMU_SIZE_720_1280,
+    get_frame_size,
+    setFrameSize,
+)
 from AutoScriptor.utils.box import Box
 
 
@@ -41,6 +47,21 @@ class ResolutionContractTests(unittest.TestCase):
         expanded_target = portrait_target.margin(frame_size=(720, 1280))
 
         self.assertEqual(expanded_target, Box(257, 1211, 206, 63))
+
+    def test_configured_portrait_frame_size_is_used_by_margin(self):
+        setFrameSize(MUMU_SIZE_720_1280)
+        try:
+            expanded_target = Box(277, 1231, 166, 23).margin()
+        finally:
+            setFrameSize(MUMU_SIZE_1280_720)
+
+        self.assertEqual(expanded_target, Box(257, 1211, 206, 63))
+
+    def test_frame_size_api_is_available_from_star_import(self):
+        self.assertIn("setFrameSize", AutoScriptor.__all__)
+        self.assertIn("MUMU_SIZE_720_1280", AutoScriptor.__all__)
+        self.assertIs(AutoScriptor.setFrameSize, setFrameSize)
+        self.assertEqual(AutoScriptor.MUMU_SIZE_720_1280, (720, 1280))
 
     def test_margin_keeps_landscape_contract_by_default(self):
         landscape_target = Box(1153, 684, 126, 30)

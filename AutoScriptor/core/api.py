@@ -138,14 +138,28 @@ def _diag_info(**extra) -> dict:
     return info
 
 
-def init():
+def init(
+    *,
+    start_emulator: bool = True,
+    launch_app: bool = True,
+    cancel_check: Callable[[], None] | None = None,
+):
     """Explicitly initialize environment and device controls.
 
     Must be called once before any API function (click, locate, ...) is used.
+    ``launch_app=False`` connects to the configured emulator without launching
+    the configured game, which is useful for scripts that operate another app.
     """
     global mixctrl, mumu
     idx, addr, app = ensure_all_environment_ready()
-    mixctrl, mumu = ensure_app_running(idx, addr, app, start_emulator=True, launch_app=True)
+    mixctrl, mumu = ensure_app_running(
+        idx,
+        addr,
+        app,
+        start_emulator=start_emulator,
+        launch_app=launch_app,
+        cancel_check=cancel_check,
+    )
     # Propagate live references to package-level namespaces so that
     # ``from AutoScriptor import mixctrl`` picks up the real object
     # when the import happens *after* init().
@@ -154,6 +168,28 @@ def init():
     _pkg.mixctrl = mixctrl
     _pkg.mumu = mumu
     _core_pkg.mixctrl = mixctrl
+    _core_pkg.mumu = mumu
+
+
+def _require_mixctrl() -> MixControl:
+    if mixctrl is None:
+        raise RuntimeError("AutoScriptor 尚未初始化，请先调用 init()")
+    return mixctrl
+
+
+def launch_app(package_name: str) -> None:
+    """Launch an Android package through the active device session."""
+    _require_mixctrl().app.launch(package_name)
+
+
+def close_app(package_name: str) -> None:
+    """Close an Android package through the active device session."""
+    _require_mixctrl().app.close(package_name)
+
+
+def go_home() -> None:
+    """Return the active Android device to its home screen."""
+    _require_mixctrl().androidEvent.go_home()
 
 
 def _validate_timeout(timeout, caller: str) -> None:
@@ -164,6 +200,16 @@ def _validate_timeout(timeout, caller: str) -> None:
         raise TypeError(
             f"{caller} 的 timeout 必须是数字秒数，收到 {type(timeout).__name__}: {timeout!r}{hint}"
         )
+
+
+def _validate_swipe_duration(duration_s: float, caller: str) -> None:
+    if isinstance(duration_s, bool) or not isinstance(duration_s, (int, float)):
+        raise TypeError(
+            f"{caller} 的 duration_s 必须是数字秒数，收到 "
+            f"{type(duration_s).__name__}: {duration_s!r}"
+        )
+    if duration_s <= 0:
+        raise ValueError(f"{caller} 的 duration_s 必须大于 0，收到 {duration_s!r}")
 
 
 def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->int:
@@ -696,6 +742,88 @@ def click(
     return True  
 
 
+def click_all(
+    target: Target,
+    *,
+    timeout: float = 30,
+    if_exist: bool = False,
+    delay: float = 0,
+    interval: float = 0,
+    offset: tuple = (0, 0),
+    resize: tuple = (-1, -1),
+    assure_stable: bool = True,
+    save_screenshot: bool = True,
+) -> int:
+    """Locate every occurrence of one target on a frame and click each once.
+
+    Unlike ``click(..., repeat=N)``, this function clicks each distinct match.
+    Matches are frozen before the first click and processed from top to bottom,
+    then left to right. The return value is the number of clicks performed.
+    """
+    if not isinstance(target, Target):
+        raise TypeError(f"click_all 期望单个 Target，收到 {type(target).__name__}: {target!r}")
+
+    _validate_timeout(timeout, "click_all")
+    check_cancel_raise()
+    effective_timeout = (
+        timeout
+        if not if_exist
+        else max(1, timeout) if timeout != 30 else 2
+    )
+
+    if isinstance(target, BoxTarget):
+        matched_boxes = [target.box]
+    else:
+        located_matrix = locate(
+            (target,),
+            timeout=effective_timeout,
+            assure_stable=assure_stable,
+            is_simplify=False,
+        )
+        matched_boxes = located_matrix[0] if located_matrix and located_matrix[0] else []
+
+    if not matched_boxes:
+        if if_exist:
+            return 0
+        try:
+            save_debug_screenshot(target, mixctrl.screenshot(), prefix="s", extra_info=_diag_info())
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"Click all {target} failed, for failed to locate target in {timeout} seconds"
+        )
+
+    ordered_boxes = sorted(matched_boxes, key=lambda matched_box: (matched_box.top, matched_box.left))
+    cancellable_sleep(delay)
+    pre_click_frame = (
+        mixctrl.screenshot()
+        if save_screenshot and not isinstance(target, BoxTarget)
+        else None
+    )
+    clicked_points = []
+    for matched_box in ordered_boxes:
+        check_cancel_raise()
+        clicked_point = b2p(matched_box, offset, resize)
+        mixctrl.click(*clicked_point)
+        clicked_points.append(clicked_point)
+        cancellable_sleep(interval)
+
+    if isinstance(target, BoxTarget):
+        _box_click_trace.extend(clicked_points)
+    elif pre_click_frame is not None:
+        prior_clicks = list(_box_click_trace)
+        _box_click_trace.clear()
+        save_debug_screenshot(
+            target,
+            pre_click_frame,
+            ordered_boxes[-1],
+            clicked_points[-1],
+            prefix="c",
+            prior_clicks=[*prior_clicks, *clicked_points[:-1]],
+        )
+    return len(clicked_points)
+
+
 def swipe(
         start_target: Target, 
         end_target: Target, 
@@ -710,6 +838,52 @@ def swipe(
     if start_box is None or end_box is None: raise RuntimeError(f"Swipe {start_target} to {end_target} failed, for failed to locate target")
     cancellable_sleep(delay)
     mixctrl.swipe(*b2p(start_box), *b2p(end_box), duration_s)
+    if ensure_stable_after_swipe:
+        cancellable_sleep(duration_s)
+    return True
+
+
+def swipe_precise(
+        start_target: Target,
+        end_target: Target,
+        *,
+        duration_s: float = 1,
+        delay: float = 0,
+        ensure_stable_after_swipe: bool = True,
+    ) -> bool:
+    """按确定的起止中心点执行滑动。
+
+    与 ``swipe`` 不同，此接口不会使用 ``b2p`` 的随机偏移，也不会经过
+    Nemu IPC 的随机贝塞尔轨迹。两个目标定位后取各自 Box 的中心点，最后
+    通过 MuMu ADB ``input swipe`` 发送，``duration_s`` 会精确转换为毫秒。
+    适合滑块、分页控件和其他对起止位置敏感的操作。
+    """
+    _validate_swipe_duration(duration_s, "swipe_precise")
+    check_cancel_raise()
+    start_box = (
+        locate(start_target, 3)
+        if not isinstance(start_target, BoxTarget)
+        else start_target.box
+    )
+    end_box = (
+        locate(end_target, 3, assure_stable=False)
+        if not isinstance(end_target, BoxTarget)
+        else end_target.box
+    )
+    if start_box is None or end_box is None:
+        raise RuntimeError(
+            f"Precise swipe {start_target} to {end_target} failed, "
+            "for failed to locate target"
+        )
+
+    start_point = start_box.center()
+    end_point = end_box.center()
+    cancellable_sleep(delay)
+    mixctrl.swipe_precise(
+        *start_point,
+        *end_point,
+        duration_s,
+    )
     if ensure_stable_after_swipe:
         cancellable_sleep(duration_s)
     return True

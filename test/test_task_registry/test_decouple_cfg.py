@@ -123,6 +123,60 @@ class TestCfgNodeShape(unittest.TestCase):
         finally:
             task_register_mod.registration_counter = old_counter
 
+    def test_table_param_defaults_add_new_columns_without_overwriting_user_values(self):
+        import ZmxyOL.task.task_register as task_register_mod
+        from AutoScriptor.utils.table_param import TableParam
+
+        cfg._config["tasks"] = {
+            "每日任务": {
+                "荒古万界": {
+                    "遗境副本": {
+                        "on": True,
+                        "next_exec_time": 0,
+                        "params": {
+                            "battle_config": {
+                                "虎神之崖": {"difficulty": "浩劫"},
+                                "雀炎之地": {"difficulty": "初难"},
+                            }
+                        },
+                    }
+                }
+            }
+        }
+        default_battle_config = TableParam(
+            {
+                "虎神之崖": {"difficulty": "灾厄", "fight_pioneer": False},
+                "雀炎之地": {"difficulty": "灾厄", "fight_pioneer": True},
+            }
+        )
+
+        def fn(battle_config=default_battle_config):
+            pass
+
+        fake_file = os.path.join(
+            os.path.dirname(__file__), "..", "..", "ZmxyOL", "task", "daily_task", "hgwj", "yijingfuben.py"
+        )
+        old_counter = task_register_mod.registration_counter
+        try:
+            with patch("inspect.getfile", return_value=fake_file):
+                task_register_mod.register_task(
+                    fn,
+                    path_cn="每日任务/荒古万界/遗境副本",
+                    description="遗境副本",
+                )
+        finally:
+            task_register_mod.registration_counter = old_counter
+
+        merged_data = cfg._config["tasks"]["每日任务"]["荒古万界"]["遗境副本"]["params"]["battle_config"]
+
+        self.assertEqual(
+            merged_data,
+            {
+                "虎神之崖": {"difficulty": "浩劫", "fight_pioneer": False},
+                "雀炎之地": {"difficulty": "初难", "fight_pioneer": True},
+            },
+        )
+
     def test_registry_has_fn(self):
         fn = lambda: "work"
         self._simulate_register(["cat", "task"], fn, order=7)

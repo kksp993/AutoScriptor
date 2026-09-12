@@ -6,6 +6,8 @@ import logging
 import os
 import sys
 import threading
+from datetime import datetime
+from pathlib import Path, PureWindowsPath
 
 from rich.console import Console
 from rich.logging import RichHandler
@@ -95,6 +97,21 @@ def _normalize_source_path(path: str) -> str:
     return os.path.normcase(os.path.realpath(path))
 
 
+def _rich_link_path(path: str) -> str | None:
+    """Return the URI path portion expected by Rich's ``file://`` prefix."""
+    if path.startswith("<") and path.endswith(">"):
+        return None
+    try:
+        windows_path = PureWindowsPath(path)
+        if windows_path.is_absolute():
+            file_uri = windows_path.as_uri()
+        else:
+            file_uri = Path(path).resolve().as_uri()
+    except (OSError, TypeError, ValueError):
+        return path
+    return file_uri.removeprefix("file://")
+
+
 def _is_path_within(path: str, parent: str) -> bool:
     try:
         return os.path.commonpath((_normalize_source_path(path), parent)) == parent
@@ -172,6 +189,22 @@ class _SafeRichHandler(RichHandler):
         if _stream_is_closed(getattr(self.console, "file", None)):
             self._refresh_console()
         super().emit(record)
+
+    def render(self, *, record, traceback, message_renderable):
+        level = self.get_level_text(record)
+        time_format = None if self.formatter is None else self.formatter.datefmt
+        log_time = datetime.fromtimestamp(record.created)
+        renderables = [message_renderable] if not traceback else [message_renderable, traceback]
+        return self._log_render(
+            self.console,
+            renderables,
+            log_time=log_time,
+            time_format=time_format,
+            level=level,
+            path=os.path.basename(record.pathname),
+            line_no=record.lineno,
+            link_path=_rich_link_path(record.pathname) if self.enable_link_path else None,
+        )
 
     def handleError(self, record: logging.LogRecord) -> None:
         if _is_closed_stream_error(sys.exc_info()[1]):
