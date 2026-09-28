@@ -36,7 +36,14 @@
     },
     "notify": {
         "enabled": false,
-        "config_yaml": "provider: null"
+        "config_yaml": "provider: null",
+        "qq": {
+            "enabled": false,
+            "endpoint": "http://127.0.0.1:3000",
+            "target_type": "private",
+            "target_id": "",
+            "access_token": ""
+        }
     },
     "update": {
         "auto_check": true,

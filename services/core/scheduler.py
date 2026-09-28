@@ -23,6 +23,7 @@ from AutoScriptor.utils.logger import logger
 
 from services.core.runtime_context import runtime_ctx
 from services.core.notify import notify_runtime_event
+from services.core.character_reports import create_character_reports
 
 
 class SchedulerState(Enum):
@@ -747,6 +748,10 @@ class Scheduler:
         retry_queue: list[tuple[tuple[str, str], dict]] = []
         failed_next_round: list[tuple[tuple[str, str], dict]] = []
         only_debug_tasks_executed = True
+        character_reports = create_character_reports(
+            cfg.get("notify.qq", {}), list(self._iter_characters_schedule_order())
+        )
+        pipeline_completed = False
         self._pipeline_active.set()
         scheduled_mode = explicit_tasks is None and explicit_task_runs is None
 
@@ -844,6 +849,10 @@ class Scheduler:
                                 and not self._is_retry_exhausted(char_key, t)
                             )
                         ]
+                character_reports.flush_ready(
+                    char_key,
+                    {character for character, _ in retry_queue + failed_next_round},
+                )
                 if not due:
                     if failed_next_round and retry_round < max_retry:
                         retry_round += 1
@@ -857,12 +866,14 @@ class Scheduler:
                             len(retry_queue),
                         )
                         continue
+                    pipeline_completed = True
                     break
 
                 task_run = due[0] if isinstance(due[0], dict) else {"id": str(due[0]), "task": str(due[0])}
                 task_key = _run_task(task_run)
                 run_id = _run_id(task_run)
                 param_override = _run_param_override(task_run)
+                character_reports.record(char_key, run_id, task_key, "pending")
                 task_debug_mode = is_task_debug_mode(task_key)
                 skip_login_for_debug = task_debug_mode and not force_login
                 skip_login_for_task = skip_character_login or skip_login_for_debug
@@ -909,6 +920,9 @@ class Scheduler:
                 attempted_this_round.add((*char_key, run_id))
                 try:
                     success, failed = _execute_task_attempt(task_key, retry_round, param_override)
+                    if not self._task_manager._cancel_event.is_set():
+                        outcome = "success" if success else ("failed" if failed else "pending")
+                        character_reports.record(char_key, run_id, task_key, outcome)
                     if success:
                         total_success += success
                         self.record_result(success, 0)
@@ -938,6 +952,8 @@ class Scheduler:
                     break
                 except Exception as e:
                     logger.error("📅 执行异常: %s - %s", task_key, e)
+                    if not self._task_manager._cancel_event.is_set():
+                        character_reports.record(char_key, run_id, task_key, "failed")
                     if retry_round < max_retry and not task_debug_mode:
                         failed_next_round.append((char_key, task_run))
                     else:
@@ -959,6 +975,9 @@ class Scheduler:
 
         finally:
             self._pipeline_active.clear()
+            character_reports.finish(
+                interrupted=not pipeline_completed or self._task_manager._cancel_event.is_set()
+            )
 
         if total_success > 0 or total_failed > 0:
             logger.info("📅 执行完成: 成功 %d, 失败 %d", total_success, total_failed)

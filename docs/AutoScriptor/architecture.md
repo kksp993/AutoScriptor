@@ -35,6 +35,9 @@ webui.bat / scripts\run.bat webui
 - 配置模板：`data/config.template.json`
 - 账号/角色/任务状态：`data/accounts/`
 - 全局任务排序覆盖层：`data/config.json` 的 `task_ordering`
+- QQ 结果通知：`data/config.json` 的 `notify.qq`；角色结果聚合与 OneBot 发送分离，见 [通知边界](operations/qq-notifications.md)。
+- 可选本机 QQ 机器人：`services/core/qq_bot.py` 管理官方包安装与独立启动，运行文件和令牌在
+  Git 忽略的 `.autoscriptor/qq-bot`；WebUI 通过 lifecycle 接收连接配置，不把安装逻辑放进游戏任务。
 - 自定义任务：`data/custom_task/`
 - 用户职业脚本：`data/battle_character/`
 - 可变缓存和采集结果：`logs/`

@@ -26,6 +26,8 @@
 | 战斗流程 | [tasks/battle-flows.md](tasks/battle-flows.md) |
 | 后台监控 | [runtime/background.md](runtime/background.md) |
 | 错误归档 | [operations/log-archiver.md](operations/log-archiver.md) |
+| QQ 角色结果通知 | [operations/qq-notifications.md](operations/qq-notifications.md) |
+| 另一台电脑独立部署 QQ 机器人 | [独立安装、启动与跨机配置](../../scripts/qq-robot-standalone/README.md) |
 | OpenAI 多智能体示例 | [reference/openai-multi-agents.md](reference/openai-multi-agents.md) |
 | 第三方资料 | [3rdparties/MumuAdaptor_README.md](3rdparties/MumuAdaptor_README.md) |
 

@@ -2224,6 +2224,10 @@ html.light .bg-white {
   line-height: var(--as-leading);
   color: var(--as-text-muted);
 }
+/* 字段级校验提示：沿用说明文字排版，仅用颜色区分错误。 */
+.settings-help--error {
+  color: #dc2626;
+}
 .settings-field-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

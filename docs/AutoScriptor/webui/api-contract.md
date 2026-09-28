@@ -63,7 +63,9 @@ WebUI 后端是 FastAPI；静态前端位于 `services/webui/static/`，源码 E
 | `POST /api/config/import`　　　　| 导入允许的配置段，剥离 deploy 密码/证书等敏感字段　　　　　　　　　　　　　　　　　　　　　　　　　　 |
 | `GET/POST /api/deploy`　　　　　 | 读取/保存 deploy、notify、update、remote_access　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
 
-`POST /api/config` 保存时会把空的、`YOUR_` 占位的或 `:0` 结尾的 `emulator.adb_addr` 规范化为 MuMu 默认地址：`127.0.0.1:16384 + index*32`。保存失败必须返回标准 `api_error` JSON，并附带 `data_root/config_path/accounts_dir/current_account` 诊断字段；前端不能只显示“未知错误”。保存层只使用同目录临时文件加 `os.replace` 原子替换；`PermissionError/WinError 5` 等替换失败必须作为保存失败暴露出来，不再降级为直接覆写目标文件。
+`POST /api/config` 保存时只会把空的、`YOUR_` 占位的或 `:0` 结尾的 `emulator.adb_addr` 规范化为 MuMu 默认地址：`127.0.0.1:16384 + index*32`；其他地址原样保留，因此局域网/远程 ADB 地址（如 `192.168.1.50:16416`、`localhost:5555`）不会被改写。设置页允许直接编辑该字段，并在前端校验 `主机:端口`（端口为 1-65535 的纯数字且不以 `0` 开头）；非法值只显示字段级错误并暂停自动保存，不发请求，避免写坏配置。保存失败必须返回标准 `api_error` JSON，并附带 `data_root/config_path/accounts_dir/current_account` 诊断字段；前端不能只显示“未知错误”。保存层只使用同目录临时文件加 `os.replace` 原子替换；`PermissionError/WinError 5` 等替换失败必须作为保存失败暴露出来，不再降级为直接覆写目标文件。
+
+设置页保存采用防抖自动保存（约 0.5 秒）：`filteredConfig` 深度 watcher 先按 `app/emulator/ocr/scheduler` 快照比对，并只在 `config_version` 未变化（即非服务端刷新）且快照与基线不同时才发出 `settings-change`。保存成功后服务端刷新只更新基线，不能再次触发保存，否则会形成保存回环。请求在途期间的改动由回调按快照差补发一次，保证界面与 `data/config.json` 收敛。执行中（runtime busy）字段禁用且暂停自动保存。
   
 保存任务时必须通过 `TaskTreeService.strip_runtime_fields()`，不能持久化 `fn/order/param_meta/param_keys/beta/custom/debug_mode/task_description/task_doc_flow/_due/progress/progress_display` 等运行时字段。
 
@@ -96,6 +98,23 @@ WebUI 后端是 FastAPI；静态前端位于 `services/webui/static/`，源码 E
 前端任务保存和排序保存必须进入同一个 FIFO 提交序列，并在入队时深拷贝请求数据，保证服务端看到的是用户点击保存时的快照。`runtime/snapshot` 判断是否需要 `/api/refresh` 前必须等待该提交序列稳定排空，并与响应处理时的当前 `config_version` 比较；只有响应版本更大时才允许全量配置回填，不能让旧版本轮询覆盖本地草稿。
 
 Reload 边界：所有 reload 类操作都会清 `bg`；纯配置同步 `POST /api/config/sync` 不属于 reload，不清 `bg`。保存任务、切换账号/角色、账号解锁、更新账号凭据和普通配置导入只保存或同步配置并刷新 WebUI 投影，不做职业脚本和任务注册表完整重载。Editor 保存自定义任务脚本、启动初始化、调度器安全边界处理脚本变更，以及兑换码任务注册缺失兜底，仍使用完整 reload。
+
+## QQ 结果通知
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/notify/qq` | 返回 `settings`、示例 `preview`、最近 20 条 `history`，令牌仅返回 `token_set` |
+| `POST /api/notify/qq` | runtime idle 时保存 `notify.qq` 全局配置，返回 `config_version` |
+| `POST /api/notify/qq/test` | 使用请求中的草稿发送明确标注的测试消息；不保存、不操作设备，失败返回 `502 notify_delivery_failed` |
+| `GET /api/notify/qq/local` | 检测受管 NapCat 安装，返回 `installed/version/login_url`，不返回 HTTP/管理令牌；不探测或宣称登录成功 |
+| `POST /api/notify/qq/local` | runtime idle 时从受管安装读取 HTTP 地址和令牌，通过原有全局保存事务写入 `notify.qq`；不接受路径/地址参数，保留已保存目标与开关 |
+
+参数只有 `enabled`、`endpoint`、`target_type`（`private/group`）、字符串 `target_id` 和可选 `access_token`。
+省略 token 保留原值，显式空字符串清除；非法参数返回 `400 invalid_notify_config`。
+QQ API 遵守主站认证，不属于 `/api/deploy` 豁免面。公开配置/导出不包含 QQ token；旧部署接口不读写 QQ 子段。
+导入不含 token 的配置保留本机 token。最近记录只在内存保留，发送成功指 OneBot 确认，不表示接收人已读。
+消息语义和机器人准备步骤见 [QQ 通知](../operations/qq-notifications.md)。
+本机安装文件损坏/读取失败显示 `local_bot_invalid`，不能伪装成未安装；这些路由不下载或启动第三方程序。
 
 ## 账号、角色和队列
 
@@ -140,6 +159,8 @@ Reload 边界：所有 reload 类操作都会清 `bg`；纯配置同步 `POST /a
 返回 `500 ocr_status_failed`，不得用默认值把失败表示为 CPU 正常。
 
 Editor 真实设备动作需要 credential unlock；模拟执行且已有缓存图时应使用虚拟 `mixctrl`，不触碰真实设备。Editor 坐标使用当前缓存截图的原生宽高；非 1280x720 画面生成的识别目标须携带 `.margin(frame_size=(width, height))`，`remote/click`、真实 `execute-code` 和保存脚本不做隐式缩放。`remote/click`、`remote/swipe` 和 `/api/editor/execute-code` 必须先取得与调度/任务列表共用的执行闸门，避免执行中插入错误点击；仅调度已启用但空闲时允许取得。`execute-code` 的 running/stopping 状态会通过 `RuntimeController` 投影为 `reason="editor"`，因此运行期间配置、任务、账号、角色和 reload 类接口都应返回 `409 runtime_busy`。
+
+Editor `execute-code` 的受限命名空间直接提供运行时全局角色对象 `h`，因此角色技能片段可直接写 `h.skill(1)` 或链式调用。Editor 包装并保存自定义任务时须生成 `from ZmxyOL.battle import h`，保证同一代码在即时执行和后续任务执行中都有效。
 
 `GET /api/editor/navigation-options` 只读取 `ZmxyOL.nav.envs` 已注册到 `mm` 的名称，不执行导航、识别或设备初始化。响应按注册顺序返回 `items: [{"name": "村庄", "locations": ["法相", "背包"]}]`；环境自身的同名根位置不重复列入 `locations`。导入或注册异常返回 `500 editor_navigation_options_failed`，前端不得把失败伪装成空菜单。
 

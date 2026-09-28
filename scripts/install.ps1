@@ -1,9 +1,11 @@
 param(
-    [ValidateSet("tools", "python", "electron", "all")]
+    [ValidateSet("tools", "python", "electron", "qq", "all")]
     [string]$Target = "all",
 
     [ValidateSet("auto", "cpu", "gpu")]
-    [string]$PaddleVariant = "auto"
+    [string]$PaddleVariant = "auto",
+
+    [switch]$WithQQ
 )
 
 $ErrorActionPreference = "Stop"
@@ -314,6 +316,15 @@ function Install-ElectronDeps {
     }
 }
 
+function Install-QQBot {
+    Ensure-Venv
+    $setupScript = Join-Path $Root "services\core\qq_bot.py"
+    & $VenvPy -X utf8 $setupScript install
+    if ($LASTEXITCODE -ne 0) {
+        throw "NapCat installation failed with exit code $LASTEXITCODE"
+    }
+}
+
 if ($Target -eq "tools" -or $Target -eq "all") {
     Install-Tools
 }
@@ -324,6 +335,20 @@ if ($Target -eq "python" -or $Target -eq "all") {
 
 if ($Target -eq "electron" -or $Target -eq "all") {
     Install-ElectronDeps
+}
+
+if ($Target -eq "all" -and -not $WithQQ) {
+    if (Test-Path -LiteralPath (Join-Path $Root ".autoscriptor\qq-bot\autoscriptor.json")) {
+        $WithQQ = $true
+    } else {
+        Write-Host "Optional QQ notifications: installs third-party NapCat (~112 MiB)."
+        Write-Host "Manual QQ login required; a dedicated account is recommended."
+        $answer = Read-Host "Install the local QQ robot? [y/N]"
+        $WithQQ = $answer -match '^(y|yes)$'
+    }
+}
+if ($Target -eq "qq" -or $WithQQ) {
+    Install-QQBot
 }
 
 Write-Host "Install complete: target=$Target, paddle=$PaddleVariant"

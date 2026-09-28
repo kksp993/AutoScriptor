@@ -166,6 +166,13 @@ else:
 
 任务列表页的三个直接执行入口通过 `execution_source=task_list` 进入 `run_direct(skip_character_login=True)`。这条策略只跳过登录缓存失效和 `_ensure_character_logged_in()`；普通任务的每日重启检查、设备/App 就绪、retry、状态保存、通知和 `post_execution` 都保持原语义。默认 `run_direct()`、自动调度和跨角色切换仍失效登录缓存并校验目标角色，显式 `force_login=True` 始终覆盖跳过策略。
 
+## 角色结果通知
+
+共用管线通过 `CharacterReports` 记录每个 run id 的最后结果。转向其他角色且原角色无待重试项时
+发布报告；管线 `finally` 收束剩余报告，取消/异常标为中断。重试覆盖原结果，空管线不发消息。
+角色身份及队列序号在管线内冻结，QQ 发送在独立线程中完成，不读取切换后的 cfg，也不影响游戏重试。
+配置入口为 WebUI“QQ 通知”，不替代原有整轮桌面/YAML 汇总，详见 [QQ 通知](../operations/qq-notifications.md)。
+
 ## 单任务执行语义
 
 `TaskManager._execute_single_task()` 的成功标准不是“函数返回了”这么简单：

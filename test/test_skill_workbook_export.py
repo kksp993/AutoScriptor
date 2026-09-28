@@ -52,11 +52,13 @@ class SkillWorkbookExportTest(unittest.TestCase):
         self.assertEqual(worksheet["E4"].value, "✔")
         self.assertNotEqual(worksheet["E4"].fill.fill_type, "solid")
 
-        for coordinate in ("D30", "E30", "F30", "G30", "K43", "L43", "M43", "N43"):
+        for coordinate in ("D30", "E30", "F30", "G30", "K43", "L43", "M43"):
             self.assertEqual(worksheet[coordinate].value, "✔")
             self.assertTrue(
                 (worksheet[coordinate].fill.fgColor.rgb or "").endswith("DDEBF7")
             )
+        # skills.txt 中「雷暴」只有 下/中/上，没有「绝」档。
+        self.assertIsNone(worksheet["N43"].value)
 
         self.assertIsNone(worksheet["H2"].value)
         self.assertIsNone(worksheet["O29"].value)
