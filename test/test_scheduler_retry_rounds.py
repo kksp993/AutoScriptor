@@ -185,6 +185,75 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         self.assertEqual(save_config.call_count, 2)
         self.assertEqual(tm.reload_calls, 0)
 
+    def test_character_notification_merges_retry_results(self):
+        from services.core.character_reports import CharacterReports
+
+        messages = []
+        reports = CharacterReports(messages.append, [("s1", "c1")])
+        manager = FakeRoundTaskManager({("A", 0): (0, 1), ("A", 1): (1, 0)})
+        with patch("services.core.scheduler.create_character_reports", return_value=reports):
+            self._run_with_fake_manager(manager)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("1:(c1)任务完成-成功:2,失败:0", messages[0])
+
+    def test_character_notification_marks_cancelled_attempt_pending(self):
+        from services.core.character_reports import CharacterReports
+
+        messages = []
+        reports = CharacterReports(messages.append, [("s1", "c1")])
+        manager = FakeRoundTaskManager({})
+
+        def cancel_attempt(tasks, **kwargs):
+            manager._cancel_event.set()
+            return 0, 1
+
+        with (
+            patch.object(manager, "execute_tasks", side_effect=cancel_attempt),
+            patch("services.core.scheduler.create_character_reports", return_value=reports),
+        ):
+            self._run_with_fake_manager(manager)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("已中断", messages[0])
+        self.assertIn("A未完成", messages[0])
+        self.assertNotIn("任务完成", messages[0])
+
+    def test_cross_character_notifications_wait_for_each_final_retry(self):
+        from services.core.character_reports import CharacterReports
+        from services.core.scheduler import Scheduler, SchedulerState
+
+        current = {"server": "s1", "name": "first"}
+        messages = []
+        reports = CharacterReports(messages.append, [("s1", "first"), ("s2", "second")])
+        manager = FakeRoundTaskManager({("A", 0): (0, 1), ("A", 1): (1, 0)})
+        scheduler = Scheduler()
+        scheduler.set_task_manager(manager)
+        scheduler.state = SchedulerState.RUNNING
+        selections = iter([("s1", "first", ["A"]), ("s2", "second", ["B"]), ("s2", "second", [])])
+
+        def collect_due():
+            server, character, paths = next(selections)
+            current.update(server=server, name=character)
+            return paths
+
+        with (
+            patch.object(cfg, "active_character", side_effect=lambda: dict(current)),
+            patch.object(cfg, "save_config"),
+            patch.object(scheduler, "_collect_due_cross_character", side_effect=collect_due),
+            patch.object(scheduler, "_switch_active_character", side_effect=lambda server, name: current.update(server=server, name=name)),
+            patch.object(scheduler, "_maybe_daily_restart"),
+            patch.object(scheduler, "_ensure_character_logged_in"),
+            patch.object(scheduler, "_return_to_first_dispatch_character"),
+            patch.object(scheduler, "_post_execution_action"),
+            patch("services.core.scheduler.runtime_ctx.refresh"),
+            patch("services.core.scheduler.notify_runtime_event"),
+            patch("services.core.scheduler.create_character_reports", return_value=reports),
+        ):
+            scheduler._run_task_pipeline()
+        self.assertEqual(manager.calls, [("A", 0), ("B", 0), ("A", 1)])
+        self.assertEqual(len(messages), 2)
+        self.assertIn("2:(second)任务完成-成功:1,失败:0", messages[0])
+        self.assertIn("1:(first)任务完成-成功:1,失败:0", messages[1])
+
     def test_scheduled_pipeline_saves_config_without_full_reload(self):
         from services.core.scheduler import Scheduler
 

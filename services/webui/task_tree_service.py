@@ -101,6 +101,9 @@ class TaskTreeService:
 
     def public_config(self) -> dict:
         config_data = deepcopy(cfg._config)
+        qq_settings = config_data.get("notify", {}).get("qq")
+        if isinstance(qq_settings, dict):
+            qq_settings["token_set"] = bool(qq_settings.pop("access_token", ""))
         for pattern in [
             "**/fn",
             "**/encryption",

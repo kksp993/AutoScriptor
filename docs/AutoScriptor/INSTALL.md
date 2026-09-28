@@ -95,7 +95,29 @@ git branch --show-current
 .\scripts\install.bat python cpu
 .\scripts\install.bat python gpu
 .\scripts\install.bat electron
+.\scripts\install.bat qq
 ```
+
+## 可选 QQ 机器人
+
+**只在另一台电脑安装机器人**时，单独复制
+[`scripts/qq-robot-standalone`](../../scripts/qq-robot-standalone/README.md) 到目标 Windows 电脑，
+右键 `1-install.cmd` 管理员安装，双击 `2-start.cmd` 启动；不需要以下整套源码安装。
+它配置 LAN/VPN 来源限制，生成地址和令牌供脚本电脑手工填写，保持与本机安装路径独立。
+
+完整安装末尾会询问是否选装 QQ 机器人，默认不安装；明确选装可执行
+`scripts\install.bat all -WithQQ`。已有环境只需：
+
+```powershell
+.\scripts\install.bat qq
+.\scripts\run.bat qq
+```
+
+安装器下载并校验官方 NapCat Windows x64 独立包到 `.autoscriptor\qq-bot`，不改现有 QQ。
+HTTP 地址和随机令牌自动生成，接口及登录页只监听本机。安装不直接修改运行中的全局配置；
+启动后扫码登录，再在 WebUI“QQ 通知”页点击“使用本机配置”，填写接收 QQ/群号并测试。
+机器人窗口需保持开启，不注册开机自启。第三方机器人有账号风控风险，建议使用专用小号。
+更多安装、重装、配置交接与错误处理见 [QQ 通知](operations/qq-notifications.md)。
 
 `npm start` 依赖 `webapp\node_modules`。如果直接进入 `webapp` 启动，必须先运行 `.\scripts\install.bat electron` 或在 `webapp` 手动执行 `npm install`。
 

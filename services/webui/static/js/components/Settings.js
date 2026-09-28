@@ -25,6 +25,11 @@ const SettingsPanel = {
       MUMU_ADB_PORT_STEP: 32,
       serverPackages: SETTINGS_SERVER_PACKAGES,
       postExecutionOptions: SETTINGS_POST_EXECUTION_OPTIONS,
+      saveTimer: null,
+      lastSyncedSignature: '',
+      lastSyncedConfigVersion: null,
+      lastQueuedSignature: '',
+      pendingInitialSave: false,
       saving: false,
       savedAt: 0,
       discovering: false,
@@ -47,7 +52,24 @@ const SettingsPanel = {
     hasOcrScale() {
       return Object.prototype.hasOwnProperty.call(this.ocrConfig, 'scale');
     },
+    /** 空值表示合法；非空时把原始原因直接显示在字段下方。 */
+    adbAddrError() {
+      const raw = String(this.emulatorConfig.adb_addr || '').trim();
+      if (!raw) return 'ADB 连接地址不能为空';
+      if (raw.startsWith('YOUR_')) return '请填写真实地址，例如 127.0.0.1:16416';
+      const colon = raw.lastIndexOf(':');
+      if (colon <= 0) return '格式应为 主机:端口，例如 127.0.0.1:16416';
+      const host = raw.slice(0, colon).trim();
+      const portText = raw.slice(colon + 1).trim();
+      if (!host) return '主机部分不能为空';
+      if (!/^\d+$/.test(portText)) return '端口必须是数字';
+      const port = Number(portText);
+      if (port < 1 || port > 65535) return '端口范围是 1-65535';
+      if (portText.length > 1 && portText.startsWith('0')) return '端口不能以 0 开头';
+      return '';
+    },
     syncStatusText() {
+      if (this.adbAddrError) return 'ADB 连接地址无效，已暂停自动保存';
       if (this.executionBusy) return '执行中暂停自动保存';
       if (this.saving) return '正在同步配置...';
       if (this.savedAt) return '配置已同步到本地文件';
@@ -67,8 +89,43 @@ const SettingsPanel = {
         this.ensureDefaultAdbAddr();
       },
     },
+    /**
+     * 自动保存：服务端刷新只更新基线，用户改动才排队保存。
+     * 用 config_version 区分两种来源，避免保存后刷新把同一份配置再存一次。
+     */
+    filteredConfig: {
+      deep: true,
+      immediate: true,
+      handler() {
+        const version = Number(this.filteredConfig.config_version || 0);
+        if (version !== this.lastSyncedConfigVersion) {
+          this.lastSyncedConfigVersion = version;
+          this.lastSyncedSignature = this.currentSettingsSignature();
+          // 服务端仍是占位地址时，本地规范化出来的值也必须真正落盘。
+          if (this.pendingInitialSave) {
+            this.pendingInitialSave = false;
+            this.queueSave();
+          }
+          return;
+        }
+        const signature = this.currentSettingsSignature();
+        if (signature === this.lastSyncedSignature) return;
+        this.queueSave();
+      },
+    },
+  },
+  beforeUnmount() {
+    if (this.saveTimer) clearTimeout(this.saveTimer);
   },
   methods: {
+    currentSettingsSignature() {
+      return JSON.stringify({
+        app: this.appConfig,
+        emulator: this.emulatorConfig,
+        ocr: this.ocrConfig,
+        scheduler: this.schedulerConfig,
+      });
+    },
     defaultAdbAddrForIndex(index) {
       const n = Number(index);
       const safeIndex = Number.isFinite(n) && n >= 0 ? n : 0;
@@ -80,6 +137,7 @@ const SettingsPanel = {
       const addr = String(this.emulatorConfig.adb_addr || '').trim();
       if (!addr || addr.startsWith('YOUR_') || addr.endsWith(':0')) {
         this.emulatorConfig.adb_addr = this.defaultAdbAddrForIndex(this.emulatorConfig.index);
+        this.pendingInitialSave = true;
       }
     },
     syncAdbPortFromIndex(index) {
@@ -99,6 +157,22 @@ const SettingsPanel = {
         return [...this.serverPackages, { label: `其他 (${currentValue})`, value: currentValue }];
       }
       return this.serverPackages;
+    },
+    queueSave() {
+      // 地址非法时不落盘，让用户先改对再同步。
+      if (this.executionBusy || this.saving || this.adbAddrError) {
+        return;
+      }
+      if (this.saveTimer) clearTimeout(this.saveTimer);
+      this.saveTimer = setTimeout(() => {
+        this.saveTimer = null;
+        if (this.executionBusy || this.adbAddrError) return;
+        // 保存期间的新改动由 onSaved 用签名比较补发，避免并发 POST 覆盖。
+        if (this.saving) return;
+        this.lastQueuedSignature = this.currentSettingsSignature();
+        this.saving = true;
+        this.$emit('settings-change', { silent: true, done: this.onSaved });
+      }, 500);
     },
     async autoDiscoverMumu() {
       if (this.executionBusy) {
@@ -138,14 +212,13 @@ const SettingsPanel = {
         this.discovering = false;
       }
     },
-    saveSettings() {
-      if (this.executionBusy || this.saving) return;
-      this.saving = true;
-      this.$emit('settings-change', { done: this.onSaved });
-    },
     onSaved(ok) {
       this.saving = false;
-      if (ok) this.savedAt = Date.now();
+      if (ok) {
+        this.savedAt = Date.now();
+        // 请求在途期间的改动没有被提交，这里补发一次让界面与文件收敛。
+        if (this.currentSettingsSignature() !== this.lastQueuedSignature) this.queueSave();
+      }
     },
   },
   template: `
@@ -199,7 +272,9 @@ const SettingsPanel = {
         </el-form-item>
         
         <el-form-item label="ADB 连接地址">
-          <el-input v-model="emulatorConfig.adb_addr" placeholder="例如 127.0.0.1:16416" :disabled="true" style="background:#f5f5f5;color:#888;" />
+          <el-input v-model="emulatorConfig.adb_addr" placeholder="例如 127.0.0.1:16416" clearable />
+          <div v-if="adbAddrError" class="settings-help settings-help--error">{{ adbAddrError }}</div>
+          <div v-else class="settings-help">默认由“MuMu 多开编号”推导；改成局域网或远程 ADB 时直接填写 主机:端口。</div>
         </el-form-item>
         </div>
         <el-form-item label="CPU 核心限制">

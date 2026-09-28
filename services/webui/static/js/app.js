@@ -1,7 +1,7 @@
 const { createApp, ref, reactive, computed, nextTick, watch } = Vue;
 
 const app = createApp({
-  components: { AppSidebar, NewsPanel, OverviewPanel, SchedulerPanel, TaskPanel, SettingsPanel, EditorPanel, DiagnosticsPanel, ErrorArchivesPanel, UpdatePanel, AboutPanel },
+  components: { AppSidebar, NewsPanel, OverviewPanel, SchedulerPanel, TaskPanel, SettingsPanel, EditorPanel, DiagnosticsPanel, ErrorArchivesPanel, NotificationsPanel, UpdatePanel, AboutPanel },
   setup() {
     const configData = reactive({});
     const activeTab = ref('news');
@@ -203,6 +203,7 @@ const app = createApp({
       const map = {
         news: '资讯', overview: '总览', scheduler: '调度', editor: '编辑器',
         errorArchives: '错误汇总', updater: '检查更新', settings: '设置', about: '关于',
+        notifications: 'QQ 通知',
         tasks: '1. 任务列表',
       };
       return map[activeTab.value] || '';

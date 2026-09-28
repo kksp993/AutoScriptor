@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("webui", "electron")]
+    [ValidateSet("webui", "electron", "qq")]
     [string]$Target = "webui",
 
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -36,6 +36,13 @@ function Find-Npm {
 }
 
 Require-File $VenvPy "Missing .venv Python. Run scripts\install.bat first."
+
+if ($Target -eq "qq") {
+    $setupScript = Join-Path $Root "services\core\qq_bot.py"
+    Require-File $setupScript "Missing local QQ robot entry."
+    & $VenvPy -X utf8 $setupScript start @AppArgs
+    exit $LASTEXITCODE
+}
 
 if ($Target -eq "webui") {
     Require-File $GuiScript "Missing source entry: $GuiScript"

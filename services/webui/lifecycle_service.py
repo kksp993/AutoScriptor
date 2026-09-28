@@ -343,6 +343,11 @@ class WebUILifecycleService:
                 deploy.pop(secret_key, None)
 
         with self.task_manager.config_transaction():
+            incoming_notify = incoming.get("notify")
+            if isinstance(incoming_notify, dict):
+                from dataclasses import asdict
+
+                incoming_notify["qq"] = asdict(self.prepare_qq_settings(incoming_notify.get("qq", {})))
             for key in self.IMPORTABLE_CONFIG_KEYS:
                 if key not in incoming:
                     continue
@@ -363,11 +368,45 @@ class WebUILifecycleService:
             self._save_global_config()
         return self.mark_config_changed("save notify settings")
 
+    def prepare_qq_settings(self, payload: dict, *, require_target: bool = False):
+        from services.core.qq_notify import QQSettings
+
+        if not isinstance(payload, dict):
+            raise ValueError("QQ settings must be an object")
+        with self.task_manager.config_transaction():
+            merged = deepcopy(self.cfg.get("notify.qq", {}))
+        if not isinstance(merged, dict):
+            raise ValueError("Stored QQ settings must be an object")
+        merged.update(payload)
+        return QQSettings.parse(merged, require_target=require_target)
+
+    def save_qq_settings(self, payload: dict) -> int:
+        from dataclasses import asdict
+
+        with self.config_operation():
+            settings = self.prepare_qq_settings(payload)
+            previous_notify = deepcopy(self.cfg.get("notify", {}))
+            with self.task_manager.config_transaction():
+                self.cfg["notify.qq"] = asdict(settings)
+                try:
+                    self._save_global_config()
+                except (OSError, ValueError, TypeError):
+                    self.cfg["notify"] = previous_notify
+                    raise
+            return self.mark_config_changed("save QQ notifications")
+
     def save_deploy_sections(self, data: dict[str, Any]) -> int:
         with self.task_manager.config_transaction():
             for section in ("deploy", "notify", "update", "remote_access"):
                 if section in data:
-                    self.cfg._config[section] = deepcopy(data[section])
+                    value = deepcopy(data[section])
+                    if section == "notify":
+                        # QQ settings have their own authenticated write-only token surface.
+                        value.pop("qq", None)
+                        existing_qq = self.cfg.get("notify.qq")
+                        if existing_qq is not None:
+                            value["qq"] = deepcopy(existing_qq)
+                    self.cfg._config[section] = value
             self._save_global_config()
         self._apply_log_level()
         return self.mark_config_changed("save deploy settings")

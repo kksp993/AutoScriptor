@@ -1331,12 +1331,44 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertIn("<diagnostics-panel embedded", content)
         self.assertIn("post_execution", content)
         self.assertIn("value: 'goto_main'", content)
+        self.assertIn("'emulatorConfig.adb_addr'", content)
+        self.assertIn("adbAddrError", content)
+        self.assertIn("queueSave", content)
         self.assertNotIn("visibleSections", content)
         self.assertNotIn("兼容自动启动", content)
         self.assertNotIn("notifyConfig", content)
         self.assertNotIn("updateConfig", content)
         self.assertNotIn("remoteConfig", content)
         self.assertNotIn("passwordProtected", content)
+
+    def test_settings_adb_addr_is_editable_and_validated(self):
+        """ADB 连接地址必须可编辑，非法值不得落盘。此前被 :disabled="true" 锁死。"""
+        settings = (ROOT / "services/webui/static/js/components/Settings.js").read_text(encoding="utf-8")
+
+        adb_input = next(
+            line for line in settings.splitlines() if 'v-model="emulatorConfig.adb_addr"' in line
+        )
+        self.assertIn("<el-input", adb_input)
+        self.assertNotIn("disabled", adb_input)
+
+        self.assertIn("adbAddrError", settings)
+        self.assertIn("端口必须是数字", settings)
+        self.assertIn("端口范围是 1-65535", settings)
+        self.assertIn("settings-help--error", settings)
+
+    def test_settings_autosave_has_a_live_trigger(self):
+        """设置页必须存在真实保存触发点，否则 settings-change 永远不会发出。"""
+        settings = (ROOT / "services/webui/static/js/components/Settings.js").read_text(encoding="utf-8")
+        index = (ROOT / "services/webui/static/index.html").read_text(encoding="utf-8")
+
+        self.assertIn("@settings-change=\"saveSettings\"", index)
+        self.assertIn("settings-change", settings)
+        # 触发点：filteredConfig 深度 watcher 防抖保存，或显式保存按钮。
+        self.assertTrue(
+            ("queueSave" in settings and "deep: true" in settings) or "@click=\"saveSettings\"" in settings,
+            "设置页需要一个可触达的保存触发点",
+        )
+        self.assertIn("beforeUnmount", settings)
 
     def test_diagnostics_is_embedded_in_settings_not_sidebar_page(self):
         sidebar = (ROOT / "services/webui/static/js/components/AppSidebar.js").read_text(encoding="utf-8")
@@ -1375,7 +1407,7 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertIn("restart_required: '需要重启'", component)
         self.assertIn("grid-template-columns: minmax(0, 112px) minmax(0, 1fr)", style)
         self.assertIn("overflow-wrap: anywhere", style)
-        self.assertIn("style.css?v=44", index)
+        self.assertIn("style.css?v=45", index)
         self.assertIn("DiagnosticsPanel.js?v=3", index)
 
 
@@ -2954,7 +2986,7 @@ class TestTaskOrderingStaticContract(unittest.TestCase):
         self.assertIn("<task-panel v-if=\"activeTab==='tasks'\"", index_html)
         self.assertNotIn("activeTab==='tasks' || activeTab==='task-graph'", index_html)
         self.assertIn("AppSidebar.js?v=18", index_html)
-        self.assertIn("style.css?v=44", index_html)
+        self.assertIn("style.css?v=45", index_html)
         self.assertIn("TaskPanel.js?v=23", index_html)
         self.assertIn("app.js?v=42", index_html)
         self.assertIn('@run-task-range="runTaskRange"', index_html)

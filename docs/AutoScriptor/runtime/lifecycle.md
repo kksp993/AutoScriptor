@@ -36,6 +36,8 @@
 | `runtime_ctx.shutdown()` | 释放 NemuIpc 并清空运行态对象 |
 | `runtime_ctx.status_dict()` | 返回 WebUI 展示用运行态摘要 |
 
+独立脚本可通过公共 `AutoScriptor.init(start_emulator=True, launch_app=True)` 建立同一类设备控制。操作游戏盒等非配置 App 时使用 `init(launch_app=False)`，再调用公共 `launch_app()` / `close_app()` / `go_home()`；这些包装函数在调用时读取当前设备控制，不会持有星号导入时的旧 `mixctrl` 快照。
+
 `ensure_app_running()` 会：
 
 1. 依据 `start_emulator` 确认 MuMu 进程存在；`MuMuManager launch` 返回成功只代表启动命令已被接受。
@@ -46,6 +48,14 @@
 6. 按 `run_in_background` 隐藏窗口。
 
 `debug_mode` 只跳过调度器的自动登录、任务前重启和常规失败恢复，不跳过设备会话的基本就绪检查。重启设备的任务应先调用 `runtime_ctx.shutdown()` 释放旧 NemuIpc 和运行态引用，再重启 MuMu 并通过 `runtime_ctx.refresh()` 建立新会话。
+
+`LoginClient.HZ4399` 表示 4399 游戏盒而不是游戏客户端。它提交游戏盒账号密码后直接结束登录状态机，不等待游戏角色选择页的“进入游戏”，也不选择服务器或角色；`LoginClient.H4399` 等游戏客户端仍按原流程进入角色选择页。
+
+## 通知生命周期
+
+QQ 结果通知不属于设备生命周期：保存 `notify.qq` 只写全局配置、递增版本，不刷新设备或任务注册表。
+每轮执行冻结通知配置，角色结果以文本快照异步发送；队列排空后发送线程退出，失败不触发游戏重试。
+进程退出不保证队列持久送达，记录只保留在内存。详见 [QQ 通知](../operations/qq-notifications.md)。
 
 ## 设备通道
 

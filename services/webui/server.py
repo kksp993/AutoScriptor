@@ -431,6 +431,9 @@ app.include_router(editor_router)
 from services.webui.routes.news import router as news_router
 app.include_router(news_router)
 
+from services.webui.routes.notifications import create_notifications_router
+app.include_router(create_notifications_router(lifecycle_service, _guard_runtime_idle))
+
 class _StaticCacheHeadersMiddleware:
     def __init__(self, inner_app):
         self.inner_app = inner_app
@@ -1930,10 +1933,12 @@ async def deploy_get_api():
     deploy_copy = dict(cfg._config.get("deploy", {}))
     has_pwd = bool(deploy_copy.get("password"))
     deploy_copy["password"] = ""
+    notify_copy = dict(cfg._config.get("notify", {}))
+    notify_copy.pop("qq", None)
     return {
         "deploy": deploy_copy,
         "password_protected": has_pwd,
-        "notify": cfg._config.get("notify", {}),
+        "notify": notify_copy,
         "update": cfg._config.get("update", {}),
         "remote_access": cfg._config.get("remote_access", {}),
     }
