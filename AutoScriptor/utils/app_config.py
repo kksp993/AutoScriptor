@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from AutoScriptor.logging.logger import logger
+from AutoScriptor.utils.json_io import write_json_atomic
 
 
 _GLOBAL_KEYS = (
@@ -30,37 +31,10 @@ _GLOBAL_KEYS = (
 )
 
 
-def _strict_json_fsync_enabled() -> bool:
-    return str(os.environ.get("AUTOSCRIPTOR_STRICT_FSYNC", "")).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _atomic_write_json(path: Path, data: Any) -> None:
-    """Write JSON via same-directory temp file then atomic replace."""
-    start = time.perf_counter()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-            f.write("\n")
-            f.flush()
-            if _strict_json_fsync_enabled():
-                os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-        elapsed = time.perf_counter() - start
-        if elapsed >= 1.0:
-            logger.warning("JSON 保存耗时 %.2fs: %s", elapsed, path)
-    finally:
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
-
-
-def write_json_atomic(path: Path | str, data: Any) -> None:
-    """Atomic JSON writer handed to the account backend."""
-    _atomic_write_json(Path(path), data)
+# The atomic writer lives in a module with no import-time side effects, so a
+# script that only needs to write JSON never triggers a config load. Kept as a
+# private alias here because the manager below writes through it.
+_atomic_write_json = write_json_atomic
 
 
 class AccountBackend(Protocol):
