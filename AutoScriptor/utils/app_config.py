@@ -91,6 +91,8 @@ class AccountBackend(Protocol):
 
     def list_accounts(self, global_cfg: dict[str, Any]) -> list[str]: ...
 
+    def read_character_names(self, name: str, global_cfg: dict[str, Any]) -> dict[str, Any]: ...
+
     def verify_security_key(self, name: str, security_key: str, global_cfg: dict[str, Any]) -> bool: ...
 
     def add_account(
@@ -492,6 +494,13 @@ class AutoConfig:
 
     def list_characters(self) -> dict[str, Any]:
         return self._account_data.get("characters", {})
+
+    def account_character_names(self, name: str) -> dict[str, Any]:
+        """某账号的角色名单。当前账号直接取内存，其它账号交给账号域只读读取。"""
+        if name == self.current_account():
+            return self._account_data.get("characters", {}) or {}
+        backend = _require_backend("读取账号角色名单")
+        return backend.read_character_names(name, self._mgr.global_cfg)
 
     def switch_account(self, target: str, security_key: str = "") -> None:
         backend = _require_backend("切换账号")

@@ -20,10 +20,25 @@ from urllib.parse import urlparse
 
 import requests
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from lxml import html as lxml_html
 
+from AutoScriptor.utils.app_config import cfg
+from AutoScriptor.logging.logger import logger
 from AutoScriptor.utils.paths import get_logs_root
+from backend.webui.api_context import busy_response, mark_config_changed
+from backend.webui.api_response import api_error, api_ok
+from backend.webui.security import (
+    attach_credential_unlock_cookie,
+    check_request_freshness,
+    credential_locked_response,
+    credential_unlock_from_request,
+    grant_credential_unlock,
+    is_verify_rate_limited,
+    record_verify_failure,
+    revoke_credential_unlock,
+)
+from orchestrator import RuntimeExecutionBusyError, current_version, orchestrator
 from backend.webui.routes.news_4399_session import (
     get_cached_or_login_session,
     get_cached_session,
@@ -823,3 +838,146 @@ async def proxy_page(request: Request, url: str = Query(..., description="要代
         return HTMLResponse(content)
     except Exception as e:
         return HTMLResponse(f"<h3>加载失败: {e}</h3>", status_code=502)
+
+# ── 兑换码：把兑换码交给内置任务执行 ──
+#
+# 页面只要一个目标账号/角色和一串兑换码；其余（切账号、切角色、加载任务、
+# 起一轮直接执行）都是编排层的事。这里只做校验、冷却和解锁令牌的签发。
+
+GIFT_REDEEM_TASK_PATH = "一般任务/活动/兑换豪礼礼品兑换"
+
+MAX_REDEEM_CODES_PER_REQUEST = 30
+
+
+def _redeem_codes_from_payload(data: dict) -> list[str]:
+    """请求里的单个 redeem_code 或 redeem_codes 列表 → 去重后的兑换码。"""
+    raw_codes = data.get("redeem_codes")
+    candidates = raw_codes if isinstance(raw_codes, list) else [data.get("redeem_code")]
+    codes: list[str] = []
+    seen: set[str] = set()
+    for raw in candidates:
+        code = str(raw or "").strip()
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        codes.append(code)
+    return codes
+
+
+@router.get("/redeem_targets")
+async def redeem_targets():
+    return api_ok(
+        current_account=cfg.current_account(),
+        active_character=cfg.active_character(),
+        credential_unlocked=cfg.has_decrypted_credentials(),
+        accounts=orchestrator.tree.account_role_options(),
+        runtime=orchestrator.execution.status(),
+    )
+
+
+@router.post("/gift_codes/redeem")
+async def redeem_gift_codes(request: Request):
+    data = await request.json()
+    if not isinstance(data, dict):
+        return api_error(400, "invalid redeem payload", code="invalid_payload")
+    if not check_request_freshness(data):
+        return api_error(400, "请求已过期，请重试", code="stale_request")
+    if orchestrator.execution.is_busy():
+        return busy_response("redeem gift code")
+
+    redeem_codes = _redeem_codes_from_payload(data)
+    account = str(data.get("account") or "").strip()
+    server = str(data.get("server") or "").strip()
+    character = str(data.get("character") or "").strip()
+    security_key = str(data.get("security_key") or "").strip()
+
+    if not redeem_codes:
+        return api_error(400, "兑换码不能为空", code="invalid_payload")
+    if len(redeem_codes) > MAX_REDEEM_CODES_PER_REQUEST:
+        return api_error(
+            400, f"一次最多兑换 {MAX_REDEEM_CODES_PER_REQUEST} 个兑换码", code="invalid_payload"
+        )
+    if not account:
+        return api_error(400, "请选择账号", code="invalid_payload")
+    if not server or not character:
+        return api_error(400, "请选择角色", code="invalid_payload")
+
+    client_ip = request.client.host if request.client else "unknown"
+    if security_key and is_verify_rate_limited(client_ip):
+        return api_error(429, "验证尝试过多，请5分钟后再试", code="rate_limited")
+    credential_granted = False
+
+    try:
+        if account != cfg.current_account():
+            if not security_key:
+                return credential_locked_response("切换账号需要输入安全密码")
+            if not cfg.verify_account_security_key(account, security_key):
+                record_verify_failure(client_ip)
+                return api_error(401, "安全密码错误", code="invalid_security_key", need_security_key=True)
+            orchestrator.tasks.switch_account(account, security_key)
+            credential_granted = True
+        elif not cfg.has_decrypted_credentials():
+            if cfg.has_encrypted_credentials():
+                if not security_key:
+                    return credential_locked_response("请先输入安全密码以验证账号")
+                if not cfg.verify_account_security_key(account, security_key):
+                    record_verify_failure(client_ip)
+                    return api_error(401, "安全密码错误", code="invalid_security_key", need_security_key=True)
+                orchestrator.tasks.reload_verified_account(security_key)
+                mark_config_changed("redeem credential unlock")
+                credential_granted = True
+            else:
+                return credential_locked_response("当前账号未配置游戏账号密码")
+
+        if not cfg.has_decrypted_credentials():
+            return credential_locked_response("请先验证账号密码后再兑换")
+
+        orchestrator.tasks.switch_character(server, character, reason="redeem code select character")
+
+        from tasks.task_registry import task_registry
+
+        if not task_registry.has_task(GIFT_REDEEM_TASK_PATH):
+            orchestrator.tasks.reload_all(reason="reload redeem task")
+        if not task_registry.has_task(GIFT_REDEEM_TASK_PATH):
+            return api_error(
+                404,
+                "未找到兑换码任务，请确认一般任务已加载",
+                code="redeem_task_missing",
+            )
+    except (KeyError, ValueError) as e:
+        return api_error(400, str(e), code="invalid_payload")
+    except Exception as e:
+        logger.error("gift code redeem prepare failed: %s", e, exc_info=True)
+        return api_error(500, "启动兑换任务失败", code="redeem_start_failed")
+
+    task_runs = [
+        {
+            "id": "redeem:batch",
+            "task": GIFT_REDEEM_TASK_PATH,
+            "params": {"redeem_code": redeem_codes if len(redeem_codes) > 1 else redeem_codes[0]},
+        }
+    ]
+
+    def _run(runs):
+        orchestrator.scheduler.run_direct_sequence(runs, force_login=True)
+        logger.info("========== 兑换码任务执行完成，共 %d 个 ==========", len(redeem_codes))
+
+    try:
+        orchestrator.execution.start_direct(_run, task_runs)
+    except RuntimeExecutionBusyError:
+        return busy_response("redeem gift code")
+
+    response = JSONResponse(content=api_ok(
+        status="ok",
+        mode="direct",
+        task=GIFT_REDEEM_TASK_PATH,
+        redeem_codes=redeem_codes,
+        redeem_count=len(redeem_codes),
+        account=cfg.current_account(),
+        active_character=cfg.active_character(),
+        config_version=current_version(),
+    ))
+    if not credential_granted:
+        return response
+    revoke_credential_unlock(credential_unlock_from_request(request))
+    return attach_credential_unlock_cookie(response, grant_credential_unlock())
