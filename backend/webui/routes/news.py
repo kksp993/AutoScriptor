@@ -24,13 +24,13 @@ from fastapi.responses import HTMLResponse, Response
 from lxml import html as lxml_html
 
 from AutoScriptor.utils.paths import get_logs_root
-from services.webui.routes.news_4399_session import (
+from backend.webui.routes.news_4399_session import (
     get_cached_or_login_session,
     get_cached_session,
     get_news_4399_credentials_from_server,
     is_public_news_credential,
 )
-from services.webui.security import CREDENTIAL_UNLOCK_COOKIE_NAME, validate_credential_unlock
+from backend.webui.security import CREDENTIAL_UNLOCK_COOKIE_NAME, validate_credential_unlock
 
 router = APIRouter(prefix="/api/news", tags=["news"])
 

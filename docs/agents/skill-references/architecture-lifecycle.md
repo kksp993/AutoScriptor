@@ -26,7 +26,7 @@ Useful docs:
 
 ## Runtime Context
 
-- `services.core.runtime_context.runtime_ctx` owns `mixctrl`, `mumu`, and background monitor lifecycle.
+- `AutoScriptor.core.runtime_context.runtime_ctx` owns `mixctrl`, `mumu`, and background monitor lifecycle.
 - WebUI startup, refresh, normal polling, and default diagnostics must not initialize device sessions.
 - Do not patch stale global controls directly when runtime refresh is required.
 - Scheduler and direct execution paths should use `runtime_ctx.refresh()` or the established lifecycle service.

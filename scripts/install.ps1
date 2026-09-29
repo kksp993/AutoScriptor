@@ -318,7 +318,7 @@ function Install-ElectronDeps {
 
 function Install-QQBot {
     Ensure-Venv
-    $setupScript = Join-Path $Root "services\core\qq_bot.py"
+    $setupScript = Join-Path $Root "backend\core\qq_bot.py"
     & $VenvPy -X utf8 $setupScript install
     if ($LASTEXITCODE -ne 0) {
         throw "NapCat installation failed with exit code $LASTEXITCODE"

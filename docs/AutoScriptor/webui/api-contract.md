@@ -1,10 +1,10 @@
 # WebUI API Contract 当前基线
 
-WebUI 后端是 FastAPI；静态前端位于 `services/webui/static/`，源码 Electron 壳位于 `webapp/`。
+WebUI 后端是 FastAPI；静态前端位于 `backend/webui/static/`，源码 Electron 壳位于 `webapp/`。
 
 ## 响应约定
 
-新建或重构接口优先使用 `services.webui.api_response`：
+新建或重构接口优先使用 `backend.webui.api_response`：
 
 ```json
 {"ok": true, "config_version": 12}

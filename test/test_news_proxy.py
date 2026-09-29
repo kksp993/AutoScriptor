@@ -7,13 +7,13 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from services.webui.routes.news import (
+from backend.webui.routes.news import (
     _fetch_proxy_with_adaptive_login,
     _forum_iframe_placeholder,
     _is_login_wall_response,
     _strip_document_domain_assignments,
 )
-from services.webui.routes.news_4399_session import encrypt_password_for_ptlogin, _ptlogin_form_error_message
+from backend.webui.routes.news_4399_session import encrypt_password_for_ptlogin, _ptlogin_form_error_message
 
 
 class _FakeResp:
@@ -71,10 +71,10 @@ class TestNewsLoginWall(unittest.TestCase):
         ok = _FakeResp("https://bbs.4399.cn/thread-tid-1")
         session = object()
 
-        with patch("services.webui.routes.news.get_cached_session", return_value=None), patch(
-            "services.webui.routes.news.get_cached_or_login_session", return_value=session
+        with patch("backend.webui.routes.news.get_cached_session", return_value=None), patch(
+            "backend.webui.routes.news.get_cached_or_login_session", return_value=session
         ) as login, patch(
-            "services.webui.routes.news._fetch_proxy_upstream",
+            "backend.webui.routes.news._fetch_proxy_upstream",
             side_effect=[login_wall, ok],
         ) as fetch:
             out = _fetch_proxy_with_adaptive_login(
@@ -98,13 +98,13 @@ class TestNewsLoginWall(unittest.TestCase):
         fresh_session = object()
 
         with patch(
-            "services.webui.routes.news.get_cached_session",
+            "backend.webui.routes.news.get_cached_session",
             return_value=stale_session,
         ), patch(
-            "services.webui.routes.news.get_cached_or_login_session",
+            "backend.webui.routes.news.get_cached_or_login_session",
             return_value=fresh_session,
         ) as login, patch(
-            "services.webui.routes.news._fetch_proxy_upstream",
+            "backend.webui.routes.news._fetch_proxy_upstream",
             side_effect=[login_wall, ok],
         ) as fetch:
             out = _fetch_proxy_with_adaptive_login(

@@ -39,7 +39,7 @@ class Updater:
         self.last_error = ""
         self.action_taken = ""
         self.restart_triggered = False
-        self._restart_event = None  # multiprocessing.Event，由 services/webui/gui.py 传入
+        self._restart_event = None  # multiprocessing.Event，由 backend/webui/gui.py 传入
 
     def _find_git(self) -> str:
         for candidate in ["git.exe", "git"]:
@@ -341,7 +341,7 @@ class Updater:
         return True
 
     def set_restart_event(self, event):
-        """设置重启事件（multiprocessing.Event），由 services/webui/gui.py 子进程传入。"""
+        """设置重启事件（multiprocessing.Event），由 backend/webui/gui.py 子进程传入。"""
         self._restart_event = event
 
     def _trigger_restart(self, delay: float = 2.0):

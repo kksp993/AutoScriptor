@@ -35,7 +35,7 @@ class FakeRoundTaskManager:
 
 class TestSchedulerExecutionGate(unittest.TestCase):
     def test_enabled_idle_scheduler_is_not_busy(self):
-        from services.core.scheduler import Scheduler, SchedulerState
+        from orchestrator.scheduler import Scheduler, SchedulerState
 
         scheduler = Scheduler()
         scheduler.state = SchedulerState.RUNNING
@@ -47,7 +47,7 @@ class TestSchedulerExecutionGate(unittest.TestCase):
         self.assertFalse(status["busy"])
 
     def test_scheduler_waits_for_direct_execution_without_deactivating(self):
-        from services.core.scheduler import Scheduler, SchedulerState
+        from orchestrator.scheduler import Scheduler, SchedulerState
 
         scheduler = Scheduler()
         scheduler.state = SchedulerState.RUNNING
@@ -68,7 +68,7 @@ class TestSchedulerExecutionGate(unittest.TestCase):
                 "_run_task_pipeline",
                 side_effect=lambda *args, **kwargs: scheduler_pipeline_started.set(),
             ),
-            patch("services.core.scheduler.os.system"),
+            patch("orchestrator.scheduler.os.system"),
         ):
             scheduler_thread = Thread(target=scheduler._check_and_run, daemon=True)
             scheduler_thread.start()
@@ -85,7 +85,7 @@ class TestSchedulerExecutionGate(unittest.TestCase):
         self.assertIsNone(scheduler.execution_owner)
 
     def test_scheduler_does_not_start_after_being_deactivated_while_waiting(self):
-        from services.core.scheduler import Scheduler, SchedulerState
+        from orchestrator.scheduler import Scheduler, SchedulerState
 
         scheduler = Scheduler()
         scheduler.state = SchedulerState.RUNNING
@@ -106,7 +106,7 @@ class TestSchedulerExecutionGate(unittest.TestCase):
                 "_run_task_pipeline",
                 side_effect=lambda *args, **kwargs: scheduler_pipeline_started.set(),
             ),
-            patch("services.core.scheduler.os.system"),
+            patch("orchestrator.scheduler.os.system"),
         ):
             scheduler_thread = Thread(target=scheduler._check_and_run, daemon=True)
             scheduler_thread.start()
@@ -140,15 +140,15 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         cfg._config = self._cfg_backup
 
     def _run_with_fake_manager(self, tm):
-        from services.core.scheduler import Scheduler
+        from orchestrator.scheduler import Scheduler
 
         sched = Scheduler()
         sched.set_task_manager(tm)
         with (
             patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}),
             patch.object(cfg, "save_config") as save_config,
-            patch("services.core.scheduler.runtime_ctx.refresh"),
-            patch("services.core.scheduler.notify_runtime_event"),
+            patch("orchestrator.scheduler.runtime_ctx.refresh"),
+            patch("orchestrator.scheduler.notify_runtime_event"),
             patch.object(sched, "_maybe_daily_restart"),
             patch.object(sched, "_ensure_character_logged_in"),
             patch.object(sched, "_post_execution_action"),
@@ -157,15 +157,15 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         return sched, save_config
 
     def _run_scheduled_with_fake_manager(self, sched, due_tasks):
-        from services.core.scheduler import SchedulerState
+        from orchestrator.scheduler import SchedulerState
 
         sched.state = SchedulerState.RUNNING
         with (
             patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}),
             patch.object(cfg, "save_config") as save_config,
             patch.object(sched, "_collect_due_cross_character", return_value=due_tasks),
-            patch("services.core.scheduler.runtime_ctx.refresh"),
-            patch("services.core.scheduler.notify_runtime_event"),
+            patch("orchestrator.scheduler.runtime_ctx.refresh"),
+            patch("orchestrator.scheduler.notify_runtime_event"),
             patch.object(sched, "_maybe_daily_restart"),
             patch.object(sched, "_ensure_character_logged_in"),
             patch.object(sched, "_post_execution_action"),
@@ -186,18 +186,18 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         self.assertEqual(tm.reload_calls, 0)
 
     def test_character_notification_merges_retry_results(self):
-        from services.core.character_reports import CharacterReports
+        from orchestrator.character_reports import CharacterReports
 
         messages = []
         reports = CharacterReports(messages.append, [("s1", "c1")])
         manager = FakeRoundTaskManager({("A", 0): (0, 1), ("A", 1): (1, 0)})
-        with patch("services.core.scheduler.create_character_reports", return_value=reports):
+        with patch("orchestrator.scheduler.create_character_reports", return_value=reports):
             self._run_with_fake_manager(manager)
         self.assertEqual(len(messages), 1)
         self.assertIn("1:(c1)任务完成-成功:2,失败:0", messages[0])
 
     def test_character_notification_marks_cancelled_attempt_pending(self):
-        from services.core.character_reports import CharacterReports
+        from orchestrator.character_reports import CharacterReports
 
         messages = []
         reports = CharacterReports(messages.append, [("s1", "c1")])
@@ -209,7 +209,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
 
         with (
             patch.object(manager, "execute_tasks", side_effect=cancel_attempt),
-            patch("services.core.scheduler.create_character_reports", return_value=reports),
+            patch("orchestrator.scheduler.create_character_reports", return_value=reports),
         ):
             self._run_with_fake_manager(manager)
         self.assertEqual(len(messages), 1)
@@ -218,8 +218,8 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         self.assertNotIn("任务完成", messages[0])
 
     def test_cross_character_notifications_wait_for_each_final_retry(self):
-        from services.core.character_reports import CharacterReports
-        from services.core.scheduler import Scheduler, SchedulerState
+        from orchestrator.character_reports import CharacterReports
+        from orchestrator.scheduler import Scheduler, SchedulerState
 
         current = {"server": "s1", "name": "first"}
         messages = []
@@ -244,9 +244,9 @@ class TestSchedulerRetryRounds(unittest.TestCase):
             patch.object(scheduler, "_ensure_character_logged_in"),
             patch.object(scheduler, "_return_to_first_dispatch_character"),
             patch.object(scheduler, "_post_execution_action"),
-            patch("services.core.scheduler.runtime_ctx.refresh"),
-            patch("services.core.scheduler.notify_runtime_event"),
-            patch("services.core.scheduler.create_character_reports", return_value=reports),
+            patch("orchestrator.scheduler.runtime_ctx.refresh"),
+            patch("orchestrator.scheduler.notify_runtime_event"),
+            patch("orchestrator.scheduler.create_character_reports", return_value=reports),
         ):
             scheduler._run_task_pipeline()
         self.assertEqual(manager.calls, [("A", 0), ("B", 0), ("A", 1)])
@@ -255,7 +255,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         self.assertIn("1:(first)任务完成-成功:1,失败:0", messages[1])
 
     def test_scheduled_pipeline_saves_config_without_full_reload(self):
-        from services.core.scheduler import Scheduler
+        from orchestrator.scheduler import Scheduler
 
         tm = FakeRoundTaskManager({("A", 0): (1, 0)})
         sched = Scheduler()
@@ -267,7 +267,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         self.assertEqual(tm.reload_calls, 0)
 
     def test_deferred_reload_still_uses_full_reload(self):
-        from services.core.scheduler import Scheduler
+        from orchestrator.scheduler import Scheduler
 
         tm = FakeRoundTaskManager({("A", 0): (1, 0)})
         sched = Scheduler()
@@ -277,8 +277,8 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         with (
             patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}),
             patch.object(cfg, "save_config") as save_config,
-            patch("services.core.scheduler.runtime_ctx.refresh"),
-            patch("services.core.scheduler.notify_runtime_event"),
+            patch("orchestrator.scheduler.runtime_ctx.refresh"),
+            patch("orchestrator.scheduler.notify_runtime_event"),
             patch.object(sched, "_maybe_daily_restart"),
             patch.object(sched, "_ensure_character_logged_in"),
             patch.object(sched, "_post_execution_action"),
@@ -290,7 +290,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         self.assertFalse(sched._reload_deferred.is_set())
 
     def test_collect_due_cross_character_uses_lightweight_switch(self):
-        from services.core.scheduler import Scheduler
+        from orchestrator.scheduler import Scheduler
 
         current = {"server": "s1", "name": "first"}
 
@@ -344,7 +344,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         self.assertEqual(tm.calls, [("A", 0), ("B", 0), ("A", 1), ("A", 2)])
 
     def test_scheduled_task_exhaustion_survives_next_pipeline_scan(self):
-        from services.core.scheduler import Scheduler
+        from orchestrator.scheduler import Scheduler
 
         tm = FakeRoundTaskManager({
             ("A", 0): (0, 1),
@@ -360,7 +360,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         self.assertEqual(tm.calls, [("A", 0), ("A", 1), ("A", 2)])
 
     def test_exhausted_scheduled_task_does_not_force_zero_wait_spin(self):
-        from services.core.scheduler import CHECK_INTERVAL, Scheduler
+        from orchestrator.scheduler import CHECK_INTERVAL, Scheduler
 
         cfg._config["tasks"] = {"A": {"on": True, "next_exec_time": 0}}
         sched = Scheduler()
@@ -373,7 +373,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
                     self.assertEqual(sched._get_wait_interval(), CHECK_INTERVAL)
 
     def test_stop_restores_error_budget_without_clearing_cancel_signal(self):
-        from services.core.scheduler import Scheduler, SchedulerState
+        from orchestrator.scheduler import Scheduler, SchedulerState
 
         class CancellableTaskManager:
             def __init__(self):
@@ -411,7 +411,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         self.assertFalse(task_manager._cancel_event.is_set())
 
     def test_scheduled_pipeline_returns_to_first_dispatch_character(self):
-        from services.core.scheduler import Scheduler, SchedulerState
+        from orchestrator.scheduler import Scheduler, SchedulerState
 
         class SwitchingTaskManager(FakeRoundTaskManager):
             def __init__(self, current):
@@ -442,11 +442,11 @@ class TestSchedulerRetryRounds(unittest.TestCase):
 
         with (
             patch.object(cfg, "active_character", side_effect=lambda: dict(current)),
-            patch("services.core.scheduler.iter_dispatch_characters", side_effect=lambda _cfg: iter(dispatch_order)),
+            patch("orchestrator.scheduler.iter_dispatch_characters", side_effect=lambda _cfg: iter(dispatch_order)),
             patch.object(cfg, "save_config"),
             patch.object(sched, "_collect_due_cross_character", return_value=["A"]),
-            patch("services.core.scheduler.runtime_ctx.refresh"),
-            patch("services.core.scheduler.notify_runtime_event"),
+            patch("orchestrator.scheduler.runtime_ctx.refresh"),
+            patch("orchestrator.scheduler.notify_runtime_event"),
             patch.object(sched, "_maybe_daily_restart"),
             patch.object(sched, "_ensure_character_logged_in", side_effect=record_login),
             patch.object(sched, "_post_execution_action"),

@@ -45,8 +45,8 @@ def import_task_tree_service_for_test():
         "AutoScriptor.utils.app_config": app_config,
         "ZmxyOL.character.profession": game_profession,
     }):
-        sys.modules.pop("services.webui.task_tree_service", None)
-        import services.webui.task_tree_service as module
+        sys.modules.pop("orchestrator.task_tree_service", None)
+        import orchestrator.task_tree_service as module
 
     return module
 
@@ -240,7 +240,7 @@ def import_watcher_for_test():
     module_name = "config_watcher_under_test"
     spec = importlib.util.spec_from_file_location(
         module_name,
-        ROOT / "services/core/watcher.py",
+        ROOT / "orchestrator/watcher.py",
     )
     module = importlib.util.module_from_spec(spec)
     with patch.dict(sys.modules, autoscriptor_logger_stubs()):
@@ -319,7 +319,7 @@ class TestTaskTreeServiceContract(unittest.TestCase):
 
         task_registry = types.ModuleType("tasks.task_registry")
         task_registry.task_registry = FakeTaskRegistry()
-        scheduler = types.ModuleType("services.core.scheduler")
+        scheduler = types.ModuleType("orchestrator.scheduler")
         scheduler.is_task_due = lambda node, path, now_ts: bool(node.get("on")) and now_ts >= node.get("next_exec_time", 0)
         scheduler.is_human_takeover_blocked = (
             lambda node, now_ts=None: bool(node.get("human_takeover_error"))
@@ -332,7 +332,7 @@ class TestTaskTreeServiceContract(unittest.TestCase):
             "AutoScriptor.utils": types.ModuleType("AutoScriptor.utils"),
             "tasks.task_registry": task_registry,
             "tasks.task_state": task_state,
-            "services.core.scheduler": scheduler,
+            "orchestrator.scheduler": scheduler,
         }
 
     def test_ordered_paths_preserves_nested_leaf_order(self):
@@ -544,19 +544,19 @@ class TestRuntimeControllerContract(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        scheduler_mod = types.ModuleType("services.core.scheduler")
+        scheduler_mod = types.ModuleType("orchestrator.scheduler")
         scheduler_mod.Scheduler = object
         scheduler_mod.SchedulerState = cls.SchedulerState
-        task_manager_mod = types.ModuleType("services.core.task_manager")
+        task_manager_mod = types.ModuleType("orchestrator.task_manager")
         task_manager_mod.TaskManager = object
         modules = autoscriptor_logger_stubs()
         modules.update({
-            "services.core.scheduler": scheduler_mod,
-            "services.core.task_manager": task_manager_mod,
+            "orchestrator.scheduler": scheduler_mod,
+            "orchestrator.task_manager": task_manager_mod,
         })
         with patch.dict(sys.modules, modules):
-            sys.modules.pop("services.webui.runtime_controller", None)
-            from services.webui.runtime_controller import RuntimeController, RuntimeExecutionBusyError
+            sys.modules.pop("orchestrator.runtime_controller", None)
+            from orchestrator.runtime_controller import RuntimeController, RuntimeExecutionBusyError
 
         cls.RuntimeController = RuntimeController
         cls.RuntimeExecutionBusyError = RuntimeExecutionBusyError
@@ -676,7 +676,7 @@ class TestRuntimeControllerContract(unittest.TestCase):
         self.assertEqual(calls, ["cancel", "scheduler_stop", "invalidate_login"])
 
     def test_request_stop_does_not_async_raise_into_worker_thread(self):
-        content = (ROOT / "services/webui/runtime_controller.py").read_text(encoding="utf-8")
+        content = (ROOT / "orchestrator/runtime_controller.py").read_text(encoding="utf-8")
 
         self.assertNotIn("PyThreadState_SetAsyncExc", content)
         self.assertNotIn("_raise_in_thread", content)
@@ -684,8 +684,8 @@ class TestRuntimeControllerContract(unittest.TestCase):
 
 class TestWebUILifecycleServiceContract(unittest.TestCase):
     def setUp(self):
-        sys.modules.pop("services.webui.lifecycle_service", None)
-        from services.webui.lifecycle_service import WebUILifecycleService
+        sys.modules.pop("orchestrator.lifecycle", None)
+        from orchestrator.lifecycle import WebUILifecycleService
 
         self.WebUILifecycleService = WebUILifecycleService
 
@@ -851,7 +851,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
         )
 
     def test_save_tasks_clears_status_for_reactivated_or_error_reset_paths(self):
-        from services.webui.task_tree_service import TaskTreeService
+        from orchestrator.task_tree_service import TaskTreeService
 
         class FakeTaskManager:
             cleared = []
@@ -1210,7 +1210,7 @@ class TestConfigLifecycleContract(unittest.TestCase):
                 self.assertNotIn(date_key, saved)
 
     def test_task_manager_reload_uses_config_reload_preserving_credentials(self):
-        content = (ROOT / "services/core/task_manager.py").read_text(encoding="utf-8")
+        content = (ROOT / "orchestrator/task_manager.py").read_text(encoding="utf-8")
 
         self.assertIn("reload_preserving_decrypted_credentials", content)
         self.assertNotIn("saved_game = cfg._config.get('game'", content)
@@ -1361,16 +1361,16 @@ class TestConfigLifecycleContract(unittest.TestCase):
 
 class TestWebUIFrontendContract(unittest.TestCase):
     JS_FILES = [
-        ROOT / "services/webui/static/js/core/api.js",
-        ROOT / "services/webui/static/js/app.js",
-        ROOT / "services/webui/static/js/stores/runtimeStore.js",
-        ROOT / "services/webui/static/js/components/DiagnosticsPanel.js",
-        ROOT / "services/webui/static/js/components/Overview.js",
-        ROOT / "services/webui/static/js/components/SchedulerPanel.js",
-        ROOT / "services/webui/static/js/components/TaskPanel.js",
-        ROOT / "services/webui/static/js/components/TaskTree.js",
-        ROOT / "services/webui/static/js/components/Settings.js",
-        ROOT / "services/webui/static/js/components/ErrorArchivesPanel.js",
+        ROOT / "backend/webui/static/js/core/api.js",
+        ROOT / "backend/webui/static/js/app.js",
+        ROOT / "backend/webui/static/js/stores/runtimeStore.js",
+        ROOT / "backend/webui/static/js/components/DiagnosticsPanel.js",
+        ROOT / "backend/webui/static/js/components/Overview.js",
+        ROOT / "backend/webui/static/js/components/SchedulerPanel.js",
+        ROOT / "backend/webui/static/js/components/TaskPanel.js",
+        ROOT / "backend/webui/static/js/components/TaskTree.js",
+        ROOT / "backend/webui/static/js/components/Settings.js",
+        ROOT / "backend/webui/static/js/components/ErrorArchivesPanel.js",
     ]
 
     def test_changed_frontend_files_parse_as_javascript(self):
@@ -1379,7 +1379,7 @@ class TestWebUIFrontendContract(unittest.TestCase):
                 subprocess.run(["node", "--check", str(path)], cwd=ROOT, check=True, capture_output=True, text=True)
 
     def test_app_uses_single_runtime_snapshot_polling_path(self):
-        content = (ROOT / "services/webui/static/js/app.js").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/static/js/app.js").read_text(encoding="utf-8")
 
         self.assertIn("fetchRuntimeSnapshot", content)
         self.assertIn("'/runtime/snapshot'", content)
@@ -1391,7 +1391,7 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertNotIn("loadDispatchQueue", content)
 
     def test_task_list_and_overview_refresh_use_full_task_reload(self):
-        content = (ROOT / "services/webui/static/js/app.js").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/static/js/app.js").read_text(encoding="utf-8")
 
         reload_start = content.index("    async function reloadTasks(")
         reload_end = content.index("    // ── WebSocket for logs", reload_start)
@@ -1409,7 +1409,7 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertNotIn("await refreshConfig(true)", overview_body)
 
     def test_task_list_run_requests_skip_character_login_without_changing_scheduler_start(self):
-        content = (ROOT / "services/webui/static/js/app.js").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/static/js/app.js").read_text(encoding="utf-8")
 
         payload_start = content.index("    function taskListRunPayload(")
         payload_end = content.index("    async function startRun()", payload_start)
@@ -1435,7 +1435,7 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertIn("taskListRunPayload([fullPath])", single_task_body)
 
     def test_frontend_stop_does_not_wait_for_full_runtime_snapshot(self):
-        content = (ROOT / "services/webui/static/js/app.js").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/static/js/app.js").read_text(encoding="utf-8")
         start = content.index("    async function unifiedStop()")
         end = content.index("    async function verifyAccount", start)
         body = content[start:end]
@@ -1448,14 +1448,14 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertNotIn("await fetchRuntimeSnapshot", body)
 
     def test_task_and_scheduler_stop_buttons_use_overview_stop_action(self):
-        index = (ROOT / "services/webui/static/index.html").read_text(encoding="utf-8")
-        overview = (ROOT / "services/webui/static/js/components/Overview.js").read_text(encoding="utf-8")
-        task_panel = (ROOT / "services/webui/static/js/components/TaskPanel.js").read_text(encoding="utf-8")
-        scheduler_panel = (ROOT / "services/webui/static/js/components/SchedulerPanel.js").read_text(encoding="utf-8")
+        index = (ROOT / "backend/webui/static/index.html").read_text(encoding="utf-8")
+        overview = (ROOT / "backend/webui/static/js/components/Overview.js").read_text(encoding="utf-8")
+        task_panel = (ROOT / "backend/webui/static/js/components/TaskPanel.js").read_text(encoding="utf-8")
+        scheduler_panel = (ROOT / "backend/webui/static/js/components/SchedulerPanel.js").read_text(encoding="utf-8")
 
         self.assertIn('@stop-dispatch="stopDispatch"', index)
         self.assertNotIn('@stop-run="stopRun"', index)
-        self.assertNotIn("function stopRun()", (ROOT / "services/webui/static/js/app.js").read_text(encoding="utf-8"))
+        self.assertNotIn("function stopRun()", (ROOT / "backend/webui/static/js/app.js").read_text(encoding="utf-8"))
         self.assertIn("$emit('stop-dispatch')", overview)
         self.assertIn("'stop-dispatch'", task_panel)
         self.assertIn("'stop-dispatch'", scheduler_panel)
@@ -1467,8 +1467,8 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertNotIn("$emit('stop-run')", scheduler_panel)
 
     def test_frontend_uses_account_terms_not_profile_terms(self):
-        index = (ROOT / "services/webui/static/index.html").read_text(encoding="utf-8")
-        style = (ROOT / "services/webui/static/css/style.css").read_text(encoding="utf-8")
+        index = (ROOT / "backend/webui/static/index.html").read_text(encoding="utf-8")
+        style = (ROOT / "backend/webui/static/css/style.css").read_text(encoding="utf-8")
 
         self.assertIn("account-dropdown", index)
         self.assertIn("topbar-account", index)
@@ -1477,12 +1477,12 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertNotIn("topbar-profile", index + style)
 
     def test_overview_scheduled_status_is_displayed_as_completed(self):
-        content = (ROOT / "services/webui/static/js/components/Overview.js").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/static/js/components/Overview.js").read_text(encoding="utf-8")
         self.assertIn("scheduled: '已完成'", content)
         self.assertNotIn("scheduled: '已计划'", content)
 
     def test_error_archives_support_shift_range_selection(self):
-        content = (ROOT / "services/webui/static/js/components/ErrorArchivesPanel.js").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/static/js/components/ErrorArchivesPanel.js").read_text(encoding="utf-8")
 
         self.assertIn("lastCheckedFolder", content)
         self.assertIn("flatArchiveFolders", content)
@@ -1490,7 +1490,7 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertIn("@click.stop=\"setChecked(it.folder, $event)\"", content)
 
     def test_settings_contains_only_active_settings_ui(self):
-        content = (ROOT / "services/webui/static/js/components/Settings.js").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/static/js/components/Settings.js").read_text(encoding="utf-8")
 
         self.assertIn("SettingsPanel", content)
         self.assertIn("任务开始时自动启动模拟器和游戏", content)
@@ -1518,7 +1518,7 @@ class TestWebUIFrontendContract(unittest.TestCase):
 
     def test_settings_adb_addr_is_editable_and_validated(self):
         """ADB 连接地址必须可编辑，非法值不得落盘。此前被 :disabled="true" 锁死。"""
-        settings = (ROOT / "services/webui/static/js/components/Settings.js").read_text(encoding="utf-8")
+        settings = (ROOT / "backend/webui/static/js/components/Settings.js").read_text(encoding="utf-8")
 
         adb_input = next(
             line for line in settings.splitlines() if 'v-model="emulatorConfig.adb_addr"' in line
@@ -1533,8 +1533,8 @@ class TestWebUIFrontendContract(unittest.TestCase):
 
     def test_settings_autosave_has_a_live_trigger(self):
         """设置页必须存在真实保存触发点，否则 settings-change 永远不会发出。"""
-        settings = (ROOT / "services/webui/static/js/components/Settings.js").read_text(encoding="utf-8")
-        index = (ROOT / "services/webui/static/index.html").read_text(encoding="utf-8")
+        settings = (ROOT / "backend/webui/static/js/components/Settings.js").read_text(encoding="utf-8")
+        index = (ROOT / "backend/webui/static/index.html").read_text(encoding="utf-8")
 
         self.assertIn("@settings-change=\"saveSettings\"", index)
         self.assertIn("settings-change", settings)
@@ -1546,10 +1546,10 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertIn("beforeUnmount", settings)
 
     def test_diagnostics_is_embedded_in_settings_not_sidebar_page(self):
-        sidebar = (ROOT / "services/webui/static/js/components/AppSidebar.js").read_text(encoding="utf-8")
-        app = (ROOT / "services/webui/static/js/app.js").read_text(encoding="utf-8")
-        index = (ROOT / "services/webui/static/index.html").read_text(encoding="utf-8")
-        settings = (ROOT / "services/webui/static/js/components/Settings.js").read_text(encoding="utf-8")
+        sidebar = (ROOT / "backend/webui/static/js/components/AppSidebar.js").read_text(encoding="utf-8")
+        app = (ROOT / "backend/webui/static/js/app.js").read_text(encoding="utf-8")
+        index = (ROOT / "backend/webui/static/index.html").read_text(encoding="utf-8")
+        settings = (ROOT / "backend/webui/static/js/components/Settings.js").read_text(encoding="utf-8")
 
         self.assertNotIn("id: 'diagnostics'", sidebar)
         self.assertNotIn("启动诊断', icon", sidebar)
@@ -1561,7 +1561,7 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertIn("DiagnosticsPanel.js", index)
 
     def test_diagnostics_screenshot_probe_is_explicit(self):
-        content = (ROOT / "services/webui/static/js/components/DiagnosticsPanel.js").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/static/js/components/DiagnosticsPanel.js").read_text(encoding="utf-8")
 
         self.assertIn("mounted()", content)
         self.assertIn("this.refresh(false)", content)
@@ -1572,9 +1572,9 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertIn("默认轻量检查，不会主动读取模拟器截图", content)
 
     def test_diagnostics_detail_rows_localize_ocr_fields_without_overlap(self):
-        component = (ROOT / "services/webui/static/js/components/DiagnosticsPanel.js").read_text(encoding="utf-8")
-        style = (ROOT / "services/webui/static/css/style.css").read_text(encoding="utf-8")
-        index = (ROOT / "services/webui/static/index.html").read_text(encoding="utf-8")
+        component = (ROOT / "backend/webui/static/js/components/DiagnosticsPanel.js").read_text(encoding="utf-8")
+        style = (ROOT / "backend/webui/static/css/style.css").read_text(encoding="utf-8")
+        index = (ROOT / "backend/webui/static/index.html").read_text(encoding="utf-8")
 
         self.assertIn("configured_use_gpu: '配置使用 GPU'", component)
         self.assertIn("engine_use_gpu: '引擎使用 GPU'", component)
@@ -1589,7 +1589,7 @@ class TestWebUIFrontendContract(unittest.TestCase):
 class TestWebUIServerRouteContract(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
         cls.routes = set()
         for line in content.splitlines():
             stripped = line.strip()
@@ -1620,13 +1620,13 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertNotIn("/api/profiles/switch", self.routes)
 
     def test_webui_routes_do_not_bypass_task_lifecycle(self):
-        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
 
-        self.assertNotIn("from tasks import load_tasks", content)
-        self.assertNotIn("with TASK_MANAGER._cfg_lock", content)
+        self.assertNotIn("from orchestrator import load_tasks", content)
+        self.assertNotIn("with orchestrator.task_manager._cfg_lock", content)
 
     def test_http_middlewares_do_not_wrap_request_body_with_base_http_middleware(self):
-        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
 
         self.assertNotIn('@app.middleware("http")', content)
         self.assertNotIn("BaseHTTPMiddleware", content)
@@ -1635,7 +1635,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("app.add_middleware(_AuthAndApiErrorMiddleware)", content)
 
     def test_accounts_add_uses_standard_api_response(self):
-        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
         start = content.index("async def accounts_add_api")
         end = content.index("@app.post(\"/api/accounts/delete\")", start)
         body = content[start:end]
@@ -1648,7 +1648,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn('credential={"unlocked"', body)
 
     def test_accounts_add_switches_to_created_account(self):
-        content = (ROOT / "services/webui/lifecycle_service.py").read_text(encoding="utf-8")
+        content = (ROOT / "orchestrator/lifecycle.py").read_text(encoding="utf-8")
         start = content.index("    def add_account(")
         end = content.index("    def delete_account", start)
         body = content[start:end]
@@ -1659,27 +1659,27 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("self.scheduler.invalidate_login()", body)
 
     def test_reload_routes_use_split_lifecycle_methods(self):
-        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
 
         start = content.index("@app.post(\"/api/tasks/reload\")")
         end = content.index("@app.post(\"/api/config\")", start)
         light_reload_body = content[start:end]
-        self.assertIn("lifecycle_service.reload_task_state", light_reload_body)
-        self.assertNotIn("lifecycle_service.reload_tasks", light_reload_body)
+        self.assertIn("orchestrator.tasks.reload_task_state", light_reload_body)
+        self.assertNotIn("orchestrator.tasks.reload_tasks", light_reload_body)
 
         start = content.index("@app.post(\"/api/config/sync\")")
         end = content.index("@app.post(\"/api/tasks/reload-all\")", start)
         sync_body = content[start:end]
-        self.assertIn("lifecycle_service.sync_all_config", sync_body)
+        self.assertIn("orchestrator.tasks.sync_all_config", sync_body)
         self.assertIn("_guard_runtime_idle", sync_body)
 
         start = content.index("@app.post(\"/api/tasks/reload-all\")")
         end = content.index("@app.post(\"/api/config\")", start)
         full_reload_body = content[start:end]
-        self.assertIn("lifecycle_service.reload_all", full_reload_body)
+        self.assertIn("orchestrator.tasks.reload_all", full_reload_body)
 
     def test_run_route_scopes_character_login_skip_to_task_list_source(self):
-        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
         start = content.index("@app.post(\"/api/run\")")
         end = content.index("@app.get(\"/api/run/status\")", start)
         body = content[start:end]
@@ -1693,12 +1693,12 @@ class TestWebUIServerRouteContract(unittest.TestCase):
             "_apply_run_character_from_body(body, skip_character_login=skip_character_login)",
             body,
         )
-        self.assertIn("scheduler.run_direct(ts, skip_character_login=skip_character_login)", body)
-        self.assertNotIn("if scheduler.state == SchedulerState.RUNNING:", body)
+        self.assertIn("orchestrator.scheduler.run_direct(ts, skip_character_login=skip_character_login)", body)
+        self.assertNotIn("if orchestrator.scheduler.state == SchedulerState.RUNNING:", body)
         self.assertIn("except RuntimeExecutionBusyError:", body)
 
     def test_frontend_busy_projection_does_not_treat_enabled_scheduler_as_execution(self):
-        content = (ROOT / "services/webui/static/js/app.js").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/static/js/app.js").read_text(encoding="utf-8")
         start = content.index("    const executionBusy = computed(() => {")
         end = content.index("    });", start) + len("    });")
         body = content[start:end]
@@ -1708,16 +1708,16 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertNotIn("schedulerStatus.state === 'running'", body)
 
     def test_editor_and_direct_run_share_scheduler_execution_gate(self):
-        server = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
-        runtime_controller = (ROOT / "services/webui/runtime_controller.py").read_text(encoding="utf-8")
-        editor = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
+        server = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
+        runtime_controller = (ROOT / "orchestrator/runtime_controller.py").read_text(encoding="utf-8")
+        editor = (ROOT / "backend/webui/routes/editor.py").read_text(encoding="utf-8")
 
-        self.assertIn('acquire_execution=lambda: scheduler.acquire_execution("editor", blocking=False)', server)
+        self.assertIn('acquire_execution=lambda: orchestrator.scheduler.acquire_execution("editor", blocking=False)', server)
         self.assertIn('self.scheduler.acquire_execution("direct_run", blocking=False)', runtime_controller)
         self.assertIn("_editor_acquire_execution()", editor)
 
     def test_frontend_api_error_message_accepts_fastapi_detail(self):
-        content = (ROOT / "services/webui/static/js/core/api.js").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/static/js/core/api.js").read_text(encoding="utf-8")
 
         self.assertIn("data.detail", content)
         self.assertIn("JSON.stringify(data.detail)", content)
@@ -1726,7 +1726,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("${path}", content)
 
     def test_persistence_errors_include_runtime_paths(self):
-        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
 
         self.assertIn("def _persistence_diagnostics()", content)
         self.assertIn("config_path", content)
@@ -1737,7 +1737,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("保存任务失败", content)
 
     def test_webui_startup_does_not_initialize_device_controls(self):
-        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
         start = content.index("def _do_heavy_init():")
         end = content.index("@app.get(\"/api/init-status\")", start)
         body = content[start:end]
@@ -1746,10 +1746,10 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertNotIn("runtime_ctx.init(", body)
         self.assertNotIn("except Exception", body)
         self.assertIn("runtime_ctx.init_bg()", body)
-        self.assertIn("TASK_MANAGER.reload_tasks()", body)
+        self.assertIn("orchestrator.task_manager.reload_tasks()", body)
 
     def test_webui_background_init_failure_is_visible(self):
-        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
         start = content.index("async def _deferred_heavy_init():")
         end = content.index("def _do_heavy_init():", start)
         body = content[start:end]
@@ -1761,7 +1761,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("payload[\"error\"] = _init_error", content)
 
     def test_enum_options_fail_instead_of_empty_fallback(self):
-        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
         start = content.index("@app.post(\"/api/enum-options\")")
         end = content.index("@app.get(\"/api/ocr-status\")", start)
         body = content[start:end]
@@ -1772,7 +1772,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("return api_error(500, str(e), code='enum_options_failed')", body)
 
     def test_ocr_status_fail_instead_of_probe_defaults(self):
-        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
         start = content.index("@app.get(\"/api/ocr-status\")")
         end = content.index("@app.get(\"/api/scheduler/status\")", start)
         body = content[start:end]
@@ -1787,7 +1787,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("return api_error(500, str(e), code=\"ocr_status_failed\")", body)
 
     def test_frontend_enum_loader_honors_http_status(self):
-        content = (ROOT / "services/webui/static/js/app.js").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/static/js/app.js").read_text(encoding="utf-8")
         start = content.index("    function openEditModal")
         end = content.index("    function _initTableRowsCache", start)
         body = content[start:end]
@@ -1801,8 +1801,8 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertNotIn("_initTableRowsCache(meta); editModalVisible.value = true; });", body)
 
     def test_runtime_startup_is_cancellable_and_execution_owned(self):
-        runtime_context = (ROOT / "services/core/runtime_context.py").read_text(encoding="utf-8")
-        scheduler = (ROOT / "services/core/scheduler.py").read_text(encoding="utf-8")
+        runtime_context = (ROOT / "AutoScriptor/core/runtime_context.py").read_text(encoding="utf-8")
+        scheduler = (ROOT / "orchestrator/scheduler.py").read_text(encoding="utf-8")
         api = (ROOT / "AutoScriptor/core/api.py").read_text(encoding="utf-8")
 
         self.assertIn("self._refresh_lock", runtime_context)
@@ -1812,7 +1812,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("start_emulator=True", runtime_context)
         self.assertIn("launch_app: bool = True", runtime_context)
         self.assertIn("launch_app=launch_app", runtime_context)
-        self.assertIn("launch_app=False", (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8"))
+        self.assertIn("launch_app=False", (ROOT / "backend/webui/routes/editor.py").read_text(encoding="utf-8"))
         self.assertIn("cancel_check=cancel_check", runtime_context)
         self.assertIn("runtime_ctx.refresh(cancel_check=self._check_cancel_requested)", scheduler)
         self.assertIn("_reload_deferred", scheduler)
@@ -1826,7 +1826,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
     def test_electron_startup_reports_stages_before_backend_ready(self):
         main = (ROOT / "webapp/main.js").read_text(encoding="utf-8")
         loading = (ROOT / "webapp/renderer/loading.html").read_text(encoding="utf-8")
-        gui = (ROOT / "services/webui/gui.py").read_text(encoding="utf-8")
+        gui = (ROOT / "backend/webui/gui.py").read_text(encoding="utf-8")
 
         for marker in [
             "function reportStartupStep",
@@ -1867,7 +1867,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
 
     def test_device_facade_centralizes_manager_adb_nemu_checks(self):
         content = (ROOT / "AutoScriptor/control/MumuAdaptor/device_facade.py").read_text(encoding="utf-8")
-        server = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        server = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
 
         self.assertIn("class DeviceFacade", content)
         self.assertIn("MuMuManager for official lifecycle commands", content)
@@ -1883,7 +1883,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         app_core = (ROOT / "AutoScriptor/control/MumuAdaptor/api/core/app.py").read_text(encoding="utf-8")
         power_core = (ROOT / "AutoScriptor/control/MumuAdaptor/api/core/power.py").read_text(encoding="utf-8")
         adb_core = (ROOT / "AutoScriptor/control/MumuAdaptor/api/adb/Adb.py").read_text(encoding="utf-8")
-        settings = (ROOT / "services/webui/static/js/components/Settings.js").read_text(encoding="utf-8")
+        settings = (ROOT / "backend/webui/static/js/components/Settings.js").read_text(encoding="utf-8")
 
         self.assertIn("MuMuManager app launch 失败，回退至 ADB monkey", app_core)
         self.assertIn("MuMuManager app close 失败，回退至 ADB force-stop", app_core)
@@ -1897,8 +1897,8 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         package_init = (ROOT / "AutoScriptor/__init__.py").read_text(encoding="utf-8")
         core_init = (ROOT / "AutoScriptor/core/__init__.py").read_text(encoding="utf-8")
         mumu_init = (ROOT / "AutoScriptor/control/MumuAdaptor/__init__.py").read_text(encoding="utf-8")
-        server = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
-        task_manager = (ROOT / "services/core/task_manager.py").read_text(encoding="utf-8")
+        server = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
+        task_manager = (ROOT / "orchestrator/task_manager.py").read_text(encoding="utf-8")
 
         self.assertIn("def __getattr__", package_init)
         self.assertIn("def __getattr__", core_init)
@@ -1925,7 +1925,7 @@ def guard(name, globals=None, locals=None, fromlist=(), level=0):
     return orig(name, globals, locals, fromlist, level)
 
 builtins.__import__ = guard
-import services.webui.server
+import backend.webui.server
 assert "paddle" not in sys.modules
 assert "paddleocr" not in sys.modules
 print("OK")
@@ -1944,7 +1944,7 @@ print("OK")
         self.assertIn("OK", proc.stdout)
 
     def test_editor_device_actions_acquire_runtime_session_on_demand(self):
-        content = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/routes/editor.py").read_text(encoding="utf-8")
 
         for marker in [
             '_ensure_editor_mixctrl("screenshot")',
@@ -1963,7 +1963,7 @@ print("OK")
         self.assertNotIn("ctx.mixctrl", content)
 
     def test_remote_access_requires_deploy_password(self):
-        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
         start = content.index('async def remote_access_toggle_api')
         end = content.index('# ── 多账号 API ──', start)
         body = content[start:end]
@@ -1972,18 +1972,18 @@ print("OK")
         self.assertIn("deploy_password_required", body)
 
     def test_account_verify_does_not_start_scheduler(self):
-        content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
         start = content.index('async def verify_account_api')
         end = content.index('@app.post("/api/account")', start)
         body = content[start:end]
 
         self.assertIn("_grant_credential_unlock()", body)
-        self.assertNotIn("scheduler.activate()", body)
-        self.assertNotIn("scheduler.wake()", body)
+        self.assertNotIn("orchestrator.scheduler.activate()", body)
+        self.assertNotIn("orchestrator.scheduler.wake()", body)
         self.assertIn("waiting for explicit run", body)
 
     def test_editor_save_updates_existing_ui_map_rows(self):
-        content = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/routes/editor.py").read_text(encoding="utf-8")
 
         self.assertIn("_read_ui_map_rows", content)
         self.assertIn("_write_ui_map_rows", content)
@@ -1992,7 +1992,7 @@ print("OK")
         self.assertIn('existing = next((row for row in rows if row.get("key") == name), None)', content)
 
     def test_editor_offline_image_paths_do_not_require_device_session(self):
-        content = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/routes/editor.py").read_text(encoding="utf-8")
 
         locate_start = content.index('async def editor_locate(')
         locate_end = content.index('@router.post("/store-template")', locate_start)
@@ -2018,8 +2018,8 @@ print("OK")
         self.assertIn("_EditorVirtualMixControl(_last_screenshot)", helper_body)
 
     def test_editor_click_recording_keeps_offset_out_of_target_box(self):
-        content = (ROOT / "services/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
-        backend = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
+        content = (ROOT / "backend/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
+        backend = (ROOT / "backend/webui/routes/editor.py").read_text(encoding="utf-8")
 
         self.assertIn("if (freeX.value) { left = 0; w = imgWidth.value; }", content)
         self.assertIn("if (freeY.value) { top = 0; h = imgHeight.value; }", content)
@@ -2047,7 +2047,7 @@ print("OK")
 
     def test_editor_inserts_targets_conditions_and_click_until_at_cursor(self):
         frontend = (
-            ROOT / "services/webui/static/js/components/editor/EditorPanel.js"
+            ROOT / "backend/webui/static/js/components/editor/EditorPanel.js"
         ).read_text(encoding="utf-8")
 
         self.assertIn("生成对象", frontend)
@@ -2069,7 +2069,7 @@ print("OK")
 
     def test_editor_match_action_is_available_in_region_recognition_menu(self):
         frontend = (
-            ROOT / "services/webui/static/js/components/editor/EditorPanel.js"
+            ROOT / "backend/webui/static/js/components/editor/EditorPanel.js"
         ).read_text(encoding="utf-8")
 
         self.assertIn("function appendMatchAction()", frontend)
@@ -2083,8 +2083,8 @@ print("OK")
         )
 
     def test_editor_custom_executor_supports_grid_templates_stop_and_indent(self):
-        frontend = (ROOT / "services/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
-        backend = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
+        frontend = (ROOT / "backend/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
+        backend = (ROOT / "backend/webui/routes/editor.py").read_text(encoding="utf-8")
         api = (ROOT / "AutoScriptor/core/api.py").read_text(encoding="utf-8")
 
         self.assertIn("counts = extract_info(make_box_grid", frontend)
@@ -2111,10 +2111,10 @@ print("OK")
         self.assertNotIn("digit_only: bool = False", api)
 
     def test_editor_draft_cache_and_save_custom_script_contract(self):
-        frontend = (ROOT / "services/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
-        index = (ROOT / "services/webui/static/index.html").read_text(encoding="utf-8")
-        backend = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
-        server = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
+        frontend = (ROOT / "backend/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
+        index = (ROOT / "backend/webui/static/index.html").read_text(encoding="utf-8")
+        backend = (ROOT / "backend/webui/routes/editor.py").read_text(encoding="utf-8")
+        server = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
         api_contract = (ROOT / "docs/AutoScriptor/webui/api-contract.md").read_text(encoding="utf-8")
         authoring = (ROOT / "docs/AutoScriptor/tasks/script-authoring.md").read_text(encoding="utf-8")
 
@@ -2175,7 +2175,7 @@ print("OK")
         self.assertIn("enum_multi", backend)
         self.assertIn("configure_editor_custom_task_save_controls", backend)
         self.assertIn("configure_editor_custom_task_save_controls", server)
-        self.assertIn('reload_custom_tasks=lambda: lifecycle_service.reload_all(reason="save editor custom task")', server)
+        self.assertIn('reload_custom_tasks=lambda: orchestrator.tasks.reload_all(reason="save editor custom task")', server)
         self.assertIn("_editor_nav_namespace", backend)
         self.assertIn("from ZmxyOL.nav import api as nav_api", backend)
         self.assertIn("from ZmxyOL.nav.envs import decorators as nav_decorators", backend)
@@ -2202,10 +2202,10 @@ print("OK")
         self.assertIn('@register_task(path_cn="自定义任务/...")', authoring)
 
     def test_editor_navigation_menu_contract(self):
-        from services.webui.routes import editor
+        from backend.webui.routes import editor
 
-        frontend = (ROOT / "services/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
-        backend = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
+        frontend = (ROOT / "backend/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
+        backend = (ROOT / "backend/webui/routes/editor.py").read_text(encoding="utf-8")
         api_contract = (ROOT / "docs/AutoScriptor/webui/api-contract.md").read_text(encoding="utf-8")
 
         self.assertIn('@router.get("/navigation-options")', backend)
@@ -2225,7 +2225,7 @@ print("OK")
         self.assertNotIn("村庄", locations_by_environment["村庄"])
 
     def test_editor_save_custom_task_metadata_codegen_contract(self):
-        from services.webui.routes import editor
+        from backend.webui.routes import editor
 
         source, wrapped, task_path = editor._prepare_editor_custom_task_source(
             "cleanup.py",
@@ -2267,10 +2267,10 @@ print("OK")
             )
 
     def test_editor_recorder_snippets_and_tab_indent_contract(self):
-        frontend = (ROOT / "services/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
-        css = (ROOT / "services/webui/static/css/style.css").read_text(encoding="utf-8")
+        frontend = (ROOT / "backend/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
+        css = (ROOT / "backend/webui/static/css/style.css").read_text(encoding="utf-8")
         trajectories = (ROOT / "docs/AutoScriptor/webui/user-trajectories.md").read_text(encoding="utf-8")
-        code_editor = (ROOT / "services/webui/static/js/components/editor/PythonCodeEditor.js").read_text(encoding="utf-8")
+        code_editor = (ROOT / "backend/webui/static/js/components/editor/PythonCodeEditor.js").read_text(encoding="utf-8")
 
         self.assertIn('ref="recordedCodeInput"', frontend)
         self.assertIn('@line-dblclick="openRecordedFunctionDialog"', frontend)
@@ -2389,7 +2389,7 @@ print("OK")
         self.assertIn("右侧按钮列内部滚动", trajectories)
 
     def test_editor_custom_executor_uses_current_target_helpers(self):
-        backend = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
+        backend = (ROOT / "backend/webui/routes/editor.py").read_text(encoding="utf-8")
 
         self.assertIn("from AutoScriptor.core.targets import B, I, T", backend)
         self.assertIn('"B": B', backend)
@@ -2400,8 +2400,8 @@ print("OK")
         self.assertIn("ns.update(_editor_battle_namespace())", backend)
 
     def test_editor_save_keeps_template_crop_separate_from_search_box(self):
-        backend = (ROOT / "services/webui/routes/editor.py").read_text(encoding="utf-8")
-        frontend = (ROOT / "services/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
+        backend = (ROOT / "backend/webui/routes/editor.py").read_text(encoding="utf-8")
+        frontend = (ROOT / "backend/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
 
         self.assertIn("template_left = int(data.get(\"template_left\", left))", backend)
         self.assertIn("cropped = _last_screenshot[template_top:template_bottom, template_left:template_right]", backend)
@@ -2492,9 +2492,9 @@ class TestSourceDistributionContract(unittest.TestCase):
             "webapp/scripts/test-release-update.cjs",
             "webapp/scripts/gen_icon.py",
             "webapp/scripts/ensure-ico.cjs",
-            "services/core/binary_delta.py",
-            "services/core/content_delta_update.py",
-            "services/core/content_update_security.py",
+            "backend/core/binary_delta.py",
+            "backend/core/content_delta_update.py",
+            "backend/core/content_update_security.py",
             "AutoScriptor/utils/filter.py",
             "ZmxyOL/accounts/crypto/update_config.py",
         ]
@@ -2509,7 +2509,7 @@ class TestSourceDistributionContract(unittest.TestCase):
         start_dev = (ROOT / "webapp/scripts/start-dev.cjs").read_text(encoding="utf-8")
         package_json = json.loads((ROOT / "webapp/package.json").read_text(encoding="utf-8"))
 
-        self.assertIn("'services', 'webui', 'gui.py'", main)
+        self.assertIn("'backend', 'webui', 'gui.py'", main)
         self.assertIn("--electron", main)
         self.assertIn(".venv", main)
         self.assertIn("Missing source Python venv", main)
@@ -2534,9 +2534,9 @@ class TestSourceDistributionContract(unittest.TestCase):
         self.assertNotIn("dryRunPackagedInstall", preload)
 
     def test_update_panel_uses_source_git_only(self):
-        panel = (ROOT / "services/webui/static/js/components/UpdatePanel.js").read_text(encoding="utf-8")
-        server = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
-        security = (ROOT / "services/webui/security.py").read_text(encoding="utf-8")
+        panel = (ROOT / "backend/webui/static/js/components/UpdatePanel.js").read_text(encoding="utf-8")
+        server = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
+        security = (ROOT / "backend/webui/security.py").read_text(encoding="utf-8")
 
         for marker in ["/api/update/status", "/api/update/check", "/api/update/run", "source-git"]:
             with self.subTest(marker=marker):
@@ -2574,7 +2574,7 @@ class TestSourceDistributionContract(unittest.TestCase):
         run = (ROOT / "scripts/run.ps1").read_text(encoding="utf-8")
         update = (ROOT / "scripts/update.ps1").read_text(encoding="utf-8")
         launcher = (ROOT / "scripts/launcher.ps1").read_text(encoding="utf-8")
-        updater = (ROOT / "services/core/updater.py").read_text(encoding="utf-8")
+        updater = (ROOT / "backend/core/updater.py").read_text(encoding="utf-8")
         bootstrap = (ROOT / "scripts/bootstrap-python310.ps1").read_text(encoding="utf-8")
         requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
         package_init = (ROOT / "AutoScriptor/__init__.py").read_text(encoding="utf-8")
@@ -2602,7 +2602,7 @@ class TestSourceDistributionContract(unittest.TestCase):
         self.assertIn("uv venv --python", install)
         self.assertIn("uv pip install", install)
         self.assertIn("npm install", install)
-        self.assertIn("services\\webui\\gui.py", run)
+        self.assertIn("backend\\webui\\gui.py", run)
         self.assertIn("npm start", run)
         self.assertIn("git", update)
         self.assertIn("pull", update)
@@ -2647,8 +2647,8 @@ class TestSourceDistributionContract(unittest.TestCase):
 class TestUpdaterGitCommandContract(unittest.TestCase):
     def test_git_command_includes_safe_directory_for_repo_root(self):
         with patch.dict(sys.modules, autoscriptor_logger_stubs()):
-            sys.modules.pop("services.core.updater", None)
-            from services.core.updater import Updater
+            sys.modules.pop("backend.core.updater", None)
+            from backend.core.updater import Updater
 
         updater = Updater()
         updater._root = str(ROOT)
@@ -2661,8 +2661,8 @@ class TestUpdaterGitCommandContract(unittest.TestCase):
     def test_git_update_disabled_outside_git_repo(self):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(sys.modules, autoscriptor_logger_stubs()):
-                sys.modules.pop("services.core.updater", None)
-                from services.core.updater import Updater
+                sys.modules.pop("backend.core.updater", None)
+                from backend.core.updater import Updater
 
             updater = Updater()
             updater._root = tmp
@@ -2675,8 +2675,8 @@ class TestUpdaterGitCommandContract(unittest.TestCase):
 
     def test_git_fetch_failure_keeps_precise_stderr_for_main(self):
         with patch.dict(sys.modules, autoscriptor_logger_stubs()):
-            sys.modules.pop("services.core.updater", None)
-            from services.core.updater import Updater
+            sys.modules.pop("backend.core.updater", None)
+            from backend.core.updater import Updater
 
         updater = Updater()
         updater._root = str(ROOT)
@@ -2694,7 +2694,7 @@ class TestUpdaterGitCommandContract(unittest.TestCase):
                 return subprocess.CompletedProcess(cmd, 128, stdout="", stderr="fatal: authentication failed")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-        with patch("services.core.updater.subprocess.run", side_effect=fake_run):
+        with patch("backend.core.updater.subprocess.run", side_effect=fake_run):
             has_update = updater.check_update()
 
         self.assertFalse(has_update)
@@ -2705,8 +2705,8 @@ class TestUpdaterGitCommandContract(unittest.TestCase):
 
     def test_git_check_reports_local_ahead_of_origin_main_as_latest(self):
         with patch.dict(sys.modules, autoscriptor_logger_stubs()):
-            sys.modules.pop("services.core.updater", None)
-            from services.core.updater import Updater
+            sys.modules.pop("backend.core.updater", None)
+            from backend.core.updater import Updater
 
         updater = Updater()
         updater._root = str(ROOT)
@@ -2730,7 +2730,7 @@ class TestUpdaterGitCommandContract(unittest.TestCase):
                 return subprocess.CompletedProcess(cmd, 0, stdout="3\t0\n", stderr="")
             return subprocess.CompletedProcess(cmd, 99, stdout="", stderr=f"unexpected git args: {git_args}")
 
-        with patch("services.core.updater.subprocess.run", side_effect=fake_run):
+        with patch("backend.core.updater.subprocess.run", side_effect=fake_run):
             has_update = updater.check_update()
             status = updater.get_status()
 
@@ -2744,8 +2744,8 @@ class TestUpdaterGitCommandContract(unittest.TestCase):
 
     def test_git_run_reports_local_ahead_of_origin_main_as_latest_without_pull(self):
         with patch.dict(sys.modules, autoscriptor_logger_stubs()):
-            sys.modules.pop("services.core.updater", None)
-            from services.core.updater import Updater
+            sys.modules.pop("backend.core.updater", None)
+            from backend.core.updater import Updater
 
         updater = Updater()
         updater._root = str(ROOT)
@@ -2773,7 +2773,7 @@ class TestUpdaterGitCommandContract(unittest.TestCase):
                 return subprocess.CompletedProcess(cmd, 0, stdout="2\t0\n", stderr="")
             return subprocess.CompletedProcess(cmd, 99, stdout="", stderr=f"unexpected git args: {git_args}")
 
-        with patch("services.core.updater.subprocess.run", side_effect=fake_run):
+        with patch("backend.core.updater.subprocess.run", side_effect=fake_run):
             success = updater.run_update()
             status = updater.get_status()
 
@@ -2950,8 +2950,8 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
             path.read_text(encoding="utf-8", errors="ignore")
             for path in [
                 ROOT / "scripts/collect_zmxy_redeem_2026.py",
-                ROOT / "services/webui/routes/news.py",
-                ROOT / "services/webui/static/js/components/NewsPanel.js",
+                ROOT / "backend/webui/routes/news.py",
+                ROOT / "backend/webui/static/js/components/NewsPanel.js",
             ]
         )
 
@@ -2968,11 +2968,11 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
             self.assertNotIn(old_name, content)
 
     def test_gift_dialog_uses_local_redeem_codes_page(self):
-        panel = (ROOT / "services/webui/static/js/components/NewsPanel.js").read_text(
+        panel = (ROOT / "backend/webui/static/js/components/NewsPanel.js").read_text(
             encoding="utf-8",
             errors="ignore",
         )
-        index = (ROOT / "services/webui/static/index.html").read_text(
+        index = (ROOT / "backend/webui/static/index.html").read_text(
             encoding="utf-8",
             errors="ignore",
         )
@@ -2987,19 +2987,19 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
         self.assertNotIn("openGiftExternal", panel)
 
     def test_gift_codes_page_supports_direct_redeem_flow(self):
-        route = (ROOT / "services/webui/routes/news.py").read_text(
+        route = (ROOT / "backend/webui/routes/news.py").read_text(
             encoding="utf-8",
             errors="ignore",
         )
-        server = (ROOT / "services/webui/server.py").read_text(
+        server = (ROOT / "backend/webui/server.py").read_text(
             encoding="utf-8",
             errors="ignore",
         )
-        scheduler = (ROOT / "services/core/scheduler.py").read_text(
+        scheduler = (ROOT / "orchestrator/scheduler.py").read_text(
             encoding="utf-8",
             errors="ignore",
         )
-        task_manager = (ROOT / "services/core/task_manager.py").read_text(
+        task_manager = (ROOT / "orchestrator/task_manager.py").read_text(
             encoding="utf-8",
             errors="ignore",
         )
@@ -3048,7 +3048,7 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
         self.assertIn('task_runs = [', server)
         self.assertIn('"id": "redeem:batch"', server)
         self.assertIn('"params": {"redeem_code": redeem_codes if len(redeem_codes) > 1 else redeem_codes[0]}', server)
-        self.assertIn("scheduler.run_direct_sequence(runs, force_login=True)", server)
+        self.assertIn("orchestrator.scheduler.run_direct_sequence(runs, force_login=True)", server)
         self.assertIn("force_login: bool = False", scheduler)
         self.assertIn("explicit_task_runs: list[dict] | None = None", scheduler)
         self.assertIn("def run_direct_sequence(", scheduler)
@@ -3056,15 +3056,15 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
         self.assertIn("param_override: dict[str, Any] | None = None", task_manager)
 
     def test_news_page_refreshes_immediately_after_auth_or_reopen(self):
-        panel = (ROOT / "services/webui/static/js/components/NewsPanel.js").read_text(
+        panel = (ROOT / "backend/webui/static/js/components/NewsPanel.js").read_text(
             encoding="utf-8",
             errors="ignore",
         )
-        app = (ROOT / "services/webui/static/js/app.js").read_text(
+        app = (ROOT / "backend/webui/static/js/app.js").read_text(
             encoding="utf-8",
             errors="ignore",
         )
-        index = (ROOT / "services/webui/static/index.html").read_text(
+        index = (ROOT / "backend/webui/static/index.html").read_text(
             encoding="utf-8",
             errors="ignore",
         )
@@ -3079,11 +3079,11 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
         self.assertIn(':refresh-key="newsRefreshKey"', index)
 
     def test_news_public_credentials_are_explicitly_scoped(self):
-        session = (ROOT / "services/webui/routes/news_4399_session.py").read_text(
+        session = (ROOT / "backend/webui/routes/news_4399_session.py").read_text(
             encoding="utf-8",
             errors="ignore",
         )
-        route = (ROOT / "services/webui/routes/news.py").read_text(
+        route = (ROOT / "backend/webui/routes/news.py").read_text(
             encoding="utf-8",
             errors="ignore",
         )
@@ -3093,6 +3093,8 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
         self.assertIn("def is_public_news_credential", session)
         self.assertIn("from AutoScriptor.utils.app_config import cfg", session)
         self.assertIn('if "news" not in cfg._config:', session)
+        # The news helper must not import the server module (that was the old cycle).
+        self.assertNotIn("from backend.webui import server", session)
         self.assertNotIn("from services.webui import server", session)
         self.assertIn("_news_credentials_for_request", route)
         self.assertIn("is_public_news_credential", route)
@@ -3103,7 +3105,7 @@ if __name__ == "__main__":
     unittest.main()
 class TestTaskOrderingGroupedOverlayContract(unittest.TestCase):
     def test_grouped_overlay_flattens_order_and_drops_graph_fields(self):
-        from services.core.task_ordering import normalize_task_ordering_overlay, project_task_ordering
+        from orchestrator.task_ordering import normalize_task_ordering_overlay, project_task_ordering
 
         raw_overlay = {
             "schema_version": 1,
@@ -3149,10 +3151,10 @@ class TestTaskOrderingGroupedOverlayContract(unittest.TestCase):
 
 class TestTaskOrderingStaticContract(unittest.TestCase):
     def test_task_page_uses_total_order_list_contract(self):
-        index_html = (ROOT / "services/webui/static/index.html").read_text(encoding="utf-8")
-        app_js = (ROOT / "services/webui/static/js/app.js").read_text(encoding="utf-8")
-        sidebar_js = (ROOT / "services/webui/static/js/components/AppSidebar.js").read_text(encoding="utf-8")
-        task_panel_js = (ROOT / "services/webui/static/js/components/TaskPanel.js").read_text(encoding="utf-8")
+        index_html = (ROOT / "backend/webui/static/index.html").read_text(encoding="utf-8")
+        app_js = (ROOT / "backend/webui/static/js/app.js").read_text(encoding="utf-8")
+        sidebar_js = (ROOT / "backend/webui/static/js/components/AppSidebar.js").read_text(encoding="utf-8")
+        task_panel_js = (ROOT / "backend/webui/static/js/components/TaskPanel.js").read_text(encoding="utf-8")
 
         self.assertIn("{ id: 'tasks', label: '任务列表'", sidebar_js)
         self.assertNotIn("task-graph", sidebar_js)

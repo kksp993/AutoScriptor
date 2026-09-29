@@ -46,8 +46,8 @@ class TestTaskDebugMode(unittest.TestCase):
         task_registry.register("测试/任务", boom, order=1, debug_mode=debug_mode)
 
     def test_task_manager_debug_failure_does_not_recover_app(self):
-        from services.core import task_manager as tm_mod
-        from services.core.task_manager import TaskManager
+        from orchestrator import task_manager as tm_mod
+        from orchestrator.task_manager import TaskManager
 
         self._install_task_config(debug_mode=True)
         tm = TaskManager()
@@ -63,8 +63,8 @@ class TestTaskDebugMode(unittest.TestCase):
         recover_app.assert_not_called()
 
     def test_task_video_uses_global_app_debug_mode(self):
-        from services.core import task_manager as tm_mod
-        from services.core.task_manager import TaskManager
+        from orchestrator import task_manager as tm_mod
+        from orchestrator.task_manager import TaskManager
 
         self._install_task_config(app_debug_mode=True)
         tm = TaskManager()
@@ -78,8 +78,8 @@ class TestTaskDebugMode(unittest.TestCase):
         recorder.assert_called_once_with("测试/任务", True)
 
     def test_scheduler_debug_task_skips_login_restart_and_post_action(self):
-        from services.core import scheduler as scheduler_mod
-        from services.core.scheduler import Scheduler
+        from orchestrator import scheduler as scheduler_mod
+        from orchestrator.scheduler import Scheduler
 
         self._install_task_config(debug_mode=True)
 
@@ -102,8 +102,8 @@ class TestTaskDebugMode(unittest.TestCase):
         with (
             patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}),
             patch.object(cfg, "save_config"),
-            patch("services.core.scheduler.runtime_ctx.refresh"),
-            patch("services.core.scheduler.notify_runtime_event"),
+            patch("orchestrator.scheduler.runtime_ctx.refresh"),
+            patch("orchestrator.scheduler.notify_runtime_event"),
             patch.object(sched, "_maybe_daily_restart") as daily_restart,
             patch.object(sched, "_ensure_character_logged_in") as ensure_login,
             patch.object(sched, "_post_execution_action") as post_action,
@@ -116,7 +116,7 @@ class TestTaskDebugMode(unittest.TestCase):
         post_action.assert_not_called()
 
     def test_scheduler_can_force_login_for_debug_task_with_param_override(self):
-        from services.core.scheduler import Scheduler
+        from orchestrator.scheduler import Scheduler
 
         self._install_task_config(debug_mode=True)
 
@@ -143,8 +143,8 @@ class TestTaskDebugMode(unittest.TestCase):
         with (
             patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}),
             patch.object(cfg, "save_config"),
-            patch("services.core.scheduler.runtime_ctx.refresh"),
-            patch("services.core.scheduler.notify_runtime_event"),
+            patch("orchestrator.scheduler.runtime_ctx.refresh"),
+            patch("orchestrator.scheduler.notify_runtime_event"),
             patch.object(sched, "_maybe_daily_restart") as daily_restart,
             patch.object(sched, "_ensure_character_logged_in") as ensure_login,
             patch.object(sched, "_post_execution_action") as post_action,
@@ -161,7 +161,7 @@ class TestTaskDebugMode(unittest.TestCase):
         post_action.assert_not_called()
 
     def test_scheduler_runs_same_debug_task_with_distinct_param_overrides(self):
-        from services.core.scheduler import Scheduler
+        from orchestrator.scheduler import Scheduler
 
         self._install_task_config(debug_mode=True)
 
@@ -191,8 +191,8 @@ class TestTaskDebugMode(unittest.TestCase):
         with (
             patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}),
             patch.object(cfg, "save_config"),
-            patch("services.core.scheduler.runtime_ctx.refresh"),
-            patch("services.core.scheduler.notify_runtime_event"),
+            patch("orchestrator.scheduler.runtime_ctx.refresh"),
+            patch("orchestrator.scheduler.notify_runtime_event"),
             patch.object(sched, "_maybe_daily_restart"),
             patch.object(sched, "_ensure_character_logged_in"),
             patch.object(sched, "_post_execution_action"),
@@ -205,7 +205,7 @@ class TestTaskDebugMode(unittest.TestCase):
         ])
 
     def test_task_list_direct_run_skips_character_login_only_when_requested(self):
-        from services.core.scheduler import Scheduler
+        from orchestrator.scheduler import Scheduler
 
         self._install_task_config(debug_mode=False)
 
@@ -229,8 +229,8 @@ class TestTaskDebugMode(unittest.TestCase):
             with (
                 patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}),
                 patch.object(cfg, "save_config"),
-                patch("services.core.scheduler.runtime_ctx.refresh"),
-                patch("services.core.scheduler.notify_runtime_event"),
+                patch("orchestrator.scheduler.runtime_ctx.refresh"),
+                patch("orchestrator.scheduler.notify_runtime_event"),
                 patch.object(scheduler, "invalidate_login") as invalidate_login,
                 patch.object(scheduler, "_maybe_daily_restart") as daily_restart,
                 patch.object(scheduler, "_ensure_character_logged_in") as ensure_login,

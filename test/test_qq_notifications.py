@@ -10,10 +10,10 @@ from unittest.mock import Mock, patch
 import requests
 from starlette.requests import Request
 
-from services.core.character_reports import CharacterReports
-from services.core.qq_notify import DeliveryError, QQNotifier, QQSettings, send_message
-from services.webui.lifecycle_service import WebUILifecycleService
-from services.webui.routes.notifications import create_notifications_router
+from orchestrator.character_reports import CharacterReports
+from orchestrator.qq_notify import DeliveryError, QQNotifier, QQSettings, send_message
+from orchestrator.lifecycle import WebUILifecycleService
+from backend.webui.routes.notifications import create_notifications_router
 
 
 class TestCharacterReports(unittest.TestCase):
@@ -82,7 +82,7 @@ class TestQQTransport(unittest.TestCase):
                 })
                 response = Mock(status_code=200)
                 response.json.return_value = {"status": "ok", "retcode": 0, "data": {"message_id": 9}}
-                with patch("services.core.qq_notify.requests.post", return_value=response) as post:
+                with patch("orchestrator.qq_notify.requests.post", return_value=response) as post:
                     send_message(settings, "角色[CQ:at,qq=all]")
                 self.assertTrue(post.call_args.args[0].endswith(f"/send_{target_type}_msg"))
                 arguments = post.call_args.kwargs
@@ -104,13 +104,13 @@ class TestQQTransport(unittest.TestCase):
             with self.subTest(payload=payload):
                 response = Mock(status_code=200)
                 response.json.return_value = payload
-                with patch("services.core.qq_notify.requests.post", return_value=response):
+                with patch("orchestrator.qq_notify.requests.post", return_value=response):
                     with self.assertRaises(DeliveryError):
                         send_message(self.settings, "test")
 
     def test_timeout_is_not_retried_and_does_not_leak_secrets(self):
         notifier = QQNotifier()
-        with patch("services.core.qq_notify.requests.post", side_effect=requests.Timeout("test-only-token")) as post:
+        with patch("orchestrator.qq_notify.requests.post", side_effect=requests.Timeout("test-only-token")) as post:
             result = notifier.deliver(self.settings, "test")
         self.assertFalse(result["success"])
         self.assertNotIn("test-only-token", result["error"])
@@ -125,7 +125,7 @@ class TestQQTransport(unittest.TestCase):
             started.set()
             self.assertTrue(release.wait(2))
 
-        with patch("services.core.qq_notify.send_message", side_effect=blocked_send):
+        with patch("orchestrator.qq_notify.send_message", side_effect=blocked_send):
             notifier.submit(self.settings, "frozen first character")
             try:
                 self.assertTrue(started.wait(1))
@@ -140,7 +140,7 @@ class TestQQTransport(unittest.TestCase):
 
     def test_disabled_notifier_never_starts_worker(self):
         notifier = QQNotifier()
-        with patch("services.core.qq_notify.send_message") as send:
+        with patch("orchestrator.qq_notify.send_message") as send:
             notifier.submit(QQSettings(), "ignored")
         send.assert_not_called()
         self.assertIsNone(notifier._worker)
@@ -242,7 +242,7 @@ class TestQQSettingsLifecycle(unittest.TestCase):
         result = self.call_endpoint("/api/notify/qq", "GET")
         self.assertNotIn("test-token", json.dumps(result))
         self.config.save_global_config.reset_mock()
-        with patch("services.webui.routes.notifications.qq_notifier.deliver", return_value={"success": True}) as deliver:
+        with patch("backend.webui.routes.notifications.qq_notifier.deliver", return_value={"success": True}) as deliver:
             result = self.call_endpoint("/api/notify/qq/test", "POST", {"target_id": "54321"})
         self.assertTrue(result["ok"])
         self.assertEqual(deliver.call_args.args[0].target_id, "54321")
@@ -264,7 +264,7 @@ class TestQQSettingsLifecycle(unittest.TestCase):
             route.path == "/api/notify/qq/local" and "POST" in route.methods
         ))
         connection = {"endpoint": "http://127.0.0.1:3010", "access_token": "local-secret"}
-        with patch("services.webui.routes.notifications.local_notification_settings", return_value=connection):
+        with patch("backend.webui.routes.notifications.local_notification_settings", return_value=connection):
             response = asyncio.run(endpoint())
         self.assertTrue(response["ok"])
         settings = self.lifecycle.prepare_qq_settings({})
@@ -280,13 +280,13 @@ class TestQQSettingsLifecycle(unittest.TestCase):
         endpoint = next(route.endpoint for route in router.routes if (
             route.path == "/api/notify/qq/local" and "POST" in route.methods
         ))
-        with patch("services.webui.routes.notifications.local_notification_settings") as read_local:
+        with patch("backend.webui.routes.notifications.local_notification_settings") as read_local:
             self.assertIs(asyncio.run(endpoint()), sentinel)
         read_local.assert_not_called()
         self.config.save_global_config.assert_not_called()
 
     def test_local_installation_read_errors_are_visible(self):
-        with patch("services.webui.routes.notifications.local_installation_status", side_effect=OSError):
+        with patch("backend.webui.routes.notifications.local_installation_status", side_effect=OSError):
             response = self.call_endpoint("/api/notify/qq/local", "GET")
         self.assertEqual(response.status_code, 500)
 

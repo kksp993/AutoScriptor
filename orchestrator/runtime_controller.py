@@ -1,8 +1,11 @@
-"""Runtime execution state for the WebUI.
+"""Exclusive execution arbitration among the participants that drive the device.
 
-This module owns the direct-run thread and exposes a single busy/stopping
-source for routes and the frontend. The scheduler still owns scheduled
-execution; this controller only composes its state with direct execution.
+Three things can run: the activated scheduler, a direct run started from the
+task list, and editor code. They must not overlap, so this module owns the
+direct-run thread and reports one busy/stopping answer for all of them.
+
+Conflicts are reported as plain payloads, not HTTP responses: turning a conflict
+into a status code belongs to the caller, not to this layer.
 """
 from __future__ import annotations
 
@@ -10,9 +13,8 @@ from threading import Lock, Thread, current_thread
 from typing import Any, Callable, Literal
 
 from AutoScriptor.logging.logger import logger
-from services.core.scheduler import Scheduler
-from services.core.task_manager import TaskManager
-from services.webui.api_response import api_error
+from orchestrator.scheduler import Scheduler
+from orchestrator.task_manager import TaskManager
 
 RuntimeReason = Literal["direct_run", "scheduler", "editor"]
 
@@ -109,24 +111,25 @@ class RuntimeController:
             "scheduler": scheduler_status,
         }
 
-    def busy_response(self, action: str = "modify runtime config"):
+    def busy_conflict(self, action: str = "modify runtime config") -> dict[str, Any]:
+        """Describe what is blocking a config mutation or a new execution."""
         reason = self.busy_reason() or "runtime"
         reason_label = {"direct_run": "直接执行任务", "scheduler": "调度器", "editor": "编辑器代码"}.get(reason, "运行任务")
         if reason == "scheduler":
             message = "当前调度任务正在执行，请等待本轮结束后再继续；无需停止已启用的调度。"
         else:
             message = f"当前{reason_label}正在运行，请等待完成或点击「终止执行」后再继续。"
-        return api_error(
-            409,
-            message,
-            code="runtime_busy",
-            reason=reason,
-            action=action,
-        )
+        return {
+            "code": "runtime_busy",
+            "reason": reason,
+            "message": message,
+            "action": action,
+        }
 
-    def guard_idle(self, action: str = "modify runtime config"):
+    def guard_idle(self, action: str = "modify runtime config") -> dict[str, Any] | None:
+        """Return the conflict payload when busy, otherwise ``None``."""
         if self.is_busy():
-            return self.busy_response(action)
+            return self.busy_conflict(action)
         return None
 
     def start_direct(

@@ -44,7 +44,7 @@ http://127.0.0.1:5000
 | 只装 Electron 依赖 | `.\scripts\install.bat electron` |
 | 源码 Electron | `.\scripts\run.bat electron` 或 `.\start.bat` |
 | 源码 WebUI | `.\scripts\run.bat webui` 或 `.\webui.bat` |
-| 直接跑后端 | `.\.venv\Scripts\python.exe -X utf8 services\webui\gui.py` |
+| 直接跑后端 | `.\.venv\Scripts\python.exe -X utf8 backend\webui\gui.py` |
 | 源码更新 | `.\scripts\update.bat` |
 
 安装脚本会按需准备 Git、Node.js LTS、uv、Python 3.10.15 `.venv`、`requirements.txt` 和 `webapp\node_modules`。直接进入 `webapp` 执行 `npm start` 前，必须先运行 `.\scripts\install.bat electron` 或手动 `npm install`。
@@ -54,8 +54,8 @@ http://127.0.0.1:5000
 ```text
 AutoScriptor/          核心 API、识别、控制、路径、配置和日志
 ZmxyOL/                游戏任务、导航、战斗流程和任务注册
-services/core/         调度器、任务管理、运行上下文、源码更新
-  services/webui/        FastAPI 后端、API 路由、静态 WebUI
+backend/core/         调度器、任务管理、运行上下文、源码更新
+  backend/webui/        FastAPI 后端、API 路由、静态 WebUI
   webapp/                源码 Electron 壳
   examples/              可选示例，不参与源码主运行链
   data/                  可编辑运行数据

@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = $PSScriptRoot
 $Root = (Resolve-Path -Path (Join-Path $ScriptDir "..")).Path
 $VenvPy = Join-Path $Root ".venv\Scripts\python.exe"
-$GuiScript = Join-Path $Root "services\webui\gui.py"
+$GuiScript = Join-Path $Root "backend\webui\gui.py"
 $WebappDir = Join-Path $Root "webapp"
 
 function Require-File {
@@ -38,7 +38,7 @@ function Find-Npm {
 Require-File $VenvPy "Missing .venv Python. Run scripts\install.bat first."
 
 if ($Target -eq "qq") {
-    $setupScript = Join-Path $Root "services\core\qq_bot.py"
+    $setupScript = Join-Path $Root "backend\core\qq_bot.py"
     Require-File $setupScript "Missing local QQ robot entry."
     & $VenvPy -X utf8 $setupScript start @AppArgs
     exit $LASTEXITCODE

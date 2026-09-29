@@ -6,7 +6,7 @@ Read this when changing WebUI, the source Electron shell, source update UI, or 4
 
 - Backend: FastAPI + uvicorn.
 - Logs: native WebSocket at `/ws/logs`, not Socket.IO.
-- Frontend: Vue 3 + Element Plus + Tailwind from local static/vendor assets; no build step for `services/webui/static`.
+- Frontend: Vue 3 + Element Plus + Tailwind from local static/vendor assets; no build step for `backend/webui/static`.
 - API routes use `/api/`.
 - Frontend pulls config through `GET /api/refresh`; do not reintroduce Jinja config injection.
 - Public config must strip sensitive fields such as encryption, account, password, and runtime-only task fields.
@@ -17,7 +17,7 @@ Read this when changing WebUI, the source Electron shell, source update UI, or 4
 
 Component convention:
 
-1. Add component files under `services/webui/static/js/components/`.
+1. Add component files under `backend/webui/static/js/components/`.
 2. Export as a global const, for example `const MyComponent = {...}`.
 3. Load in `index.html` after dependencies and before `app.js`.
 4. Register in `createApp({ components: ... })`.
@@ -25,7 +25,7 @@ Component convention:
 ## Source Electron Shell
 
 - Desktop source entry is `scripts\run.bat electron` or root `start.bat`; direct `cd webapp; npm start` is only the low-level command after source dependencies are installed.
-- `webapp/main.js` starts `services\webui\gui.py --electron` with the repo root as cwd and only uses the source `.venv`; if it is missing, run `scripts\install.bat python`.
+- `webapp/main.js` starts `backend\webui\gui.py --electron` with the repo root as cwd and only uses the source `.venv`; if it is missing, run `scripts\install.bat python`.
 - `webapp/preload.js` should expose only source runtime IPC needed by the shell.
 - `webapp/package.json` should stay focused on `start`, `electron`, and runtime helpers actually used by the source shell. Python install/bootstrap belongs in `scripts\install.*`, not npm lifecycle hooks.
 - `webapp/scripts/start-dev.cjs` should resolve the executable through Electron's package entry (`require('electron')`), not by hardcoding `node_modules/electron/dist/electron.exe`.
@@ -37,7 +37,7 @@ Component convention:
 ## Version Coupling
 
 - Electron package version comes from `webapp/package.json`.
-- About panel display version in `services/webui/static/js/components/AboutPanel.js` should match it when the desktop-facing version changes.
+- About panel display version in `backend/webui/static/js/components/AboutPanel.js` should match it when the desktop-facing version changes.
 - Version display changes are source metadata only on this branch; do not add distribution machinery just to bump a displayed version.
 
 ## Source Update Channel

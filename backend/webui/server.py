@@ -24,15 +24,12 @@ from AutoScriptor.control.MumuAdaptor.device_facade import get_device_facade
 from AutoScriptor.utils.app_config import cfg
 from ZmxyOL.character.profession import GAME_PROFESSIONS
 from AutoScriptor.utils.mumu_discovery import discover_mumu_setup
-from services.core.task_manager import TaskManager
-from services.core.banner import _print_banner
-from services.core.scheduler import scheduler, SchedulerState
-from services.webui.api_response import api_error, api_ok
-from services.webui.lifecycle_service import WebUILifecycleService
-from services.webui.runtime_controller import RuntimeController, RuntimeExecutionBusyError
-from services.webui.state_version import bump_version, current_version
-from services.webui.task_tree_service import task_tree_service
-from services.core.task_ordering import summarize_ordering_generations
+from backend.core.banner import _print_banner
+from backend.webui.api_response import api_error, api_ok
+from orchestrator import orchestrator
+from orchestrator import bump_version, current_version, summarize_ordering_generations
+from orchestrator import SchedulerState
+from orchestrator import RuntimeExecutionBusyError
 
 
 def _battle_flow_allowed_for_task(flow_value: str, task_path: str | None) -> bool:
@@ -83,7 +80,7 @@ _plain_fmt    = logging.Formatter(
 
 from AutoScriptor.utils.paths import get_app_root, get_data_root, get_logs_root
 from ZmxyOL.accounts import get_accounts_dir
-from services.webui.error_archives import (
+from backend.webui.error_archives import (
     delete_archives,
     get_archive_detail,
     import_zip_bytes,
@@ -150,18 +147,32 @@ _apply_webui_log_level_from_config()
 
 CONFIG = cfg
 ORDER_MAP: dict[str, int] = {}
-TASK_MANAGER = TaskManager()
-scheduler.set_task_manager(TASK_MANAGER)
-runtime_controller = RuntimeController(scheduler, TASK_MANAGER)
-lifecycle_service: WebUILifecycleService | None = None
 
 
 def _guard_runtime_idle(action: str = "modify runtime config") -> JSONResponse | None:
-    return runtime_controller.guard_idle(action)
+    conflict = orchestrator.guard_idle(action)
+    if conflict is None:
+        return None
+    return _conflict_response(conflict)
+
+
+def _conflict_response(conflict: dict) -> JSONResponse:
+    """Shape an execution conflict from the orchestrator into a 409."""
+    return api_error(
+        409,
+        conflict["message"],
+        code=conflict["code"],
+        reason=conflict["reason"],
+        action=conflict["action"],
+    )
+
+
+def _busy_response(action: str) -> JSONResponse:
+    return _conflict_response(orchestrator.busy_conflict(action))
 
 # ── 安全模块 ──
 
-from services.webui.security import (
+from backend.webui.security import (
     hash_deploy_password as _hash_deploy_password,
     verify_deploy_password as _verify_deploy_password,
     create_session as _create_session,
@@ -230,8 +241,8 @@ def _require_credential_unlock(request: Request) -> JSONResponse | None:
     return None
 
 
-VENDOR_DIR = str(get_app_root() / "services" / "webui" / "vendor")
-STATIC_DIR = str(get_app_root() / "services" / "webui" / "static")
+VENDOR_DIR = str(get_app_root() / "backend" / "webui" / "vendor")
+STATIC_DIR = str(get_app_root() / "backend" / "webui" / "static")
 WEBAPP_ICON_PATH = os.path.join(str(get_app_root()), "webapp", "icon.png")
 
 
@@ -239,28 +250,28 @@ WEBAPP_ICON_PATH = os.path.join(str(get_app_root()), "webapp", "icon.png")
 
 def read_config():
     global ORDER_MAP
-    ORDER_MAP = task_tree_service.read_order_map()
+    ORDER_MAP = orchestrator.tree.read_order_map()
 
 
 def _make_public_config_unlocked():
-    data = task_tree_service.public_config()
+    data = orchestrator.tree.public_config()
     data["config_version"] = current_version()
     return data
 
 
 def _make_task_ordering_response_unlocked():
-    projection = task_tree_service.task_ordering_projection()
+    projection = orchestrator.tree.task_ordering_projection()
     return api_ok(
         status="ok",
         config_version=current_version(),
         projection=projection.to_public_dict(),
         generations=summarize_ordering_generations(projection),
-        runtime=runtime_controller.status(),
+        runtime=orchestrator.execution.status(),
     )
 
 
 def make_public_config():
-    service = lifecycle_service
+    service = orchestrator.tasks
     if service is None:
         return _make_public_config_unlocked()
     with service.config_operation():
@@ -289,9 +300,9 @@ def _persistence_error_message(action: str, exc: Exception) -> str:
 
 
 def _consume_runtime_config_updates() -> bool:
-    if not scheduler.consume_tasks_updated():
+    if not orchestrator.scheduler.consume_tasks_updated():
         return False
-    if getattr(scheduler, "is_executing", False):
+    if orchestrator.scheduler.is_executing:
         _mark_config_changed("runtime tasks updated")
         return True
     read_config()
@@ -299,14 +310,10 @@ def _consume_runtime_config_updates() -> bool:
     return True
 
 
-lifecycle_service = WebUILifecycleService(
-    cfg,
-    TASK_MANAGER,
-    scheduler,
-    task_tree_service,
-    read_config,
-    _mark_config_changed,
-    _apply_webui_log_level_from_config,
+orchestrator.configure_lifecycle(
+    refresh_order_map=read_config,
+    mark_config_changed=_mark_config_changed,
+    apply_log_level=_apply_webui_log_level_from_config,
 )
 
 _GIFT_REDEEM_TASK_PATH = "一般任务/活动/兑换豪礼礼品兑换"
@@ -411,31 +418,31 @@ async def auth_api(request: Request):
 
 
 # 编辑器 API 路由
-from services.webui.routes.editor import (
+from backend.webui.routes.editor import (
     configure_editor_custom_task_save_controls,
     configure_editor_execution_controls,
     editor_execution_status,
     router as editor_router,
 )
-runtime_controller.set_external_status_getter("editor", editor_execution_status)
+orchestrator.execution.set_external_status_getter("editor", editor_execution_status)
 configure_editor_execution_controls(
-    request_cancel=TASK_MANAGER.request_cancel,
-    reset_cancel=TASK_MANAGER.reset_cancel,
-    runtime_busy=runtime_controller.is_busy,
-    acquire_execution=lambda: scheduler.acquire_execution("editor", blocking=False),
-    release_execution=lambda: scheduler.release_execution("editor"),
+    request_cancel=orchestrator.task_manager.request_cancel,
+    reset_cancel=orchestrator.task_manager.reset_cancel,
+    runtime_busy=orchestrator.execution.is_busy,
+    acquire_execution=lambda: orchestrator.scheduler.acquire_execution("editor", blocking=False),
+    release_execution=lambda: orchestrator.scheduler.release_execution("editor"),
 )
 configure_editor_custom_task_save_controls(
-    reload_custom_tasks=lambda: lifecycle_service.reload_all(reason="save editor custom task"),
+    reload_custom_tasks=lambda: orchestrator.tasks.reload_all(reason="save editor custom task"),
 )
 app.include_router(editor_router)
 
 # 资讯 API 路由
-from services.webui.routes.news import router as news_router
+from backend.webui.routes.news import router as news_router
 app.include_router(news_router)
 
-from services.webui.routes.notifications import create_notifications_router
-app.include_router(create_notifications_router(lifecycle_service, _guard_runtime_idle))
+from backend.webui.routes.notifications import create_notifications_router
+app.include_router(create_notifications_router(orchestrator.tasks, _guard_runtime_idle))
 
 class _StaticCacheHeadersMiddleware:
     def __init__(self, inner_app):
@@ -545,8 +552,8 @@ async def _deferred_heavy_init():
         await loop.run_in_executor(None, _do_heavy_init)
         if cfg.get("scheduler.auto_start", False):
             if cfg.has_decrypted_credentials():
-                scheduler.activate()
-                scheduler.wake()
+                orchestrator.scheduler.activate()
+                orchestrator.scheduler.wake()
                 logger.info("Scheduler auto-started from config")
             else:
                 logger.info("Scheduler auto-start is enabled but account is not verified yet")
@@ -559,10 +566,10 @@ async def _deferred_heavy_init():
 
 def _do_heavy_init():
     """同步版初始化：只做不触碰模拟器的准备工作。"""
-    from services.core.runtime_context import runtime_ctx
+    from AutoScriptor.core.runtime_context import runtime_ctx
 
     runtime_ctx.init_bg()
-    TASK_MANAGER.reload_tasks()
+    orchestrator.task_manager.reload_tasks()
     read_config()
 
 
@@ -608,7 +615,7 @@ async def favicon_png():
 @app.get("/api/refresh")
 async def refresh_config_api():
     try:
-        with lifecycle_service.config_operation():
+        with orchestrator.tasks.config_operation():
             _consume_runtime_config_updates()
             read_config()
             _apply_webui_log_level_from_config()
@@ -624,8 +631,8 @@ async def reload_tasks_api():
     if busy is not None:
         return busy
     try:
-        with lifecycle_service.config_operation():
-            lifecycle_service.reload_task_state(reason="reload tasks")
+        with orchestrator.tasks.config_operation():
+            orchestrator.tasks.reload_task_state(reason="reload tasks")
             return _make_public_config_unlocked()
     except Exception as e:
         logger.error("reload_tasks error: %s", e)
@@ -645,7 +652,7 @@ async def sync_config_api(request: Request):
         data = {}
     security_key = data.get("security_key")
     try:
-        version = lifecycle_service.sync_all_config(security_key, reason="sync config")
+        version = orchestrator.tasks.sync_all_config(security_key, reason="sync config")
         return api_ok(status="ok", config_version=version)
     except Exception as e:
         logger.error("sync_config error: %s", e)
@@ -658,8 +665,8 @@ async def reload_all_tasks_api():
     if busy is not None:
         return busy
     try:
-        with lifecycle_service.config_operation():
-            lifecycle_service.reload_all(reason="reload all")
+        with orchestrator.tasks.config_operation():
+            orchestrator.tasks.reload_all(reason="reload all")
             return _make_public_config_unlocked()
     except Exception as e:
         logger.error("reload_all_tasks error: %s", e)
@@ -675,7 +682,7 @@ async def save_config_api(request: Request):
     if not isinstance(data, dict):
         return api_error(400, "invalid config payload", code="invalid_payload")
     try:
-        return api_ok(config_version=lifecycle_service.save_runtime_config(data))
+        return api_ok(config_version=orchestrator.tasks.save_runtime_config(data))
     except (KeyError, ValueError) as e:
         return api_error(400, str(e), code="invalid_payload")
     except Exception as e:
@@ -698,8 +705,8 @@ async def save_tasks_api(request: Request):
         tasks = payload.get('tasks', payload)
         if not isinstance(tasks, dict):
             return api_error(400, "invalid tasks payload", code="invalid_payload")
-        with lifecycle_service.config_operation():
-            lifecycle_service.save_tasks(tasks)
+        with orchestrator.tasks.config_operation():
+            orchestrator.tasks.save_tasks(tasks)
             return _make_public_config_unlocked()
     except Exception as e:
         logger.error("save_tasks error: %s", e)
@@ -714,7 +721,7 @@ async def save_tasks_api(request: Request):
 @app.get("/api/task-ordering")
 async def task_ordering_api():
     try:
-        with lifecycle_service.config_operation():
+        with orchestrator.tasks.config_operation():
             return _make_task_ordering_response_unlocked()
     except Exception as e:
         logger.error("task_ordering read error: %s", e, exc_info=True)
@@ -731,8 +738,8 @@ async def save_task_ordering_api(request: Request):
         if not isinstance(payload, dict):
             return api_error(400, "invalid task ordering payload", code="invalid_payload")
         raw_overlay = payload.get("overlay", payload)
-        with lifecycle_service.config_operation():
-            lifecycle_service.save_task_ordering(raw_overlay)
+        with orchestrator.tasks.config_operation():
+            orchestrator.tasks.save_task_ordering(raw_overlay)
             return _make_task_ordering_response_unlocked()
     except ValueError as e:
         return api_error(400, str(e), code="invalid_task_ordering")
@@ -753,8 +760,8 @@ async def save_task_ordering_layout_api(request: Request):
         if not isinstance(payload, dict):
             return api_error(400, "invalid task ordering layout payload", code="invalid_payload")
         raw_layout = payload.get("layout", payload)
-        config_version = lifecycle_service.save_task_ordering_layout(raw_layout)
-        projection = task_tree_service.task_ordering_projection()
+        config_version = orchestrator.tasks.save_task_ordering_layout(raw_layout)
+        projection = orchestrator.tree.task_ordering_projection()
         return api_ok(
             status="ok",
             config_version=config_version,
@@ -784,7 +791,7 @@ def _apply_run_character_from_body(body: dict, *, skip_character_login: bool = F
     if not server or not character:
         return None
     try:
-        lifecycle_service.switch_character(
+        orchestrator.tasks.switch_character(
             server,
             character,
             reason="select run character",
@@ -819,11 +826,11 @@ async def run_tasks_api(request: Request):
     activate_sched = bool(body.get("activate_scheduler", True))
     execution_source = str(body.get("execution_source") or "").strip()
     skip_character_login = not activate_sched and execution_source == "task_list"
-    direct_busy = runtime_controller.direct_run_alive()
+    direct_busy = orchestrator.execution.direct_run_alive()
     if activate_sched:
-        if runtime_controller.is_busy():
-            return runtime_controller.busy_response("start scheduler")
-        if scheduler.state == SchedulerState.ERROR:
+        if orchestrator.execution.is_busy():
+            return _busy_response("start scheduler")
+        if orchestrator.scheduler.state == SchedulerState.ERROR:
             return JSONResponse(
                 status_code=409,
                 content={
@@ -831,7 +838,7 @@ async def run_tasks_api(request: Request):
                     "message": "调度器处于错误状态，请先恢复调度后再启动",
                 },
             )
-        if not task_tree_service.normalize_dispatch_queue(cfg._account_data.get("dispatch_queue", [])):
+        if not orchestrator.tree.normalize_dispatch_queue(cfg._account_data.get("dispatch_queue", [])):
             return JSONResponse(
                 status_code=400,
                 content={
@@ -839,8 +846,8 @@ async def run_tasks_api(request: Request):
                     "message": "调度队列为空，请先添加要参与调度的角色",
                 },
             )
-    elif runtime_controller.is_busy():
-        return runtime_controller.busy_response("run task")
+    elif orchestrator.execution.is_busy():
+        return _busy_response("run task")
 
     err = _apply_run_character_from_body(body, skip_character_login=skip_character_login)
     if err is not None:
@@ -868,8 +875,8 @@ async def run_tasks_api(request: Request):
                 code="runtime_busy",
                 reason="direct_run",
             )
-        scheduler.activate()
-        scheduler.wake()
+        orchestrator.scheduler.activate()
+        orchestrator.scheduler.wake()
         return api_ok(status='ok', tasks=sorted_tasks, mode='scheduler')
 
     if direct_busy:
@@ -880,20 +887,20 @@ async def run_tasks_api(request: Request):
             reason="direct_run",
         )
     def _run(ts):
-        scheduler.run_direct(ts, skip_character_login=skip_character_login)
+        orchestrator.scheduler.run_direct(ts, skip_character_login=skip_character_login)
         logger.info("========== 所有任务执行完成 ==========")
 
     try:
-        runtime_controller.start_direct(_run, sorted_tasks)
+        orchestrator.execution.start_direct(_run, sorted_tasks)
     except RuntimeExecutionBusyError:
-        return runtime_controller.busy_response("run task")
+        return _busy_response("run task")
     return api_ok(status='ok', tasks=sorted_tasks, mode='direct')
 
 
 @app.get("/api/run/status")
 async def run_status_api():
     """轻量运行状态接口；统一前端状态以 /api/runtime/snapshot 为准。"""
-    return {"running": runtime_controller.direct_run_alive(), "runtime": runtime_controller.status()}
+    return {"running": orchestrator.execution.direct_run_alive(), "runtime": orchestrator.execution.status()}
 
 
 def _gift_redeem_character_options() -> list[dict[str, Any]]:
@@ -940,7 +947,7 @@ async def news_redeem_targets_api():
         active_character=cfg.active_character(),
         credential_unlocked=cfg.has_decrypted_credentials(),
         accounts=_gift_redeem_character_options(),
-        runtime=runtime_controller.status(),
+        runtime=orchestrator.execution.status(),
     )
 
 
@@ -978,8 +985,8 @@ async def news_gift_code_redeem_api(request: Request):
         return api_error(400, "invalid redeem payload", code="invalid_payload")
     if not _check_request_freshness(data):
         return api_error(400, "请求已过期，请重试", code="stale_request")
-    if runtime_controller.is_busy():
-        return runtime_controller.busy_response("redeem gift code")
+    if orchestrator.execution.is_busy():
+        return _busy_response("redeem gift code")
 
     redeem_codes = _gift_redeem_codes_from_payload(data)
     account = str(data.get("account") or "").strip()
@@ -1008,7 +1015,7 @@ async def news_gift_code_redeem_api(request: Request):
             if not cfg.verify_account_security_key(account, security_key):
                 _record_verify_failure(client_ip)
                 return api_error(401, "安全密码错误", code="invalid_security_key", need_security_key=True)
-            lifecycle_service.switch_account(account, security_key)
+            orchestrator.tasks.switch_account(account, security_key)
             credential_granted = True
         elif not cfg.has_decrypted_credentials():
             if cfg.has_encrypted_credentials():
@@ -1017,7 +1024,7 @@ async def news_gift_code_redeem_api(request: Request):
                 if not cfg.verify_account_security_key(account, security_key):
                     _record_verify_failure(client_ip)
                     return api_error(401, "安全密码错误", code="invalid_security_key", need_security_key=True)
-                lifecycle_service.reload_verified_account(security_key)
+                orchestrator.tasks.reload_verified_account(security_key)
                 _mark_config_changed("redeem credential unlock")
                 credential_granted = True
             else:
@@ -1026,12 +1033,12 @@ async def news_gift_code_redeem_api(request: Request):
         if not cfg.has_decrypted_credentials():
             return _credential_locked_response("请先验证账号密码后再兑换")
 
-        lifecycle_service.switch_character(server, character, reason="redeem code select character")
+        orchestrator.tasks.switch_character(server, character, reason="redeem code select character")
 
         from tasks.task_registry import task_registry
 
         if not task_registry.has_task(_GIFT_REDEEM_TASK_PATH):
-            lifecycle_service.reload_all(reason="reload redeem task")
+            orchestrator.tasks.reload_all(reason="reload redeem task")
         if not task_registry.has_task(_GIFT_REDEEM_TASK_PATH):
             return api_error(
                 404,
@@ -1053,13 +1060,13 @@ async def news_gift_code_redeem_api(request: Request):
     ]
 
     def _run(runs):
-        scheduler.run_direct_sequence(runs, force_login=True)
+        orchestrator.scheduler.run_direct_sequence(runs, force_login=True)
         logger.info("========== 兑换码任务执行完成，共 %d 个 ==========", len(redeem_codes))
 
     try:
-        runtime_controller.start_direct(_run, task_runs)
+        orchestrator.execution.start_direct(_run, task_runs)
     except RuntimeExecutionBusyError:
-        return runtime_controller.busy_response("redeem gift code")
+        return _busy_response("redeem gift code")
     resp = JSONResponse(content=api_ok(
         status="ok",
         mode="direct",
@@ -1081,7 +1088,7 @@ async def news_gift_code_redeem_api(request: Request):
 @app.post("/api/stop")
 async def stop_tasks_api():
     try:
-        return api_ok(status=runtime_controller.request_stop(), runtime=runtime_controller.status())
+        return api_ok(status=orchestrator.execution.request_stop(), runtime=orchestrator.execution.status())
     except Exception as e:
         logger.error("stop error: %s", e)
         return api_error(500, str(e), code="stop_failed")
@@ -1125,7 +1132,7 @@ async def verify_account_api(request: Request):
         return JSONResponse(status_code=401, content={"error": "请输入安全密码"})
 
     try:
-        character_name = lifecycle_service.reload_verified_account(security_key)
+        character_name = orchestrator.tasks.reload_verified_account(security_key)
     except Exception as e:
         logger.error("verify reload_tasks: %s", e)
         return JSONResponse(status_code=500, content={"error": "加载配置失败"})
@@ -1197,7 +1204,7 @@ async def update_account_credentials_api(request: Request):
             "message": f"更新账密会覆盖当前已有的加密设置（当前角色: {existing_name}），是否继续？"
         }
     try:
-        character_name, version = lifecycle_service.update_account_credentials(account, password, security_key)
+        character_name, version = orchestrator.tasks.update_account_credentials(account, password, security_key)
     except Exception as e:
         logger.error("update_account error: %s", e)
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -1283,7 +1290,7 @@ async def ocr_status_api():
 
 @app.get("/api/scheduler/status")
 async def scheduler_status_api():
-    return scheduler.status_dict()
+    return orchestrator.scheduler.status_dict()
 
 
 @app.post("/api/scheduler/reset")
@@ -1291,19 +1298,19 @@ async def scheduler_reset_api():
     busy = _guard_runtime_idle("reset scheduler")
     if busy is not None:
         return busy
-    scheduler.reset()
-    return scheduler.status_dict()
+    orchestrator.scheduler.reset()
+    return orchestrator.scheduler.status_dict()
 
 
 @app.post("/api/scheduler/deactivate")
 async def scheduler_deactivate_api():
     """仅将调度器切回待运行，不取消直接执行线程、不发送 cancel。"""
-    scheduler.deactivate()
-    return scheduler.status_dict()
+    orchestrator.scheduler.deactivate()
+    return orchestrator.scheduler.status_dict()
 
 
 def _build_overview_payload(now_ts: float | None = None) -> dict:
-    from services.core.scheduler import (
+    from orchestrator.scheduler import (
         calc_effective_next_time,
         is_human_takeover_blocked,
         is_task_due,
@@ -1358,18 +1365,18 @@ def _build_overview_payload(now_ts: float | None = None) -> dict:
     order = {'pending': 0, 'error': 1, 'scheduled': 2}
     upcoming.sort(key=lambda x: (order.get(x['status'], 3), x['next_exec_time']))
 
-    sched = scheduler.status_dict()
-    sched['next_execution'] = scheduler.get_next_execution_timestamp()
+    sched = orchestrator.scheduler.status_dict()
+    sched['next_execution'] = orchestrator.scheduler.get_next_execution_timestamp()
 
-    from services.core.runtime_context import runtime_ctx
+    from AutoScriptor.core.runtime_context import runtime_ctx
     return {
         'scheduler': sched,
         'stats': {
             'total': total, 'enabled': enabled, 'pending': pending,
             'scheduled': scheduled, 'error': error, 'disabled': disabled,
         },
-        'stats_all': task_tree_service.aggregate_stats_all_characters(now_ts),
-        'overall_next_execution': task_tree_service.overall_next_execution_all_characters(),
+        'stats_all': orchestrator.tree.aggregate_stats_all_characters(now_ts),
+        'overall_next_execution': orchestrator.tree.overall_next_execution_all_characters(),
         'upcoming': upcoming[:30],
         'runtime': runtime_ctx.status_dict(),
     }
@@ -1391,7 +1398,7 @@ async def runtime_snapshot_api(request: Request):
         _consume_runtime_config_updates()
         now_ts = _time.time()
         overview = _build_overview_payload(now_ts)
-        queue = task_tree_service.normalize_dispatch_queue(cfg._account_data.get("dispatch_queue", []))
+        queue = orchestrator.tree.normalize_dispatch_queue(cfg._account_data.get("dispatch_queue", []))
         return api_ok(
             config_version=current_version(),
             credential={"unlocked": cfg.has_decrypted_credentials()},
@@ -1399,14 +1406,14 @@ async def runtime_snapshot_api(request: Request):
             accounts=cfg.list_accounts(),
             active_character=cfg.active_character(),
             character_name=cfg._config.get("game", {}).get("character_name", ""),
-            characters=task_tree_service.characters_summary(),
-            game_professions_by_character=task_tree_service.game_professions_by_character(),
+            characters=orchestrator.tree.characters_summary(),
+            game_professions_by_character=orchestrator.tree.game_professions_by_character(),
             game_profession_options=list(GAME_PROFESSIONS),
             dispatch_queue=queue,
-            all_tasks_summary=task_tree_service.all_characters_tasks_summary(),
+            all_tasks_summary=orchestrator.tree.all_characters_tasks_summary(),
             overview=overview,
             scheduler=overview["scheduler"],
-            runtime=runtime_controller.status(),
+            runtime=orchestrator.execution.status(),
         )
     except Exception as e:
         logger.error("runtime snapshot error: %s", e)
@@ -1444,7 +1451,7 @@ async def device_discover_apply_api(request: Request):
     try:
         data = await request.json()
         emulator = data.get("emulator", data) if isinstance(data, dict) else {}
-        version = lifecycle_service.apply_discovered_emulator_config(emulator)
+        version = orchestrator.tasks.apply_discovered_emulator_config(emulator)
         return api_ok(config_version=version, discovery=discover_mumu_setup(cfg["emulator"], probe_adb=False))
     except (KeyError, ValueError) as e:
         return api_error(400, str(e), code="invalid_payload")
@@ -1460,7 +1467,7 @@ async def notify_test_api(request: Request):
     try:
         data = await request.json()
         config_yaml = data.get("config_yaml", "")
-        from services.core.notify import handle_notify
+        from orchestrator.notify import handle_notify
         ok = handle_notify(config_yaml, title="AutoScriptor 测试", content="通知推送测试成功")
         return {"success": ok}
     except Exception as e:
@@ -1473,7 +1480,7 @@ async def notify_save_api(request: Request):
     if busy is not None:
         return busy
     data = await request.json()
-    version = lifecycle_service.save_notify_settings(
+    version = orchestrator.tasks.save_notify_settings(
         data.get("enabled", False),
         data.get("config_yaml", "provider: null"),
     )
@@ -1484,13 +1491,13 @@ async def notify_save_api(request: Request):
 
 @app.get("/api/update/status")
 async def update_status_api():
-    from services.core.updater import updater
+    from backend.core.updater import updater
     return updater.get_status()
 
 
 @app.post("/api/update/check")
 async def update_check_api():
-    from services.core.updater import updater
+    from backend.core.updater import updater
     has_update = updater.check_update()
     return {"has_update": has_update, **updater.get_status()}
 
@@ -1500,21 +1507,21 @@ async def update_run_api():
     busy = _guard_runtime_idle("run source update")
     if busy is not None:
         return busy
-    from services.core.updater import updater
+    from backend.core.updater import updater
     ok = updater.run_update()
     return {"success": ok, **updater.get_status()}
 
 
 @app.get("/api/remote-access")
 async def remote_access_status_api():
-    from services.core.remote_access import RemoteAccess
+    from backend.core.remote_access import RemoteAccess
     return RemoteAccess.get_status()
 
 
 @app.post("/api/remote-access")
 async def remote_access_toggle_api(request: Request):
     data = await request.json()
-    from services.core.remote_access import RemoteAccess
+    from backend.core.remote_access import RemoteAccess
     if data.get("enabled"):
         if not cfg._config.get("deploy", {}).get("password"):
             return api_error(
@@ -1541,7 +1548,7 @@ async def accounts_list_api():
         "current_account": cfg.current_account(),
         "accounts": cfg.list_accounts(),
         "active_character": cfg.active_character(),
-        "characters": task_tree_service.characters_summary(),
+        "characters": orchestrator.tree.characters_summary(),
     }
 
 
@@ -1565,7 +1572,7 @@ async def accounts_switch_api(request: Request):
         _record_verify_failure(client_ip)
         return JSONResponse(status_code=401, content={"error": "安全密码错误"})
     try:
-        version = lifecycle_service.switch_account(name, security_key)
+        version = orchestrator.tasks.switch_account(name, security_key)
         character_name = cfg._config.get("game", {}).get("character_name", "")
         ac = cfg.active_character()
         old_tok = _credential_unlock_from_request(request)
@@ -1576,7 +1583,7 @@ async def accounts_switch_api(request: Request):
                 "current_account": name,
                 "character_name": character_name,
                 "active_character": ac,
-                "characters": task_tree_service.characters_summary(),
+                "characters": orchestrator.tree.characters_summary(),
                 "config_version": version,
             }
         )
@@ -1617,7 +1624,7 @@ async def accounts_add_api(request: Request):
         return api_error(400, "安全密码不能为空", code="invalid_payload")
 
     try:
-        version = lifecycle_service.add_account(name, account, password, server, character_name, security_key)
+        version = orchestrator.tasks.add_account(name, account, password, server, character_name, security_key)
         old_tok = _credential_unlock_from_request(request)
         _revoke_credential_unlock(old_tok)
         tok = _grant_credential_unlock()
@@ -1626,7 +1633,7 @@ async def accounts_add_api(request: Request):
             current_account=cfg.current_account(),
             character_name=cfg._config.get("game", {}).get("character_name", ""),
             active_character=cfg.active_character(),
-            characters=task_tree_service.characters_summary(),
+            characters=orchestrator.tree.characters_summary(),
             credential={"unlocked": cfg.has_decrypted_credentials()},
             config_version=version,
         ))
@@ -1651,7 +1658,7 @@ async def accounts_delete_api(request: Request):
     data = await request.json()
     name = data.get("name", "")
     try:
-        version = lifecycle_service.delete_account(name)
+        version = orchestrator.tasks.delete_account(name)
         return {
             "accounts": cfg.list_accounts(),
             "current_account": cfg.current_account(),
@@ -1667,7 +1674,7 @@ async def accounts_delete_api(request: Request):
 async def characters_list_api():
     return {
         "active_character": cfg.active_character(),
-        "characters": task_tree_service.characters_summary(),
+        "characters": orchestrator.tree.characters_summary(),
     }
 
 
@@ -1682,11 +1689,11 @@ async def characters_switch_api(request: Request):
     server = data.get("server", "")
     character = data.get("character", "")
     try:
-        version = lifecycle_service.switch_character(server, character)
+        version = orchestrator.tasks.switch_character(server, character)
         return {
             "active_character": cfg.active_character(),
             "character_name": character,
-            "characters": task_tree_service.characters_summary(),
+            "characters": orchestrator.tree.characters_summary(),
             "config_version": version,
         }
     except (KeyError, ValueError) as e:
@@ -1705,10 +1712,10 @@ async def characters_add_api(request: Request):
     server = data.get("server", "")
     character = data.get("character", "")
     try:
-        version = lifecycle_service.add_character(server, character)
+        version = orchestrator.tasks.add_character(server, character)
         return {
             "active_character": cfg.active_character(),
-            "characters": task_tree_service.characters_summary(),
+            "characters": orchestrator.tree.characters_summary(),
             "config_version": version,
         }
     except (ValueError, KeyError) as e:
@@ -1724,10 +1731,10 @@ async def characters_delete_api(request: Request):
     server = data.get("server", "")
     character = data.get("character", "")
     try:
-        version = lifecycle_service.delete_character(server, character)
+        version = orchestrator.tasks.delete_character(server, character)
         return {
             "active_character": cfg.active_character(),
-            "characters": task_tree_service.characters_summary(),
+            "characters": orchestrator.tree.characters_summary(),
             "config_version": version,
         }
     except (ValueError, KeyError) as e:
@@ -1747,9 +1754,9 @@ async def characters_game_profession_api(request: Request):
     character = (data.get("character") or "").strip()
     profession = (data.get("game_profession") or "").strip()
     try:
-        version = lifecycle_service.set_character_profession(server, character, profession)
+        version = orchestrator.tasks.set_character_profession(server, character, profession)
         return {
-            "game_professions_by_character": task_tree_service.game_professions_by_character(),
+            "game_professions_by_character": orchestrator.tree.game_professions_by_character(),
             "game": {"game_profession": cfg._config.get("game", {}).get("game_profession", "")},
             "config_version": version,
         }
@@ -1763,7 +1770,7 @@ async def characters_game_profession_api(request: Request):
 @app.get("/api/characters/all_tasks_summary")
 async def characters_all_tasks_summary_api():
     try:
-        return {"characters": task_tree_service.all_characters_tasks_summary()}
+        return {"characters": orchestrator.tree.all_characters_tasks_summary()}
     except Exception as e:
         logger.error("all_tasks_summary error: %s", e)
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -1772,7 +1779,7 @@ async def characters_all_tasks_summary_api():
 @app.get("/api/characters/task")
 async def get_character_task_api(server: str, character: str, path: str):
     try:
-        node = task_tree_service.get_character_task_public(server, character, path)
+        node = orchestrator.tree.get_character_task_public(server, character, path)
         if not node:
             return api_error(404, "task not found", code="task_not_found")
         return api_ok(task=node, path=path, server=server, character=character)
@@ -1796,7 +1803,7 @@ async def save_character_task_api(request: Request):
         task = body.get("task")
         if not server or not character or not path or not isinstance(task, dict):
             return api_error(400, "invalid character task payload", code="invalid_payload")
-        lifecycle_service.save_character_task(server, character, path, task)
+        orchestrator.tasks.save_character_task(server, character, path, task)
         ac = cfg.active_character()
         if ac.get("server") == server and ac.get("name") == character:
             return make_public_config()
@@ -1818,7 +1825,7 @@ async def save_character_task_api(request: Request):
 
 @app.get("/api/dispatch/queue")
 async def dispatch_queue_get_api():
-    queue = task_tree_service.normalize_dispatch_queue(cfg._account_data.get("dispatch_queue", []))
+    queue = orchestrator.tree.normalize_dispatch_queue(cfg._account_data.get("dispatch_queue", []))
     return {"queue": queue}
 
 
@@ -1828,7 +1835,7 @@ async def dispatch_queue_save_api(request: Request):
     if busy is not None:
         return busy
     data = await request.json()
-    queue, version = lifecycle_service.save_dispatch_queue(data.get("queue", []))
+    queue, version = orchestrator.tasks.save_dispatch_queue(data.get("queue", []))
     return {"queue": queue, "config_version": version}
 
 
@@ -1855,7 +1862,7 @@ async def config_import_api(request: Request):
         data = await request.json()
         if not isinstance(data, dict):
             return JSONResponse(status_code=400, content={"error": "invalid JSON"})
-        version = lifecycle_service.import_config(data)
+        version = orchestrator.tasks.import_config(data)
         return api_ok(status="ok", config_version=version)
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -1970,7 +1977,7 @@ async def deploy_save_api(request: Request):
                         if not current_pwd or not _verify_deploy_password(current_pwd, existing_pwd):
                             return JSONResponse(status_code=403, content={"error": "修改密码需要验证当前密码"})
                     incoming["password"] = _hash_deploy_password(incoming_pwd)
-    return api_ok(status="ok", config_version=lifecycle_service.save_deploy_sections(data))
+    return api_ok(status="ok", config_version=orchestrator.tasks.save_deploy_sections(data))
 
 
 # ── 入口 ──
@@ -1993,7 +2000,7 @@ def run_webui(restart_event=None):
     _print_banner()
 
     # 仅传递重启事件；更新检查改为手动触发（点击「检查更新」）
-    from services.core.updater import updater as _updater
+    from backend.core.updater import updater as _updater
     if restart_event is not None:
         _updater.set_restart_event(restart_event)
 
@@ -2033,20 +2040,20 @@ def shutdown_webui():
         except Exception:
             pass
 
-    _silent(scheduler.deactivate)
-    _silent(lambda: scheduler.stop(timeout=3))
+    _silent(orchestrator.scheduler.deactivate)
+    _silent(lambda: orchestrator.scheduler.stop(timeout=3))
     _silent(_shutdown_runtime)
     _silent(lambda: setattr(_server, "should_exit", True) if _server else None)
 
 
 def _shutdown_runtime():
-    from services.core.runtime_context import runtime_ctx
+    from AutoScriptor.core.runtime_context import runtime_ctx
     if runtime_ctx.bg is not None:
         runtime_ctx.bg.stop()
     runtime_ctx.shutdown()
 
 
 if __name__ == '__main__':
-    from services.single_instance import ensure_single_instance
+    from backend.core.single_instance import ensure_single_instance
     ensure_single_instance()
     run_webui()

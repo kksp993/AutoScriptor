@@ -152,7 +152,7 @@ http://127.0.0.1:5000
 直接运行后端：
 
 ```powershell
-.\.venv\Scripts\python.exe -X utf8 services\webui\gui.py
+.\.venv\Scripts\python.exe -X utf8 backend\webui\gui.py
 ```
 
 运行脚本不会安装依赖。缺 `.venv` 时运行 `.\scripts\install.bat python`，缺 `webapp\node_modules` 时运行 `.\scripts\install.bat electron`。

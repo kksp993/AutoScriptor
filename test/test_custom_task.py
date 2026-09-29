@@ -44,7 +44,7 @@ class TestCustomTaskPaths(unittest.TestCase):
 
 class TestPruneStaleCustomTasks(unittest.TestCase):
     def test_prune_removes_unregistered_leaves(self):
-        from services.core.task_tree import TaskTree
+        from orchestrator.task_tree import TaskTree
 
         branch = {
             "orphan": {"on": False, "next_exec_time": 0},
@@ -143,7 +143,7 @@ class TestCustomTaskDynamicImport(unittest.TestCase):
 
         from AutoScriptor.utils.app_config import cfg
         from tasks.task_registry import task_registry
-        from tasks import force_reload_tasks
+        from orchestrator import force_reload_tasks
 
         with tempfile.TemporaryDirectory() as d:
             ct = Path(d) / "custom_task"

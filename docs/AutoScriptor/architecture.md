@@ -8,27 +8,35 @@
 start.bat / local_start.bat
 └─ scripts\run.bat electron
    └─ webapp\main.js
-      └─ .venv\Scripts\python.exe -X utf8 services\webui\gui.py --electron
+      └─ .venv\Scripts\python.exe -X utf8 backend\webui\gui.py --electron
 
 webui.bat / scripts\run.bat webui
-└─ .venv\Scripts\python.exe -X utf8 services\webui\gui.py
-   └─ services\webui\server.py
-      └─ services\webui\static\
+└─ .venv\Scripts\python.exe -X utf8 backend\webui\gui.py
+   └─ backend\webui\server.py
+      └─ backend\webui\static\
 ```
 
 ## 代码分层
 
 | 层 | 位置 | 职责 |
 | --- | --- | --- |
-| 前端 | `frontend/`（现 `webapp/` + `services/webui/static/`） | Electron 壳、Vue 页面与静态资源 |
-| 后端 | `backend/`（现 `services/`） | FastAPI API、日志 WebSocket、安全、更新与通知 |
-| 编排层 | `orchestrator/`（待从 `services/core/`、`services/webui/` 抽出） | 定时、排序、跨角色派发、执行闸门、retry |
-| 任务脚本 | `tasks/` | `@register_task` 任务实现、注册机制与运行时任务状态 |
-| 自动化核心 | `AutoScriptor/` | 识别、控制、配置、路径、日志、截图和通用 API |
+| 前端 | `frontend/`（现 `webapp/` + `backend/webui/static/`） | Electron 壳、Vue 页面与静态资源 |
+| 后端 | `backend/`（`core/` 运维 + `webui/` 服务） | FastAPI API、日志 WebSocket、安全、更新与通知 |
+| 编排层 | `orchestrator/` | 定时、排序、跨角色派发、执行闸门、retry、任务注册装配 |
+| 任务脚本 | `tasks/` | `@register_task` 任务实现与运行时任务状态 |
+| 自动化核心 | `AutoScriptor/` | 识别、控制、配置、路径、日志、设备会话、截图和通用 API |
 | 游戏业务 | `ZmxyOL/` | 账号（`accounts/`，含 `crypto`）、角色（`character/`）、导航、战斗、参数表 |
 | 用户数据 | `data/` | 配置、账号、职业脚本、自定义任务 |
 | 运行产物 | `logs/` | 日志、错误归档、截图、礼包码缓存 |
 | 维护脚本 | `scripts/` | 安装、运行、更新和少量当前主线需要的维护脚本 |
+
+依赖方向单向，每层都不反向 import：
+
+```text
+backend -> orchestrator -> tasks -> ZmxyOL -> AutoScriptor
+```
+
+后端只通过 `orchestrator.orchestrator` 调用编排层，装配在 `orchestrator/facade.py` 完成一次。
 
 ## 数据边界
 
@@ -38,7 +46,7 @@ webui.bat / scripts\run.bat webui
 - 全局任务排序覆盖层：`data/config.json` 的 `task_ordering`
 - 运行时日历：`cfg` 拍平视图里的 `year` / `month` / `day` / `weekday`（`weekday` 为 `1=周一 ... 7=周日`）。它不在 `_GLOBAL_KEYS` 里，因此**永不落盘**，由 `AutoConfig._refresh_flat_config()` 在每次生成视图时写入，只反映进程当前时间。任务脚本可以直接下标读取，不需要先保存一次配置。
 - QQ 结果通知：`data/config.json` 的 `notify.qq`；角色结果聚合与 OneBot 发送分离，见 [通知边界](operations/qq-notifications.md)。
-- 可选本机 QQ 机器人：`services/core/qq_bot.py` 管理官方包安装与独立启动，运行文件和令牌在
+- 可选本机 QQ 机器人：`backend/core/qq_bot.py` 管理官方包安装与独立启动，运行文件和令牌在
   Git 忽略的 `.autoscriptor/qq-bot`；WebUI 通过 lifecycle 接收连接配置，不把安装逻辑放进游戏任务。
 - 自定义任务：`data/custom_task/`
 - 用户职业脚本：`data/character/`
@@ -65,7 +73,7 @@ webui.bat / scripts\run.bat webui
 
 ## 源码启动与更新边界
 
-- Electron 只负责源码壳：创建加载窗口、清理本项目占用的 `5000` 端口、启动 `.venv\Scripts\python.exe -X utf8 services\webui\gui.py --electron`。
+- Electron 只负责源码壳：创建加载窗口、清理本项目占用的 `5000` 端口、启动 `.venv\Scripts\python.exe -X utf8 backend\webui\gui.py --electron`。
 - Electron 壳在 `app.whenReady()` 前配置 Chromium render mode；默认 `AUTOSCRIPTOR_ELECTRON_RENDER_MODE=software` 只影响桌面壳，不改变浏览器访问 WebUI 的行为。
 - 加载窗口必须先于端口清理和 Python 后端启动出现；端口清理失败要写启动日志并显示在加载页，不修改 Windows 控制台 code page。
 - WebUI 更新器只处理源码 Git 通道：固定 `fetch origin main`、比较 `HEAD` 和 `origin/main` 的 ahead/behind，只有当前检出分支可快进到 `origin/main` 时才执行 `pull --ff-only origin main`。

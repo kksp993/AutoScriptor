@@ -18,7 +18,7 @@ from dpath.exceptions import PathNotFound
 
 from AutoScriptor.utils.app_config import cfg
 from ZmxyOL.character.profession import GAME_PROFESSIONS, normalize_game_profession
-from services.core.task_ordering import (
+from orchestrator.task_ordering import (
     collect_task_paths,
     project_task_ordering,
     summarize_ordering_generations,
@@ -61,7 +61,7 @@ class TaskTreeService:
 
     def apply_effective_order_to_tree(self, tasks: dict) -> Any:
         """Reorder a public task tree by effective order without changing shape."""
-        from services.core.task_tree import TaskTree
+        from orchestrator.task_tree import TaskTree
 
         projection = self.task_ordering_projection(tasks)
         order_map = projection.order_map
@@ -130,7 +130,7 @@ class TaskTreeService:
         config_data["game_professions_by_character"] = self.game_professions_by_character()
         config_data["game_profession_options"] = list(GAME_PROFESSIONS)
         try:
-            from tasks.custom_task_loader import get_custom_task_load_errors
+            from orchestrator.custom_task_loader import get_custom_task_load_errors
 
             custom_task_load_errors = get_custom_task_load_errors()
         except Exception:
@@ -143,8 +143,8 @@ class TaskTreeService:
 
     def inject_public_task_fields(self, node: dict, prefix: str = "") -> None:
         from tasks.task_registry import task_registry
-        from services.core.scheduler import is_task_due
-        from services.core.task_tree import TaskTree
+        from orchestrator.scheduler import is_task_due
+        from orchestrator.task_tree import TaskTree
 
         now_ts = time.time()
         for key, val in list(node.items()):
@@ -201,7 +201,7 @@ class TaskTreeService:
         return cleaned
 
     def strip_runtime_fields_inplace(self, node: Any) -> None:
-        from services.core.task_tree import TaskTree
+        from orchestrator.task_tree import TaskTree
 
         if not isinstance(node, dict):
             return
@@ -215,7 +215,7 @@ class TaskTreeService:
                 self.strip_runtime_fields_inplace(val)
 
     def collect_task_reset_paths(self, old_node: dict, new_node: dict, prefix: str = "") -> list[str]:
-        from services.core.task_tree import TaskTree
+        from orchestrator.task_tree import TaskTree
 
         paths: list[str] = []
         for key, new_val in (new_node or {}).items():
@@ -270,7 +270,7 @@ class TaskTreeService:
         import dpath
         from dpath.exceptions import PathNotFound
         from tasks.task_registry import task_registry
-        from services.core.task_tree import TaskTree
+        from orchestrator.task_tree import TaskTree
 
         path = (task_path or "").strip().replace("\\", "/")
         if not path or not task_registry.has_task(path):
@@ -295,7 +295,7 @@ class TaskTreeService:
     def apply_character_task_leaf(self, tree: dict, task_path: str, task_data: dict) -> dict:
         import dpath
         from dpath.exceptions import PathNotFound
-        from services.core.task_tree import TaskTree
+        from orchestrator.task_tree import TaskTree
 
         path = (task_path or "").strip().replace("\\", "/")
         try:
@@ -347,7 +347,7 @@ class TaskTreeService:
         return result
 
     def task_leaf_status(self, node: dict, path: str, now_ts: float) -> str:
-        from services.core.scheduler import is_human_takeover_blocked, is_task_due
+        from orchestrator.scheduler import is_human_takeover_blocked, is_task_due
 
         if not node.get("on"):
             return "disabled"
@@ -426,7 +426,7 @@ class TaskTreeService:
         }
 
     def overall_next_execution_all_characters(self) -> float | None:
-        from services.core.scheduler import (
+        from orchestrator.scheduler import (
             collect_active_times_from_tasks_tree,
             next_display_timestamp_from_times,
         )
@@ -442,7 +442,7 @@ class TaskTreeService:
         return min(candidates) if candidates else None
 
     def all_characters_tasks_summary(self) -> dict:
-        from services.core.scheduler import (
+        from orchestrator.scheduler import (
             collect_active_times_from_tasks_tree,
             next_display_timestamp_from_times,
         )

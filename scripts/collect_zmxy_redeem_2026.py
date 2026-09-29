@@ -29,12 +29,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from AutoScriptor.utils.paths import get_config_path, get_logs_root  # noqa: E402
-from services.webui.routes.news import (  # noqa: E402
+from backend.webui.routes.news import (  # noqa: E402
     _fetch_proxy_with_adaptive_login,
     _is_login_wall_response,
     _scrape_posts,
 )
-from services.webui.routes.news_4399_session import (  # noqa: E402
+from backend.webui.routes.news_4399_session import (  # noqa: E402
     PUBLIC_NEWS_ACCOUNT,
     PUBLIC_NEWS_PASSWORD,
 )

@@ -8,10 +8,11 @@
 |------|------|
 | `tasks/task_register.py` | `@register_task` 注册任务路径，维护用户配置叶节点，并把运行时元数据写入 `TaskRegistry` |
 | `tasks/task_registry.py` | 运行时注册表，保存 `fn/order/param_meta/doc/debug_mode`，不持久化 |
-| `services/core/scheduler.py` | 后台线程、动态等待、跨角色收集到期任务、调度周期 retry、状态机 |
-| `services/core/task_manager.py` | 单任务执行、参数恢复、任务内 retry、进度判定、人工接管标记、执行后时间更新 |
+| `orchestrator/registry.py` | 启动时发现任务模块、按 `_order.txt` 导入、装配任务树 |
+| `orchestrator/scheduler.py` | 后台线程、动态等待、跨角色收集到期任务、调度周期 retry、状态机 |
+| `orchestrator/task_manager.py` | 单任务执行、参数恢复、任务内 retry、进度判定、人工接管标记、执行后时间更新 |
 | `tasks/task_state.py` | 当前任务本地状态 API，例如 `progress` |
-| `services/webui/task_tree_service.py` / `server.py` | 将任务树投影为 WebUI 状态、进度、到期与错误展示 |
+| `orchestrator/task_tree_service.py` / `backend/webui/server.py` | 将任务树投影为 WebUI 状态、进度、到期与错误展示 |
 
 ## 任务注册与数据归属
 

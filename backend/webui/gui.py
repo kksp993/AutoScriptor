@@ -76,7 +76,7 @@ def _webui_worker(restart_event):
         _webbrowser.open = lambda *a, **kw: None
 
     _boot_log("正在导入 WebUI 服务模块")
-    from services.webui.server import run_webui
+    from backend.webui.server import run_webui
 
     _boot_log("WebUI 服务模块已导入，正在启动 HTTP 服务")
     run_webui(restart_event=restart_event)
@@ -90,7 +90,7 @@ def main() -> int:
     multiprocessing.freeze_support()
 
     _boot_log("正在检查单实例锁")
-    from services.single_instance import ensure_single_instance
+    from backend.core.single_instance import ensure_single_instance
 
     ensure_single_instance()
 
