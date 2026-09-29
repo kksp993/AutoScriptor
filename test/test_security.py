@@ -21,7 +21,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-from services.webui.security import (
+from backend.webui.security import (
     hash_deploy_password, verify_deploy_password,
     create_session, validate_session, get_sessions,
     RateLimiter, login_limiter, verify_limiter,

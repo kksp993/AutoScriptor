@@ -1,21 +1,17 @@
-"""
-RuntimeContext: 运行时对象的集中生命周期管理
-=============================================
-管理 mixctrl / mumu / bg 的初始化、刷新、关闭，
-替代 scheduler.py 中对全局变量的散乱修补。
+"""Device session lifetime: mixctrl / mumu / bg in one place.
 
-用法::
+The session is created lazily, because a passive consumer (WebUI startup,
+diagnostics) must not spin up an emulator connection just by importing the
+framework. Anything that truly needs the device calls
+:meth:`RuntimeContext.ensure_device_session`.
 
-    from services.core.runtime_context import runtime_ctx
+Usage::
 
-    # 首次初始化（由 api.py 或 run.py 调用）
-    runtime_ctx.init(mixctrl, mumu)
+    from AutoScriptor.core.runtime_context import runtime_ctx
 
-    # 模拟器重启后刷新（替代 Scheduler._refresh_runtime_controls）
-    runtime_ctx.refresh()
-
-    # 退出时清理
-    runtime_ctx.shutdown()
+    runtime_ctx.init(mixctrl, mumu)      # adopt an existing session
+    runtime_ctx.refresh()                # rebuild after an emulator restart
+    runtime_ctx.shutdown()               # release on exit
 """
 
 from __future__ import annotations
@@ -127,6 +123,19 @@ class RuntimeContext:
         self._initialized = False
         self._sync_globals()
         logger.info("RuntimeContext 已关闭")
+
+    def release_session(self):
+        """Drop the current session without touching ``bg``.
+
+        Callers that only need to force a reconnect (emulator restart, post-run
+        teardown) use this instead of poking ``mixctrl``/``mumu`` directly.
+        """
+        self._release_nemu_ipc()
+        self.mixctrl = None
+        self.mumu = None
+        self._initialized = False
+        self._sync_globals()
+        logger.debug("RuntimeContext 会话已释放")
 
     # ── 内部工具 ──
 

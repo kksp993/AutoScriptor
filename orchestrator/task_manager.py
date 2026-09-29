@@ -33,7 +33,7 @@ from tasks.task_state import (
     set_current_task_path,
 )
 from AutoScriptor.utils.paths import get_logs_root
-from services.core.runtime_context import runtime_ctx
+from AutoScriptor.core.runtime_context import runtime_ctx
 from AutoScriptor.logging.task_video_recorder import new_task_video_recorder
 
 
@@ -245,7 +245,7 @@ class TaskManager:
 
                 reload_character_modules()
                 # 重新发现并注册任务（不再由 import 自动触发）
-                from tasks import force_reload_tasks
+                from orchestrator import force_reload_tasks
                 force_reload_tasks()
                 logger.info("✅ 任务重新加载完成")
             except Exception as e:

@@ -59,7 +59,7 @@ class CharacterReports:
 
 def create_character_reports(settings_payload: dict, order: list[CharacterKey]) -> CharacterReports:
     """Bind the optional QQ sink once; all execution hooks remain transport-neutral."""
-    from services.core.qq_notify import QQSettings, qq_notifier
+    from orchestrator.qq_notify import QQSettings, qq_notifier
 
     try:
         settings = QQSettings.parse(settings_payload)

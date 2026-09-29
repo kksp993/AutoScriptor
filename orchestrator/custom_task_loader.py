@@ -10,7 +10,7 @@ from AutoScriptor.logging.logger import logger
 from ZmxyOL.accounts import get_custom_task_dir
 from AutoScriptor.utils.app_config import cfg
 from tasks.task_registry import task_registry
-from services.core.task_tree import TaskTree
+from orchestrator.task_tree import TaskTree
 
 _MODULE_PREFIX = "tasks._ct_"
 _last_load_errors: list[dict[str, str]] = []

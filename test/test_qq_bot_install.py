@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import Mock, patch
 import zipfile
 
-from services.core import qq_bot
+from backend.core import qq_bot
 
 
 class TestLocalBotInstall(unittest.TestCase):

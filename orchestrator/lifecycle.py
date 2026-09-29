@@ -12,7 +12,7 @@ import logging
 from threading import RLock, local
 from typing import Any, Callable
 
-from services.core.task_ordering import normalize_task_ordering_overlay
+from orchestrator.task_ordering import normalize_task_ordering_overlay
 
 logger = logging.getLogger(__name__)
 
@@ -369,7 +369,7 @@ class WebUILifecycleService:
         return self.mark_config_changed("save notify settings")
 
     def prepare_qq_settings(self, payload: dict, *, require_target: bool = False):
-        from services.core.qq_notify import QQSettings
+        from orchestrator.qq_notify import QQSettings
 
         if not isinstance(payload, dict):
             raise ValueError("QQ settings must be an object")

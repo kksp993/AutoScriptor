@@ -6,8 +6,12 @@ from tasks.task_registry import task_registry
 from tasks.translations import normalize_cfg_key, translate_path_part
 
 
-PACKAGE_NAME = __name__.rsplit(".", 1)[0]
-PACKAGE_PATH = pathlib.Path(__file__).parent
+# The task sources still live in the ``tasks`` package; this module only drives
+# their discovery, so the paths must point there rather than at this package.
+import tasks as _tasks_package
+
+PACKAGE_NAME = "tasks"
+PACKAGE_PATH = pathlib.Path(_tasks_package.__file__).resolve().parent
 
 
 def get_min_order(node, path_prefix=""):

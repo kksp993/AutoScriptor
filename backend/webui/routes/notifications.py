@@ -2,10 +2,10 @@
 from fastapi import APIRouter, Request
 from starlette.concurrency import run_in_threadpool
 
-from services.core.character_reports import CharacterReport
-from services.core.qq_bot import local_installation_status, local_notification_settings
-from services.core.qq_notify import qq_notifier
-from services.webui.api_response import api_error, api_ok
+from orchestrator.character_reports import CharacterReport
+from backend.core.qq_bot import local_installation_status, local_notification_settings
+from orchestrator.qq_notify import qq_notifier
+from backend.webui.api_response import api_error, api_ok
 
 
 def create_notifications_router(lifecycle_service, guard_idle) -> APIRouter:

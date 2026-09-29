@@ -123,7 +123,7 @@ function getRoot() {
 }
 
 function guiScriptPath() {
-  return path.join(getRoot(), 'services', 'webui', 'gui.py');
+  return path.join(getRoot(), 'backend', 'webui', 'gui.py');
 }
 
 function browserWindowWebPreferences() {
@@ -705,4 +705,3 @@ app.on('before-quit', () => {
   app.isQuitting = true;
   globalShortcut.unregister(BOSS_KEY);
 });
-

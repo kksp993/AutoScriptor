@@ -134,7 +134,7 @@ def normalize_task_ordering_overlay(raw_overlay: Any) -> dict[str, Any]:
 
 def collect_task_paths(task_tree: dict[str, Any], prefix: str = "") -> list[str]:
     """Collect leaf task paths from a cfg task tree in current tree order."""
-    from services.core.task_tree import TaskTree
+    from orchestrator.task_tree import TaskTree
 
     paths: list[str] = []
     if not isinstance(task_tree, dict):

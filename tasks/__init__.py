@@ -1,76 +1,46 @@
-from AutoScriptor.utils.app_config import cfg
-from tasks.task_registry import task_registry
+"""Task scripts: what a task *is*.
 
-# 游戏层启动时把账号域、包名解析、错误归档上下文注册进通用层。
-# 这些模块自注册，导入即生效（幂等）。
-from ZmxyOL.accounts import account_store  # noqa: F401
-from ZmxyOL import app_package_resolve  # noqa: F401
-from ZmxyOL import nav  # noqa: F401
-from tasks.pkg_utils import (
-    gather_py_files, sort_py_files, import_modules,
-    sort_tasks, normalize_cfg_tasks_to_cn,
-    migrate_hgwj_daily_task_leaf_to_wanjiefuben,
-    migrate_remove_daily_login_task,
-)
-from tasks.custom_task_loader import (
-    has_custom_task_load_errors,
-    load_custom_task_modules,
-    prune_stale_custom_tasks,
-)
-from .task_register import register_task
+This package owns the authoring surface (``@register_task``), the runtime
+metadata table and task-local state. Deciding which task modules exist, in what
+order they load and how the task tree lands in config is ``orchestrator``'s job.
+
+The exports here are eager on purpose. ``task_register`` runs
+``from ZmxyOL import *``, and ``ZmxyOL`` maps ``register_task`` back to this
+package -- resolving that lazily would re-enter the module that is still being
+imported. Binding the real attributes up front removes the re-entry.
+"""
+from __future__ import annotations
+
+# Game-layer self-registration. Importing these attaches the account backend,
+# the package-name resolver and navigation to AutoScriptor's generic layer, so a
+# task script imported on its own still finds them ready. Idempotent.
+from ZmxyOL.accounts import account_store as _account_store  # noqa: F401
+from ZmxyOL import app_package_resolve as _app_package_resolve  # noqa: F401
+from ZmxyOL import nav as _nav  # noqa: F401
+
 from tasks.battle_task_params import (
-    BattleFlowName,
-    DEFAULT_BATTLE_FLOW,
-    DEFAULT_JJC_BATTLE_FLOW,
-    get_battle_profile,
+    BattleFlowName as BattleFlowName,
+    DEFAULT_BATTLE_FLOW as DEFAULT_BATTLE_FLOW,
+    DEFAULT_JJC_BATTLE_FLOW as DEFAULT_JJC_BATTLE_FLOW,
+    get_battle_profile as get_battle_profile,
 )
-
-_loaded = False
-
-
-def load_tasks():
-    """Discover, import, and sort all task modules under tasks/.
-
-    Safe to call multiple times; subsequent calls are no-ops unless
-    ``force_reload_tasks()`` resets the guard first.
-    """
-    global _loaded
-    if _loaded:
-        return
-    _loaded = True
-    all_py_files = gather_py_files()
-    sorted_files = sort_py_files(all_py_files)
-    import_modules(sorted_files)
-    load_custom_task_modules()
-    normalize_cfg_tasks_to_cn()
-    migrate_remove_daily_login_task(cfg["tasks"])
-    migrate_hgwj_daily_task_leaf_to_wanjiefuben(cfg["tasks"])
-    prune_stale_custom_tasks()
-    sort_tasks(cfg["tasks"])
-    if has_custom_task_load_errors():
-        return
-    cfg.save_config()
-
-
-def force_reload_tasks():
-    """Reset the load guard and re-run ``load_tasks()``.
-
-    Used by ``TaskManager.reload_tasks()`` after clearing ``sys.modules``.
-    Clears the TaskRegistry before re-registering to avoid stale entries.
-    """
-    global _loaded
-    _loaded = False
-    task_registry.clear()
-    load_tasks()
+from tasks.task_register import register_task as register_task
+from tasks.task_registry import task_registry as task_registry
+from tasks.task_state import (
+    clear_task_status as clear_task_status,
+    get_task_status as get_task_status,
+    set_task_status as set_task_status,
+)
 
 
 __all__ = [
     "register_task",
     "task_registry",
-    "load_tasks",
-    "force_reload_tasks",
     "BattleFlowName",
     "DEFAULT_BATTLE_FLOW",
     "DEFAULT_JJC_BATTLE_FLOW",
     "get_battle_profile",
+    "get_task_status",
+    "set_task_status",
+    "clear_task_status",
 ]

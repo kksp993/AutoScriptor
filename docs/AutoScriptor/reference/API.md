@@ -8,9 +8,9 @@
 |------|------|
 | 安装源码依赖 | `scripts\install.bat` |
 | 源码 Electron 桌面壳 | `scripts\run.bat electron` 或根目录 `start.bat` |
-| 后端 WebUI | `scripts\run.bat webui`、根目录 `webui.bat` 或 `.venv\Scripts\python.exe -X utf8 services\webui\gui.py` |
+| 后端 WebUI | `scripts\run.bat webui`、根目录 `webui.bat` 或 `.venv\Scripts\python.exe -X utf8 backend\webui\gui.py` |
 | 更新源码 | `scripts\update.bat` |
-| WebUI 模块直跑 | `.venv\Scripts\python.exe -X utf8 services\webui\server.py` |
+| WebUI 模块直跑 | `.venv\Scripts\python.exe -X utf8 backend\webui\server.py` |
 
 导入 `AutoScriptor` 本身是懒加载：不会初始化 OCR、UI Map、MuMu、NemuIpc 或 `mixctrl/mumu`。真正执行 `click()`、`locate()`、任务运行或显式设备接口时才需要设备会话。
 

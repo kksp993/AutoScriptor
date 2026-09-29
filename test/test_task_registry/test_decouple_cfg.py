@@ -295,20 +295,20 @@ class TestTaskTreeLeaf(unittest.TestCase):
     """is_leaf 现在只看 'on' 字段，不依赖 'fn'。"""
 
     def test_on_only_is_leaf(self):
-        from services.core.task_tree import TaskTree
+        from orchestrator.task_tree import TaskTree
         self.assertTrue(TaskTree.is_leaf({"on": True, "next_exec_time": 0}))
 
     def test_on_without_fn_is_leaf(self):
-        from services.core.task_tree import TaskTree
+        from orchestrator.task_tree import TaskTree
         self.assertTrue(TaskTree.is_leaf({"on": False}))
 
     def test_branch_not_leaf(self):
-        from services.core.task_tree import TaskTree
+        from orchestrator.task_tree import TaskTree
         self.assertFalse(TaskTree.is_leaf({"子目录": {}}))
         self.assertFalse(TaskTree.is_leaf({}))
 
     def test_is_branch(self):
-        from services.core.task_tree import TaskTree
+        from orchestrator.task_tree import TaskTree
         self.assertTrue(TaskTree.is_branch({"子目录": {}}))
         self.assertFalse(TaskTree.is_branch({"on": True}))
 
@@ -328,7 +328,7 @@ class TestSortTasks(unittest.TestCase):
         task_registry._tasks = self._reg_backup
 
     def test_sort_by_registry_order(self):
-        from tasks.pkg_utils import sort_tasks
+        from orchestrator.pkg_utils import sort_tasks
 
         task_registry.register("cat/Z任务", lambda: None, order=1)
         task_registry.register("cat/A任务", lambda: None, order=2)
@@ -344,7 +344,7 @@ class TestSortTasks(unittest.TestCase):
         self.assertEqual(keys, ["Z任务", "A任务"])
 
     def test_unregistered_tasks_sort_last(self):
-        from tasks.pkg_utils import sort_tasks
+        from orchestrator.pkg_utils import sort_tasks
 
         task_registry.register("cat/注册过", lambda: None, order=1)
 
@@ -374,7 +374,7 @@ class TestSchedulerCollectDue(unittest.TestCase):
         task_registry._tasks = self._reg_backup
 
     def test_registered_due_task_collected(self):
-        from services.core.scheduler import Scheduler
+        from orchestrator.scheduler import Scheduler
         sched = Scheduler()
 
         task_registry.register("cat/task", lambda: None, order=1)
@@ -384,7 +384,7 @@ class TestSchedulerCollectDue(unittest.TestCase):
         self.assertIn("cat/task", due)
 
     def test_unregistered_task_not_collected(self):
-        from services.core.scheduler import Scheduler
+        from orchestrator.scheduler import Scheduler
         sched = Scheduler()
 
         tree = {"cat": {"orphan": {"on": True, "next_exec_time": 0}}}
@@ -392,7 +392,7 @@ class TestSchedulerCollectDue(unittest.TestCase):
         self.assertEqual(due, [])
 
     def test_disabled_task_not_collected(self):
-        from services.core.scheduler import Scheduler
+        from orchestrator.scheduler import Scheduler
         sched = Scheduler()
 
         task_registry.register("cat/off", lambda: None, order=1)
@@ -402,7 +402,7 @@ class TestSchedulerCollectDue(unittest.TestCase):
         self.assertEqual(due, [])
 
     def test_future_task_not_collected(self):
-        from services.core.scheduler import Scheduler
+        from orchestrator.scheduler import Scheduler
         sched = Scheduler()
 
         task_registry.register("cat/future", lambda: None, order=1)
@@ -412,7 +412,7 @@ class TestSchedulerCollectDue(unittest.TestCase):
         self.assertEqual(due, [])
 
     def test_human_takeover_task_not_collected_before_next_exec_time(self):
-        from services.core.scheduler import Scheduler
+        from orchestrator.scheduler import Scheduler
         sched = Scheduler()
 
         task_registry.register("cat/human", lambda: None, order=1)
@@ -431,7 +431,7 @@ class TestSchedulerCollectDue(unittest.TestCase):
         self.assertEqual(due, [])
 
     def test_human_takeover_task_collected_after_next_exec_time(self):
-        from services.core.scheduler import Scheduler
+        from orchestrator.scheduler import Scheduler
         sched = Scheduler()
 
         task_registry.register("cat/human", lambda: None, order=1)
@@ -467,7 +467,7 @@ class TestTaskManagerPrepare(unittest.TestCase):
         task_registry._tasks = self._reg_backup
 
     def test_prepare_gets_fn_from_registry(self):
-        from services.core.task_manager import TaskManager
+        from orchestrator.task_manager import TaskManager
 
         fn = lambda: "executed"
         cfg._config["tasks"] = {
@@ -480,7 +480,7 @@ class TestTaskManagerPrepare(unittest.TestCase):
         self.assertIs(got_fn, fn)
 
     def test_prepare_applies_one_time_param_override(self):
-        from services.core.task_manager import TaskManager
+        from orchestrator.task_manager import TaskManager
 
         def fn(redeem_code="1111"):
             return redeem_code
@@ -500,7 +500,7 @@ class TestTaskManagerPrepare(unittest.TestCase):
         self.assertEqual(cfg._config["tasks"]["测试"]["任务"]["params"]["redeem_code"], "1111")
 
     def test_prepare_raises_if_not_registered(self):
-        from services.core.task_manager import TaskManager
+        from orchestrator.task_manager import TaskManager
 
         cfg._config["tasks"] = {
             "测试": {"幽灵": {"on": True, "next_exec_time": 0, "params": {}}}
@@ -511,7 +511,7 @@ class TestTaskManagerPrepare(unittest.TestCase):
             tm._prepare_task("测试/幽灵")
 
     def test_debug_task_skips_failure_recovery(self):
-        from services.core.task_manager import TaskManager
+        from orchestrator.task_manager import TaskManager
 
         cfg._config.setdefault("app", {})["restart_on_error"] = True
         cfg._config["tasks"] = {
@@ -558,8 +558,8 @@ class TestTaskStatusProgress(unittest.TestCase):
 
     def test_normal_return_with_incomplete_progress_marks_human_takeover_after_retry_exhausted(self):
         from tasks.task_state import set_task_status
-        from services.core import task_manager as tm_mod
-        from services.core.task_manager import TaskManager
+        from orchestrator import task_manager as tm_mod
+        from orchestrator.task_manager import TaskManager
 
         def partial_done():
             set_task_status("progress", "5/6", save=False)

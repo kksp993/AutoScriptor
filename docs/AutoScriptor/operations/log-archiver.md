@@ -80,7 +80,7 @@ except Exception as e:
 
 ## WebUI 错误归档页
 
-`services/webui/error_archives.py` 提供：
+`backend/webui/error_archives.py` 提供：
 
 | API | 功能 |
 |-----|------|

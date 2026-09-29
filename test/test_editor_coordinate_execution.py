@@ -4,8 +4,8 @@ import unittest
 from unittest.mock import patch
 
 from AutoScriptor.core import api as core_api
-from services.webui.routes import editor as editor_routes
-from services.webui.routes.editor import _run_editor_snippet
+from backend.webui.routes import editor as editor_routes
+from backend.webui.routes.editor import _run_editor_snippet
 
 
 class _RecordingMixControl:

@@ -21,9 +21,9 @@ from enum import Enum
 from AutoScriptor.utils.cancel import TaskCancelled
 from AutoScriptor.logging.logger import logger
 
-from services.core.runtime_context import runtime_ctx
-from services.core.notify import notify_runtime_event
-from services.core.character_reports import create_character_reports
+from AutoScriptor.core.runtime_context import runtime_ctx
+from orchestrator.notify import notify_runtime_event
+from orchestrator.character_reports import create_character_reports
 
 
 class SchedulerState(Enum):
@@ -39,7 +39,7 @@ MAX_CONSECUTIVE_ERRORS = 3
 def collect_active_times_from_tasks_tree(tasks: dict) -> list[float]:
     """收集任务树中所有 on=True 且已注册任务的「有效」下次执行时间（含 sched_window / 星期限制）。"""
     from tasks.task_registry import task_registry
-    from services.core.task_manager import (
+    from orchestrator.task_manager import (
         parse_sched_window_hours,
         clamp_to_sched_window,
         parse_allowed_weekdays,
@@ -133,7 +133,7 @@ def next_display_timestamp_from_times(times: list[float]) -> float | None:
 def is_task_due(val: dict, path: str, now_ts: float) -> bool:
     """判定单个任务是否到期（与 Scheduler._collect_due 完全一致的判定逻辑，无副作用）。"""
     from tasks.task_registry import task_registry
-    from services.core.task_manager import (
+    from orchestrator.task_manager import (
         parse_sched_window_hours,
         clamp_to_sched_window,
         parse_allowed_weekdays,
@@ -194,7 +194,7 @@ def is_human_takeover_blocked(val: dict, now_ts: float | None = None) -> bool:
 
 def calc_effective_next_time(val: dict, now_ts: float) -> float:
     """计算任务的有效下次执行时间（用于展示），与 collect_active_times_from_tasks_tree 一致。"""
-    from services.core.task_manager import (
+    from orchestrator.task_manager import (
         parse_sched_window_hours,
         clamp_to_sched_window,
         parse_allowed_weekdays,
@@ -518,7 +518,7 @@ class Scheduler:
     # ── 后台主循环 ──
 
     def _loop(self):
-        from services.core.watcher import ConfigWatcher
+        from orchestrator.watcher import ConfigWatcher
         from AutoScriptor.utils.app_config import cfg
         from ZmxyOL.accounts import get_character_dir, get_custom_task_dir
 
@@ -568,7 +568,7 @@ class Scheduler:
     def _collect_due(self, node: dict, prefix: str, now_ts: float) -> list[str]:
         from tasks.task_registry import task_registry
         from AutoScriptor.utils.app_config import cfg
-        from services.core.task_manager import (
+        from orchestrator.task_manager import (
             parse_sched_window_hours,
             clamp_to_sched_window,
             parse_allowed_weekdays,
@@ -624,7 +624,7 @@ class Scheduler:
     def _sort_due_paths(self, due_paths: list[str]) -> list[str]:
         """Sort due paths by the global task ordering overlay."""
         from AutoScriptor.utils.app_config import cfg
-        from services.core.task_ordering import sort_paths_by_task_ordering
+        from orchestrator.task_ordering import sort_paths_by_task_ordering
 
         return sort_paths_by_task_ordering(
             due_paths,
@@ -1087,14 +1087,11 @@ class Scheduler:
                 except Exception as e:
                     logger.debug("%s 关闭应用失败(可忽略): %s", tag, e)
 
-            runtime_ctx._release_nemu_ipc()
-
             from AutoScriptor.control.MumuAdaptor.mumu import Mumu
             mumu = Mumu().select(cfg["emulator"]["index"])
             mumu.power.shutdown(wait=True, timeout=30)
 
-            runtime_ctx.mixctrl = None
-            runtime_ctx.mumu = None
+            runtime_ctx.release_session()
             self._logged_in_character = None
             logger.info("%s 模拟器已安全关闭", tag)
             return True
@@ -1123,7 +1120,7 @@ class Scheduler:
     @staticmethod
     def _release_nemu_ipc():
         """释放旧 mixctrl 持有的 NemuIpc 原生连接，防止泄露。"""
-        runtime_ctx._release_nemu_ipc()
+        runtime_ctx.release_session()
 
     @staticmethod
     def _refresh_runtime_controls(cfg):

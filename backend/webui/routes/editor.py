@@ -30,7 +30,7 @@ from AutoScriptor.logging.logger import logger
 from AutoScriptor.core.box import b2p
 from AutoScriptor.utils.cancel import TaskCancelled, check_cancel_raise, suppress_cancel_checks
 from AutoScriptor.core.targets import B
-from services.webui.api_response import api_error, api_ok
+from backend.webui.api_response import api_error, api_ok
 
 router = APIRouter(prefix="/api/editor", tags=["editor"])
 
@@ -91,7 +91,7 @@ def _locate_text_at_scale(screenshot, text, margin_box, color, scale):
 
 
 def _get_runtime():
-    from services.core.runtime_context import runtime_ctx
+    from AutoScriptor.core.runtime_context import runtime_ctx
     return runtime_ctx
 
 

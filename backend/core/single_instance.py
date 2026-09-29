@@ -1,7 +1,7 @@
 """
 跨进程单例：保证 AutoScriptor 源码 WebUI / Electron 主入口全局只运行一个实例。
 
-放在 services/ 下，避免 import AutoScriptor 包时执行其 __init__ 拉起重依赖。
+ 放在 backend/ 下，避免 import AutoScriptor 包时执行其 __init__ 拉起重依赖。
 
 - Windows：命名互斥体（Local\\AutoScriptor_<name>）
 - 其他平台：临时目录下锁文件 + fcntl 非阻塞排他锁

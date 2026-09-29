@@ -80,12 +80,12 @@ WebUI 侧栏 **QQ 通知** 是独立页面，不需要填写 YAML。
 
 | 模块 | 职责 |
 | --- | --- |
-| `services/core/character_reports.py` | 每管线角色结果聚合、重试合并、文本格式；使用 publish 回调 |
-| `services/core/qq_notify.py` | 配置校验、OneBot HTTP 发送、后台 FIFO 和最近记录；不依赖 cfg/调度/游戏 |
-| `services/core/scheduler.py` | 在执行边界记录 pending/success/failed，结束时收束报告 |
-| `services/webui/lifecycle_service.py` | 全局配置持久化、令牌保留/清除、公开版本递增 |
-| `services/webui/routes/notifications.py` | 独立配置、测试和记录 API |
-| `services/webui/static/js/components/NotificationsPanel.js` | 页面自己的表单草稿；刷新记录不覆盖未保存编辑 |
+| `backend/core/character_reports.py` | 每管线角色结果聚合、重试合并、文本格式；使用 publish 回调 |
+| `backend/core/qq_notify.py` | 配置校验、OneBot HTTP 发送、后台 FIFO 和最近记录；不依赖 cfg/调度/游戏 |
+| `orchestrator/scheduler.py` | 在执行边界记录 pending/success/failed，结束时收束报告 |
+| `orchestrator/lifecycle.py` | 全局配置持久化、令牌保留/清除、公开版本递增 |
+| `backend/webui/routes/notifications.py` | 独立配置、测试和记录 API |
+| `backend/webui/static/js/components/NotificationsPanel.js` | 页面自己的表单草稿；刷新记录不覆盖未保存编辑 |
 
 配置位于 `data/config.json -> notify.qq`，字段为 `enabled/endpoint/target_type/target_id/access_token`。
 保存只写全局文件，不改账号 JSON，不重载任务或设备；磁盘写入失败回滚本次内存修改，不递增版本。
@@ -105,7 +105,7 @@ HTTP 200 不是成功证明，必须有 OneBot `status=ok`、整数 `retcode=0` 
 
 ```powershell
 .venv\Scripts\python.exe -X utf8 -m unittest test.test_qq_notifications test.test_scheduler_retry_rounds
-node --check services/webui/static/js/components/NotificationsPanel.js
+node --check backend/webui/static/js/components/NotificationsPanel.js
 ```
 
 通知测试使用模拟 HTTP，不向真实 QQ 发消息，也不初始化模拟器。

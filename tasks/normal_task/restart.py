@@ -8,7 +8,7 @@ from AutoScriptor import *
 )
 def task():
     from AutoScriptor.logging.logger import logger
-    from services.core.runtime_context import runtime_ctx
+    from AutoScriptor.core.runtime_context import runtime_ctx
 
     logger.info("开始重启所有设备")
     current_mixctrl, current_mumu = runtime_ctx.ensure_device_session(
