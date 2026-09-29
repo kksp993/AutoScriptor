@@ -53,7 +53,7 @@ Component convention:
 
 - Source runtime config is `data/config.json`.
 - User account data is `data/accounts/*.json` and must not be committed.
-- User scripts live in `data/custom_task/` and `data/battle_character/`.
+- User scripts live in `data/custom_task/` and `data/character/`.
 - Runtime logs and error archives live under `logs/`.
 - Gift-code JSON is read from `logs/zmxy_redeem_codes.json`; it is mutable runtime cache and must not live under `docs/`.
 - Do not use docs or third-party references as mutable runtime state.
@@ -87,7 +87,7 @@ Get-Process -Name "electron" -ErrorAction SilentlyContinue | Stop-Process -Force
 - The gift-code collector should inspect official announcements only: last 10 days, at most 15 posts, with `checked_post_ids` and active rows in runtime `logs/zmxy_redeem_codes.json` for incremental refresh.
 - The gift-code dialog iframe should load local `/api/news/gift_codes/page` and refresh through `/api/news/gift_codes?refresh=1`; do not use the stale external 4399 gift-code page.
 - Gift-code redemption uses `/api/news/redeem_targets` and `POST /api/news/gift_codes/redeem`; keep credential unlock/security-key checks, support `redeem_code` and batched `redeem_codes`, switch to the selected `server:character`, force login even for debug-mode redeem tasks, and pass each code as a one-time task param override to the built-in normal task `一般任务/活动/兑换豪礼礼品兑换`.
-- Keep the redeem task under `ZmxyOL.task.normal_task.huodong.redeem_gift`, not only under `data/custom_task`.
+- Keep the redeem task under `tasks.normal_task.huodong.redeem_gift`, not only under `data/custom_task`.
 - Public config must not expose plaintext credentials.
 - Do not reuse the news account for game automation unless the user explicitly asks.
 

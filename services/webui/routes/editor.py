@@ -613,7 +613,7 @@ def _build_wrapped_custom_task_source(name: str, code: str, metadata: dict | Non
         "from ZmxyOL.battle import h",
         "from ZmxyOL.nav.api import *",
         "from ZmxyOL.nav.envs.decorators import *",
-        "from ZmxyOL.task.task_register import register_task",
+        "from tasks.task_register import register_task",
     ]
     if enum_sources:
         imports.insert(0, "import enum")
@@ -681,7 +681,7 @@ def _editor_nav_namespace() -> dict:
 
 def _editor_battle_namespace() -> dict:
     """Expose the shared runtime hero used by editor battle snippets."""
-    from ZmxyOL.battle_character.hero import h
+    from ZmxyOL.character.hero import h
 
     return {"h": h}
 
@@ -1521,7 +1521,7 @@ async def editor_save_custom_task(request: Request):
         raw_name = str(data.get("name") or os.path.splitext(filename)[0])
         source, wrapped, task_path = _prepare_editor_custom_task_source(raw_name, code, data)
 
-        from ZmxyOL.paths import get_custom_task_dir
+        from ZmxyOL.accounts import get_custom_task_dir
 
         root = get_custom_task_dir()
         root.mkdir(parents=True, exist_ok=True)

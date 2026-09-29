@@ -1,18 +1,18 @@
 """ZmxyOL package: game layer — battle, navigation, task, account and crypto.
 
 Exports stay lazy (PEP 562) on purpose. Importing this package eagerly used to
-pull in ``ZmxyOL.battle`` -> ``battle_character`` -> ``data/battle_character``
+pull in ``ZmxyOL.battle`` -> ``character`` -> ``data/character``
 -> ``AutoScriptor``, which re-enters ``AutoScriptor.utils.app_config`` while it
 is still initializing and fails on a partially initialized ``cfg``.
 
 Resolving each name on first access keeps ``from ZmxyOL import *`` and
 ``from ZmxyOL import h`` working exactly as before, while a lightweight
-submodule import such as ``ZmxyOL.crypto.config_manager`` no longer drags the
+submodule import such as ``ZmxyOL.accounts.crypto.config_manager`` no longer drags the
 whole battle/task chain into a caller that is mid-initialization.
 
-This package also owns the account/task domains that ``AutoScriptor`` only
-consumes through injected contracts (``account_store`` registers itself with
-``AutoScriptor.utils.app_config.set_account_backend``).
+This package also owns the account domain that ``AutoScriptor`` only consumes
+through an injected backend: ``ZmxyOL.accounts.account_store`` registers itself
+with ``AutoScriptor.utils.app_config.set_account_backend``.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from importlib import import_module as _import_module
 from typing import TYPE_CHECKING as _TYPE_CHECKING, Any as _Any
 
 # Register the asset tree before anything can load the UI map.
-from ZmxyOL.paths import register_assets_root as _register_assets_root
+from ZmxyOL.accounts import register_assets_root as _register_assets_root
 
 _register_assets_root()
 
@@ -49,7 +49,7 @@ if _TYPE_CHECKING:
         try_close_via_x as try_close_via_x,
     )
     from ZmxyOL.nav.envs.decorators import LOC_ENV as LOC_ENV
-    from ZmxyOL.task import (
+    from tasks import (
         BattleFlowName as BattleFlowName,
         DEFAULT_BATTLE_FLOW as DEFAULT_BATTLE_FLOW,
         DEFAULT_JJC_BATTLE_FLOW as DEFAULT_JJC_BATTLE_FLOW,
@@ -84,30 +84,24 @@ _EXPORTS: dict[str, str] = {
     "detect_floating_window_on_frame": "ZmxyOL.nav.envs.floating_window",
     "dismiss_floating_window": "ZmxyOL.nav.envs.floating_window",
     # task layer
-    "register_task": "ZmxyOL.task",
-    "task_registry": "ZmxyOL.task",
-    "BattleFlowName": "ZmxyOL.task",
-    "DEFAULT_BATTLE_FLOW": "ZmxyOL.task",
-    "DEFAULT_JJC_BATTLE_FLOW": "ZmxyOL.task",
-    "get_battle_profile": "ZmxyOL.task",
+    "register_task": "tasks",
+    "task_registry": "tasks",
+    "BattleFlowName": "tasks",
+    "DEFAULT_BATTLE_FLOW": "tasks",
+    "DEFAULT_JJC_BATTLE_FLOW": "tasks",
+    "get_battle_profile": "tasks",
     # runtime task state helpers
-    "get_task_status": "ZmxyOL.task_state",
-    "set_task_status": "ZmxyOL.task_state",
+    "get_task_status": "tasks.task_state",
+    "set_task_status": "tasks.task_state",
 }
 
-# Subpackages / modules addressable as attributes, e.g. ``ZmxyOL.task.load_tasks``.
+# Subpackages / modules addressable as attributes, e.g. ``ZmxyOL.nav.mm``.
 _SUBMODULES = (
-    "account_store",
+    "accounts",
     "app_package_resolve",
     "battle",
-    "battle_character",
-    "crypto",
-    "game_profession",
+    "character",
     "nav",
-    "table_param",
-    "task",
-    "task_registry",
-    "task_state",
 )
 
 _PUBLIC_NAMES = [
@@ -127,16 +121,26 @@ _PUBLIC_NAMES = [
 
 
 def _package_init_is_running() -> bool:
-    """True while a ``ZmxyOL`` subpackage ``__init__`` is still executing.
+    """True while a package that owns these exports is still initializing.
+
+    ``tasks/task_register.py`` and the battle procedures run
+    ``from ZmxyOL import *`` while ``tasks`` itself is only half built, so
+    resolving an export would re-enter the very package being imported.
+    Publishing ``__all__`` in that window makes the star-import request every
+    name, including ones that cannot exist yet; reporting "no ``__all__``"
+    instead lets it pick up whatever is already resolved.
 
     Only package initializers count. A leaf module that is mid-import (for
-    example ``ZmxyOL/task/daily_task/hgwj/yijingfuben.py``) must still see the
-    full export list, because those modules rely on ``from ZmxyOL import *`` to
-    pick up names such as ``DEFAULT_BATTLE_FLOW``.
+    example ``tasks/daily_task/hgwj/yijingfuben.py``) must still see the full
+    export list, because those modules rely on ``from ZmxyOL import *`` to pick
+    up names such as ``DEFAULT_BATTLE_FLOW``.
     """
-    prefix = __name__ + "."
+    domain_roots = (__name__, "tasks")
     for module_name, module in tuple(_sys.modules.items()):
-        if not module_name.startswith(prefix):
+        if not any(
+            module_name == root or module_name.startswith(root + ".")
+            for root in domain_roots
+        ):
             continue
         if not hasattr(module, "__path__"):
             continue

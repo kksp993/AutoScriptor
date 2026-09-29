@@ -93,7 +93,7 @@ bg.wait_signal(BG_SIGNALS.TRY_EXIT, True, timeout=60)
 
 ## battle_loop 交互
 
-`data/battle_character/hero.py` 的 `battle_loop()` 会：
+`data/character/hero.py` 的 `battle_loop()` 会：
 
 1. 重置 `TRY_EXIT`、`PAUSE_BATTLE`、`BUILTIN_ADVANCE`。
 2. 进入 `bg.protect_clear()`。

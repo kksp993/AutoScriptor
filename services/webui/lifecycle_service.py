@@ -157,7 +157,7 @@ class WebUILifecycleService:
             reset_paths = self.task_tree_service.collect_task_reset_paths(old_tasks, cleaned)
             self.cfg._config["tasks"] = cleaned
             if reset_paths:
-                from ZmxyOL.task_state import clear_task_status
+                from tasks.task_state import clear_task_status
 
                 for path in reset_paths:
                     self.task_manager._clear_human_takeover_state(path)
@@ -226,7 +226,7 @@ class WebUILifecycleService:
             if ac.get("server") == server and ac.get("name") == character:
                 self.cfg._config["tasks"] = cleaned_tree
                 if reset_paths:
-                    from ZmxyOL.task_state import clear_task_status
+                    from tasks.task_state import clear_task_status
 
                     for path in reset_paths:
                         self.task_manager._clear_human_takeover_state(path)

@@ -1,31 +1,31 @@
 # 战斗职业与 Flow 维护说明
 
-当前战斗配招只使用 `data/battle_character/` 里的职业脚本；旧 `ZmxyOL/assets/profiles/*.yaml` 资源已移除。
+当前战斗配招只使用 `data/character/` 里的职业脚本；旧 `ZmxyOL/assets/profiles/*.yaml` 资源已移除。
 
 ## 当前结构
 
 | 位置 | 职责 |
 |------|------|
-| [`data/battle_character/hero.py`](../../../data/battle_character/hero.py) | 运行态 `Hero` 基类、`battle_loop` 外壳、职业注册表、`@flow`、`battle_plan` 接入 |
-| [`data/battle_character/liuli.py`](../../../data/battle_character/liuli.py) | 示例职业脚本；通过 `profession = "琉离"` 注册 |
-| [`ZmxyOL/battle_character/hero.py`](../../../ZmxyOL/battle_character/hero.py) | 兼容入口，加载 `data/battle_character/hero.py` |
-| [`ZmxyOL/battle_character/plan.py`](../../../ZmxyOL/battle_character/plan.py) | `BattlePlan` DSL：`first`、`at`、`every`、`combo` |
-| [`ZmxyOL/task/battle_task_params.py`](../../../ZmxyOL/task/battle_task_params.py) | 聚合职业与 flow，生成 `HeroProfession`、`BattleFlowName` |
-| [`ZmxyOL/task/task_register.py`](../../../ZmxyOL/task/task_register.py) | 任务执行前加载当前职业，并注入 WebUI 选择的 `battle_flow` |
+| [`data/character/hero.py`](../../../data/character/hero.py) | 运行态 `Hero` 基类、`battle_loop` 外壳、职业注册表、`@flow`、`battle_plan` 接入 |
+| [`data/character/liuli.py`](../../../data/character/liuli.py) | 示例职业脚本；通过 `profession = "琉离"` 注册 |
+| [`ZmxyOL/character/hero.py`](../../../ZmxyOL/character/hero.py) | 兼容入口，加载 `data/character/hero.py` |
+| [`ZmxyOL/character/plan.py`](../../../ZmxyOL/character/plan.py) | `BattlePlan` DSL：`first`、`at`、`every`、`combo` |
+| [`tasks/battle_task_params.py`](../../../tasks/battle_task_params.py) | 聚合职业与 flow，生成 `HeroProfession`、`BattleFlowName` |
+| [`tasks/task_register.py`](../../../tasks/task_register.py) | 任务执行前加载当前职业，并注入 WebUI 选择的 `battle_flow` |
 
 ## 生命周期
 
-1. 启动或导入任务参数时，`ensure_battle_heroes_loaded()` 扫描 `data/battle_character/*.py`，跳过 `hero.py`，执行职业脚本。
+1. 启动或导入任务参数时，`ensure_battle_heroes_loaded()` 扫描 `data/character/*.py`，跳过 `hero.py`，执行职业脚本。
 2. 职业类继承 `Hero` 并显式声明 `profession` 时，通过 `__init_subclass__` 写入 `_hero_registry`。
 3. 类上 `battle_plan("流程名")` 或 `@flow("流程名")` 注册 flow；WebUI 的 `BattleFlowName` 由 `get_registered_flows()` 聚合。
 4. 任务函数声明 `battle_flow: BattleFlowName` 时，`task_wrapper` 在任务体前调用 `get_battle_profile(h)`，按当前账号 `game.game_profession` 切换全局 `h` 的职业类。
 5. `resolve_battle_flow_for_profile()` 只允许当前职业可解析的 flow 生效；配置了其他职业的 flow 会回到任务默认 flow，避免借用错误职业的流程。
 6. `battle_loop()` 解析 flow，初始化信号和内置触发器，然后循环执行 flow；`TRY_EXIT`、超时、取消、暂停和前进信号决定退出或跳转。
-7. 热重载 `custom_task` 或 `battle_character` 时，scheduler 调用 `reload_battle_character_modules()`，清空注册表、恢复 `h` 为基类并重载职业脚本。
+7. 热重载 `custom_task` 或 `character` 时，scheduler 调用 `reload_character_modules()`，清空注册表、恢复 `h` 为基类并重载职业脚本。
 
 ## 编写规则
 
-- 新职业放在 `data/battle_character/<name>.py`，继承 `Hero`，显式写 `profession`。
+- 新职业放在 `data/character/<name>.py`，继承 `Hero`，显式写 `profession`。
 - 普通循环优先用 `battle_plan()`，少写手动状态判断。
 - 需要定制连招时，实现 `combo_xxx()`，再在 plan 中 `.combo("xxx")`。
 - 需要职业默认战斗循环时，在类上定义 `default_battle_flow = battle_plan("战斗循环...")...`。
@@ -42,7 +42,7 @@
 
 ## 排障入口
 
-- WebUI 下拉缺 flow：检查职业脚本是否在 `data/battle_character/`、是否声明 `profession`、是否被 `ensure_battle_heroes_loaded()` 成功导入。
+- WebUI 下拉缺 flow：检查职业脚本是否在 `data/character/`、是否声明 `profession`、是否被 `ensure_battle_heroes_loaded()` 成功导入。
 - 选中的 flow 未执行：检查它是否属于当前职业；不属于时会回到任务默认 flow。
 - `battle_loop` 超时：这表示业务未达成退出条件，不等于函数执行成功；应检查 flow 是否能触发 `TRY_EXIT` 或任务后续状态。
-- 职业脚本更新后不生效：确认触发了 `custom_task`/`battle_character` reload，或重启服务。
+- 职业脚本更新后不生效：确认触发了 `custom_task`/`character` reload，或重启服务。

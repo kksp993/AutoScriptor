@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from ZmxyOL.battle_character.hero import Hero
+from ZmxyOL.character.hero import Hero
 from AutoScriptor import *
 RIGHT = B(190,562,159,151)
 LEFT = B(33,558,153,161)
@@ -20,7 +20,7 @@ def account_battle_flow(h: Hero):
 
     这里先沿用 Hero 的通用战斗逻辑；如果创号角色需要专用技能顺序，
     只需在本函数内替换为 ``hero.skill(...).sleep(...).move_right(...)``
-    等链式操作即可，不需要修改 data/battle_character 下的常驻职业文件。
+    等链式操作即可，不需要修改 data/character 下的常驻职业文件。
     """
     global cnt
 
@@ -36,7 +36,7 @@ def liushahe(h: Hero):
 
     这里先沿用 Hero 的通用战斗逻辑；如果创号角色需要专用技能顺序，
     只需在本函数内替换为 ``hero.skill(...).sleep(...).move_right(...)``
-    等链式操作即可，不需要修改 data/battle_character 下的常驻职业文件。
+    等链式操作即可，不需要修改 data/character 下的常驻职业文件。
     """
     global cnt
 

@@ -12,7 +12,7 @@ sys.path.insert(0, REPO_ROOT)
 
 def _load_task_registry():
     """按路径加载 task_registry，避免 AutoScriptor 包 __init__ 拉取 adbutils。"""
-    path = os.path.join(REPO_ROOT, "ZmxyOL", "task_registry.py")
+    path = os.path.join(REPO_ROOT, "tasks", "task_registry.py")
     spec = importlib.util.spec_from_file_location("_task_registry_test", path)
     mod = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -28,9 +28,9 @@ class TestCustomTaskPaths(unittest.TestCase):
 
     def test_game_data_directories_derive_from_the_config_location(self):
         from AutoScriptor.utils.paths import get_config_path
-        from ZmxyOL.paths import (
+        from ZmxyOL.accounts import (
             get_accounts_dir,
-            get_battle_character_dir,
+            get_character_dir,
             get_custom_task_dir,
             get_editable_data_root,
         )
@@ -39,7 +39,7 @@ class TestCustomTaskPaths(unittest.TestCase):
         self.assertEqual(data_root, get_config_path().parent)
         self.assertEqual(get_custom_task_dir(), data_root / "custom_task")
         self.assertEqual(get_accounts_dir(), data_root / "accounts")
-        self.assertEqual(get_battle_character_dir(), data_root / "battle_character")
+        self.assertEqual(get_character_dir(), data_root / "character")
 
 
 class TestPruneStaleCustomTasks(unittest.TestCase):
@@ -77,8 +77,8 @@ class TestCustomTaskRegisterPathNormalization(unittest.TestCase):
         import uuid
 
         from AutoScriptor.utils.app_config import cfg
-        from ZmxyOL.task_registry import task_registry
-        import ZmxyOL.task.task_register as task_register_mod
+        from tasks.task_registry import task_registry
+        import tasks.task_register as task_register_mod
 
         old_tasks = copy.deepcopy(cfg._config.get("tasks", {}))
         old_registry = dict(task_registry._tasks)
@@ -101,7 +101,7 @@ class TestCustomTaskRegisterPathNormalization(unittest.TestCase):
                 ct.mkdir()
                 script = ct / "tmp_no_root.py"
                 script.write_text(
-                    "from ZmxyOL.task.task_register import register_task\n"
+                    "from tasks.task_register import register_task\n"
                     '@register_task(path_cn="背包清空/进阶仙宝")\n'
                     "def tmp_no_root(xianbao_idx=1):\n"
                     "    pass\n",
@@ -142,20 +142,20 @@ class TestCustomTaskDynamicImport(unittest.TestCase):
         from unittest.mock import patch
 
         from AutoScriptor.utils.app_config import cfg
-        from ZmxyOL.task_registry import task_registry
-        from ZmxyOL.task import force_reload_tasks
+        from tasks.task_registry import task_registry
+        from tasks import force_reload_tasks
 
         with tempfile.TemporaryDirectory() as d:
             ct = Path(d) / "custom_task"
             ct.mkdir()
             (ct / "tmp_hello.py").write_text(
-                "from ZmxyOL.task import register_task\n"
+                "from tasks import register_task\n"
                 '@register_task(path_cn="自定义任务/演示/tmp_hello")\n'
                 "def tmp_hello():\n"
                 "    pass\n",
                 encoding="utf-8",
             )
-            with patch("ZmxyOL.paths.get_custom_task_dir", lambda: ct):
+            with patch("ZmxyOL.accounts.get_custom_task_dir", lambda: ct):
                 old_tasks = copy.deepcopy(cfg._config.get("tasks", {}))
                 try:
                     force_reload_tasks()

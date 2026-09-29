@@ -11,7 +11,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from ZmxyOL.task_registry import TaskRegistry, task_registry
+from tasks.task_registry import TaskRegistry, task_registry
 
 
 # ---------------------------------------------------------------------------

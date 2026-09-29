@@ -142,7 +142,7 @@ class TestHeavenBonusRewards(unittest.TestCase):
             monitor.stop()
 
     def test_yijing_battle_config_manages_pioneer_choice_per_dungeon(self):
-        from ZmxyOL.task.daily_task.hgwj import yijingfuben
+        from tasks.daily_task.hgwj import yijingfuben
 
         pioneer_choices = {
             dungeon_name: row["fight_pioneer"]

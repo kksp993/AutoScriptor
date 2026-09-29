@@ -17,7 +17,7 @@ import dpath
 from dpath.exceptions import PathNotFound
 
 from AutoScriptor.utils.app_config import cfg
-from ZmxyOL.game_profession import GAME_PROFESSIONS, normalize_game_profession
+from ZmxyOL.character.profession import GAME_PROFESSIONS, normalize_game_profession
 from services.core.task_ordering import (
     collect_task_paths,
     project_task_ordering,
@@ -130,7 +130,7 @@ class TaskTreeService:
         config_data["game_professions_by_character"] = self.game_professions_by_character()
         config_data["game_profession_options"] = list(GAME_PROFESSIONS)
         try:
-            from ZmxyOL.task.custom_task_loader import get_custom_task_load_errors
+            from tasks.custom_task_loader import get_custom_task_load_errors
 
             custom_task_load_errors = get_custom_task_load_errors()
         except Exception:
@@ -142,7 +142,7 @@ class TaskTreeService:
         return config_data
 
     def inject_public_task_fields(self, node: dict, prefix: str = "") -> None:
-        from ZmxyOL.task_registry import task_registry
+        from tasks.task_registry import task_registry
         from services.core.scheduler import is_task_due
         from services.core.task_tree import TaskTree
 
@@ -182,7 +182,7 @@ class TaskTreeService:
                 task_status = ((cfg._config.get("status") or {}).get("tasks") or {}).get(path, {})
                 progress = task_status.get("progress") if isinstance(task_status, dict) else None
                 if progress is not None:
-                    from ZmxyOL.task_state import progress_label
+                    from tasks.task_state import progress_label
 
                     val["progress"] = progress
                     val["progress_display"] = progress_label(progress) or str(progress)
@@ -269,7 +269,7 @@ class TaskTreeService:
     def get_character_task_public(self, server: str, char_name: str, task_path: str) -> dict | None:
         import dpath
         from dpath.exceptions import PathNotFound
-        from ZmxyOL.task_registry import task_registry
+        from tasks.task_registry import task_registry
         from services.core.task_tree import TaskTree
 
         path = (task_path or "").strip().replace("\\", "/")
@@ -356,7 +356,7 @@ class TaskTreeService:
         return "pending" if is_task_due(node, path, now_ts) else "scheduled"
 
     def flatten_tasks(self, node: dict, now_ts: float, prefix: str = "") -> list:
-        from ZmxyOL.task_registry import task_registry
+        from tasks.task_registry import task_registry
 
         result = []
         for key, val in (node or {}).items():
@@ -378,7 +378,7 @@ class TaskTreeService:
                 task_status = ((cfg._config.get("status") or {}).get("tasks") or {}).get(path, {})
                 progress = task_status.get("progress") if isinstance(task_status, dict) else None
                 if progress is not None:
-                    from ZmxyOL.task_state import progress_label
+                    from tasks.task_state import progress_label
 
                     row["progress"] = progress
                     row["progress_display"] = progress_label(progress) or str(progress)

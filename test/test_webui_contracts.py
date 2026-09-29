@@ -33,7 +33,7 @@ def import_task_tree_service_for_test():
         list_characters=lambda: {},
     )
 
-    game_profession = types.ModuleType("ZmxyOL.game_profession")
+    game_profession = types.ModuleType("ZmxyOL.character.profession")
     game_profession.GAME_PROFESSIONS = ("悟空", "唐僧")
     game_profession.normalize_game_profession = (
         lambda raw: raw if raw in game_profession.GAME_PROFESSIONS else "悟空"
@@ -43,7 +43,7 @@ def import_task_tree_service_for_test():
         "AutoScriptor": autoscriptor,
         "AutoScriptor.utils": utils,
         "AutoScriptor.utils.app_config": app_config,
-        "ZmxyOL.game_profession": game_profession,
+        "ZmxyOL.character.profession": game_profession,
     }):
         sys.modules.pop("services.webui.task_tree_service", None)
         import services.webui.task_tree_service as module
@@ -74,7 +74,7 @@ def autoscriptor_logger_stubs() -> dict[str, types.ModuleType]:
 def import_app_config_for_test(tmp_root: str):
     autoscriptor = types.ModuleType("AutoScriptor")
     utils = types.ModuleType("AutoScriptor.utils")
-    game_profession = types.ModuleType("ZmxyOL.game_profession")
+    game_profession = types.ModuleType("ZmxyOL.character.profession")
     game_profession.DEFAULT_GAME_PROFESSION = "default_profession"
     game_profession.normalize_game_profession = lambda raw: raw or "default_profession"
     logger_module = types.ModuleType("AutoScriptor.logging.logger")
@@ -96,7 +96,7 @@ def import_app_config_for_test(tmp_root: str):
     with patch.dict(sys.modules, {
         "AutoScriptor": autoscriptor,
         "AutoScriptor.utils": utils,
-        "ZmxyOL.game_profession": game_profession,
+        "ZmxyOL.character.profession": game_profession,
         "AutoScriptor.logging.logger": logger_module,
         "AutoScriptor.utils.paths": paths,
     }):
@@ -112,7 +112,7 @@ class _FakeAccountBackend:
     """Minimal account domain used to pin AppConfig's backend contract.
 
     Credentials are stored as plaintext JSON instead of AES-GCM: these tests
-    cover config lifecycle, not cryptography (that lives in ZmxyOL.crypto).
+    cover config lifecycle, not cryptography (that lives in ZmxyOL.accounts.crypto).
     """
 
     def __init__(self, root: Path):
@@ -263,6 +263,28 @@ class TestConfigTemplateContract(unittest.TestCase):
         self.assertFalse(self.config["scheduler"]["auto_start"])
         self.assertEqual(self.config["emulator"]["post_execution"], "none")
 
+    def test_every_template_section_is_persisted(self):
+        """每模板段都必须登记在 _GLOBAL_KEYS，否则保存时会被静默丢弃。"""
+        from AutoScriptor.utils import app_config
+
+        section_names = set(self.config) - {"current_account"}
+        unregistered = sorted(section_names - set(app_config._GLOBAL_KEYS))
+
+        self.assertEqual(
+            unregistered,
+            [],
+            f"config.template.json 中存在未登记的顶层段: {unregistered}",
+        )
+
+    def test_news_section_survives_a_save_cycle(self):
+        module = import_app_config_for_test(tempfile.mkdtemp(prefix="test_news_"))
+
+        module.cfg._config["news"] = {"account": "reader", "password": "secret"}
+        module.cfg.save_global_config()
+
+        saved = json.loads(Path(module.cfg.CONFIG_PATH).read_text(encoding="utf-8"))
+        self.assertEqual(saved.get("news"), {"account": "reader", "password": "secret"})
+
 
 class TestTaskTreeServiceContract(unittest.TestCase):
     def setUp(self):
@@ -295,7 +317,7 @@ class TestTaskTreeServiceContract(unittest.TestCase):
             def get_doc_flow(self, path):
                 return []
 
-        task_registry = types.ModuleType("ZmxyOL.task_registry")
+        task_registry = types.ModuleType("tasks.task_registry")
         task_registry.task_registry = FakeTaskRegistry()
         scheduler = types.ModuleType("services.core.scheduler")
         scheduler.is_task_due = lambda node, path, now_ts: bool(node.get("on")) and now_ts >= node.get("next_exec_time", 0)
@@ -303,13 +325,13 @@ class TestTaskTreeServiceContract(unittest.TestCase):
             lambda node, now_ts=None: bool(node.get("human_takeover_error"))
             and (now_ts is None or now_ts < node.get("next_exec_time", 0))
         )
-        task_state = types.ModuleType("ZmxyOL.task_state")
+        task_state = types.ModuleType("tasks.task_state")
         task_state.progress_label = lambda value: value if isinstance(value, str) else None
         return {
             "AutoScriptor": types.ModuleType("AutoScriptor"),
             "AutoScriptor.utils": types.ModuleType("AutoScriptor.utils"),
-            "ZmxyOL.task_registry": task_registry,
-            "ZmxyOL.task_state": task_state,
+            "tasks.task_registry": task_registry,
+            "tasks.task_state": task_state,
             "services.core.scheduler": scheduler,
         }
 
@@ -866,7 +888,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
         )
 
         cleared = []
-        with patch("ZmxyOL.task_state.clear_task_status", side_effect=lambda *a, **k: cleared.append((a, k))):
+        with patch("tasks.task_state.clear_task_status", side_effect=lambda *a, **k: cleared.append((a, k))):
             service.save_tasks({"group": {"task": {"on": True, "next_exec_time": 0}}})
 
         self.assertEqual(task_manager.cleared, ["group/task"])
@@ -1114,7 +1136,7 @@ class TestConfigLifecycleContract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             # The account entity lives in the game layer now; AutoScriptor only
             # keeps the generic config surface plus the injected backend contract.
-            from ZmxyOL.account_store import Account
+            from ZmxyOL.accounts.account_store import Account
 
             account = Account("main", {"characters": {}, "active_character": {}, "encryption": {}})
             account.restore_credentials({"account": "user", "password": "pwd"})
@@ -1600,7 +1622,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
     def test_webui_routes_do_not_bypass_task_lifecycle(self):
         content = (ROOT / "services/webui/server.py").read_text(encoding="utf-8")
 
-        self.assertNotIn("from ZmxyOL.task import load_tasks", content)
+        self.assertNotIn("from tasks import load_tasks", content)
         self.assertNotIn("with TASK_MANAGER._cfg_lock", content)
 
     def test_http_middlewares_do_not_wrap_request_body_with_base_http_middleware(self):
@@ -2143,7 +2165,7 @@ print("OK")
         self.assertIn("def _normalize_editor_custom_task_filename", backend)
         self.assertIn("def _normalize_editor_task_path", backend)
         self.assertIn("def _normalize_editor_param_specs", backend)
-        self.assertIn("from ZmxyOL.paths import get_custom_task_dir", backend)
+        self.assertIn("from ZmxyOL.accounts import get_custom_task_dir", backend)
         self.assertIn("os.replace(tmp_path, target_path)", backend)
         self.assertIn("api_ok(", backend)
         self.assertIn("api_error(", backend)
@@ -2474,7 +2496,7 @@ class TestSourceDistributionContract(unittest.TestCase):
             "services/core/content_delta_update.py",
             "services/core/content_update_security.py",
             "AutoScriptor/utils/filter.py",
-            "ZmxyOL/crypto/update_config.py",
+            "ZmxyOL/accounts/crypto/update_config.py",
         ]
 
         for rel in removed_paths:
@@ -3008,18 +3030,18 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
 
         self.assertNotIn("<th>类型</th>", route)
         self.assertIn('label": f"{server}:{char_name}"', server)
-        redeem_task = (ROOT / "ZmxyOL/task/normal_task/huodong/redeem_gift.py").read_text(
+        redeem_task = (ROOT / "tasks/normal_task/huodong/redeem_gift.py").read_text(
             encoding="utf-8",
             errors="ignore",
         )
-        translations = (ROOT / "ZmxyOL/task/translations.py").read_text(
+        translations = (ROOT / "tasks/translations.py").read_text(
             encoding="utf-8",
             errors="ignore",
         )
 
         self.assertIn('_GIFT_REDEEM_TASK_PATH = "一般任务/活动/兑换豪礼礼品兑换"', server)
         self.assertIn("未找到兑换码任务，请确认一般任务已加载", server)
-        self.assertFalse((ROOT / "ZmxyOL/task/_manifest.py").exists())
+        self.assertFalse((ROOT / "tasks/_manifest.py").exists())
         self.assertIn("'兑换豪礼礼品兑换': 'redeem_gift'", translations)
         self.assertIn("def task(redeem_code: str | list[str] = \"1111\")", redeem_task)
         self.assertFalse((ROOT / "data/custom_task/zmxy_activity_redeem.py").exists())

@@ -2,7 +2,7 @@ from threading import Thread
 from time import time
 from AutoScriptor import *
 from ZmxyOL import *
-from ZmxyOL.battle_character.hero import h, combo
+from ZmxyOL.character.hero import h, combo
 from AutoScriptor.utils.cancel import TaskCancelled
 from ZmxyOL.nav.api import ensure_in
 from AutoScriptor.logging.logger import logger

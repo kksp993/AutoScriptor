@@ -1,7 +1,10 @@
 """通用配置（data/config.json）读写层。
 
 只负责通用配置段：app / ocr / emulator / scheduler / deploy / notify / update /
-remote_access / task_ordering / accounts，以及同目录临时文件 + 原子替换的持久化。
+remote_access / task_ordering / accounts / news，以及同目录临时文件 + 原子替换的持久化。
+
+``_GLOBAL_KEYS`` 决定哪些顶层段会被写回，因此模板里存在的段必须同时登记在这里，
+否则用户设置会在下一次保存时被静默丢弃。
 
 账号与角色数据不在本层定义；运行时通过 ``set_account_backend()`` 注入实现。
 没有注册 backend 时，账号相关查询返回空值、写入方法明确报错，不会伪装成功。
@@ -23,7 +26,7 @@ from AutoScriptor.logging.logger import logger
 
 _GLOBAL_KEYS = (
     "app", "ocr", "emulator", "scheduler", "deploy", "notify",
-    "update", "remote_access", "task_ordering", "accounts",
+    "update", "remote_access", "task_ordering", "accounts", "news",
 )
 
 
