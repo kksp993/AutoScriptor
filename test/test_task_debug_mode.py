@@ -18,13 +18,12 @@ class TestTaskDebugMode(unittest.TestCase):
         cfg._config = self._cfg_backup
         task_registry._tasks = self._reg_backup
 
-    def _install_task_config(self, *, debug_mode: bool = False, app_debug_mode: bool = False):
+    def _install_task_config(self, *, debug_mode: bool = False):
         cfg._config = {
             "app": {
                 "app_to_start": "com.test.app",
                 "max_retry": 1,
                 "restart_on_error": True,
-                "debug_mode": app_debug_mode,
             },
             "emulator": {"post_execution": "close_game_only"},
             "ocr": {"use_gpu": False},
@@ -62,11 +61,11 @@ class TestTaskDebugMode(unittest.TestCase):
         archive_error.assert_called_once()
         recover_app.assert_not_called()
 
-    def test_task_video_uses_global_app_debug_mode(self):
+    def test_task_video_follows_task_debug_mode(self):
         from orchestrator import task_manager as tm_mod
         from orchestrator.task_manager import TaskManager
 
-        self._install_task_config(app_debug_mode=True)
+        self._install_task_config(debug_mode=True)
         tm = TaskManager()
         mixctrl = SimpleNamespace(release_all_keys=lambda: None)
 
@@ -76,6 +75,24 @@ class TestTaskDebugMode(unittest.TestCase):
                     self.assertFalse(tm._execute_single_task("测试/任务"))
 
         recorder.assert_called_once_with("测试/任务", True)
+
+    def test_task_debug_mode_is_the_only_recording_source(self):
+        """录制只看任务注册的 debug_mode，app 段里留下的旧键不再有任何作用。"""
+        from orchestrator import task_manager as tm_mod
+        from orchestrator.task_manager import TaskManager
+
+        self._install_task_config(debug_mode=False)
+        cfg._config["app"]["debug_mode"] = True
+        tm = TaskManager()
+        mixctrl = SimpleNamespace(release_all_keys=lambda: None)
+
+        with patch.object(tm_mod.runtime_ctx, "mixctrl", mixctrl):
+            with patch.object(tm_mod, "new_task_video_recorder", return_value=None) as recorder:
+                with patch.object(tm, "_archive_error"):
+                    with patch.object(tm, "_try_recover_app", return_value=False):
+                        tm._execute_single_task("测试/任务")
+
+        recorder.assert_called_once_with("测试/任务", False)
 
     def test_scheduler_debug_task_skips_login_restart_and_post_action(self):
         from orchestrator import scheduler as scheduler_mod

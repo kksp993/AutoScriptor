@@ -72,7 +72,6 @@ class ResolutionContractTests(unittest.TestCase):
         control = _make_mix_control(frame)
 
         with (
-            patch.object(AutoScriptor, "cfg", {"app": {"debug_mode": False}}),
             patch("AutoScriptor.core.control.time.monotonic", side_effect=[100.0, 110.0]),
             patch("AutoScriptor.core.control.logger.warning") as warning,
         ):

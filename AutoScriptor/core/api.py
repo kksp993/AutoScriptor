@@ -721,7 +721,7 @@ def click(
         
         assure_stable: 是否保证定位稳定，True时会连续两次定位结果一致才认为成功
         
-        save_screenshot: 是否在debug模式下保存点击截图（带标注），默认True
+        save_screenshot: 是否保存点击截图（带标注），默认True；与 debug 开关无关
     
     Returns:
         bool: 点击是否成功（如果if_exist=True且目标不存在，返回False）
@@ -1316,7 +1316,9 @@ def extract_info(
         )
     )
 
-    if save_screenshot and cfg["app"]["debug_mode"]:
+    # 与 c/s 一致：提取信息的标注帧属于决策点证据，不看 debug 开关，
+    # 由调用方用 save_screenshot=False 关闭。
+    if save_screenshot:
         debug_screenshot = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
         save_debug_screenshot(
             target=target,

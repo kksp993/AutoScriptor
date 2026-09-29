@@ -85,6 +85,8 @@ WebUI 的“任务列表”使用全局 `task_ordering` 覆盖层保存用户拖
 
 其他关键字会写入任务叶节点配置，可作为任务默认配置持久化，例如 `last_buy_time`、`sched_window_hours`、`allowed_weekdays`、`next_exec_offset_hours`。运行时元数据如 `fn/order/param_meta/debug_mode/task_doc_flow/description/deprecated` 存在 `TaskRegistry`，不会写入 JSON；其中 `deprecated=True` 的任务连配置叶节点也不会写入，旧叶子由加载末尾的 prune 统一清掉。
 
+`debug_mode=True` 是判断任务是否处于调试态的唯一来源：跨角色登录、任务前重启、失败恢复、本轮重试与 post_execution 都以它为准，录屏和运行期抓帧也由它开启。`cfg["app"]` 里没有 debug 开关，任务是否放在 `data/custom_task/` 下也不影响判定。
+
 内置任务一旦使用 `@register_task` 就会进入 WebUI 和调度器候选集，除非显式声明 `deprecated=True`。`【未完成】`、`【bug】` 等只是 `description` 文案，不会隐藏任务；只有 `deprecated=True` 会隐藏且不入 cfg。不要把仍会 `raise Stop here`、打印调试表格、或只作为活动占位的脚本长期注册；这类实验应先放在未注册代码、本地 `data/custom_task/`，或直接删除。
 
 ## 参数
