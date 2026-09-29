@@ -2654,9 +2654,8 @@ class TestSourceDistributionContract(unittest.TestCase):
                 self.assertNotIn(stale_update, updater)
         self.assertNotIn("time.sleep", updater)
         self.assertNotIn("range(3)", updater)
-        # The Python version and its uv bootstrap live in install.ps1 now, so the
-        # version appears exactly once for the whole install path.
-        self.assertIn("uv python install", install)
+        # The uv bootstrap moved into install.ps1, so the pinned Python version
+        # appears exactly once for the whole install path.
         self.assertIn("3.10.15", install)
 
         for stale in [
