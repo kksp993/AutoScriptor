@@ -11,7 +11,7 @@ from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import (
 )
 from AutoScriptor.recognition.locate import locate_on_screen
 from AutoScriptor.core.box import Box
-from AutoScriptor.logging.tracer import save_debug_screenshot
+from AutoScriptor.logging.tracer import capture_run_frame
 
 class BaseMumuControl:
     def screenshot(self):
@@ -58,11 +58,19 @@ class NemuIpcControl(BaseMumuControl):
         )
 
     def input_text(self, text)->None:
-        self.mumu.adb.input_text(text)
+        self.nemu_ipc.input_text_nemu_ipc(text)
 
     def screenshot(self):
         """rgb image via NemuIpc"""
         return self.nemu_ipc.screenshot_nemu_ipc()
+
+    def screenshot_region(self, box):
+        """只转换给定屏幕区域的快速截图（RGB、正向）。
+
+        ``box`` 为 ``(x, y, width, height)`` 或 ``Box``，使用与点击一致
+        的屏幕坐标（左上原点）。返回该区域的 RGB 图像，适合实时检测循环。
+        """
+        return self.nemu_ipc.screenshot_region_nemu_ipc(box)
     
     def long_click(self, x, y, duration=1.0)->None:
         self.nemu_ipc.long_click_nemu_ipc(x, y, duration)
@@ -82,18 +90,52 @@ class NemuIpcControl(BaseMumuControl):
         except (AttributeError, NemuIpcError, RequestHumanTakeover, RuntimeError) as e:
             logger.debug(f"释放NemuIpc按键失败: {e}")
 
+    # 多指 API（finger 1..10）：编号手指是 IPC 原生的多点触控通道。
+
+    def finger_down(self, finger_id, x, y)->None:
+        self.nemu_ipc.finger_down_nemu_ipc(finger_id, x, y)
+
+    def finger_move(self, finger_id, x, y)->None:
+        self.nemu_ipc.finger_move_nemu_ipc(finger_id, x, y)
+
+    def finger_up(self, finger_id)->None:
+        self.nemu_ipc.finger_up_nemu_ipc(finger_id)
+
+    def release_all_fingers(self)->None:
+        """兜底释放 1..10 号手指（不会抛错）。"""
+        self.nemu_ipc.release_all_fingers_nemu_ipc()
+
 class MixControl(BaseMumuControl):
     def __init__(self, mumu: Mumu, serial: str = '127.0.0.1:16416'):
         self.mumu = mumu
         self.nemu_control = NemuIpcControl(mumu, serial)
-        self.mode="mumu"
-        self.last_screenshot_time=0
-        self.screenshot_interval=5
+        # 默认走 Nemu IPC：截图与输入同源、无 ADB 进程开销、支持多指。
+        # 个别 MuMu 版本对 external renderer 输入行为异常（MAA 对
+        # MuMuManager < 6.3.2.0 禁用了 IPC 输入），命中失败时回退 ADB。
+        self.mode="nemu"
+        self._nemu_input_failed = False
         self._last_action_log = defaultdict(float)
         self._action_log_interval = 1.0
         self._last_resolution_warning_at = 0.0
         self._last_resolution_warning_size: tuple[int, int] | None = None
         self._resolution_warning_interval = 60.0
+
+    def _nemu_routed(self) -> bool:
+        """Whether the next input should go through the Nemu IPC channel."""
+        return self.mode == "nemu" and not self._nemu_input_failed
+
+    def _fallback_nemu_input(self, action: str, error: Exception) -> None:
+        """Switch the input path back to ADB after an IPC input failure.
+
+        Keeps the run alive on ADB when the renderer IPC rejects input, and
+        leaves ``switch_to_nemu()`` as the explicit way to re-arm the fast
+        path. Screen capture is unaffected: it proved to work in production.
+        """
+        self._nemu_input_failed = True
+        logger.error(
+            f"Nemu IPC {action} 输入失败，本次运行已回退到 ADB"
+            f"（可调用 switch_to_nemu() 复位重试）: {error}"
+        )
 
     def _log_action(self, action: str, detail: str) -> None:
         msg = f"【{self.mode}】{action}: {detail}"
@@ -111,20 +153,27 @@ class MixControl(BaseMumuControl):
     def switch_to_nemu(self)->None:
         logger.info("切换到nemu")
         self.mode="nemu"
+        self._nemu_input_failed = False
 
     def click(self, x, y)->None:
         self._log_action("Click", f"{x}, {y}")
-        if self.mode=="mumu":
-            self.mumu.adb.click(x, y)
-        else:
-            self.nemu_control.click(x, y)
+        if self._nemu_routed():
+            try:
+                self.nemu_control.click(x, y)
+                return
+            except (NemuIpcError, RequestHumanTakeover) as error:
+                self._fallback_nemu_input("Click", error)
+        self.mumu.adb.click(x, y)
 
     def swipe(self, x1, y1, x2, y2, duration_s=1)->None:
         self._log_action("Swipe", f"({x1},{y1}) -> ({x2},{y2})")
-        if self.mode=="mumu":
-            self.mumu.adb.swipe(x1, y1, x2, y2, int(duration_s*1000))
-        else:
-            self.nemu_control.swipe(x1, y1, x2, y2, duration_s)
+        if self._nemu_routed():
+            try:
+                self.nemu_control.swipe(x1, y1, x2, y2, duration_s)
+                return
+            except (NemuIpcError, RequestHumanTakeover) as error:
+                self._fallback_nemu_input("Swipe", error)
+        self.mumu.adb.swipe(x1, y1, x2, y2, int(duration_s*1000))
 
     def swipe_precise(self, x1, y1, x2, y2, duration_s=1)->None:
         """通过当前 MuMu 实例的 ADB 按指定端点和时长滑动。
@@ -139,19 +188,20 @@ class MixControl(BaseMumuControl):
         self.nemu_control.swipe_precise(x1, y1, x2, y2, duration_s)
 
     def input_text(self, text)->None:
-        if self.mode=="mumu":
-            self.mumu.adb.input_text(text)
-        else:
-            self.nemu_control.input_text(text)
+        if self._nemu_routed():
+            try:
+                self.nemu_control.input_text(text)
+                return
+            except (NemuIpcError, RequestHumanTakeover) as error:
+                self._fallback_nemu_input("InputText", error)
+        self.mumu.adb.input_text(text)
 
     def screenshot(self):
         """根据当前模式返回相应的截图"""
-        from AutoScriptor import cfg
         screenshot=self.nemu_control.screenshot()
         self._warn_if_resolution_mismatch(screenshot)
-        if cfg["app"]["debug_mode"] and (t:=time.time()) - self.last_screenshot_time > self.screenshot_interval:
-            self.last_screenshot_time = t
-            save_debug_screenshot(target=None, screenshot=screenshot, prefix="s")
+        # 运行期抓帧的开关由 TaskManager 按任务 debug 状态设置，这里只负责送帧。
+        capture_run_frame(screenshot)
         return screenshot
 
     def _warn_if_resolution_mismatch(self, screenshot) -> None:
@@ -198,6 +248,39 @@ class MixControl(BaseMumuControl):
     def release_all_keys(self)->None:
         """释放所有按键（主要是触摸按键）"""
         self.nemu_control.release_all_keys()
+
+    def screenshot_region(self, box):
+        """只转换给定屏幕区域的快速截图（RGB、正向）。
+
+        ``box`` 为 ``(x, y, width, height)`` 或 ``Box``，屏幕坐标与点击
+        一致。实时检测循环应使用本方法而不是全帧截图。
+        """
+        return self.nemu_control.screenshot_region(box)
+
+    def finger_down(self, finger_id, x, y)->None:
+        """按下 1..10 号手指；对同一编号再次调用即拖动。"""
+        self.nemu_control.finger_down(finger_id, x, y)
+
+    def finger_move(self, finger_id, x, y)->None:
+        """移动已按住的手指（Nemu IPC 没有独立 move：重复 down 即移动）。"""
+        self.nemu_control.finger_move(finger_id, x, y)
+
+    def finger_up(self, finger_id)->None:
+        """抬起 1..10 号手指。"""
+        self.nemu_control.finger_up(finger_id)
+
+    def multi_finger_down(self, contacts)->None:
+        """同时按下多根手指。
+
+        ``contacts`` 为 ``[(finger_id, x, y), ...]``；与逐个 click 不同，
+        按下的手指之间不会产生中间 up 事件，可表达双指同按/捏合起手。
+        """
+        for finger_id, x, y in contacts:
+            self.nemu_control.finger_down(finger_id, x, y)
+
+    def release_all_fingers(self)->None:
+        """兜底释放 1..10 号手指（不会抛错）；实时步骤的 finally 里调用。"""
+        self.nemu_control.release_all_fingers()
 
 class ControlModeProxy:
     """临时切换 mixctrl.mode，执行 fn(*args)，再恢复原 mode。"""

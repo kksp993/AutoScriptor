@@ -25,8 +25,6 @@ class _FakeScreenshotControl:
 def _make_mix_control(frame) -> MixControl:
     control = MixControl.__new__(MixControl)
     control.nemu_control = _FakeScreenshotControl(frame)
-    control.last_screenshot_time = 0
-    control.screenshot_interval = 5
     control._last_resolution_warning_at = 0.0
     control._last_resolution_warning_size = None
     control._resolution_warning_interval = 60.0

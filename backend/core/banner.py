@@ -18,7 +18,7 @@ WHITE = "\033[97m"
 @lru_cache(maxsize=1)
 def _get_app_version() -> str:
     candidates = [
-        get_app_root() / "webapp" / "package.json",
+        get_app_root() / "frontend" / "electron" / "package.json",
         get_app_root() / "package.json",
     ]
     for path in candidates:

@@ -9,7 +9,7 @@ import os
 import re
 import shutil
 import zipfile
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -25,11 +25,14 @@ _RE_LOG_TS_ISO = re.compile(
     r"(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})"
 )
 # tracer 调试截图：250401_143022_123456_c.png
+# c=点击 s=失败 e=OCR/提取 r=运行期例行抓帧
 _RE_DBG_SHOT = re.compile(
-    r"^(\d{6})_(\d{6})_(\d{6})_([cse])\.png$",
+    r"^(\d{6})_(\d{6})_(\d{6})_([cser])\.png$",
     re.IGNORECASE,
 )
-_RE_TIMED_SHOT = re.compile(r"^timed_screenshot_(\d+)\.png$", re.IGNORECASE)
+
+# 归档内的运行截图目录；旧归档用 click_screenshots，新归档用 debug_screenshots。
+_RUN_SCREENSHOT_DIRS = ("debug_screenshots", "click_screenshots")
 
 
 def _safe_folder_name(name: str) -> Optional[str]:
@@ -105,42 +108,47 @@ def list_error_archives() -> Dict[str, Any]:
     return {"items": items, "groups": groups}
 
 
-def _collect_image_paths(archive_dir: Path) -> List[str]:
-    rels: List[str] = []
-    for pat in ("*.png", "*.jpg", "*.jpeg"):
-        for p in archive_dir.glob(pat):
-            rels.append(p.name)
-    click_dir = archive_dir / "click_screenshots"
-    if click_dir.is_dir():
-        for p in click_dir.iterdir():
-            if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg"):
-                rels.append(f"click_screenshots/{p.name}")
-    rels.sort()
-    return rels
-
-
 def _collect_video_paths(archive_dir: Path) -> List[str]:
     rels: List[str] = []
     for p in archive_dir.glob("*.mp4"):
         if p.is_file():
             rels.append(p.name)
+    video_dir = archive_dir / "task_video"
+    if video_dir.is_dir():
+        for p in video_dir.glob("*.mp4"):
+            if p.is_file():
+                rels.append(f"task_video/{p.name}")
     rels.sort()
     return rels
 
 
+# 当前 error.log 写 "type:"/"message:"；旧归档和导入的日志可能是中文字段名。
+_EXC_TYPE_LABELS = ("type:", "异常类型:")
+_EXC_MESSAGE_LABELS = ("message:", "异常信息:")
+
+
+def _value_after_label(line: str, labels: Tuple[str, ...]) -> str:
+    for label in labels:
+        if line.startswith(label):
+            return line[len(label):].strip()
+    return ""
+
+
 def _extract_summary_from_log(text: str) -> str:
-    lines = text.splitlines()
     exc_type = ""
-    exc_msg = ""
-    for i, line in enumerate(lines):
-        if line.strip().startswith("异常类型:"):
-            exc_type = line.split(":", 1)[-1].strip()
-        if line.strip().startswith("异常信息:"):
-            exc_msg = line.split(":", 1)[-1].strip()
-    if exc_type or exc_msg:
-        parts = [p for p in (exc_type, exc_msg) if p]
-        return " · ".join(parts) if len(parts) > 1 else (parts[0] if parts else "")
-    for line in lines:
+    exc_message = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not exc_type:
+            exc_type = _value_after_label(stripped, _EXC_TYPE_LABELS)
+        if not exc_message:
+            exc_message = _value_after_label(stripped, _EXC_MESSAGE_LABELS)
+        if exc_type and exc_message:
+            break
+    parts = [part for part in (exc_type, exc_message) if part]
+    if parts:
+        return " · ".join(parts)
+    for line in text.splitlines():
         if "执行错误:" in line:
             return line.strip()
     return "（未能解析摘要，请查看下方日志）"
@@ -183,11 +191,14 @@ def _iter_archive_images(archive_dir: Path) -> List[Tuple[str, Path]]:
     for pat in ("*.png", "*.jpg", "*.jpeg"):
         for p in archive_dir.glob(pat):
             out.append((p.name, p))
-    click_dir = archive_dir / "click_screenshots"
-    if click_dir.is_dir():
-        for p in click_dir.iterdir():
+    for dir_name in _RUN_SCREENSHOT_DIRS:
+        run_dir = archive_dir / dir_name
+        if not run_dir.is_dir():
+            continue
+        for p in run_dir.iterdir():
             if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg"):
-                out.append((f"click_screenshots/{p.name}", p))
+                out.append((f"{dir_name}/{p.name}", p))
+    out.sort(key=lambda item: item[0])
     return out
 
 
@@ -205,19 +216,6 @@ def _image_datetime(
             return datetime.strptime(d6 + hm + micro, "%y%m%d%H%M%S%f")
         except ValueError:
             pass
-    m2 = _RE_TIMED_SHOT.match(base)
-    if m2:
-        try:
-            return datetime.fromtimestamp(abs_path.stat().st_mtime)
-        except OSError:
-            pass
-        ft = _folder_start_datetime(folder_name)
-        if ft:
-            try:
-                idx = int(m2.group(1))
-            except ValueError:
-                idx = 1
-            return ft + timedelta(seconds=max(0, idx))
     if base.lower() == "current_screenshot.png":
         try:
             return datetime.fromtimestamp(abs_path.stat().st_mtime)
@@ -346,7 +344,7 @@ def get_archive_detail(folder: str) -> Optional[Dict[str, Any]]:
         except OSError:
             log_text = ""
     summary = _extract_summary_from_log(log_text)
-    images = _collect_image_paths(adir)
+    images = [rel for rel, _ in _iter_archive_images(adir)]
     videos = _collect_video_paths(adir)
     segments, unmatched_images = build_log_segments(log_text, adir, folder)
 

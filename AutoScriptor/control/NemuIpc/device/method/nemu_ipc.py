@@ -10,7 +10,6 @@ import cv2
 import numpy as np
 
 from AutoScriptor.control.NemuIpc.base.decorator import cached_property, del_cached_property, has_cached_property
-from AutoScriptor.control.NemuIpc.base.timer import Timer
 from AutoScriptor.control.NemuIpc.base.utils import ensure_time, random_rectangle_point
 from AutoScriptor.logging.logger import logger
 from AutoScriptor.control.NemuIpc.device.method.utils import RETRY_TRIES, retry_sleep
@@ -325,39 +324,52 @@ class NemuIpcImpl:
         self.width = 0
         self.height = 0
 
+        # Protects connect/disconnect/reconnect and the reused capture
+        # buffer. Held by the *calling* thread only: ``_screenshot`` runs on a
+        # worker thread and must never take it (RLock is thread-bound).
+        self.io_lock = RLock()
+
+        # Reused capture buffer; re-allocated only when the resolution
+        # changes. Avoids the per-frame 3.7MB zero-filled allocation.
+        self._pixels_buffer = None
+        self._buffer_length = 0
+
     def connect(self, on_thread=True):
-        if self.connect_id > 0:
-            return
+        with self.io_lock:
+            if self.connect_id > 0:
+                return
 
-        if on_thread:
-            connect_id = self.run_func(
-                self.lib.nemu_connect,
-                self.nemu_folder, self.instance_id
-            )
-        else:
-            connect_id = self.lib.nemu_connect(self.nemu_folder, self.instance_id)
-        if connect_id == 0:
-            raise NemuIpcError(
-                'Connection failed, please check if nemu_folder is correct and emulator is running'
-            )
+            if on_thread:
+                connect_id = self.run_func(
+                    self.lib.nemu_connect,
+                    self.nemu_folder, self.instance_id
+                )
+            else:
+                connect_id = self.lib.nemu_connect(self.nemu_folder, self.instance_id)
+            if connect_id == 0:
+                raise NemuIpcError(
+                    'Connection failed, please check if nemu_folder is correct and emulator is running'
+                )
 
-        self.connect_id = connect_id
-        # logger.info(f'NemuIpc connected: {self.connect_id}')
+            self.connect_id = connect_id
+            # logger.info(f'NemuIpc connected: {self.connect_id}')
 
     def disconnect(self):
-        if self.connect_id == 0:
-            return
+        with self.io_lock:
+            if self.connect_id == 0:
+                return
 
-        self.run_func(
-            self.lib.nemu_disconnect,
-            self.connect_id
-        )
+            self.run_func(
+                self.lib.nemu_disconnect,
+                self.connect_id
+            )
 
-        self.connect_id = 0
+            self.connect_id = 0
 
     def reconnect(self):
-        self.disconnect()
-        self.connect()
+        with self.io_lock:
+            self.disconnect()
+            self.connect()
 
     def __enter__(self):
         self.connect()
@@ -426,23 +438,50 @@ class NemuIpcImpl:
         self.height = height_ptr.contents.value
 
     def _screenshot(self):
+        # Worker-thread body. The calling thread holds ``io_lock``; never take
+        # the lock here, RLock is bound to the thread that acquired it.
         if self.connect_id == 0:
             self.connect(on_thread=False)
-        self.get_resolution(on_thread=False)
+        if self.width <= 0 or self.height <= 0:
+            self.get_resolution(on_thread=False)
+
+        length = self.width * self.height * 4
+        if self._pixels_buffer is None or self._buffer_length != length:
+            self._pixels_buffer = (ctypes.c_ubyte * length)()
+            self._buffer_length = length
 
         width_ptr = ctypes.pointer(ctypes.c_int(self.width))
         height_ptr = ctypes.pointer(ctypes.c_int(self.height))
-        length = self.width * self.height * 4
-        pixels_pointer = ctypes.pointer((ctypes.c_ubyte * length)())
 
         ret = self.lib.nemu_capture_display(
-            self.connect_id, self.display_id, length, width_ptr, height_ptr, pixels_pointer,
+            self.connect_id, self.display_id, length, width_ptr, height_ptr, self._pixels_buffer,
         )
         if ret > 0:
+            # The cached size/buffer may be stale; drop them so @retry
+            # re-probes the resolution and rebuilds before retrying.
+            self._drop_capture_buffer()
             raise NemuIpcError('nemu_capture_display failed during screenshot()')
 
-        # Return pixels_pointer instead of image to avoid passing image through jobs
-        return pixels_pointer
+        captured_width = width_ptr.contents.value
+        captured_height = height_ptr.contents.value
+        if (captured_width, captured_height) != (self.width, self.height):
+            # Display resolution changed underneath us; do not trust the frame
+            # just written at the cached shape. Rebuild on the next retry.
+            self._drop_capture_buffer()
+            raise NemuIpcError(
+                f'display resolution changed to {captured_width}x{captured_height}'
+            )
+
+        # Return the reusable buffer itself (not an ndarray view) so the frame
+        # crosses the worker job without a copy.
+        return self._pixels_buffer
+
+    def _drop_capture_buffer(self):
+        """Discard the cached frame size and buffer so they rebuild on demand."""
+        self.width = 0
+        self.height = 0
+        self._pixels_buffer = None
+        self._buffer_length = 0
 
     @retry
     def screenshot(self, timeout=2.0):
@@ -452,17 +491,18 @@ class NemuIpcImpl:
                 Will be dynamically extended by `@retry`
 
         Returns:
-            np.ndarray: Image array in RGBA color space
-                Note that image is upside down
+            np.ndarray: Image array in BGRA color space, bottom-up.
+                The array is a view over the reused capture buffer; consume it
+                before the next capture or copy the data you keep.
         """
-        if self.connect_id == 0:
-            self.connect()
+        with self.io_lock:
+            if self.connect_id == 0:
+                self.connect()
 
-        pixels_pointer = self.run_func(self._screenshot, timeout=timeout)
+            pixels_buffer = self.run_func(self._screenshot, timeout=timeout)
 
-        # image = np.ctypeslib.as_array(pixels_pointer, shape=(self.height, self.width, 4))
-        image = np.ctypeslib.as_array(pixels_pointer.contents).reshape((self.height, self.width, 4))
-        return image
+            image = np.ctypeslib.as_array(pixels_buffer).reshape((self.height, self.width, 4))
+            return image
 
     def convert_xy(self, x, y):
         """
@@ -510,6 +550,57 @@ class NemuIpcImpl:
         if ret > 0:
             raise NemuIpcError('nemu_input_event_touch_up failed')
 
+    @retry
+    def finger_touch_down(self, finger_id, x, y):
+        """
+        Press (or move) one numbered finger.
+
+        Args:
+            finger_id: Finger number, range 1..10.
+            x, y: Screen coordinates (MuMu logical coordinates).
+        """
+        if self.connect_id == 0:
+            self.connect()
+        ret = self.run_func(
+            self.lib.nemu_input_event_finger_touch_down,
+            self.connect_id, self.display_id, int(finger_id), int(x), int(y)
+        )
+        if ret > 0:
+            raise NemuIpcError('nemu_input_event_finger_touch_down failed')
+
+    @retry
+    def finger_touch_up(self, finger_id):
+        """
+        Raise one numbered finger.
+
+        Args:
+            finger_id: Finger number, range 1..10.
+        """
+        if self.connect_id == 0:
+            self.connect()
+        ret = self.run_func(
+            self.lib.nemu_input_event_finger_touch_up,
+            self.connect_id, self.display_id, int(finger_id)
+        )
+        if ret > 0:
+            raise NemuIpcError('nemu_input_event_finger_touch_up failed')
+
+    def input_text(self, text: str):
+        """Type UTF-8 text through the renderer IPC (no ADB round trip).
+
+        Deliberately not wrapped in @retry: retrying a partially delivered
+        text would duplicate input.
+        """
+        if self.connect_id == 0:
+            self.connect()
+        encoded = str(text).encode('utf-8')
+        ret = self.run_func(
+            self.lib.nemu_input_text,
+            self.connect_id, len(encoded), encoded
+        )
+        if ret > 0:
+            raise NemuIpcError('nemu_input_text failed')
+
     @staticmethod
     def serial_to_id(serial: str):
         """
@@ -535,12 +626,19 @@ class NemuIpcImpl:
 
 
 class NemuIpc():
-    _screenshot_interval = Timer(0.1)
-    _native_ipc_lock = RLock()
+    # Fallback gesture lock for instances created without ``__init__`` (tests
+    # build wrappers via ``__new__``); real instances always replace this with
+    # a per-instance lock in ``__init__``.
+    _ipc_lock = RLock()
 
     def __init__(self, serial: str = '127.0.0.1:16416'):
         self.serial = serial
-        self._ipc_lock = self._native_ipc_lock
+        # Serialises compound gestures (a down..up sequence such as swipe or
+        # long-click) so concurrent callers cannot interleave one gesture with
+        # another. It intentionally no longer serialises against screenshots:
+        # capture protection lives in ``NemuIpcImpl.io_lock`` (per instance),
+        # and capture is proven to run concurrently with touch injection.
+        self._ipc_lock = RLock()
 
     @cached_property
     def nemu_ipc(self) -> NemuIpcImpl:
@@ -658,20 +756,64 @@ class NemuIpc():
         logger.info('nemu_ipc released')
 
     def screenshot_nemu_ipc(self):
-        with self._ipc_lock:
-            image = self.nemu_ipc.screenshot()
+        impl = self.nemu_ipc
+        with impl.io_lock:
+            image = impl.screenshot()
 
             image = cv2.cvtColor(image, cv2.COLOR_BGRA2RGB)
             cv2.flip(image, 0, dst=image)
             return image
 
-    def click_nemu_ipc(self, x, y):
+    def screenshot_region_nemu_ipc(self, box):
+        """Capture and convert only one screen-space region.
+
+        Args:
+            box: ``(left, top, width, height)`` or a ``Box`` in the frame's
+                screen coordinates (top-down, same convention as clicks).
+
+        Returns:
+            np.ndarray: RGB image of the region. The rest of the frame is
+            neither colour-converted nor flipped, which keeps tight polling
+            loops cheap (see the realtime detection loop it enables).
+        """
+        left, top, width, height = (int(value) for value in box)
+        if width <= 0 or height <= 0:
+            raise ValueError(f"screenshot_region_nemu_ipc 区域无效: {box!r}")
+
+        impl = self.nemu_ipc
+        with impl.io_lock:
+            frame = impl.screenshot()
+            frame_height, frame_width = frame.shape[0], frame.shape[1]
+            if (
+                left < 0 or top < 0
+                or left + width > frame_width or top + height > frame_height
+            ):
+                raise ValueError(
+                    f"screenshot_region_nemu_ipc 区域超出 {frame_width}x{frame_height} 帧: {box!r}"
+                )
+            # The raw buffer is bottom-up: screen rows [top, top+height) live
+            # at raw rows [frame_height - top - height, frame_height - top).
+            raw_top = frame_height - top - height
+            region = frame[raw_top:raw_top + height, left:left + width]
+            region = cv2.cvtColor(region, cv2.COLOR_BGRA2RGB)
+            return cv2.flip(region, 0, dst=region)
+
+    def click_nemu_ipc(self, x, y, press_s=None, tail_s=None):
+        """Tap through the IPC.
+
+        Args:
+            press_s: Press duration in seconds. The default keeps the
+                historical 0.010-0.020s jitter.
+            tail_s: Pause after the release. The default keeps the historical
+                ``0.050 - press``; pass ``0`` for a minimal-latency tap.
+        """
         with self._ipc_lock:
-            down = ensure_time((0.010, 0.020))
+            press = ensure_time((0.010, 0.020)) if press_s is None else max(0.0, float(press_s))
+            tail = max(0.0, 0.050 - press) if tail_s is None else max(0.0, float(tail_s))
             self.nemu_ipc.down(x, y)
-            time.sleep(down)
+            time.sleep(press)
             self.nemu_ipc.up()
-            time.sleep(0.050 - down)
+            time.sleep(tail)
 
     def long_click_nemu_ipc(self, x, y, duration=1.0):
         with self._ipc_lock:
@@ -754,3 +896,43 @@ class NemuIpc():
         with self._ipc_lock:
             if has_cached_property(self, 'nemu_ipc'):
                 self.nemu_ipc.up()
+
+    # ------------------------------------------------------- multi-finger API
+    #
+    # Numbered fingers (1..10) are the IPC's native multi-touch channel.
+    # These calls are deliberately lock-free: a realtime loop must be able to
+    # press/release its own finger between frame captures without waiting on
+    # anything else. Callers own the integrity of their finger sequences and
+    # should not mix numbered fingers with the legacy single-contact calls
+    # (``click_nemu_ipc``/``long_click_nemu_ipc``), which share one contact.
+
+    def finger_down_nemu_ipc(self, finger_id, x, y):
+        """Press numbered finger ``finger_id`` (1..10) at (x, y)."""
+        self.nemu_ipc.finger_touch_down(finger_id, x, y)
+
+    def finger_move_nemu_ipc(self, finger_id, x, y):
+        """Move an already-pressed finger; same event as a repeated down."""
+        self.nemu_ipc.finger_touch_down(finger_id, x, y)
+
+    def finger_up_nemu_ipc(self, finger_id):
+        """Raise numbered finger ``finger_id`` (1..10)."""
+        self.nemu_ipc.finger_touch_up(finger_id)
+
+    def release_all_fingers_nemu_ipc(self):
+        """Best-effort release of fingers 1..10; never raises.
+
+        Used as an exit guard (``finally``) so no finger stays pressed after
+        an aborted realtime step. Not every numbered finger is necessarily
+        down, so individual failures are expected and only logged at debug.
+        """
+        if not has_cached_property(self, 'nemu_ipc'):
+            return
+        for finger_id in range(1, 11):
+            try:
+                self.nemu_ipc.finger_touch_up(finger_id)
+            except (NemuIpcError, RequestHumanTakeover) as error:
+                logger.debug(f"释放 finger {finger_id} 失败（通常表示该指未按下）: {error}")
+
+    def input_text_nemu_ipc(self, text):
+        """Type text through the renderer IPC (no ADB round trip)."""
+        self.nemu_ipc.input_text(text)

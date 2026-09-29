@@ -16,10 +16,14 @@ from backend.webui.api_context import (
 )
 from backend.webui.security import (
     attach_credential_unlock_cookie,
+    check_request_freshness,
     clear_credential_unlock_cookie,
     credential_unlock_from_request,
+    grant_credential_unlock,
     is_verify_rate_limited,
     record_verify_failure,
+    revoke_credential_unlock,
+    validate_credential_unlock,
 )
 from orchestrator import current_version, orchestrator
 
@@ -43,7 +47,7 @@ async def accounts_switch_api(request: Request):
     if busy is not None:
         return busy
     data = await request.json()
-    if not _check_request_freshness(data):
+    if not check_request_freshness(data):
         return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
     name = data.get("name", "")
     security_key = data.get("security_key", "")
@@ -61,8 +65,8 @@ async def accounts_switch_api(request: Request):
         character_name = cfg._config.get("game", {}).get("character_name", "")
         ac = cfg.active_character()
         old_tok = credential_unlock_from_request(request)
-        _revoke_credential_unlock(old_tok)
-        tok = _grant_credential_unlock()
+        revoke_credential_unlock(old_tok)
+        tok = grant_credential_unlock()
         resp = JSONResponse(
             content={
                 "current_account": name,
@@ -86,7 +90,7 @@ async def accounts_add_api(request: Request):
     if busy is not None:
         return busy
     data = await request.json()
-    if not _check_request_freshness(data):
+    if not check_request_freshness(data):
         return api_error(400, "请求已过期，请重试", code="stale_request")
     name = str(data.get("name", "") or "").strip()
     account = str(data.get("account", "") or "").strip()
@@ -111,8 +115,8 @@ async def accounts_add_api(request: Request):
     try:
         version = orchestrator.tasks.add_account(name, account, password, server, character_name, security_key)
         old_tok = credential_unlock_from_request(request)
-        _revoke_credential_unlock(old_tok)
-        tok = _grant_credential_unlock()
+        revoke_credential_unlock(old_tok)
+        tok = grant_credential_unlock()
         resp = JSONResponse(content=api_ok(
             accounts=cfg.list_accounts(),
             current_account=cfg.current_account(),
@@ -167,7 +171,7 @@ async def characters_switch_api(request: Request):
     if busy is not None:
         return busy
     data = await request.json()
-    if not _check_request_freshness(data):
+    if not check_request_freshness(data):
         return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
     server = data.get("server", "")
     character = data.get("character", "")
@@ -231,7 +235,7 @@ async def characters_game_profession_api(request: Request):
         return busy
     """写入指定角色的游戏职业（存账号 JSON），当前角色同步 cfg.game。"""
     data = await request.json()
-    if not _check_request_freshness(data):
+    if not check_request_freshness(data):
         return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
     server = (data.get("server") or "").strip()
     character = (data.get("character") or "").strip()
@@ -333,7 +337,7 @@ async def credential_revoke_api(request: Request):
     if busy is not None:
         return busy
     old = credential_unlock_from_request(request)
-    _revoke_credential_unlock(old)
+    revoke_credential_unlock(old)
     cfg.clear_decrypted_credentials()
     resp = JSONResponse(content={"status": "ok"})
     return clear_credential_unlock_cookie(resp)
@@ -350,7 +354,7 @@ async def verify_account_api(request: Request):
         return busy
 
     data = await request.json()
-    if not _check_request_freshness(data):
+    if not check_request_freshness(data):
         return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
     security_key = data.get("security_key", "")
     has_enc = cfg.has_encrypted_credentials()
@@ -375,8 +379,8 @@ async def verify_account_api(request: Request):
         )
 
     old_tok = credential_unlock_from_request(request)
-    _revoke_credential_unlock(old_tok)
-    tok = _grant_credential_unlock()
+    revoke_credential_unlock(old_tok)
+    tok = grant_credential_unlock()
     if cfg.get("scheduler.auto_start", False):
         logger.info("Scheduler auto-start is armed; waiting for explicit run after account verification")
     version = mark_config_changed("verify account")
@@ -397,7 +401,7 @@ async def update_account_credentials_api(request: Request):
     if busy is not None:
         return busy
     data = await request.json()
-    if not _check_request_freshness(data):
+    if not check_request_freshness(data):
         return JSONResponse(status_code=400, content={"error": "请求已过期，请重试"})
 
     client_ip = request.client.host if request.client else "unknown"
@@ -409,7 +413,7 @@ async def update_account_credentials_api(request: Request):
     security_key = data.get('security_key', '')
     confirmed = data.get('confirmed', False)
     current_security_key = data.get('current_security_key', '')
-    unlocked = _validate_credential_unlock(credential_unlock_from_request(request))
+    unlocked = validate_credential_unlock(credential_unlock_from_request(request))
 
     if cfg.has_encrypted_credentials():
         if not unlocked and not current_security_key:
@@ -435,7 +439,7 @@ async def update_account_credentials_api(request: Request):
         logger.error("update_account error: %s", e)
         return JSONResponse(status_code=500, content={"error": str(e)})
     old_tok = credential_unlock_from_request(request)
-    _revoke_credential_unlock(old_tok)
-    tok = _grant_credential_unlock()
+    revoke_credential_unlock(old_tok)
+    tok = grant_credential_unlock()
     resp = JSONResponse(content={"character_name": character_name, "config_version": version})
     return attach_credential_unlock_cookie(resp, tok)

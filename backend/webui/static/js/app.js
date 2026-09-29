@@ -82,6 +82,8 @@ const app = createApp({
       ZhuWang: '猪王星宫',
       cancel_on_failed: '不用点券复活',
       claim_past: '是否解锁过去',
+      buy_spirit_liquid: '购买灵力滴液',
+      buy_spirit_brew: '购买灵力真酿',
     };
     function paramLabel(key) {
       return PARAM_KEY_LABELS[key] || key;

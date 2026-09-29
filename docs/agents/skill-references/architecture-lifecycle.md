@@ -39,7 +39,7 @@ Useful docs:
 - Do not patch stale global controls directly when runtime refresh is required.
 - Scheduler and direct execution paths should use `runtime_ctx.refresh()` or the established lifecycle service.
 - Treat `MuMuManager launch` success as command acceptance only; wait for the configured ADB device and Android boot completion before package resolution, App launch, or other Android-side checks.
-- Treat NemuIpc as a single native IPC lane. Background screenshots, task clicks, touch release, and connection release must use the `NemuIpc` wrapper methods so the native calls are serialized instead of hidden behind extra retries.
+- NemuIpc is two lanes: `NemuIpcImpl.io_lock` guards connect/disconnect/reconnect and the reused capture buffer, while `NemuIpc._ipc_lock` serialises compound gestures only. Screenshots and input can run concurrently (verified), so keep background screenshots, task clicks, touch release, and connection release on the `NemuIpc` wrapper methods, but do not add a global cross-instance lock or extra fallback sleeps.
 - Do not reintroduce host-level boost for runtime stability. Source execution must not change Windows power state, CPU affinity, process priority, thread priority, or MuMu process priority, and must not restore `AutoScriptor.utils.perf` as a compatibility shell.
 - Use `RuntimeController.guard_idle()` before config/task/account writes that cannot happen during execution.
 - Stop paths are cooperative: `TaskManager.request_cancel()`, `Scheduler.request_stop()`, and cancellable `AutoScriptor.sleep()`.
@@ -77,4 +77,3 @@ Useful docs:
 Useful docs:
 
 - `docs/AutoScriptor/schedule/scheduler.md`
-

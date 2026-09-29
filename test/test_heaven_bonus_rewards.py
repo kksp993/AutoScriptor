@@ -142,11 +142,11 @@ class TestHeavenBonusRewards(unittest.TestCase):
             monitor.stop()
 
     def test_yijing_battle_config_manages_pioneer_choice_per_dungeon(self):
-        from tasks.daily_task.hgwj import yijingfuben
+        from tasks.daily_task.hgwj import 遗境副本
 
         pioneer_choices = {
             dungeon_name: row["fight_pioneer"]
-            for dungeon_name, row in yijingfuben._DEFAULT_BATTLE_CONFIG.items()
+            for dungeon_name, row in 遗境副本._DEFAULT_BATTLE_CONFIG.items()
         }
 
         self.assertEqual(
@@ -158,7 +158,7 @@ class TestHeavenBonusRewards(unittest.TestCase):
                 "雀炎之地": True,
             },
         )
-        parameter_metadata = yijingfuben._DEFAULT_BATTLE_CONFIG.get_param_meta()
+        parameter_metadata = 遗境副本._DEFAULT_BATTLE_CONFIG.get_param_meta()
         self.assertEqual(parameter_metadata["columns"]["fight_pioneer"], {"type": "bool"})
         self.assertEqual(parameter_metadata["column_labels"]["fight_pioneer"], "打先锋本")
 

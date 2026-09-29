@@ -54,6 +54,10 @@ nuitka-crash-report.xml
 /logs/
 /data/config.json
 /data/accounts/*.json
+# 配置与账号的原子写临时文件：.{文件名}.{随机}.tmp。正常路径会被 os.replace 消费，
+# 进程在写入中途被终止时会残留；它们和 config.json 一样属于本机数据。
+/data/.*.tmp
+/data/accounts/.*.tmp
 /data/canvas_data/
 /data/logs/
 /config.json
@@ -62,8 +66,8 @@ nuitka-crash-report.xml
 /.gitadd*
 /docs/refs/
 **/node_modules
-webapp/.release-staging
-webapp/buildResources/icon.ico
+frontend/electron/.release-staging
+frontend/electron/buildResources/icon.ico
 /accounts/
 /custom_task/
 /battle_character/
