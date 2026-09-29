@@ -6,8 +6,6 @@ TaskManager: 任务执行管理器
 """
 
 import datetime
-import enum
-import importlib
 import inspect
 import sys
 from contextlib import contextmanager
@@ -35,101 +33,14 @@ from tasks.task_state import (
 from AutoScriptor.utils.paths import get_logs_root
 from AutoScriptor.core.runtime_context import runtime_ctx
 from AutoScriptor.logging.task_video_recorder import new_task_video_recorder
-
-
-# ── 下次执行时间计算 ──
-
-class NextDate(enum.Enum):
-    past = "past"
-    today = "today"
-    tomorrow = "tomorrow"
-    next_week = "next_week"
-
-
-def calc_next_exec_ts(
-    now: datetime.datetime,
-    next_date: NextDate = NextDate.today,
-    offset_hours: int = 0,
-) -> float:
-    """根据类别规则计算下次执行的 UNIX 时间戳。"""
-    if next_date == NextDate.past:
-        return 0
-    if next_date == NextDate.tomorrow:
-        next_day = (now + datetime.timedelta(days=1 if now.hour >= 5 else 0)).date()
-    elif next_date == NextDate.next_week:
-        days = (7 - now.weekday()) % 7 or 7
-        next_day = (now + datetime.timedelta(days=days if now.hour >= 5 else 0)).date()
-    else:
-        next_day = (now + datetime.timedelta(hours=offset_hours)).date()
-    target_time = datetime.time(5, 0) if offset_hours == 0 else datetime.time(0, 0)
-    return datetime.datetime.combine(next_day, target_time).timestamp()
-
-
-# 任务类别 → NextDate 映射
-_CATEGORY_NEXT_DATE = {
-    "每日任务": NextDate.tomorrow,
-    "活动任务": NextDate.tomorrow,
-    "每周任务": NextDate.next_week,
-    "自定义任务": NextDate.tomorrow,
-}
-
-
-def is_task_debug_mode(task_path: str, task_data: dict | None = None) -> bool:
-    """Task-level debug run policy from registry first, config fallback second."""
-    if task_registry.get_debug_mode(task_path):
-        return True
-    if isinstance(task_data, dict):
-        return bool(task_data.get("debug_mode") or task_data.get("debug"))
-    try:
-        data = dpath.get(cfg["tasks"], task_path)
-    except PathNotFound:
-        return False
-    return isinstance(data, dict) and bool(data.get("debug_mode") or data.get("debug"))
-
-
-def parse_sched_window_hours(task_data: dict) -> tuple[int, int] | None:
-    """解析 sched_window_hours: [start_h, end_h)，本地时间，左闭右开。"""
-    sw = task_data.get("sched_window_hours")
-    if sw is None or len(sw) != 2:
-        return None
-    try:
-        return int(sw[0]), int(sw[1])
-    except (TypeError, ValueError):
-        return None
-
-
-def parse_allowed_weekdays(task_data: dict) -> list[int] | None:
-    """解析 allowed_weekdays: [1..7] 表示周一至周日（与 cfg['weekday'] 一致）。"""
-    aw = task_data.get("allowed_weekdays")
-    if aw is None or not isinstance(aw, list) or not aw:
-        return None
-    try:
-        return [int(x) for x in aw]
-    except (TypeError, ValueError):
-        return None
-
-
-def calc_next_allowed_weekday_ts(now: datetime.datetime, allowed: list[int]) -> float:
-    """当前不在允许日时，返回「下一个允许日」本地 5:00 的时间戳（从次日开始找）。"""
-    allowed_set = set(allowed)
-    for i in range(1, 15):
-        d = now.date() + datetime.timedelta(days=i)
-        wd = d.weekday() + 1
-        if wd in allowed_set:
-            return datetime.datetime.combine(d, datetime.time(5, 0)).timestamp()
-    return (now + datetime.timedelta(days=7)).timestamp()
-
-
-def clamp_to_sched_window(ts: float, start_h: int, end_h: int) -> float:
-    """将时间戳映射到最近的 [start_h, end_h) 窗口起点（本地时间）。若已在窗口内则原样返回。"""
-    t = datetime.datetime.fromtimestamp(ts)
-    m = t.hour * 60 + t.minute
-    if start_h * 60 <= m < end_h * 60:
-        return ts
-    if m < start_h * 60:
-        return t.replace(hour=start_h, minute=0, second=0, microsecond=0).timestamp()
-    next_day = t.date() + datetime.timedelta(days=1)
-    return datetime.datetime.combine(next_day, datetime.time(start_h, 0)).timestamp()
+from orchestrator.model import (
+    CATEGORY_NEXT_DATE,
+    NextDate,
+    calc_next_exec_ts,
+    clamp_to_sched_window,
+    is_task_debug_mode,
+    parse_sched_window_hours,
+)
 
 
 def _is_request_human_takeover(exc: Exception) -> bool:
@@ -392,65 +303,22 @@ class TaskManager:
         *,
         param_override: dict[str, Any] | None = None,
     ) -> dict:
-        """解析任务参数（枚举恢复，TableParam 重建）。"""
+        """执行参数（枚举恢复，TableParam 重建）由参数自己的 spec 负责。"""
         raw = dict(task_data.get('params', {}) or {})
         if param_override:
             raw.update(param_override)
-        meta = task_registry.get_param_meta(task_path)
-        sig = inspect.signature(fn)
-        has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+        specs = task_registry.get_param_specs(task_path)
+        has_var_kw = any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in inspect.signature(fn).parameters.values()
+        )
         params = {}
-        for k, v in raw.items():
-            if not has_var_kw and k not in sig.parameters:
+        for key, value in raw.items():
+            if not has_var_kw and key not in specs:
                 continue
-            k_meta = meta.get(k)
-            if isinstance(k_meta, dict) and k_meta.get("type") == "table":
-                params[k] = self._coerce_table_param(v, k_meta)
-            else:
-                enum_cls = self._get_enum_class(k, meta, sig)
-                params[k] = self._coerce_enum(v, enum_cls) if enum_cls else v
+            spec = specs.get(key)
+            params[key] = spec.decode(value) if spec else value
         return params
-
-    @staticmethod
-    def _meta_enum_path(meta_val):
-        if isinstance(meta_val, dict):
-            return meta_val.get("enum") or meta_val.get("path")
-        return meta_val
-
-    @staticmethod
-    def _get_enum_class(key: str, meta: dict, sig: inspect.Signature):
-        """尝试获取参数对应的枚举类。"""
-        if key in meta:
-            path = TaskManager._meta_enum_path(meta[key])
-            if not path:
-                return None
-            mod_name, cls_name = path.rsplit('.', 1)
-            return getattr(importlib.import_module(mod_name), cls_name)
-        ann = getattr(sig.parameters.get(key), 'annotation', None)
-        if isinstance(ann, type) and issubclass(ann, enum.Enum):
-            return ann
-        return None
-
-    @staticmethod
-    def _coerce_enum(value, enum_cls):
-        """将值转换为枚举（支持单值和列表）。"""
-        if isinstance(value, list):
-            return [enum_cls[i] for i in value]
-        if isinstance(value, str):
-            return enum_cls[value]
-        return value
-
-    @staticmethod
-    def _coerce_table_param(value, meta: dict):
-        """将 JSON dict-of-dicts 还原为 TableParam（含枚举恢复）。"""
-        from ZmxyOL.battle.table_param import TableParam
-        if isinstance(value, TableParam):
-            return value
-        if not isinstance(value, dict):
-            return value
-        columns = meta.get("columns", {})
-        column_labels = meta.get("column_labels", {})
-        return TableParam.from_json_data(value, columns, column_labels)
 
     # ── 执行后更新 ──
 
@@ -517,9 +385,9 @@ class TaskManager:
 
     def _calc_category_ts(self, task: str, now: datetime.datetime) -> float | None:
         """根据任务类别前缀计算下次执行时间。"""
-        for prefix, nd in _CATEGORY_NEXT_DATE.items():
+        for prefix, next_date in CATEGORY_NEXT_DATE.items():
             if task.startswith(prefix):
-                return calc_next_exec_ts(now, nd)
+                return calc_next_exec_ts(now, next_date)
         if task.startswith("一般任务"):
             dpath.set(cfg["tasks"], task + "/on", False)
         return None

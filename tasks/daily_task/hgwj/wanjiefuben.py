@@ -139,6 +139,7 @@ def _run_bonus_and_handle_settlement(start_game: bool = True) -> str:
 
 @register_task(
     path_cn="每日任务/荒古万界/万界副本",
+    legacy_path_cn="每日任务/荒古万界/每日任务",
     description="按配置挑战荒古万界固定副本关卡。",
 )
 def task2(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):

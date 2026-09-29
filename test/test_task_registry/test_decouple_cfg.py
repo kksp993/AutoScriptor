@@ -20,6 +20,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from tasks.task_registry import task_registry
+from tasks.task_params import describe_signature
 from AutoScriptor.utils.app_config import cfg
 
 
@@ -102,7 +103,8 @@ class TestCfgNodeShape(unittest.TestCase):
             task_register_mod.registration_counter = old_counter
 
 
-    def test_deprecated_register_is_not_visible_or_written_to_cfg(self):
+    def test_deprecated_register_leaves_cleanup_to_the_prune_pass(self):
+        import orchestrator.catalog as catalog_mod
         import tasks.task_register as task_register_mod
 
         old_counter = task_register_mod.registration_counter
@@ -117,11 +119,74 @@ class TestCfgNodeShape(unittest.TestCase):
             with patch("inspect.getfile", return_value=fake_file):
                 task_register_mod.register_task(fn, path_cn="每日任务/村庄/仙盟建设", deprecated=True, description="旧任务")
 
-            self.assertNotIn("每日任务", cfg._config["tasks"])
+            # 注册只声明「不写 cfg」，已存在的旧叶子留给加载末尾的 prune 统一清理。
+            self.assertIn("每日任务", cfg._config["tasks"])
             self.assertFalse(task_registry.has_task("每日任务/村庄/仙盟建设"))
             self.assertTrue(task_registry.get_deprecated("每日任务/村庄/仙盟建设"))
+            with patch.object(catalog_mod, "_last_custom_load_errors", []):
+                self.assertTrue(catalog_mod.prune_stale_tasks())
+            self.assertNotIn("每日任务", cfg._config["tasks"])
         finally:
             task_register_mod.registration_counter = old_counter
+
+    def test_legacy_path_cn_carries_saved_config_to_the_current_path(self):
+        """改名任务：前身路径上的用户状态随注册搬到当前路径，旧节点被清掉。"""
+        import tasks.task_register as task_register_mod
+
+        old_counter = task_register_mod.registration_counter
+        cfg._config["tasks"] = {
+            "每日任务": {
+                "荒古万界": {
+                    "每日任务": {"on": True, "next_exec_time": 111.0, "params": {"times": 2}},
+                }
+            }
+        }
+        try:
+            def fn(times=1):
+                pass
+
+            fake_file = os.path.join(
+                os.path.dirname(__file__), "..", "..", "tasks", "daily_task", "hgwj", "wanjiefuben.py"
+            )
+            with patch("inspect.getfile", return_value=fake_file):
+                task_register_mod.register_task(
+                    fn,
+                    legacy_path_cn="每日任务/荒古万界/每日任务",
+                    description="万界副本",
+                )
+        finally:
+            task_register_mod.registration_counter = old_counter
+
+        hgwj = cfg._config["tasks"]["每日任务"]["荒古万界"]
+        self.assertNotIn("每日任务", hgwj)
+        moved = hgwj["万界副本"]
+        self.assertTrue(moved["on"])
+        self.assertEqual(moved["next_exec_time"], 111.0)
+        self.assertEqual(moved["params"]["times"], 2)
+        self.assertTrue(task_registry.has_task("每日任务/荒古万界/万界副本"))
+
+    def test_prune_stale_tasks_drops_unclaimed_leaves_and_empty_branches(self):
+        """没有任务认领的 cfg 叶子由 prune 统一清理，顺带删掉空分支。"""
+        import orchestrator.catalog as catalog_mod
+
+        task_registry.register("每日任务/村庄/保留", lambda: None, 1)
+        cfg._config["tasks"] = {
+            "每日任务": {
+                "村庄": {
+                    "保留": {"on": True, "next_exec_time": 0},
+                    "已删除": {"on": True, "next_exec_time": 0},
+                },
+                "废弃目录": {"另一个任务": {"on": True, "next_exec_time": 0}},
+            }
+        }
+
+        with patch.object(catalog_mod, "_last_custom_load_errors", []):
+            self.assertTrue(catalog_mod.prune_stale_tasks())
+
+        tasks = cfg._config["tasks"]
+        self.assertIn("保留", tasks["每日任务"]["村庄"])
+        self.assertNotIn("已删除", tasks["每日任务"]["村庄"])
+        self.assertNotIn("废弃目录", tasks["每日任务"])
 
     def test_table_param_defaults_add_new_columns_without_overwriting_user_values(self):
         import tasks.task_register as task_register_mod
@@ -295,20 +360,20 @@ class TestTaskTreeLeaf(unittest.TestCase):
     """is_leaf 现在只看 'on' 字段，不依赖 'fn'。"""
 
     def test_on_only_is_leaf(self):
-        from orchestrator.task_tree import TaskTree
+        from orchestrator.model import TaskTree
         self.assertTrue(TaskTree.is_leaf({"on": True, "next_exec_time": 0}))
 
     def test_on_without_fn_is_leaf(self):
-        from orchestrator.task_tree import TaskTree
+        from orchestrator.model import TaskTree
         self.assertTrue(TaskTree.is_leaf({"on": False}))
 
     def test_branch_not_leaf(self):
-        from orchestrator.task_tree import TaskTree
+        from orchestrator.model import TaskTree
         self.assertFalse(TaskTree.is_leaf({"子目录": {}}))
         self.assertFalse(TaskTree.is_leaf({}))
 
     def test_is_branch(self):
-        from orchestrator.task_tree import TaskTree
+        from orchestrator.model import TaskTree
         self.assertTrue(TaskTree.is_branch({"子目录": {}}))
         self.assertFalse(TaskTree.is_branch({"on": True}))
 
@@ -328,7 +393,7 @@ class TestSortTasks(unittest.TestCase):
         task_registry._tasks = self._reg_backup
 
     def test_sort_by_registry_order(self):
-        from orchestrator.pkg_utils import sort_tasks
+        from orchestrator.catalog import sort_tasks
 
         task_registry.register("cat/Z任务", lambda: None, order=1)
         task_registry.register("cat/A任务", lambda: None, order=2)
@@ -344,7 +409,7 @@ class TestSortTasks(unittest.TestCase):
         self.assertEqual(keys, ["Z任务", "A任务"])
 
     def test_unregistered_tasks_sort_last(self):
-        from orchestrator.pkg_utils import sort_tasks
+        from orchestrator.catalog import sort_tasks
 
         task_registry.register("cat/注册过", lambda: None, order=1)
 
@@ -488,7 +553,7 @@ class TestTaskManagerPrepare(unittest.TestCase):
         cfg._config["tasks"] = {
             "测试": {"任务": {"on": True, "next_exec_time": 0, "params": {"redeem_code": "1111"}}}
         }
-        task_registry.register("测试/任务", fn, order=1)
+        task_registry.register("测试/任务", fn, order=1, param_specs=describe_signature(fn))
 
         tm = TaskManager()
         _got_fn, got_kwargs = tm._prepare_task(

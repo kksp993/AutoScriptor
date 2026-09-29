@@ -1,7 +1,17 @@
+"""磁盘源码树（英文）与 cfg 任务树（中文键）之间的唯一映射表。
+
+cfg 里的任务路径必须是中文键，而内置任务的默认路径来自它在 ``tasks/`` 下的
+目录/文件名。两个方向各有一个入口，名字说明各自接受什么输入：
+
+- ``source_name_to_cn``：源码目录/文件名 → cfg 键，未登记的英文名直接报错。
+- ``normalize_cfg_key``：cfg 侧路径段 → cfg 键，已知英文名转中文，其余原样保留。
+
+新增内置目录或文件时必须在这里登记，否则加载时明确失败，而不是让中文任务树里
+混进英文键。
+"""
 from __future__ import annotations
 
-# 翻译映射：中文 <-> 英文（当前项目正在使用的键）
-# 注意：保持与现有 _order.txt 和目录/文件名兼容
+
 TRANSLATION_MAP = {
     # 目录
     '自定义任务': 'custom_task',
@@ -29,46 +39,19 @@ TRANSLATION_MAP = {
 TRANSLATION_MAP_REVERSE = {v: k for k, v in TRANSLATION_MAP.items()}
 
 
-def translate_path_part(part: str) -> str:
-    """支持中英文双向转换，未知词原样返回。
-    - 当传入旧英文/新英文时，优先映射回中文，保持菜单键为中文。
-    - 当传入中文时，返回原样（由调用方决定是否使用英文）。
-    """
-    # 英文 -> 中文
-    if part in TRANSLATION_MAP_REVERSE:
-        return TRANSLATION_MAP_REVERSE[part]
-
-    # 中文 -> 英文
-    if part in TRANSLATION_MAP:
-        return TRANSLATION_MAP[part]
-    
-    # 未知词原样返回
-    return part
-
-
-
 def normalize_cfg_key(part: str) -> str:
-    """配置 JSON 里任务树键的规范化：英→中、已知中文保持；未知片段原样保留（不抛错）。
+    """把 cfg 侧的路径段规范化为中文键，未知片段原样保留。
 
-    用于 normalize_cfg_tasks_to_cn，避免用户自定义英文路径段触发异常。
+    用于 ``path_cn`` / ``legacy_path_cn`` 这类由脚本写出的路径：允许任意中文自定义名，
+    所以不认识的片段不报错。
     """
+    return TRANSLATION_MAP_REVERSE.get(part, part)
+
+
+def source_name_to_cn(part: str) -> str:
+    """把内置任务的源码目录/文件名翻译成 cfg 中文键；未登记的英文名报错。"""
     if part in TRANSLATION_MAP_REVERSE:
         return TRANSLATION_MAP_REVERSE[part]
     if part in TRANSLATION_MAP:
-        return part
-    return part
-
-
-def normalize_to_cn(part: str) -> str:
-    """将任何路径片段规范化为中文键。
-    优先支持当前英文 → 中文；其次兼容历史英文 → 中文；中文保持原样。
-    """
-    # 新英文 → 中文
-    if part in TRANSLATION_MAP_REVERSE:
-        return TRANSLATION_MAP_REVERSE[part]
-    if part in TRANSLATION_MAP.keys():
         return part
     raise ValueError(f"Unknown part: {part}")
-
-
-

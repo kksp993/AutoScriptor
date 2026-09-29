@@ -7,27 +7,13 @@ from AutoScriptor.utils.app_config import cfg
 from tasks.task_registry import task_registry
 from AutoScriptor.logging.logger import logger
 from ZmxyOL.battle.table_param import TableParam
-from tasks.translations import normalize_cfg_key, normalize_to_cn
+from tasks.translations import normalize_cfg_key, source_name_to_cn
+from tasks.task_params import describe_signature, hydrate_params
 from ZmxyOL.nav.api import locate_region
 
 # 在模块顶端添加全局计数器
 registration_counter = 0
 _CUSTOM_TASK_ROOT_KEY = normalize_cfg_key("custom_task")
-
-
-def _merge_table_param_defaults(default_data: dict, existing_data: object) -> object:
-    """补齐新增的默认行/列，同时保留用户已经保存的表格值。"""
-    if not isinstance(existing_data, dict):
-        return deepcopy(existing_data)
-
-    merged_data = deepcopy(default_data)
-    for row_key, existing_row in existing_data.items():
-        default_row = merged_data.get(row_key)
-        if isinstance(default_row, dict) and isinstance(existing_row, dict):
-            default_row.update(deepcopy(existing_row))
-        else:
-            merged_data[row_key] = deepcopy(existing_row)
-    return merged_data
 
 
 def _find_cfg_leaf(root: dict, keys: list[str]) -> tuple[dict | None, dict | None]:
@@ -58,15 +44,14 @@ def _remove_empty_cfg_branches(root: dict, keys: list[str]) -> None:
         del parent[key]
 
 
-def _drop_cfg_leaf(keys: list[str]) -> None:
-    parent, leaf = _find_cfg_leaf(cfg["tasks"], keys)
-    if parent is None or leaf is None:
-        return
-    del parent[keys[-1]]
-    _remove_empty_cfg_branches(cfg["tasks"], keys[:-1])
+def _migrate_cfg_leaf(legacy_keys: list[str] | None, normalized_keys: list[str]) -> None:
+    """Move saved config from a task's former path onto its current path.
 
-
-def _migrate_custom_cfg_leaf(legacy_keys: list[str] | None, normalized_keys: list[str]) -> None:
+    Task paths change over time -- renames, regrouping -- while the config leaf
+    holds user state that has to survive the move: the enabled flag, params,
+    next_exec_time. A path still claimed by a live task is left alone, which is
+    what makes migrating here, at registration time, safe to run on every load.
+    """
     if not legacy_keys or legacy_keys == normalized_keys:
         return
     legacy_path = "/".join(legacy_keys)
@@ -101,6 +86,7 @@ def register_task(
     default_offset_hours=None,
     beta=False,
     path_cn=None,
+    legacy_path_cn=None,
     task_doc=None,
     description=None,
     debug_mode=False,
@@ -122,9 +108,14 @@ def register_task(
       - debug_mode (bool): 调试直跑模式；执行时不强制回登录页重登，失败时不关闭/重启游戏，
         若本轮只执行 debug 任务，也跳过 post_execution 收尾动作。也兼容 debug=True 短写。
       - deprecated (bool): 弃用任务。源码和注册元数据保留，但不写入 cfg、不出现在 WebUI 或调度列表。
+        已经存在的旧配置叶子由加载末尾的 catalog.prune_stale_tasks() 统一清理。
       - path_cn (str): **仅 custom_task 目录下脚本必填**。斜杠分隔的 cfg 任务路径（中文键），
         custom_task 脚本最终都会归一到「自定义任务」根节点；省略首段时会自动补齐。
         示例：path_cn="自定义任务/示例/hello_custom"
+      - legacy_path_cn (str): 可选。任务改名/重组前使用的 cfg 路径。注册时会把该路径上已保存的
+        用户配置（开关、参数、next_exec_time）搬到当前路径并删除旧节点，避免用户状态丢失；
+        这是任务改名的唯一表述方式，加载流程里没有别的迁移通道。
+        示例：legacy_path_cn="每日任务/荒古万界/每日任务"
       - sched_window_hours (tuple[int,int]): 本地时间可执行时段 [start, end)，如 (10, 22)；
         调度器在时段外不会执行该任务，执行后 next_exec_time 也会落在时段内
       - allowed_weekdays (list[int]): 仅在这些星期可执行，cfg 约定 1=周一 … 7=周日（如 [6,7] 为周六日）；
@@ -147,6 +138,7 @@ def register_task(
                 default_offset_hours=default_offset_hours,
                 beta=beta,
                 path_cn=path_cn,
+                legacy_path_cn=legacy_path_cn,
                 task_doc=task_doc,
                 description=description,
                 debug_mode=debug_mode,
@@ -193,6 +185,10 @@ def register_task(
     keys[-1] = task_name
 
     raw_cn = path_cn.strip() if isinstance(path_cn, str) else ""
+
+    # 路径解析。源码树只提供默认值，path_cn 是唯一的显式声明入口；
+    # legacy_keys 记录「这个任务以前在哪」，由 _migrate_cfg_leaf 在写入叶子前搬配置。
+    legacy_keys = None
     if is_custom:
         if not raw_cn:
             raise ValueError(
@@ -202,27 +198,30 @@ def register_task(
         keys = [normalize_cfg_key(p) for p in raw_cn.split("/") if p.strip()]
         if not keys:
             raise ValueError(f"path_cn 解析后为空: {path_cn!r}")
-        legacy_keys = None
         if keys[0] != _CUSTOM_TASK_ROOT_KEY:
+            # 省略「自定义任务」根节点的写法：补上根节点后，写法里的路径就是前身。
             legacy_keys = list(keys)
             keys.insert(0, _CUSTOM_TASK_ROOT_KEY)
-        _migrate_custom_cfg_leaf(legacy_keys, keys)
     elif raw_cn:
         keys = [normalize_cfg_key(p) for p in raw_cn.split("/") if p.strip()]
         if not keys:
             raise ValueError(f"path_cn 解析后为空: {path_cn!r}")
     else:
-        keys = [normalize_to_cn(key) for key in keys]
+        keys = [source_name_to_cn(key) for key in keys]
+
+    if legacy_path_cn:
+        legacy_keys = [normalize_cfg_key(p) for p in str(legacy_path_cn).split("/") if p.strip()]
 
     last_key = keys[-1]
     task_path = "/".join(keys)
 
-    # cfg["tasks"] 只存用户配置（on、next_exec_time、params 等）。
-    # deprecated 任务源码保留，但不创建/保留配置叶子，避免进入 WebUI 和调度。
+    # cfg["tasks"] 只存用户配置（on、next_exec_time、params 等），结构由注册声明产生：
+    # deprecated 任务不写叶子，改名任务先把前身路径上的用户状态搬过来。
+    # 没有任务认领的残留叶子不在这里删——统一交给 catalog.prune_stale_tasks()。
     task_cfg = None
-    if deprecated:
-        _drop_cfg_leaf(keys)
-    else:
+    if not deprecated:
+        if legacy_keys:
+            _migrate_cfg_leaf(legacy_keys, keys)
         current_level = cfg["tasks"]
         for key in keys[:-1]:
             current_level = current_level.setdefault(key, {})
@@ -247,43 +246,14 @@ def register_task(
         if raw.strip():
             doc_flow = raw.strip().split("\n\n")[0].strip()
 
-    # 解析函数签名，提取参数默认值和枚举元数据
-    sig = inspect.signature(func)
-    defaults = {}
-    param_meta = {}
-    for name, param in sig.parameters.items():
-        if param.kind in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL):
-            continue
-        default = param.default if param.default is not inspect._empty else None
-        if isinstance(default, TableParam):
-            defaults[name] = default.to_json_data()
-            param_meta[name] = default.get_param_meta()
-        elif isinstance(default, enum.Enum):
-            defaults[name] = default.name
-            enum_path = default.__class__.__module__ + "." + default.__class__.__qualname__
-            param_meta[name] = {"enum": enum_path, "multiple": False}
-        elif isinstance(default, (list, tuple)) and default and all(isinstance(item, enum.Enum) for item in default):
-            defaults[name] = [item.name for item in default]
-            enum_path = default[0].__class__.__module__ + "." + default[0].__class__.__qualname__
-            param_meta[name] = {"enum": enum_path, "multiple": True}
-        else:
-            defaults[name] = default
-
+    # 参数分两处：specs 是运行时契约（表单描述 + 执行解码），params 是用户在 cfg 里的值。
+    # 两者的换算全部由 tasks.task_params 承担，这里不按参数类型分支。
+    param_specs = describe_signature(func)
     if task_cfg is not None:
-        # params 是用户可编辑配置，留在 cfg
-        existing_params = task_cfg.get("params", {})
-        if not isinstance(existing_params, dict):
-            existing_params = {}
-        merged_params = deepcopy(defaults)
-        for name, existing_value in existing_params.items():
-            if name not in defaults:
-                continue
-            if param_meta.get(name, {}).get("type") == "table":
-                merged_params[name] = _merge_table_param_defaults(defaults[name], existing_value)
-            else:
-                merged_params[name] = existing_value
-        # 仅保留当前签名中的参数名，丢弃已迁移的旧键（如独立难度、battle_flow 等）
-        task_cfg["params"] = {k: merged_params[k] for k in defaults}
+        saved_params = task_cfg.get("params")
+        task_cfg["params"] = hydrate_params(
+            param_specs, saved_params if isinstance(saved_params, dict) else {}
+        )
 
     # fn / order / param_meta 注册到 TaskRegistry（运行时数据，不写入 JSON）
     desc = (description or "").strip() if description is not None else ""
@@ -293,8 +263,7 @@ def register_task(
         task_path,
         task_wrapper(func),
         reg_order,
-        param_meta,
-        param_keys=list(defaults.keys()),
+        param_specs,
         beta=beta,
         custom=is_custom,
         doc_flow=doc_flow,

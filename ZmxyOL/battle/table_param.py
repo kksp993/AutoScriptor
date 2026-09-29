@@ -24,7 +24,6 @@
 from __future__ import annotations
 
 import enum
-import importlib
 from typing import Any, Iterator
 
 
@@ -79,17 +78,14 @@ class TableParam:
     # ------------------------------------------------------------------
 
     def _infer_columns(self) -> dict[str, dict[str, Any]]:
-        """从数据行推断各列的类型元信息。"""
+        """从数据行推断各列的类型。枚举列只报类型，枚举类由 column_enum_classes() 给出。"""
         meta: dict[str, dict[str, Any]] = {}
         for row in self._data.values():
             for col_key, val in row.items():
                 if col_key in meta:
                     continue
                 if isinstance(val, enum.Enum):
-                    meta[col_key] = {
-                        "type": "enum",
-                        "enum": f"{val.__class__.__module__}.{val.__class__.__qualname__}",
-                    }
+                    meta[col_key] = {"type": "enum"}
                 elif isinstance(val, bool):
                     meta[col_key] = {"type": "bool"}
                 elif isinstance(val, (int, float)):
@@ -98,6 +94,19 @@ class TableParam:
                     meta[col_key] = {"type": "string"}
             break  # 只需首行
         return meta
+
+    def column_enum_classes(self) -> dict[str, type[enum.Enum]]:
+        """枚举列到枚举类的映射（取首行实例的类）。"""
+        classes: dict[str, type[enum.Enum]] = {}
+        for row in self._data.values():
+            for col_key, val in row.items():
+                if isinstance(val, enum.Enum):
+                    classes[col_key] = val.__class__
+            break
+        return classes
+
+    def column_labels(self) -> dict[str, str]:
+        return dict(self._column_labels)
 
     # ------------------------------------------------------------------
     # Serialization (Python -> JSON config)
@@ -115,38 +124,6 @@ class TableParam:
                     out_row[col_key] = val
             result[row_key] = out_row
         return result
-
-    # ------------------------------------------------------------------
-    # Deserialization (JSON config -> Python with enums)
-    # ------------------------------------------------------------------
-
-    @classmethod
-    def from_json_data(
-        cls,
-        data: dict[str, dict[str, Any]],
-        column_meta: dict[str, dict[str, Any]],
-        column_labels: dict[str, str] | None = None,
-    ) -> "TableParam":
-        """从 JSON dict + 列元信息还原，把 enum 名字符串恢复为枚举实例。"""
-        enum_classes: dict[str, type[enum.Enum]] = {}
-        for col_key, col_info in column_meta.items():
-            if col_info.get("type") == "enum" and "enum" in col_info:
-                enum_classes[col_key] = _import_enum_class(col_info["enum"])
-
-        restored: dict[str, dict[str, Any]] = {}
-        for row_key, row in data.items():
-            out_row: dict[str, Any] = {}
-            for col_key, val in row.items():
-                if col_key in enum_classes and isinstance(val, str):
-                    ecls = enum_classes[col_key]
-                    try:
-                        out_row[col_key] = ecls[val]
-                    except KeyError:
-                        out_row[col_key] = next(iter(ecls))
-                else:
-                    out_row[col_key] = val
-            restored[row_key] = out_row
-        return cls(restored, column_labels=column_labels)
 
     # ------------------------------------------------------------------
     # param_meta generation (for task_register / WebUI)
@@ -167,21 +144,3 @@ class TableParam:
     def __repr__(self) -> str:
         rows = list(self._data.keys())
         return f"TableParam(rows={rows!r}, cols={list(self._column_meta.keys())!r})"
-
-
-# ------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------
-
-_enum_cache: dict[str, type[enum.Enum]] = {}
-
-
-def _import_enum_class(dotted_path: str) -> type[enum.Enum]:
-    """``'module.ClassName'`` -> enum 类。"""
-    if dotted_path in _enum_cache:
-        return _enum_cache[dotted_path]
-    module_path, _, cls_name = dotted_path.rpartition(".")
-    mod = importlib.import_module(module_path)
-    cls = getattr(mod, cls_name)
-    _enum_cache[dotted_path] = cls
-    return cls

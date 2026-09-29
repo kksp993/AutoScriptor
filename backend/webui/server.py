@@ -8,7 +8,6 @@ static files served from ./static and ./vendor.
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
 import logging
 import os
@@ -30,12 +29,6 @@ from orchestrator import orchestrator
 from orchestrator import bump_version, current_version, summarize_ordering_generations
 from orchestrator import SchedulerState
 from orchestrator import RuntimeExecutionBusyError
-
-
-def _battle_flow_allowed_for_task(flow_value: str, task_path: str | None) -> bool:
-    from tasks.battle_task_params import battle_flow_allowed_for_task
-
-    return battle_flow_allowed_for_task(flow_value, task_path)
 
 # FastAPI Form/UploadFile 运行时依赖。Starlette 优先使用 python-multipart
 # 提供的 `python_multipart`；显式导入它（而不是旧的 `multipart` shim），
@@ -1215,48 +1208,6 @@ async def update_account_credentials_api(request: Request):
     return _attach_credential_unlock_cookie(resp, tok)
 
 
-@app.post("/api/enum-options")
-async def enum_options_api(request: Request):
-    try:
-        data = await request.json()
-        paths = data.get('paths', [])
-        raw_tp = data.get('task_path')
-        if isinstance(raw_tp, str):
-            task_path = raw_tp.strip() or None
-        else:
-            task_path = None
-        if not isinstance(paths, list):
-            return api_error(400, 'paths must be a list', code='invalid_payload')
-        result = {}
-        for p in paths:
-            if not isinstance(p, str) or '.' not in p:
-                return api_error(400, f'invalid enum path: {p!r}', code='invalid_payload')
-            module_name, class_name = p.rsplit('.', 1)
-            mod = importlib.import_module(module_name)
-            EnumClass = getattr(mod, class_name)
-            opts = []
-            for m in EnumClass:
-                if isinstance(m.value, str):
-                    label = m.value
-                elif isinstance(m.value, int):
-                    label = str(m.value)
-                else:
-                    label = m.name
-                if (
-                    task_path
-                    and EnumClass.__name__ == 'BattleFlowName'
-                    and isinstance(m.value, str)
-                    and not _battle_flow_allowed_for_task(m.value, task_path)
-                ):
-                    continue
-                opts.append({"value": m.name, "label": label})
-            result[p] = opts
-        return result
-    except Exception as e:
-        logger.error("enum_options error: %s", e)
-        return api_error(500, str(e), code='enum_options_failed')
-
-
 @app.get("/api/ocr-status")
 async def ocr_status_api():
     try:
@@ -1310,7 +1261,7 @@ async def scheduler_deactivate_api():
 
 
 def _build_overview_payload(now_ts: float | None = None) -> dict:
-    from orchestrator.scheduler import (
+    from orchestrator.model import (
         calc_effective_next_time,
         is_human_takeover_blocked,
         is_task_due,
@@ -1467,7 +1418,7 @@ async def notify_test_api(request: Request):
     try:
         data = await request.json()
         config_yaml = data.get("config_yaml", "")
-        from orchestrator.notify import handle_notify
+        from orchestrator.delivery import handle_notify
         ok = handle_notify(config_yaml, title="AutoScriptor 测试", content="通知推送测试成功")
         return {"success": ok}
     except Exception as e:

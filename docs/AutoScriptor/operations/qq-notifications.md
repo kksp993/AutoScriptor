@@ -83,7 +83,7 @@ WebUI 侧栏 **QQ 通知** 是独立页面，不需要填写 YAML。
 | `backend/core/character_reports.py` | 每管线角色结果聚合、重试合并、文本格式；使用 publish 回调 |
 | `backend/core/qq_notify.py` | 配置校验、OneBot HTTP 发送、后台 FIFO 和最近记录；不依赖 cfg/调度/游戏 |
 | `orchestrator/scheduler.py` | 在执行边界记录 pending/success/failed，结束时收束报告 |
-| `orchestrator/lifecycle.py` | 全局配置持久化、令牌保留/清除、公开版本递增 |
+| `orchestrator/projection.py` | 全局配置持久化、令牌保留/清除、公开版本递增 |
 | `backend/webui/routes/notifications.py` | 独立配置、测试和记录 API |
 | `backend/webui/static/js/components/NotificationsPanel.js` | 页面自己的表单草稿；刷新记录不覆盖未保存编辑 |
 

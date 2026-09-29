@@ -30,6 +30,18 @@ webui.bat / scripts\run.bat webui
 | 运行产物 | `logs/` | 日志、错误归档、截图、礼包码缓存 |
 | 维护脚本 | `scripts/` | 安装、运行、更新和少量当前主线需要的维护脚本 |
 
+编排层内部再分七个模块，各回答一个问题，依赖单向：
+
+| 模块 | 回答的问题 |
+| --- | --- |
+| `orchestrator/model.py` | 任务集长什么样、什么时候到期（纯查询，无 IO/线程/设备） |
+| `orchestrator/catalog.py` | 任务集从哪来：发现、导入顺序、自定义任务、启动装配 |
+| `orchestrator/scheduler.py` | 什么时候跑、跑谁、在哪个设备会话 |
+| `orchestrator/task_manager.py` | 单个任务怎么执行、重试、恢复 |
+| `orchestrator/projection.py` | WebUI 能看见什么、保存/重载怎么排序副作用 |
+| `orchestrator/delivery.py` | 有什么要送出去：桌面通知、onepush、OneBot QQ、角色结果 |
+| `orchestrator/facade.py` | 组合根与执行互斥（`orchestrator` 单例、`RuntimeController`） |
+
 依赖方向单向，每层都不反向 import：
 
 ```text
@@ -56,11 +68,12 @@ backend -> orchestrator -> tasks -> ZmxyOL -> AutoScriptor
 
 ## 任务注册边界
 
-- `TaskRegistry` 保存运行时任务数据：函数、排序、参数元数据、说明、beta/custom/debug 标记。
+- `TaskRegistry` 保存运行时任务数据：函数、排序、参数 spec、说明、beta/custom/debug 标记。参数 spec 由 `describe_signature(fn)` 生成，默认值/表单/执行解码共用（见 [任务脚本编写](tasks/script-authoring.md#参数)）。
 - `cfg["tasks"]` 只保存用户配置：开关、下次执行时间、参数、调度窗口和星期限制。
 - `task_ordering` 保存用户排序覆盖层：当前持久化可嵌套总顺序 `items`；`user_order` 是由 `items` 展平得到的兼容投影和旧数据导入 seed。它是全局配置，不写入账号 JSON。
 - 两者用 slash 路径关联，例如 `每日任务/村庄/宠物培养`。
-- 保存配置前必须剥离 `fn`、`order`、`param_meta`、`param_keys`、`_due`、`progress_display` 等运行时字段。
+- `cfg["tasks"]` 是注册集的镜像：注册写叶子（改名任务用 `legacy_path_cn` 自己搬配置），加载末尾 prune 掉没有任务认领的叶子，再按注册顺序排序。没有独立的改名通道，也没有键翻译通道。
+- 保存配置前必须剥离 `fn`、`order`、`param_meta`、`param_keys`、`_due`、`progress_display` 等运行时字段；`param_meta` 由 spec 现算，从不落盘。
 - 调度器收集到期任务时必须通过 `task_registry.has_task(path)` 过滤未注册残留叶子。
 - `tasks/**/_order.txt` 是 legacy 源码导入/注册 seed；任务加载可读取它保持内置脚本稳定注册顺序，但用户显示和执行顺序由全局 `task_ordering` 投影决定，不在运行时反写源码树。
 - 有效任务顺序通过确定性总排序计算：先递归展开用户拖拽保存的 `items` 分组顺序，再回退到当前任务树顺序、运行时注册顺序和路径字典序。旧版 `hard_edges`、`layout`、`group_order` 会被规范化忽略，不再参与显示或执行顺序。

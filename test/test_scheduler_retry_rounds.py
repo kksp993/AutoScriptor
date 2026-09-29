@@ -186,7 +186,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         self.assertEqual(tm.reload_calls, 0)
 
     def test_character_notification_merges_retry_results(self):
-        from orchestrator.character_reports import CharacterReports
+        from orchestrator.delivery import CharacterReports
 
         messages = []
         reports = CharacterReports(messages.append, [("s1", "c1")])
@@ -197,7 +197,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         self.assertIn("1:(c1)任务完成-成功:2,失败:0", messages[0])
 
     def test_character_notification_marks_cancelled_attempt_pending(self):
-        from orchestrator.character_reports import CharacterReports
+        from orchestrator.delivery import CharacterReports
 
         messages = []
         reports = CharacterReports(messages.append, [("s1", "c1")])
@@ -218,7 +218,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         self.assertNotIn("任务完成", messages[0])
 
     def test_cross_character_notifications_wait_for_each_final_retry(self):
-        from orchestrator.character_reports import CharacterReports
+        from orchestrator.delivery import CharacterReports
         from orchestrator.scheduler import Scheduler, SchedulerState
 
         current = {"server": "s1", "name": "first"}

@@ -672,23 +672,15 @@ const app = createApp({
       } catch (e) { ElementPlus.ElMessage.error('恢复失败: ' + e); }
     }
 
-    function _enumMetaPath(ep) {
-      if (typeof ep === 'string') return ep;
-      if (ep && typeof ep === 'object' && ep.enum) return ep.enum;
-      return null;
+    // 参数的表单形状由后端 ParamSpec.describe() 唯一决定，用 type 判别：
+    // value | enum | enum_list | table。选项随 param_meta 一起下发。
+    function paramMeta(key) {
+      const m = editTaskData.value?.param_meta?.[key];
+      return m && typeof m === 'object' ? m : {};
     }
 
     function enumParamIsMultiple(key) {
-      const m = editTaskData.value?.param_meta?.[key];
-      if (m && typeof m === 'object' && !Array.isArray(m) && 'multiple' in m) {
-        return m.multiple === true;
-      }
-      if (typeof m === 'string') {
-        const v = editTaskData.value?.params?.[key];
-        return Array.isArray(v);
-      }
-      const v = editTaskData.value?.params?.[key];
-      return Array.isArray(v);
+      return paramMeta(key).type === 'enum_list';
     }
 
     const tableRowsCache = reactive({});
@@ -705,16 +697,11 @@ const app = createApp({
 
     function openEditModal(key, data, path, options = {}) {
       const cloned = JSON.parse(JSON.stringify(data));
-      if (cloned.params && typeof cloned.params === 'object') {
-        delete cloned.params.profession;
-      }
-      if (cloned.param_meta && typeof cloned.param_meta === 'object') {
-        delete cloned.param_meta.profession;
-      }
       _filterParamsToRegisteredKeys(cloned);
       const meta = (cloned && cloned.param_meta) || {};
+      // 单选控件渲染不了数组；后端允许单选值存成列表，这里归一成单值。
       for (const [pk, mp] of Object.entries(meta)) {
-        if (mp && typeof mp === 'object' && mp.multiple === false && cloned.params && Array.isArray(cloned.params[pk]) && cloned.params[pk].length === 1) {
+        if (mp.type === 'enum' && cloned.params && Array.isArray(cloned.params[pk]) && cloned.params[pk].length === 1) {
           cloned.params[pk] = cloned.params[pk][0];
         }
       }
@@ -725,45 +712,14 @@ const app = createApp({
       overviewEditContext.value = options.overviewContext || null;
       Object.keys(paramEnumOptions).forEach(k => delete paramEnumOptions[k]);
       Object.keys(tableRowsCache).forEach(k => delete tableRowsCache[k]);
-      const paths = Object.values(meta).map(_enumMetaPath).filter(Boolean);
       for (const [pk, mp] of Object.entries(meta)) {
-        if (mp && typeof mp === 'object' && mp.type === 'table' && mp.columns) {
-          for (const [col, colMeta] of Object.entries(mp.columns)) {
-            if (colMeta.enum) paths.push(colMeta.enum);
-          }
+        if (Array.isArray(mp.options)) paramEnumOptions[pk] = mp.options;
+        for (const [col, colMeta] of Object.entries(mp.columns || {})) {
+          if (Array.isArray(colMeta.options)) paramEnumOptions[pk + '.' + col] = colMeta.options;
         }
       }
-      const uniquePaths = [...new Set(paths)];
-      const openDialog = () => { _initTableRowsCache(meta); editModalVisible.value = true; };
-      if (uniquePaths.length) {
-        API.request('POST', '/enum-options', { paths: uniquePaths, task_path: editTaskPath.value || '' }).then(({ ok, data: map }) => {
-          if (!ok) {
-            showApiError(map, '加载参数选项失败');
-            return;
-          }
-          const requireOptions = (enumPath) => {
-            const optionsList = map && map[enumPath];
-            if (!Array.isArray(optionsList)) throw new Error(`枚举选项缺失: ${enumPath}`);
-            return optionsList;
-          };
-          Object.entries(meta).forEach(([pk, ep]) => {
-            if (ep && typeof ep === 'object' && ep.type === 'table' && ep.columns) {
-              for (const [col, colMeta] of Object.entries(ep.columns)) {
-                if (colMeta.enum) {
-                  paramEnumOptions[pk + '.' + col] = requireOptions(colMeta.enum);
-                }
-              }
-            } else {
-              const p = _enumMetaPath(ep);
-              if (p) paramEnumOptions[pk] = requireOptions(p);
-            }
-          });
-          openDialog();
-        }).catch((e) => {
-          const message = e && e.message ? e.message : String(e || '');
-          ElementPlus.ElMessage.error(message ? `加载参数选项失败: ${message}` : '加载参数选项失败');
-        });
-      } else { openDialog(); }
+      _initTableRowsCache(meta);
+      editModalVisible.value = true;
     }
 
     async function openOverviewTaskEditor({ server, name, task }) {
@@ -854,18 +810,12 @@ const app = createApp({
     function _buildTaskSavePayload() {
       const meta = editTaskData.value?.param_meta || {};
       for (const [pk, mp] of Object.entries(meta)) {
-        if (mp && typeof mp === 'object' && mp.type === 'table') {
+        if (mp.type === 'table') {
           _syncTableRowsToParams(pk);
         }
       }
       const payload = _deepClone(editTaskData.value);
       _filterParamsToRegisteredKeys(payload);
-      if (payload.params && typeof payload.params === 'object') {
-        delete payload.params.profession;
-      }
-      if (payload.param_meta && typeof payload.param_meta === 'object') {
-        delete payload.param_meta.profession;
-      }
       return payload;
     }
 
@@ -1013,8 +963,7 @@ const app = createApp({
     }
 
     function isTableParam(key) {
-      const m = editTaskData.value?.param_meta?.[key];
-      return m && typeof m === 'object' && m.type === 'table';
+      return paramMeta(key).type === 'table';
     }
 
     function getTableRows(key) {
@@ -1022,13 +971,12 @@ const app = createApp({
     }
 
     function getTableColumns(key) {
-      const m = editTaskData.value?.param_meta?.[key];
-      return (m && m.columns) || {};
+      return paramMeta(key).columns || {};
     }
 
     function getTableColumnLabel(key, col) {
-      const m = editTaskData.value?.param_meta?.[key];
-      if (m && m.column_labels && m.column_labels[col]) return m.column_labels[col];
+      const labels = paramMeta(key).column_labels;
+      if (labels && labels[col]) return labels[col];
       return PARAM_KEY_LABELS[col] || col;
     }
 
