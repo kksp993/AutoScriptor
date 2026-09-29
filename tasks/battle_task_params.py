@@ -143,6 +143,15 @@ BattleFlowName = _make_str_enum(
     _flow_pairs,
 )
 
+# 战斗流程只对注册时声明了 ``task=`` 作用域的任务有意义。这条规则登记给参数层，
+# WebUI 表单项由 ParamSpec.describe() 直接裁剪，无需在 HTTP 层特判枚举类名。
+from tasks.task_params import set_enum_option_filter
+
+set_enum_option_filter(
+    BattleFlowName,
+    lambda member, task_path: battle_flow_allowed_for_task(member.value, task_path),
+)
+
 # 任务默认参数（取扫描结果首项；竞技场任务优先「竞技场循环」若存在）
 # HeroProfession 保留供后续自动识别；配招职业与 battle_flow 在 register_task 的 task_wrapper 中于任务体执行前注入。
 _default_key = next((k for k, v in _flow_pairs if v == "战斗循环"), None)

@@ -4,9 +4,19 @@
 character, under which retry policy and on which device session. The backend
 talks to :data:`orchestrator.orchestrator` instead of wiring the parts itself.
 
+Seven modules, each answering one question:
+
+- ``model``      -- what the task set looks like, and when each task is due (pure).
+- ``catalog``    -- where the task set comes from: discovery, registration, startup.
+- ``task_manager`` -- how one task is executed, retried and recovered.
+- ``scheduler``  -- when tasks run, in which order, and on which device session.
+- ``projection`` -- what the WebUI may see, and how it changes it.
+- ``delivery``   -- everything that leaves the process: toasts, QQ, run reports.
+- ``facade``     -- the composition root; ``orchestrator`` is its singleton.
+
 Exports stay lazy (PEP 562): importing a single module such as
-``orchestrator.task_tree`` from deep inside the task loader must not pull the
-scheduler, the lifecycle service and the whole `tasks` package in behind it.
+``orchestrator.model`` from deep inside the task loader must not pull the
+scheduler, the lifecycle service and the whole ``tasks`` package in behind it.
 """
 from __future__ import annotations
 
@@ -18,91 +28,66 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     # the composed entry point
     "orchestrator": ("orchestrator.facade", "orchestrator"),
     "Orchestrator": ("orchestrator.facade", "Orchestrator"),
+    "RuntimeController": ("orchestrator.facade", "RuntimeController"),
+    "RuntimeExecutionBusyError": ("orchestrator.facade", "RuntimeExecutionBusyError"),
     # startup assembly
-    "load_tasks": ("orchestrator.registry", "load_tasks"),
-    "force_reload_tasks": ("orchestrator.registry", "force_reload_tasks"),
+    "load_tasks": ("orchestrator.catalog", "load_tasks"),
+    "force_reload_tasks": ("orchestrator.catalog", "force_reload_tasks"),
     # scheduling
     "scheduler": ("orchestrator.scheduler", "scheduler"),
     "Scheduler": ("orchestrator.scheduler", "Scheduler"),
     "SchedulerState": ("orchestrator.scheduler", "SchedulerState"),
-    "is_task_due": ("orchestrator.scheduler", "is_task_due"),
-    "is_human_takeover_blocked": ("orchestrator.scheduler", "is_human_takeover_blocked"),
-    "calc_effective_next_time": ("orchestrator.scheduler", "calc_effective_next_time"),
+    "ConfigWatcher": ("orchestrator.scheduler", "ConfigWatcher"),
+    # execution
+    "TaskManager": ("orchestrator.task_manager", "TaskManager"),
+    # task tree, ordering and timing
+    "TaskTree": ("orchestrator.model", "TaskTree"),
+    "is_task_due": ("orchestrator.model", "is_task_due"),
+    "is_human_takeover_blocked": ("orchestrator.model", "is_human_takeover_blocked"),
+    "calc_effective_next_time": ("orchestrator.model", "calc_effective_next_time"),
     "collect_active_times_from_tasks_tree": (
-        "orchestrator.scheduler",
+        "orchestrator.model",
         "collect_active_times_from_tasks_tree",
     ),
     "collect_active_times_from_all_characters": (
-        "orchestrator.scheduler",
+        "orchestrator.model",
         "collect_active_times_from_all_characters",
     ),
-    "iter_dispatch_characters": ("orchestrator.scheduler", "iter_dispatch_characters"),
+    "iter_dispatch_characters": ("orchestrator.model", "iter_dispatch_characters"),
     "next_display_timestamp_from_times": (
-        "orchestrator.scheduler",
+        "orchestrator.model",
         "next_display_timestamp_from_times",
     ),
-    # execution
-    "TaskManager": ("orchestrator.task_manager", "TaskManager"),
-    "RuntimeController": ("orchestrator.runtime_controller", "RuntimeController"),
-    "RuntimeExecutionBusyError": (
-        "orchestrator.runtime_controller",
-        "RuntimeExecutionBusyError",
-    ),
-    # task tree and ordering
-    "TaskTree": ("orchestrator.task_tree", "TaskTree"),
-    "TaskTreeService": ("orchestrator.task_tree_service", "TaskTreeService"),
-    "project_task_ordering": ("orchestrator.task_ordering", "project_task_ordering"),
-    "normalize_task_ordering_overlay": (
-        "orchestrator.task_ordering",
-        "normalize_task_ordering_overlay",
-    ),
-    "collect_task_paths": ("orchestrator.task_ordering", "collect_task_paths"),
-    "sort_paths_by_task_ordering": (
-        "orchestrator.task_ordering",
-        "sort_paths_by_task_ordering",
-    ),
-    "summarize_ordering_generations": (
-        "orchestrator.task_ordering",
-        "summarize_ordering_generations",
-    ),
-    # lifecycle and config version
-    "WebUILifecycleService": ("orchestrator.lifecycle", "WebUILifecycleService"),
-    "bump_version": ("orchestrator.state_version", "bump_version"),
-    "current_version": ("orchestrator.state_version", "current_version"),
+    "project_task_ordering": ("orchestrator.model", "project_task_ordering"),
+    "normalize_task_ordering_overlay": ("orchestrator.model", "normalize_task_ordering_overlay"),
+    "collect_task_paths": ("orchestrator.model", "collect_task_paths"),
+    "sort_paths_by_task_ordering": ("orchestrator.model", "sort_paths_by_task_ordering"),
+    "summarize_ordering_generations": ("orchestrator.model", "summarize_ordering_generations"),
+    # WebUI projections and config lifecycle
+    "TaskTreeService": ("orchestrator.projection", "TaskTreeService"),
+    "WebUILifecycleService": ("orchestrator.projection", "WebUILifecycleService"),
+    "bump_version": ("orchestrator.projection", "bump_version"),
+    "current_version": ("orchestrator.projection", "current_version"),
     # results and delivery
-    "CharacterReports": ("orchestrator.character_reports", "CharacterReports"),
-    "CharacterReport": ("orchestrator.character_reports", "CharacterReport"),
-    "create_character_reports": (
-        "orchestrator.character_reports",
-        "create_character_reports",
-    ),
-    "notify_runtime_event": ("orchestrator.notify", "notify_runtime_event"),
-    "notify_desktop": ("orchestrator.notify", "notify_desktop"),
-    "handle_notify": ("orchestrator.notify", "handle_notify"),
-    "QQSettings": ("orchestrator.qq_notify", "QQSettings"),
-    "qq_notifier": ("orchestrator.qq_notify", "qq_notifier"),
-    # file watching
-    "ConfigWatcher": ("orchestrator.watcher", "ConfigWatcher"),
+    "CharacterReports": ("orchestrator.delivery", "CharacterReports"),
+    "CharacterReport": ("orchestrator.delivery", "CharacterReport"),
+    "create_character_reports": ("orchestrator.delivery", "create_character_reports"),
+    "notify_runtime_event": ("orchestrator.delivery", "notify_runtime_event"),
+    "notify_desktop": ("orchestrator.delivery", "notify_desktop"),
+    "handle_notify": ("orchestrator.delivery", "handle_notify"),
+    "QQSettings": ("orchestrator.delivery", "QQSettings"),
+    "qq_notifier": ("orchestrator.delivery", "qq_notifier"),
 }
 
-# Addressable as attributes, e.g. ``orchestrator.registry.load_tasks``.
+# Addressable as attributes, e.g. ``orchestrator.catalog.load_tasks``.
 _SUBMODULES = (
-    "character_reports",
-    "custom_task_loader",
+    "catalog",
+    "delivery",
     "facade",
-    "lifecycle",
-    "notify",
-    "pkg_utils",
-    "qq_notify",
-    "registry",
-    "runtime_controller",
+    "model",
+    "projection",
     "scheduler",
-    "state_version",
     "task_manager",
-    "task_ordering",
-    "task_tree",
-    "task_tree_service",
-    "watcher",
 )
 
 __all__ = list(_EXPORTS)

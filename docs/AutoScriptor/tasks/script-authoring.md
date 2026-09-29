@@ -35,7 +35,7 @@ Editor 操作录制区的“定位 > 区域识别 > 匹配目标（match）”�
 
 编辑器保存裸片段时会按表单生成 `@register_task(path_cn="自定义任务/...", description=..., task_doc=...)`，并把参数设置转换为函数签名、本地 `enum.Enum` 类和默认值；如果传入的是完整自定义任务文件，文件内的 `@register_task` 必须显式提供 `path_cn`，已有装饰器元数据由文件自身负责。只落盘未注册的 Python 片段不会出现在 WebUI 任务树中。
 
-自定义任务导入失败会记录到 WebUI 公开配置的 `custom_task_load_errors`，并在本轮加载中跳过 stale 自定义任务配置清理和 `cfg.save_config()`。修复脚本语法或导入错误后重新加载即可恢复；不要因为任务临时消失就手动清空 `自定义任务` 配置分支。
+自定义任务导入失败会记录到 WebUI 公开配置的 `custom_task_load_errors`，并在本轮加载中跳过 stale 任务叶子清理和 `cfg.save_config()`。修复脚本语法或导入错误后重新加载即可恢复；不要因为任务临时消失就手动清空 `自定义任务` 配置分支。
 
 例如兑换码礼品兑换是内置一般任务，注册路径为 `一般任务/活动/兑换豪礼礼品兑换`，源码位于 `tasks/normal_task/huodong/redeem_gift.py`。
 
@@ -46,7 +46,8 @@ WebUI 的“任务列表”使用全局 `task_ordering` 覆盖层保存用户拖
 - `_order.txt` 只作为内置源码导入/注册 seed，保留历史稳定性；不是用户拖拽排序的持久化位置。
 - `items` 是当前持久化的用户分组顺序，支持任务节点和嵌套分组；`user_order` 是后端由 `items` 展平生成的兼容投影和旧数据导入 seed。有效顺序先递归展开 `items`，再回退到当前任务树顺序、运行时注册顺序和路径字典序。
 - 旧版 `hard_edges`、`layout`、`group_order` 会被后端规范化忽略，不再表达偏序关系或画布布局。
-- 重命名 `path_cn` 等同于删除旧路径并新增新路径；旧排序路径会在 WebUI 诊断中显示为 stale，用户可拖拽后重新保存。
+- 改名任务用 `@register_task(legacy_path_cn="旧路径")` 声明前身：注册时把旧路径上的用户配置（开关、参数、`next_exec_time`）搬到当前路径并删除旧节点。这是唯一的改名通道。
+- 只改 `path_cn` 而不声明前身，等同于删除旧路径并新增新路径；旧排序路径会在 WebUI 诊断中显示为 stale，用户可拖拽后重新保存。
 
 ## register_task 元数据
 
@@ -57,16 +58,39 @@ WebUI 的“任务列表”使用全局 `task_ordering` 覆盖层保存用户拖
 | `task_doc`　　　　　　　　　| WebUI 补充说明正文；不传时取函数 docstring 首段　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
 | `description`　　　　　　　 | WebUI 一句话简介；不传时生成占位，内置脚本不再使用集中默认描述表　　　　　　　　　　　　　　　　　　　　　　　 |
 | `debug_mode` / `debug=True` | 调试直跑：跳过自动登录/失败恢复/本轮 post_execution　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
-| `deprecated`　　　　　　　　| 弃用隐藏字段；`True` 时源码保留并记录注册元数据，但不写入 `cfg["tasks"]`、不出现在 WebUI/可见任务列表/调度列表 |
+| `deprecated`　　　　　　　　| 弃用隐藏字段；`True` 时源码保留并记录注册元数据，但不写入 `cfg["tasks"]`、不出现在 WebUI/可见任务列表/调度列表；已存在的叶子由加载末尾的 prune 清理 |
 | `path_cn`　　　　　　　　　 | `data/custom_task` 必填中文路径并归一到 `自定义任务/...`；内置任务可选，提供后替代文件名翻译映射　　　　　　　 |
+| `legacy_path_cn` | 任务改名/重组前的 cfg 路径；注册时把该路径上的用户配置搬到当前路径并删除旧节点 |
 | `sched_window_hours`　　　　| 本地可执行窗口 `[start, end)`　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
 | `allowed_weekdays`　　　　　| 允许星期，`1=周一 ... 7=周日`　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
 
-其他关键字会写入任务叶节点配置，可作为任务默认配置持久化，例如 `last_buy_time`、`sched_window_hours`、`allowed_weekdays`、`next_exec_offset_hours`。运行时元数据如 `fn/order/param_meta/debug_mode/task_doc_flow/description/deprecated` 存在 `TaskRegistry`，不会写入 JSON；其中 `deprecated=True` 的任务连配置叶节点也不会写入。
+其他关键字会写入任务叶节点配置，可作为任务默认配置持久化，例如 `last_buy_time`、`sched_window_hours`、`allowed_weekdays`、`next_exec_offset_hours`。运行时元数据如 `fn/order/param_meta/debug_mode/task_doc_flow/description/deprecated` 存在 `TaskRegistry`，不会写入 JSON；其中 `deprecated=True` 的任务连配置叶节点也不会写入，旧叶子由加载末尾的 prune 统一清掉。
 
 内置任务一旦使用 `@register_task` 就会进入 WebUI 和调度器候选集，除非显式声明 `deprecated=True`。`【未完成】`、`【bug】` 等只是 `description` 文案，不会隐藏任务；只有 `deprecated=True` 会隐藏且不入 cfg。不要把仍会 `raise Stop here`、打印调试表格、或只作为活动占位的脚本长期注册；这类实验应先放在未注册代码、本地 `data/custom_task/`，或直接删除。
 
 ## 参数
+
+任务函数的参数就是 WebUI 表单，两者的换算只有一个出处：`tasks/task_params.py`。
+
+`describe_signature(fn)` 由函数签名生成 `ParamSpec`，之后三件事共用同一份 spec：
+
+| 用途 | 方法 |
+|------|------|
+| 写进 `cfg["tasks"][..]["params"]` 的 JSON 默认值 | `json_default()` |
+| WebUI 表单的控件类型和可选项（投影为 `param_meta`） | `describe()` |
+| 执行前还原成传给函数的实参 | `decode()` |
+
+`describe()` 是唯一的对外形状，用 `type` 判别；枚举选项随描述一起下发，没有单独的取选项接口：
+
+```json
+{"type": "value"}
+{"type": "enum",      "options": [{"value": "灾厄", "label": "灾厄"}]}
+{"type": "enum_list", "options": [...]}
+{"type": "table", "columns": {"difficulty": {"type": "enum", "options": [...]}},
+                  "column_labels": {"difficulty": "难度"}}
+```
+
+新增参数类型只要加一个 `ParamSpec` 子类，注册、表单、执行三处自动一致。需要按任务裁剪选项的枚举（例如只对部分任务适用的战斗流程），由拥有该概念的模块用 `set_enum_option_filter()` 登记规则。
 
 默认值会写入 `params`，执行前由 `TaskManager._resolve_params()` 恢复：
 

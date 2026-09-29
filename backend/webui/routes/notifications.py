@@ -2,9 +2,9 @@
 from fastapi import APIRouter, Request
 from starlette.concurrency import run_in_threadpool
 
-from orchestrator.character_reports import CharacterReport
+from orchestrator.delivery import CharacterReport
 from backend.core.qq_bot import local_installation_status, local_notification_settings
-from orchestrator.qq_notify import qq_notifier
+from orchestrator.delivery import qq_notifier
 from backend.webui.api_response import api_error, api_ok
 
 

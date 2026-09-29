@@ -12,6 +12,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from tasks.task_registry import TaskRegistry, task_registry
+from tasks.task_params import describe_signature
 
 
 # ---------------------------------------------------------------------------
@@ -59,9 +60,11 @@ class TestRegisterAndQuery(unittest.TestCase):
         self.assertEqual(task_registry.get_order("missing"), float("inf"))
 
     def test_get_param_meta(self):
-        meta = {"difficulty": "mock.Difficulty"}
-        task_registry.register("x/y", lambda: None, order=1, param_meta=meta)
-        self.assertEqual(task_registry.get_param_meta("x/y"), meta)
+        def fn(difficulty=4):
+            return difficulty
+
+        task_registry.register("x/y", fn, order=1, param_specs=describe_signature(fn))
+        self.assertEqual(task_registry.get_param_meta("x/y"), {"difficulty": {"type": "value"}})
 
     def test_get_param_meta_missing_returns_empty(self):
         self.assertEqual(task_registry.get_param_meta("missing"), {})
@@ -170,14 +173,15 @@ class TestCollections(unittest.TestCase):
 
     def test_items(self):
         fn = lambda: None
-        task_registry.register("p", fn, order=5, param_meta={"k": "v"})
+        specs = describe_signature(fn)
+        task_registry.register("p", fn, order=5, param_specs=specs)
         items = list(task_registry.items())
         self.assertEqual(len(items), 1)
         path, entry = items[0]
         self.assertEqual(path, "p")
         self.assertIs(entry["fn"], fn)
         self.assertEqual(entry["order"], 5)
-        self.assertEqual(entry["param_meta"], {"k": "v"})
+        self.assertEqual(entry["param_specs"], specs)
         self.assertEqual(entry.get("description"), "")
         self.assertFalse(entry.get("debug_mode"))
 

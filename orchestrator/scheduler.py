@@ -17,13 +17,28 @@ AutoScriptor 后台定时调度器
 import os
 import time
 import threading
+from datetime import datetime
 from enum import Enum
+from pathlib import Path
+from typing import Callable
 from AutoScriptor.utils.cancel import TaskCancelled
 from AutoScriptor.logging.logger import logger
 
 from AutoScriptor.core.runtime_context import runtime_ctx
-from orchestrator.notify import notify_runtime_event
-from orchestrator.character_reports import create_character_reports
+from orchestrator.delivery import create_character_reports, notify_runtime_event
+from orchestrator.model import (
+    calc_next_allowed_weekday_ts,
+    calc_effective_next_time,
+    clamp_to_sched_window,
+    collect_active_times_from_all_characters,
+    is_human_takeover_blocked,
+    is_task_debug_mode,
+    iter_dispatch_characters,
+    next_display_timestamp_from_times,
+    parse_allowed_weekdays,
+    parse_sched_window_hours,
+    sort_paths_by_task_ordering,
+)
 
 
 class SchedulerState(Enum):
@@ -34,188 +49,6 @@ class SchedulerState(Enum):
 
 CHECK_INTERVAL = 3600
 MAX_CONSECUTIVE_ERRORS = 3
-
-
-def collect_active_times_from_tasks_tree(tasks: dict) -> list[float]:
-    """收集任务树中所有 on=True 且已注册任务的「有效」下次执行时间（含 sched_window / 星期限制）。"""
-    from tasks.task_registry import task_registry
-    from orchestrator.task_manager import (
-        parse_sched_window_hours,
-        clamp_to_sched_window,
-        parse_allowed_weekdays,
-        calc_next_allowed_weekday_ts,
-    )
-    import datetime as _dt
-
-    now_ts = time.time()
-    result: list[float] = []
-
-    def _walk(node: dict, prefix: str = "") -> None:
-        for key, val in node.items():
-            if not isinstance(val, dict):
-                continue
-            path = f"{prefix}/{key}" if prefix else key
-            if "on" in val:
-                if val.get("on") and task_registry.has_task(path):
-                    raw = float(val.get("next_exec_time", 0) or 0)
-                    sw = parse_sched_window_hours(val)
-                    effective = clamp_to_sched_window(max(raw, now_ts), sw[0], sw[1]) if sw else (raw or now_ts)
-                    aw = parse_allowed_weekdays(val)
-                    if aw is not None:
-                        now_dt = _dt.datetime.fromtimestamp(now_ts)
-                        wd = now_dt.weekday() + 1
-                        if effective <= now_ts and wd not in set(aw):
-                            effective = calc_next_allowed_weekday_ts(now_dt, aw)
-                        elif effective > now_ts:
-                            tdt = _dt.datetime.fromtimestamp(effective)
-                            if (tdt.weekday() + 1) not in set(aw):
-                                effective = calc_next_allowed_weekday_ts(tdt, aw)
-                    result.append(effective)
-            else:
-                _walk(val, path)
-
-    _walk(tasks or {})
-    return result
-
-
-def iter_dispatch_characters(cfg):
-    """Yield valid dispatch queue characters in the exact configured order."""
-    chars = cfg._account_data.get("characters", {}) or {}
-    seen: set[tuple[str, str]] = set()
-    for item in cfg._account_data.get("dispatch_queue", []) or []:
-        server = (item.get("server") or "").strip()
-        name = (item.get("name") or "").strip()
-        if not server or not name:
-            continue
-        key = (server, name)
-        if key in seen:
-            continue
-        if server not in chars or name not in chars[server]:
-            continue
-        seen.add(key)
-        yield key
-
-
-def collect_active_times_from_all_characters(cfg, dispatch_only: bool = False) -> list[float]:
-    """当前账号下所有角色的「有效」下次执行时间（与总览 / all_tasks_summary 一致）。"""
-    ac = cfg.active_character()
-    active_server = ac.get("server", "")
-    active_name = ac.get("name", "")
-    chars = cfg._account_data.get("characters", {}) or {}
-    result: list[float] = []
-    if dispatch_only:
-        char_keys = list(iter_dispatch_characters(cfg))
-    else:
-        char_keys = [
-            (srv, char_name)
-            for srv, srv_chars in chars.items()
-            for char_name in srv_chars.keys()
-        ]
-    for srv, char_name in char_keys:
-        if srv == active_server and char_name == active_name:
-            tasks_tree = cfg._config.get("tasks", {})
-        else:
-            tasks_tree = chars.get(srv, {}).get(char_name, {}).get("tasks", {}) or {}
-        result.extend(collect_active_times_from_tasks_tree(tasks_tree))
-    return result
-
-
-def next_display_timestamp_from_times(times: list[float]) -> float | None:
-    """与 Scheduler.get_next_execution_timestamp 一致：有到期则返回当前时刻，否则最早未来时间。"""
-    now = time.time()
-    if not times:
-        return None
-    if any(t <= now for t in times):
-        return now
-    return min(times)
-
-
-def is_task_due(val: dict, path: str, now_ts: float) -> bool:
-    """判定单个任务是否到期（与 Scheduler._collect_due 完全一致的判定逻辑，无副作用）。"""
-    from tasks.task_registry import task_registry
-    from orchestrator.task_manager import (
-        parse_sched_window_hours,
-        clamp_to_sched_window,
-        parse_allowed_weekdays,
-    )
-    import datetime as _dt
-
-    if not val.get("on"):
-        return False
-    if is_human_takeover_blocked(val, now_ts):
-        return False
-    if not task_registry.has_task(path):
-        return False
-    if now_ts < val.get("next_exec_time", 0):
-        return False
-    sw = parse_sched_window_hours(val)
-    if sw is not None:
-        deferred = clamp_to_sched_window(now_ts, sw[0], sw[1])
-        if deferred > now_ts:
-            return False
-    aw = parse_allowed_weekdays(val)
-    if aw is not None:
-        wd = _dt.datetime.fromtimestamp(now_ts).weekday() + 1
-        if wd not in set(aw):
-            return False
-    return True
-
-
-def is_task_debug_mode(task_path: str, task_data: dict | None = None) -> bool:
-    """Lightweight debug-mode lookup that does not import task runtime modules."""
-    from AutoScriptor.utils.app_config import cfg
-    from tasks.task_registry import task_registry
-    import dpath
-
-    if task_registry.get_debug_mode(task_path):
-        return True
-    if isinstance(task_data, dict):
-        return bool(task_data.get("debug_mode") or task_data.get("debug"))
-    try:
-        data = dpath.get(cfg["tasks"], task_path)
-    except Exception:
-        return False
-    return isinstance(data, dict) and bool(data.get("debug_mode") or data.get("debug"))
-
-
-def is_human_takeover_blocked(val: dict, now_ts: float | None = None) -> bool:
-    """
-    人工接管后的红色冷却态。
-
-    标记存在但 next_exec_time 尚未到期时，暂不参与自动调度；一旦到期，
-    调度器会自动再试。未传 now_ts 时保留保守语义，供纯标记判断调用。
-    """
-    if not bool(val.get("human_takeover") or val.get("human_takeover_error")):
-        return False
-    if now_ts is None:
-        return True
-    return now_ts < float(val.get("next_exec_time", 0) or 0)
-
-
-def calc_effective_next_time(val: dict, now_ts: float) -> float:
-    """计算任务的有效下次执行时间（用于展示），与 collect_active_times_from_tasks_tree 一致。"""
-    from orchestrator.task_manager import (
-        parse_sched_window_hours,
-        clamp_to_sched_window,
-        parse_allowed_weekdays,
-        calc_next_allowed_weekday_ts,
-    )
-    import datetime as _dt
-
-    nxt = float(val.get("next_exec_time", 0) or 0)
-    sw = parse_sched_window_hours(val)
-    eff = clamp_to_sched_window(max(nxt, now_ts), sw[0], sw[1]) if sw else (nxt or now_ts)
-    aw = parse_allowed_weekdays(val)
-    if aw is not None:
-        now_dt = _dt.datetime.fromtimestamp(now_ts)
-        wd = now_dt.weekday() + 1
-        if eff <= now_ts and wd not in set(aw):
-            eff = calc_next_allowed_weekday_ts(now_dt, aw)
-        elif eff > now_ts:
-            tdt = _dt.datetime.fromtimestamp(eff)
-            if (tdt.weekday() + 1) not in set(aw):
-                eff = calc_next_allowed_weekday_ts(tdt, aw)
-    return eff
 
 
 _STATE_LABELS = {"pending": "待运行", "running": "运行中", "error": "发生错误"}
@@ -518,7 +351,6 @@ class Scheduler:
     # ── 后台主循环 ──
 
     def _loop(self):
-        from orchestrator.watcher import ConfigWatcher
         from AutoScriptor.utils.app_config import cfg
         from ZmxyOL.accounts import get_character_dir, get_custom_task_dir
 
@@ -568,12 +400,6 @@ class Scheduler:
     def _collect_due(self, node: dict, prefix: str, now_ts: float) -> list[str]:
         from tasks.task_registry import task_registry
         from AutoScriptor.utils.app_config import cfg
-        from orchestrator.task_manager import (
-            parse_sched_window_hours,
-            clamp_to_sched_window,
-            parse_allowed_weekdays,
-            calc_next_allowed_weekday_ts,
-        )
         import datetime as _dt
 
         tasks = []
@@ -624,8 +450,6 @@ class Scheduler:
     def _sort_due_paths(self, due_paths: list[str]) -> list[str]:
         """Sort due paths by the global task ordering overlay."""
         from AutoScriptor.utils.app_config import cfg
-        from orchestrator.task_ordering import sort_paths_by_task_ordering
-
         return sort_paths_by_task_ordering(
             due_paths,
             cfg.get("tasks") or {},
@@ -1203,3 +1027,114 @@ class Scheduler:
 
 
 scheduler = Scheduler()
+
+
+class ConfigWatcher:
+    """监听配置/用户脚本的修改时间，判断是否需要重新加载。"""
+
+    def __init__(self, config_path: str, extra_paths: Callable[[], list[str]] | None = None):
+        self._path = config_path
+        self._extra_paths = extra_paths
+        self._last_mtime: datetime = datetime.min
+        self._seen_mtimes: dict[str, float] = {}
+
+    def start_watching(self):
+        """记录当前修改时间作为基准。"""
+        self._seen_mtimes = self._snapshot_mtimes()
+        self._last_mtime = self._latest_datetime(self._seen_mtimes)
+
+    def _watched_paths(self) -> list[str]:
+        paths = [self._path]
+        if self._extra_paths is not None:
+            paths.extend(path for path in self._extra_paths() if path)
+        return paths
+
+    def _iter_existing_paths(self):
+        for raw in self._watched_paths():
+            path = Path(raw)
+            if not path.exists():
+                continue
+            yield path
+            if path.is_dir():
+                try:
+                    yield from (p for p in path.rglob("*") if p.exists())
+                except OSError:
+                    continue
+
+    @staticmethod
+    def _path_key(path: Path) -> str:
+        try:
+            return str(path.resolve())
+        except OSError:
+            return str(path.absolute())
+
+    @staticmethod
+    def _same_or_under(path_key: str, root_key: str) -> bool:
+        if path_key == root_key:
+            return True
+        try:
+            Path(path_key).relative_to(Path(root_key))
+            return True
+        except ValueError:
+            return False
+
+    @staticmethod
+    def _latest_datetime(snapshot: dict[str, float]) -> datetime:
+        if not snapshot:
+            return datetime.min
+        return datetime.fromtimestamp(max(snapshot.values())).replace(microsecond=0)
+
+    def _snapshot_mtimes(self) -> dict[str, float]:
+        mtimes: dict[str, float] = {}
+        for path in self._iter_existing_paths():
+            try:
+                mtimes[self._path_key(path)] = os.stat(path).st_mtime
+            except OSError:
+                continue
+        return mtimes
+
+    def _get_latest_mtime(self) -> datetime:
+        return self._latest_datetime(self._snapshot_mtimes())
+
+    def mark_seen(self, paths: list[str] | None = None) -> None:
+        """Mark current watcher state as already handled.
+
+        Passing paths updates only those files/directories in the baseline.
+        Scheduler uses this for its own config/account JSON writes so they do
+        not immediately look like external hot-reload requests.
+        """
+        current = self._snapshot_mtimes()
+        if paths is None:
+            self._seen_mtimes = current
+            self._last_mtime = self._latest_datetime(current)
+            return
+
+        roots = [Path(raw) for raw in paths if raw]
+        root_keys = {self._path_key(root) for root in roots}
+        for key, ts in current.items():
+            if any(self._same_or_under(key, root) for root in root_keys):
+                self._seen_mtimes[key] = ts
+        for key in list(self._seen_mtimes.keys()):
+            if any(self._same_or_under(key, root) for root in root_keys) and key not in current:
+                self._seen_mtimes.pop(key, None)
+        self._last_mtime = self._latest_datetime(self._seen_mtimes)
+
+    def should_reload(self) -> bool:
+        """任一监听路径是否在上次检查后被修改过。"""
+        snapshot = self._snapshot_mtimes()
+        changed = False
+        for key, ts in snapshot.items():
+            old = self._seen_mtimes.get(key)
+            if old is None or ts > old:
+                changed = True
+                break
+        if not changed:
+            changed = any(key not in snapshot for key in self._seen_mtimes)
+
+        if changed:
+            mtime = self._latest_datetime(snapshot)
+            logger.info(f"检测到配置/用户脚本变更 ({mtime})")
+            self._seen_mtimes = snapshot
+            self._last_mtime = mtime
+            return True
+        return False

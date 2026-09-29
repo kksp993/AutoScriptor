@@ -10,9 +10,9 @@ from unittest.mock import Mock, patch
 import requests
 from starlette.requests import Request
 
-from orchestrator.character_reports import CharacterReports
-from orchestrator.qq_notify import DeliveryError, QQNotifier, QQSettings, send_message
-from orchestrator.lifecycle import WebUILifecycleService
+from orchestrator.delivery import CharacterReports
+from orchestrator.delivery import DeliveryError, QQNotifier, QQSettings, send_message
+from orchestrator.projection import WebUILifecycleService
 from backend.webui.routes.notifications import create_notifications_router
 
 
@@ -82,7 +82,7 @@ class TestQQTransport(unittest.TestCase):
                 })
                 response = Mock(status_code=200)
                 response.json.return_value = {"status": "ok", "retcode": 0, "data": {"message_id": 9}}
-                with patch("orchestrator.qq_notify.requests.post", return_value=response) as post:
+                with patch("orchestrator.delivery.requests.post", return_value=response) as post:
                     send_message(settings, "角色[CQ:at,qq=all]")
                 self.assertTrue(post.call_args.args[0].endswith(f"/send_{target_type}_msg"))
                 arguments = post.call_args.kwargs
@@ -104,13 +104,13 @@ class TestQQTransport(unittest.TestCase):
             with self.subTest(payload=payload):
                 response = Mock(status_code=200)
                 response.json.return_value = payload
-                with patch("orchestrator.qq_notify.requests.post", return_value=response):
+                with patch("orchestrator.delivery.requests.post", return_value=response):
                     with self.assertRaises(DeliveryError):
                         send_message(self.settings, "test")
 
     def test_timeout_is_not_retried_and_does_not_leak_secrets(self):
         notifier = QQNotifier()
-        with patch("orchestrator.qq_notify.requests.post", side_effect=requests.Timeout("test-only-token")) as post:
+        with patch("orchestrator.delivery.requests.post", side_effect=requests.Timeout("test-only-token")) as post:
             result = notifier.deliver(self.settings, "test")
         self.assertFalse(result["success"])
         self.assertNotIn("test-only-token", result["error"])
@@ -125,7 +125,7 @@ class TestQQTransport(unittest.TestCase):
             started.set()
             self.assertTrue(release.wait(2))
 
-        with patch("orchestrator.qq_notify.send_message", side_effect=blocked_send):
+        with patch("orchestrator.delivery.send_message", side_effect=blocked_send):
             notifier.submit(self.settings, "frozen first character")
             try:
                 self.assertTrue(started.wait(1))
@@ -140,7 +140,7 @@ class TestQQTransport(unittest.TestCase):
 
     def test_disabled_notifier_never_starts_worker(self):
         notifier = QQNotifier()
-        with patch("orchestrator.qq_notify.send_message") as send:
+        with patch("orchestrator.delivery.send_message") as send:
             notifier.submit(QQSettings(), "ignored")
         send.assert_not_called()
         self.assertIsNone(notifier._worker)

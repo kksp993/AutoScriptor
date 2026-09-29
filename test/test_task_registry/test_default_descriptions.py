@@ -6,7 +6,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-TASK_ROOT = ROOT / "ZmxyOL" / "task"
+TASK_ROOT = ROOT / "tasks"
 
 
 class TestRegisterTaskMetadata(unittest.TestCase):
@@ -36,4 +36,3 @@ class TestRegisterTaskMetadata(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

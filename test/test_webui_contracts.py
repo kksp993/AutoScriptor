@@ -45,8 +45,8 @@ def import_task_tree_service_for_test():
         "AutoScriptor.utils.app_config": app_config,
         "ZmxyOL.character.profession": game_profession,
     }):
-        sys.modules.pop("orchestrator.task_tree_service", None)
-        import orchestrator.task_tree_service as module
+        sys.modules.pop("orchestrator.projection", None)
+        import orchestrator.projection as module
 
     return module
 
@@ -237,16 +237,10 @@ class _FakeAccountBackend:
 
 
 def import_watcher_for_test():
-    module_name = "config_watcher_under_test"
-    spec = importlib.util.spec_from_file_location(
-        module_name,
-        ROOT / "orchestrator/watcher.py",
-    )
-    module = importlib.util.module_from_spec(spec)
-    with patch.dict(sys.modules, autoscriptor_logger_stubs()):
-        assert spec.loader is not None
-        spec.loader.exec_module(module)
-    return module
+    """ConfigWatcher now lives with its only user, the scheduler."""
+    from orchestrator.scheduler import ConfigWatcher
+
+    return SimpleNamespace(ConfigWatcher=ConfigWatcher)
 
 
 class TestConfigTemplateContract(unittest.TestCase):
@@ -319,9 +313,15 @@ class TestTaskTreeServiceContract(unittest.TestCase):
 
         task_registry = types.ModuleType("tasks.task_registry")
         task_registry.task_registry = FakeTaskRegistry()
-        scheduler = types.ModuleType("orchestrator.scheduler")
-        scheduler.is_task_due = lambda node, path, now_ts: bool(node.get("on")) and now_ts >= node.get("next_exec_time", 0)
-        scheduler.is_human_takeover_blocked = (
+        # The due predicate lives in orchestrator.model, which also provides
+        # TaskTree and the ordering projection: copy it, then override the query
+        # so the test pins the projection logic, not the due rules.
+        import orchestrator.model as real_model
+
+        model = types.ModuleType("orchestrator.model")
+        model.__dict__.update(real_model.__dict__)
+        model.is_task_due = lambda node, path, now_ts: bool(node.get("on")) and now_ts >= node.get("next_exec_time", 0)
+        model.is_human_takeover_blocked = (
             lambda node, now_ts=None: bool(node.get("human_takeover_error"))
             and (now_ts is None or now_ts < node.get("next_exec_time", 0))
         )
@@ -332,7 +332,7 @@ class TestTaskTreeServiceContract(unittest.TestCase):
             "AutoScriptor.utils": types.ModuleType("AutoScriptor.utils"),
             "tasks.task_registry": task_registry,
             "tasks.task_state": task_state,
-            "orchestrator.scheduler": scheduler,
+            "orchestrator.model": model,
         }
 
     def test_ordered_paths_preserves_nested_leaf_order(self):
@@ -544,19 +544,9 @@ class TestRuntimeControllerContract(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        scheduler_mod = types.ModuleType("orchestrator.scheduler")
-        scheduler_mod.Scheduler = object
-        scheduler_mod.SchedulerState = cls.SchedulerState
-        task_manager_mod = types.ModuleType("orchestrator.task_manager")
-        task_manager_mod.TaskManager = object
-        modules = autoscriptor_logger_stubs()
-        modules.update({
-            "orchestrator.scheduler": scheduler_mod,
-            "orchestrator.task_manager": task_manager_mod,
-        })
-        with patch.dict(sys.modules, modules):
-            sys.modules.pop("orchestrator.runtime_controller", None)
-            from orchestrator.runtime_controller import RuntimeController, RuntimeExecutionBusyError
+        # RuntimeController shares the facade with the composition root, so the
+        # test imports the real module rather than stubbing the orchestration.
+        from orchestrator.facade import RuntimeController, RuntimeExecutionBusyError
 
         cls.RuntimeController = RuntimeController
         cls.RuntimeExecutionBusyError = RuntimeExecutionBusyError
@@ -676,7 +666,7 @@ class TestRuntimeControllerContract(unittest.TestCase):
         self.assertEqual(calls, ["cancel", "scheduler_stop", "invalidate_login"])
 
     def test_request_stop_does_not_async_raise_into_worker_thread(self):
-        content = (ROOT / "orchestrator/runtime_controller.py").read_text(encoding="utf-8")
+        content = (ROOT / "orchestrator/facade.py").read_text(encoding="utf-8")
 
         self.assertNotIn("PyThreadState_SetAsyncExc", content)
         self.assertNotIn("_raise_in_thread", content)
@@ -684,8 +674,8 @@ class TestRuntimeControllerContract(unittest.TestCase):
 
 class TestWebUILifecycleServiceContract(unittest.TestCase):
     def setUp(self):
-        sys.modules.pop("orchestrator.lifecycle", None)
-        from orchestrator.lifecycle import WebUILifecycleService
+        sys.modules.pop("orchestrator.projection", None)
+        from orchestrator.projection import WebUILifecycleService
 
         self.WebUILifecycleService = WebUILifecycleService
 
@@ -851,7 +841,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
         )
 
     def test_save_tasks_clears_status_for_reactivated_or_error_reset_paths(self):
-        from orchestrator.task_tree_service import TaskTreeService
+        from orchestrator.projection import TaskTreeService
 
         class FakeTaskManager:
             cleared = []
@@ -1648,7 +1638,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn('credential={"unlocked"', body)
 
     def test_accounts_add_switches_to_created_account(self):
-        content = (ROOT / "orchestrator/lifecycle.py").read_text(encoding="utf-8")
+        content = (ROOT / "orchestrator/projection.py").read_text(encoding="utf-8")
         start = content.index("    def add_account(")
         end = content.index("    def delete_account", start)
         body = content[start:end]
@@ -1709,7 +1699,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
 
     def test_editor_and_direct_run_share_scheduler_execution_gate(self):
         server = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
-        runtime_controller = (ROOT / "orchestrator/runtime_controller.py").read_text(encoding="utf-8")
+        runtime_controller = (ROOT / "orchestrator/facade.py").read_text(encoding="utf-8")
         editor = (ROOT / "backend/webui/routes/editor.py").read_text(encoding="utf-8")
 
         self.assertIn('acquire_execution=lambda: orchestrator.scheduler.acquire_execution("editor", blocking=False)', server)
@@ -1760,16 +1750,31 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertNotIn("_init_done = True", except_block)
         self.assertIn("payload[\"error\"] = _init_error", content)
 
-    def test_enum_options_fail_instead_of_empty_fallback(self):
-        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
-        start = content.index("@app.post(\"/api/enum-options\")")
-        end = content.index("@app.get(\"/api/ocr-status\")", start)
-        body = content[start:end]
+    def test_enum_options_ship_inside_param_meta(self):
+        """枚举选项由 ParamSpec.describe() 随参数描述一起下发，没有单独的取选项接口。"""
+        from tasks.task_params import EnumSpec, describe_signature
+        import enum as enum_module
 
-        self.assertNotIn("result[p] = []", body)
-        self.assertIn("return api_error(400, 'paths must be a list'", body)
-        self.assertIn("invalid enum path", body)
-        self.assertIn("return api_error(500, str(e), code='enum_options_failed')", body)
+        class Mode(enum_module.Enum):
+            Normal = "普通"
+            Hard = "困难"
+
+        def fn(mode=Mode.Normal):
+            return mode
+
+        spec = describe_signature(fn)["mode"]
+        self.assertIsInstance(spec, EnumSpec)
+        self.assertEqual(
+            spec.describe(),
+            {
+                "type": "enum",
+                "options": [{"value": "Normal", "label": "普通"}, {"value": "Hard", "label": "困难"}],
+            },
+        )
+
+        server = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
+        self.assertNotIn("/api/enum-options", server)
+        self.assertNotIn("enum_options_failed", server)
 
     def test_ocr_status_fail_instead_of_probe_defaults(self):
         content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
@@ -1786,17 +1791,16 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn('"restart_required": runtime_status["restart_required"]', body)
         self.assertIn("return api_error(500, str(e), code=\"ocr_status_failed\")", body)
 
-    def test_frontend_enum_loader_honors_http_status(self):
+    def test_frontend_reads_options_from_param_meta(self):
         content = (ROOT / "backend/webui/static/js/app.js").read_text(encoding="utf-8")
         start = content.index("    function openEditModal")
         end = content.index("    function _initTableRowsCache", start)
         body = content[start:end]
 
-        self.assertIn("API.request('POST', '/enum-options'", body)
-        self.assertNotIn("API.post('/enum-options'", body)
-        self.assertIn("if (!ok)", body)
-        self.assertIn("showApiError(map, '加载参数选项失败')", body)
-        self.assertIn("throw new Error(`枚举选项缺失: ${enumPath}`)", body)
+        self.assertIn("mp.options", body)
+        self.assertIn("paramEnumOptions[pk] = mp.options", body)
+        self.assertNotIn("enum-options", body)
+        self.assertNotIn("枚举选项缺失", content)
         self.assertNotIn("map[p] || []", body)
         self.assertNotIn("_initTableRowsCache(meta); editModalVisible.value = true; });", body)
 
@@ -3105,7 +3109,7 @@ if __name__ == "__main__":
     unittest.main()
 class TestTaskOrderingGroupedOverlayContract(unittest.TestCase):
     def test_grouped_overlay_flattens_order_and_drops_graph_fields(self):
-        from orchestrator.task_ordering import normalize_task_ordering_overlay, project_task_ordering
+        from orchestrator.model import normalize_task_ordering_overlay, project_task_ordering
 
         raw_overlay = {
             "schema_version": 1,

@@ -11,6 +11,8 @@ cfg["tasks"] 仅保存可序列化的用户配置，TaskRegistry 保存不可序
 路径格式: "每日任务/村庄/宠物培养"
 """
 
+from tasks.task_params import ParamSpec
+
 
 class TaskRegistry:
     _instance = None
@@ -26,9 +28,8 @@ class TaskRegistry:
         path: str,
         fn,
         order: int,
-        param_meta: dict | None = None,
+        param_specs: dict[str, ParamSpec] | None = None,
         *,
-        param_keys: list[str] | None = None,
         beta: bool = False,
         custom: bool = False,
         doc_flow: str = "",
@@ -39,8 +40,7 @@ class TaskRegistry:
         self._tasks[path] = {
             "fn": fn,
             "order": order,
-            "param_meta": param_meta or {},
-            "param_keys": list(param_keys) if param_keys else [],
+            "param_specs": dict(param_specs) if param_specs else {},
             "beta": bool(beta),
             "custom": bool(custom),
             "doc_flow": (doc_flow or "").strip(),
@@ -61,14 +61,21 @@ class TaskRegistry:
         entry = self._visible_entry(path)
         return entry["order"] if entry else float("inf")
 
-    def get_param_meta(self, path: str) -> dict:
+    def get_param_specs(self, path: str) -> dict[str, ParamSpec]:
+        """参数名 -> ParamSpec。默认值、表单描述和执行解码都从这里出发。"""
         entry = self._visible_entry(path)
-        return entry.get("param_meta", {}) if entry else {}
+        return dict(entry.get("param_specs", {})) if entry else {}
+
+    def get_param_meta(self, path: str) -> dict:
+        """WebUI 表单描述。选项按任务路径裁剪，所以要把路径传下去。"""
+        return {
+            name: spec.describe(path)
+            for name, spec in self.get_param_specs(path).items()
+        }
 
     def get_param_keys(self, path: str) -> list[str]:
         """当前任务函数签名中的参数名（不含 * / **），用于丢弃 cfg 中已迁移的旧键。"""
-        entry = self._visible_entry(path)
-        return list(entry.get("param_keys", [])) if entry else []
+        return list(self.get_param_specs(path))
 
     def get_beta(self, path: str) -> bool:
         entry = self._visible_entry(path)

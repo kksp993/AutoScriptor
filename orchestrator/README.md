@@ -22,17 +22,17 @@ orchestrator.execution_status()            # 忙碌/停止状态
 
 | 模块 | 职责 |
 | --- | --- |
-| `facade.py` | 组合入口，`orchestrator` 单例 |
-| `registry.py` | 启动时的任务发现、导入顺序、装配（原 `tasks/pkg_utils` + `custom_task_loader` + `load_tasks`） |
-| `scheduler.py` | 定时等待、跨角色派发、调度周期 retry、状态机、执行闸门 |
-| `task_manager.py` | 单任务执行、任务内 retry、进度判定、人工接管、执行后时间 |
-| `task_tree.py` / `task_ordering.py` | 任务树判定、全局排序投影 |
-| `task_tree_service.py` | 任务树投影（供 WebUI 读取） |
-| `runtime_controller.py` | 执行互斥：调度 / 直接执行 / 编辑器代码三者仲裁 |
-| `lifecycle.py` | 配置与任务的保存/重载生命周期 |
-| `state_version.py` | 配置版本号 |
-| `watcher.py` | 配置文件变更监听 |
-| `notify.py` / `character_reports.py` / `qq_notify.py` | 管线内联的结果聚合与投递 |
+| `model.py` | 任务集的形状与到期时间：任务树判定、全局排序投影、时间窗口/星期限制、到期判定。纯查询，不读文件、不持线程、不碰设备 |
+| `catalog.py` | 任务集从哪来：`tasks/` 发现、`_order.txt` 导入顺序、自定义任务、配置归一化和启动装配 |
+| `scheduler.py` | 何时跑、跑谁：后台线程、跨角色派发、调度周期 retry、状态机、执行闸门、配置变更监听（`ConfigWatcher`） |
+| `task_manager.py` | 单个任务怎么跑：参数恢复、任务内 retry、进度判定、人工接管、失败恢复、执行后时间 |
+| `projection.py` | WebUI 能看见什么、怎么改：任务树公开投影与存档清洗、保存/重载生命周期、配置版本号 |
+| `delivery.py` | 有什么要送出去：桌面 Toast / onepush 渠道 / OneBot QQ / 角色结果聚合 |
+| `facade.py` | 组合根：`orchestrator` 单例，以及调度 / 直接执行 / 编辑器代码三者的执行互斥（`RuntimeController`） |
+
+七个模块各回答一个问题，互相之间的依赖是单向的：`facade -> scheduler / task_manager / projection -> model`，
+`catalog` 只被启动路径调用，`delivery` 不读任务树。`model.py` 是唯一不依赖运行时状态的模块，
+所以调度器和 UI 投影能共用同一份「是否到期」定义，而不用各自维护一份。
 
 ## 边界
 

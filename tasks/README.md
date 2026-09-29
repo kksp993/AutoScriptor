@@ -10,14 +10,15 @@
 | --- | --- |
 | `daily_task/`、`event_task/`、`normal_task/`、`weekly_task/` | 内置任务实现 |
 | `task_register.py` | `@register_task` 装饰器与 cfg 叶节点维护 |
-| `task_registry.py` | 运行时注册表（fn / order / 参数元数据），不持久化 |
+| `task_registry.py` | 运行时注册表（fn / order / 参数 spec），不持久化 |
+| `task_params.py` | 参数契约：签名 → 默认值 / 表单描述 / 执行解码 |
 | `task_state.py` | 任务本地状态 API，例如 `progress` |
 | `_order.txt` | 内置任务注册顺序的 seed（由编排层读取） |
 | `battle_task_params.py` | 战斗流程枚举与职业参数 |
 | `time.py`、`translations.py` | 时间辅助与路径中文化 |
 
 任务路径用 slash 表示，例如 `每日任务/村庄/宠物培养`。用户自定义任务放在运行数据目录 `data/custom_task/`，
-由 `orchestrator/registry.py` 载入；`test/scripts/` 是测试脚本，不属于本层。
+由 `orchestrator/catalog.py` 载入；`test/scripts/` 是测试脚本，不属于本层。
 
 ## 与 `ZmxyOL/__init__.py` 的耦合
 

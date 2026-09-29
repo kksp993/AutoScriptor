@@ -58,7 +58,6 @@ WebUI 后端是 FastAPI；静态前端位于 `backend/webui/static/`，源码 El
 | `GET /api/task-ordering`　　　　 | 读取全局任务总顺序投影：`overlay.items`、展平 `overlay.user_order`、`effective_order`、`order_map` 和诊断 |
 | `POST /api/task-ordering`　　　　| 要求 runtime idle；保存全局 `task_ordering.items` 并派生 `user_order`，返回轻量排序投影，不返回完整任务树 |
 | `POST /api/task-ordering/layout` | 旧版图布局兼容 no-op；前端不再调用，不保存画布坐标，也不影响执行语义　　　　　　　　　　　　　　　　 |
-| `POST /api/enum-options`　　　　 | 批量查询枚举选项，含 `BattleFlowName` 当前职业过滤；导入/枚举错误必须返回错误，不返回空列表伪装成功　 |
 | `GET /api/config/export`　　　　 | 导出可迁移配置　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
 | `POST /api/config/import`　　　　| 导入允许的配置段，剥离 deploy 密码/证书等敏感字段　　　　　　　　　　　　　　　　　　　　　　　　　　 |
 | `GET/POST /api/deploy`　　　　　 | 读取/保存 deploy、notify、update、remote_access　　　　　　　　　　　　　　　　　　　　　　　　　　　 |

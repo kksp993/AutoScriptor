@@ -7,12 +7,14 @@
 | 组件 | 职责 |
 |------|------|
 | `tasks/task_register.py` | `@register_task` 注册任务路径，维护用户配置叶节点，并把运行时元数据写入 `TaskRegistry` |
-| `tasks/task_registry.py` | 运行时注册表，保存 `fn/order/param_meta/doc/debug_mode`，不持久化 |
-| `orchestrator/registry.py` | 启动时发现任务模块、按 `_order.txt` 导入、装配任务树 |
+| `tasks/task_registry.py` | 运行时注册表，保存 `fn/order/param_specs/doc/debug_mode`，不持久化；`param_meta` 由 spec 现算 |
+| `tasks/task_params.py` | 参数契约：签名 → 默认值 / 表单描述 / 执行解码的唯一出处 |
+| `orchestrator/catalog.py` | 启动时发现任务模块、按 `_order.txt` 导入、装配任务树 |
+| `orchestrator/model.py` | 任务树判定、全局排序投影、到期判定与时间窗口（纯查询） |
 | `orchestrator/scheduler.py` | 后台线程、动态等待、跨角色收集到期任务、调度周期 retry、状态机 |
 | `orchestrator/task_manager.py` | 单任务执行、参数恢复、任务内 retry、进度判定、人工接管标记、执行后时间更新 |
 | `tasks/task_state.py` | 当前任务本地状态 API，例如 `progress` |
-| `orchestrator/task_tree_service.py` / `backend/webui/server.py` | 将任务树投影为 WebUI 状态、进度、到期与错误展示 |
+| `orchestrator/projection.py` / `backend/webui/server.py` | 将任务树投影为 WebUI 状态、进度、到期与错误展示 |
 
 ## 任务注册与数据归属
 
@@ -23,7 +25,7 @@
 | 数据 | 保存位置 | 持久化 | 说明 |
 |------|----------|--------|------|
 | `on`、`next_exec_time`、`params`、`next_exec_offset_hours`、`sched_window_hours`、`allowed_weekdays` | `cfg["tasks"]` | 是 | 用户配置和调度配置 |
-| `fn`、`order`、`param_meta`、`param_keys`、`beta`、`custom`、`doc_flow`、`description`、`debug_mode` | `TaskRegistry` | 否 | 运行时元数据，重载任务时重建，WebUI 投影为 `task_doc_flow` / `task_description` 等字段 |
+| `fn`、`order`、`param_specs`、`beta`、`custom`、`doc_flow`、`description`、`debug_mode` | `TaskRegistry` | 否 | 运行时元数据，重载任务时重建；WebUI 投影时由 spec 现算 `param_meta` / `param_keys` |
 | `progress` 等任务运行状态 | `cfg["status"]["tasks"][task_path]` | 是 | 跟随账号/角色配置 |
 
 首次注册一个新任务叶节点时默认 `on=False`、`next_exec_time=0`；已有任务会保留用户配置，并补齐缺失字段。WebUI 保存任务时会剥离 `fn/order/param_meta/_due` 等运行时字段。

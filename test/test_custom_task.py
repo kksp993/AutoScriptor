@@ -44,7 +44,7 @@ class TestCustomTaskPaths(unittest.TestCase):
 
 class TestPruneStaleCustomTasks(unittest.TestCase):
     def test_prune_removes_unregistered_leaves(self):
-        from orchestrator.task_tree import TaskTree
+        from orchestrator.model import TaskTree
 
         branch = {
             "orphan": {"on": False, "next_exec_time": 0},
