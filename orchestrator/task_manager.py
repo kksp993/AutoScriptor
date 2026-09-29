@@ -144,17 +144,21 @@ class TaskManager:
         with self._cfg_lock:
             try:
                 cfg.reload_preserving_decrypted_credentials(security_key)
-                # 清除 ZmxyOL 与 tasks 子模块缓存，强制重新导入。
-                # 任务模块现在住顶层 tasks 包，漏掉它会让重载读到旧任务函数。
-                for name in [
-                    m for m in sys.modules
-                    if m in ("ZmxyOL", "tasks")
-                    or m.startswith(("ZmxyOL.", "tasks."))
-                ]:
+                # 只清任务脚本模块，让它们的 @register_task 重新执行；tasks 包的基础设施
+                # 必须留着——重载它们会重建 TaskRegistry 单例，而上面所有读者还拿着旧的
+                # 空注册表。ZmxyOL 整体保留：TableParam、职业表这些跨边界类型必须还是同一
+                # 个类，否则任务签名里的表格默认值不再被识别（见 catalog 的保留清单）。
+                from orchestrator.catalog import is_reloadable_task_module
+
+                for name in [m for m in sys.modules if is_reloadable_task_module(m)]:
                     sys.modules.pop(name, None)
                 from ZmxyOL.character.hero import reload_character_modules
+                import ZmxyOL
 
                 reload_character_modules()
+                # 刚丢弃的 tasks 包初始化里绑过这些名字，ZmxyOL 首次访问时也记忆过一份；
+                # 不清掉就会继续把重载前的枚举发给重新导入的任务脚本。
+                ZmxyOL.drop_cached_exports()
                 # 重新发现并注册任务（不再由 import 自动触发）
                 from orchestrator import force_reload_tasks
                 force_reload_tasks()

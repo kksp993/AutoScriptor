@@ -302,12 +302,6 @@ class AccountStore:
         self.current_acc = Account(name, data)
         self.current_acc.decrypt_credentials(pwd)
 
-    def load(self, name: str, pwd: str, global_cfg: dict[str, Any], writer) -> None:
-        if name:
-            self.load_account(name, pwd, global_cfg, writer)
-        else:
-            self.current_acc = None
-
     def save_account_file(self, global_cfg: dict[str, Any], writer) -> None:
         if not self.current_acc:
             return
@@ -387,13 +381,6 @@ class AccountStore:
             return False
 
     # ── 写入 ──
-
-    def switch_account(self, target: str, security_key: str, global_cfg: dict[str, Any], writer) -> None:
-        if not self.account_path(target, global_cfg).exists():
-            raise KeyError(f"账号 '{target}' 不存在")
-        global_cfg["current_account"] = target
-        self.load_account(target, security_key, global_cfg, writer)
-        logger.info("已切换到账号: %s", target)
 
     def add_account(
         self,
