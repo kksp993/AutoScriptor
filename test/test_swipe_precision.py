@@ -4,7 +4,7 @@ from unittest.mock import call, patch
 
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import NemuIpc
 from AutoScriptor.core.targets import B, T
-from AutoScriptor.utils.box import Box
+from AutoScriptor.core.box import Box
 
 
 class PreciseSwipeTest(unittest.TestCase):

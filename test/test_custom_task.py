@@ -12,7 +12,7 @@ sys.path.insert(0, REPO_ROOT)
 
 def _load_task_registry():
     """按路径加载 task_registry，避免 AutoScriptor 包 __init__ 拉取 adbutils。"""
-    path = os.path.join(REPO_ROOT, "AutoScriptor", "utils", "task_registry.py")
+    path = os.path.join(REPO_ROOT, "ZmxyOL", "task_registry.py")
     spec = importlib.util.spec_from_file_location("_task_registry_test", path)
     mod = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -21,16 +21,25 @@ def _load_task_registry():
 
 
 class TestCustomTaskPaths(unittest.TestCase):
-    def test_get_custom_task_dir_suffix(self):
-        path = os.path.join(REPO_ROOT, "AutoScriptor", "utils", "paths.py")
-        spec = importlib.util.spec_from_file_location("_paths_test", path)
-        mod = importlib.util.module_from_spec(spec)
-        assert spec.loader is not None
-        spec.loader.exec_module(mod)
-        self.assertEqual(mod.get_config_path(), mod.get_app_root() / "data" / "config.json")
-        self.assertEqual(mod.get_custom_task_dir(), mod.get_app_root() / "data" / "custom_task")
-        self.assertEqual(mod.get_accounts_dir(), mod.get_app_root() / "data" / "accounts")
-        self.assertEqual(mod.get_battle_character_dir(), mod.get_app_root() / "data" / "battle_character")
+    def test_auto_scriptor_owns_only_the_config_location(self):
+        from AutoScriptor.utils.paths import get_app_root, get_config_path
+
+        self.assertEqual(get_config_path(), get_app_root() / "data" / "config.json")
+
+    def test_game_data_directories_derive_from_the_config_location(self):
+        from AutoScriptor.utils.paths import get_config_path
+        from ZmxyOL.paths import (
+            get_accounts_dir,
+            get_battle_character_dir,
+            get_custom_task_dir,
+            get_editable_data_root,
+        )
+
+        data_root = get_editable_data_root()
+        self.assertEqual(data_root, get_config_path().parent)
+        self.assertEqual(get_custom_task_dir(), data_root / "custom_task")
+        self.assertEqual(get_accounts_dir(), data_root / "accounts")
+        self.assertEqual(get_battle_character_dir(), data_root / "battle_character")
 
 
 class TestPruneStaleCustomTasks(unittest.TestCase):
@@ -68,7 +77,7 @@ class TestCustomTaskRegisterPathNormalization(unittest.TestCase):
         import uuid
 
         from AutoScriptor.utils.app_config import cfg
-        from AutoScriptor.utils.task_registry import task_registry
+        from ZmxyOL.task_registry import task_registry
         import ZmxyOL.task.task_register as task_register_mod
 
         old_tasks = copy.deepcopy(cfg._config.get("tasks", {}))
@@ -133,7 +142,7 @@ class TestCustomTaskDynamicImport(unittest.TestCase):
         from unittest.mock import patch
 
         from AutoScriptor.utils.app_config import cfg
-        from AutoScriptor.utils.task_registry import task_registry
+        from ZmxyOL.task_registry import task_registry
         from ZmxyOL.task import force_reload_tasks
 
         with tempfile.TemporaryDirectory() as d:
@@ -146,7 +155,7 @@ class TestCustomTaskDynamicImport(unittest.TestCase):
                 "    pass\n",
                 encoding="utf-8",
             )
-            with patch("AutoScriptor.utils.paths.get_custom_task_dir", lambda: ct):
+            with patch("ZmxyOL.paths.get_custom_task_dir", lambda: ct):
                 old_tasks = copy.deepcopy(cfg._config.get("tasks", {}))
                 try:
                     force_reload_tasks()

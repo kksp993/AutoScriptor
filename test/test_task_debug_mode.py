@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from AutoScriptor.utils.app_config import cfg
-from AutoScriptor.utils.task_registry import task_registry
+from ZmxyOL.task_registry import task_registry
 
 
 class TestTaskDebugMode(unittest.TestCase):

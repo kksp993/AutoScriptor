@@ -1,12 +1,12 @@
 from time import time
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 
 def battle():
     wait_for_disappear(I("加载中"))
-    from AutoScriptor.battle_character.hero import h
+    from ZmxyOL.battle_character.hero import h
     sleep(0.5)
     h.skill(4, 0.95)
     h.zhenling()

@@ -1,7 +1,7 @@
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import RequestHumanTakeover
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 
 def reset_task():

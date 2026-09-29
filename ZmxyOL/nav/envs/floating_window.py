@@ -1,21 +1,25 @@
-"""
-4399 悬浮窗检测模块
+"""4399 悬浮窗（贴边推广浮窗）检测与移除。
 
-利用悬浮窗独特的绿色特征，在屏幕四边的窄条区域内检测绿色连通区域。
-不依赖模板匹配，不怕半透明背景变化。
+4399 渠道登录后会在屏幕边缘弹出绿色推广浮窗，遮挡游戏 UI。本模块在四边窄条
+内按绿色连通域定位它，再滑到屏幕中央触发设置面板并隐藏。
 
-用法:
-    from AutoScriptor.recognition.floating_window import detect_floating_window
-    result = detect_floating_window(screenshot)
-    if result['found']:
-        print(f"悬浮窗在 {result['edge']} 边，位置: {result['box']}")
+这是 4399 平台业务，因此属于 ZmxyOL，而不是通用识别层，也不占用 AutoScriptor。
+调用方：登录流程（``ZmxyOL.nav.envs.login``）。
 """
+
+from __future__ import annotations
+
 import cv2
 import numpy as np
-from AutoScriptor.utils.box import Box
+
+import AutoScriptor.core.api as core_api
+from AutoScriptor import B, click, swipe
+from AutoScriptor.core.box import Box
+from AutoScriptor.utils.cancel import cancellable_sleep, check_cancel_raise
+from AutoScriptor.logging.logger import logger
 
 
-def detect_floating_window(
+def detect_floating_window_on_frame(
     screenshot: np.ndarray,
     edge_width: int = 40,
     min_area: int = 150,
@@ -24,7 +28,7 @@ def detect_floating_window(
     debug: bool = False,
 ) -> dict:
     """
-    检测屏幕边缘的 4399 悬浮窗。
+    在给定帧上检测屏幕边缘的 4399 悬浮窗。
 
     在屏幕四边各取 edge_width 像素宽的窄条，转 HSV 后提取绿色像素，
     对绿色连通区域做面积 + 长宽比过滤，返回第一个命中结果。
@@ -131,6 +135,53 @@ def detect_floating_window(
     return best
 
 
+def detect_floating_window(debug: bool = False) -> dict:
+    """
+    截取当前画面并检测 4399 悬浮窗。
+
+    Returns:
+        dict: 见 detect_floating_window_on_frame
+    """
+    return detect_floating_window_on_frame(core_api.mixctrl.screenshot(), debug=debug)
+
+
+def dismiss_floating_window(max_retries: int = 1, debug: bool = False) -> bool:
+    """
+    检测并移除 4399 悬浮窗：检测到后将其滑动到屏幕中央触发设置面板，然后隐藏。
+
+    Args:
+        max_retries: 最大重试次数（悬浮窗可能需要多次截图才能稳定检测到）
+        debug: 保存调试图像
+
+    Returns:
+        bool: True 表示检测到并处理了悬浮窗，False 表示未检测到
+    """
+    for attempt in range(max_retries):
+        check_cancel_raise()
+        screenshot = core_api.mixctrl.screenshot()
+        result = detect_floating_window_on_frame(screenshot, debug=debug)
+        if not result["found"]:
+            cancellable_sleep(0.3)
+            continue
+
+        logger.info(f"🔍 检测到悬浮窗: {result['edge']}边 {result['box']} (第{attempt+1}次)")
+
+        # 从悬浮窗位置滑到屏幕中央，触发悬浮窗设置面板
+        cx, cy = result["center"]
+        swipe(B(cx, cy, 10, 10), B(640, 650, 10, 10), duration_s=1)
+        cancellable_sleep(1)
+        click(B(740, 555, 10, 10))
+        cancellable_sleep(0.5)
+
+        verify = detect_floating_window_on_frame(core_api.mixctrl.screenshot(), debug=debug)
+        if not verify["found"]:
+            logger.info("✅ 悬浮窗已隐藏")
+            return True
+
+        logger.warning(f"⚠️ 悬浮窗关闭后仍检测到: {verify['edge']}边 {verify['box']}")
+
+    return False
+
 
 def _touches_screen_edge(edge_name: str, bx: int, by: int, bw: int, bh: int, sw: int, sh: int, margin: int = 2) -> bool:
     """Require the candidate to touch the real screen boundary for that edge."""
@@ -143,6 +194,7 @@ def _touches_screen_edge(edge_name: str, bx: int, by: int, bw: int, bh: int, sw:
     if edge_name == "右":
         return bx + bw >= sw - margin
     return False
+
 
 def _save_debug(edge_name: str, strip: np.ndarray, mask: np.ndarray):
     """保存调试图像"""

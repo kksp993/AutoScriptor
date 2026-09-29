@@ -1,5 +1,5 @@
-﻿from AutoScriptor import *
-from AutoScriptor.battle_character.hero import combo
+from AutoScriptor import *
+from ZmxyOL.battle_character.hero import combo
 from ZmxyOL.nav.api import ensure_in, try_close_via_x
 EXIT_RADIUS=0  # 退出范围 for safety
 
@@ -101,17 +101,17 @@ def get_task_table(task_name:str|list[str]|tuple[str]):
     
 
 def challenge_task():
-    from AutoScriptor.battle_character.hero import h
+    from ZmxyOL.battle_character.hero import h
     h.battle_tasks(set(TASK_TABLE_LIST).union(set(JIYUAN_TASK_TABLE)))
 
 
 def challenge_task_jiyuan():
-    from AutoScriptor.battle_character.hero import h
+    from ZmxyOL.battle_character.hero import h
     h.battle_tasks(JIYUAN_TASK_TABLE)
 
 
 def challenge_task_daily():
-    from AutoScriptor.battle_character.hero import h
+    from ZmxyOL.battle_character.hero import h
     h.battle_tasks(TASK_TABLE_LIST)
 
 
@@ -121,7 +121,7 @@ def battle_tasks(self:"Hero", task_table:list[str], speed_x:int=1, flow_name: st
     if flow_name is None:
         flow_name = getattr(self, "task_context_battle_flow", None) or "战斗循环"
     for task_name, v in get_task_table(task_table).items():
-        from AutoScriptor.utils.logger import logger
+        from AutoScriptor.logging.logger import logger
         logger.info(f"开始挑战 {task_name} @ {v['location']}")
         ensure_in(*v["location"])
         click(v["target"])

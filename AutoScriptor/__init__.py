@@ -20,13 +20,13 @@ if TYPE_CHECKING:
         launch_app as launch_app,
         swipe_precise as swipe_precise,
     )
-    from AutoScriptor.core.display_contract import (
+    from AutoScriptor.core.api import (
         MUMU_SIZE_1280_720 as MUMU_SIZE_1280_720,
         MUMU_SIZE_720_1280 as MUMU_SIZE_720_1280,
         getFrameSize as getFrameSize,
         setFrameSize as setFrameSize,
     )
-    from AutoScriptor.utils.logger import logger as logger
+    from AutoScriptor.logging.logger import logger as logger
 
 
 _ERROR_EXPORTS = [
@@ -45,8 +45,8 @@ _ERROR_EXPORTS = [
 
 _EXPORTS: dict[str, tuple[str, str]] = {
     # targets
-    "Box": ("AutoScriptor.utils.box", "Box"),
-    "box_cell_in_grid": ("AutoScriptor.utils.box", "box_cell_in_grid"),
+    "Box": ("AutoScriptor.core.box", "Box"),
+    "box_cell_in_grid": ("AutoScriptor.core.box", "box_cell_in_grid"),
     "Target": ("AutoScriptor.core.targets", "Target"),
     "B": ("AutoScriptor.core.targets", "B"),
     "I": ("AutoScriptor.core.targets", "I"),
@@ -54,16 +54,14 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "ui": ("AutoScriptor.utils.ui_map", "ui"),
     # utils
     "cfg": ("AutoScriptor.utils.app_config", "cfg"),
-    "logger": ("AutoScriptor.utils.logger", "logger"),
-    "log_flush": ("AutoScriptor.utils.logger", "log_flush"),
-    "make_box_grid": ("AutoScriptor.utils.box_grid", "make_box_grid"),
-    "indexof": ("AutoScriptor.utils.box_grid", "indexof"),
-    "get_task_status": ("AutoScriptor.utils.task_state", "get_task_status"),
-    "set_task_status": ("AutoScriptor.utils.task_state", "set_task_status"),
-    "setFrameSize": ("AutoScriptor.core.display_contract", "setFrameSize"),
-    "getFrameSize": ("AutoScriptor.core.display_contract", "getFrameSize"),
-    "MUMU_SIZE_1280_720": ("AutoScriptor.core.display_contract", "MUMU_SIZE_1280_720"),
-    "MUMU_SIZE_720_1280": ("AutoScriptor.core.display_contract", "MUMU_SIZE_720_1280"),
+    "logger": ("AutoScriptor.logging.logger", "logger"),
+    "log_flush": ("AutoScriptor.logging.logger", "log_flush"),
+    "make_box_grid": ("AutoScriptor.core.box_grid", "make_box_grid"),
+    "indexof": ("AutoScriptor.core.box_grid", "indexof"),
+    "setFrameSize": ("AutoScriptor.core.api", "setFrameSize"),
+    "getFrameSize": ("AutoScriptor.core.api", "getFrameSize"),
+    "MUMU_SIZE_1280_720": ("AutoScriptor.core.api", "MUMU_SIZE_1280_720"),
+    "MUMU_SIZE_720_1280": ("AutoScriptor.core.api", "MUMU_SIZE_720_1280"),
     # runtime helpers
     "bg": ("AutoScriptor.core.background", "bg"),
     "BG_SIGNALS": ("AutoScriptor.core.background", "BG_SIGNALS"),
@@ -98,8 +96,6 @@ for _name in [
     "ctrl_mumu",
     "sleep",
     "extract_info",
-    "detect_floating_window",
-    "dismiss_floating_window",
     "launch_app",
     "close_app",
     "go_home",
@@ -130,8 +126,6 @@ __all__ = [
     "log_flush",
     "make_box_grid",
     "indexof",
-    "get_task_status",
-    "set_task_status",
     "setFrameSize",
     "getFrameSize",
     "MUMU_SIZE_1280_720",
@@ -163,8 +157,6 @@ __all__ = [
     "ctrl_mumu",
     "sleep",
     "extract_info",
-    "detect_floating_window",
-    "dismiss_floating_window",
     "launch_app",
     "close_app",
     "go_home",

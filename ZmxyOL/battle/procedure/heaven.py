@@ -1,5 +1,5 @@
 from AutoScriptor import *
-from AutoScriptor.battle_character.hero import *
+from ZmxyOL.battle_character.hero import *
 
 
 def _collect_bonus_rewards(expected: int):
@@ -294,7 +294,7 @@ def heaven_battle(
 def task(self, task_name:str):
     from ZmxyOL.battle.tasks import get_task_table
     from ZmxyOL.nav.api import ensure_in
-    from AutoScriptor.battle_character.hero import h
+    from ZmxyOL.battle_character.hero import h
     ensure_in(*get_task_table(task_name)["location"])
     logger.info(f"===={task_name}====")
     box = Box(174,253+100*get_task_table(task_name)["idx"],930,75)

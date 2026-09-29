@@ -4,7 +4,7 @@ from functools import wraps
 from threading import Thread, RLock, Event, current_thread, get_ident
 import time
 from typing import Any, Callable, List
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 from AutoScriptor.core.targets import Target
 
 DEFAULT_INTERVAL = 1.0
@@ -19,23 +19,22 @@ class BgSignals:
     """Well-known signal names used by battle/task code.
 
     The values intentionally keep the legacy strings so existing scripts that
-    call bg.signal("try_exit") continue to work. Deprecated aliases such as
-    "Failed" are canonicalized by BackgroundMonitor so old scripts read and
+    call bg.signal("try_exit") continue to work. The lowercase "failed"
+    spelling is canonicalized by BackgroundMonitor so old scripts read and
     write the same state as current code.
     """
 
     TRY_EXIT = "try_exit"
     PAUSE_BATTLE = "Pause_battle"
     BUILTIN_ADVANCE = "_builtin_advance"
-    FAILED = "failed"
-    FAILED_LEGACY = "Failed"
+    FAILED = "Failed"
     EXIT = "Exit"
 
 
 BG_SIGNALS = BgSignals
 
 _SIGNAL_ALIASES = {
-    BG_SIGNALS.FAILED_LEGACY: BG_SIGNALS.FAILED,
+    "failed": BG_SIGNALS.FAILED,
 }
 
 

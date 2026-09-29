@@ -1,6 +1,6 @@
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 def buy_item(item_name: str):
     box = locate(T(item_name),timeout=10)

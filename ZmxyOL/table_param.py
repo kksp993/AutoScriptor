@@ -5,7 +5,7 @@
 
 典型用法::
 
-    from AutoScriptor.utils.table_param import TableParam
+    from ZmxyOL.table_param import TableParam
 
     @register_task
     def task(

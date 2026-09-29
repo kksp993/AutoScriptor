@@ -34,7 +34,7 @@ with bg.scope("team") as watch:
 职业战斗逻辑优先写成 `battle_plan` 类属性：
 
 ```python
-from AutoScriptor.battle_character import Hero, battle_plan
+from ZmxyOL.battle_character import Hero, battle_plan
 
 class LiuLi(Hero):
     profession = "琉离"

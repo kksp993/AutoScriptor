@@ -66,15 +66,6 @@ def get_recent_recognition_results(limit: int = RECOGNITION_TRACE_LIMIT) -> list
     return list(_get_trace_buffer())[-limit:]
 
 
-def get_last_recognition_result() -> RecognitionResult | None:
-    trace_buffer = _get_trace_buffer()
-    return trace_buffer[-1] if trace_buffer else None
-
-
-def clear_recognition_trace() -> None:
-    _get_trace_buffer().clear()
-
-
 def summarize_recognition_value(value: Any, *, _depth: int = 0) -> Any:
     """Convert recognition inputs and outputs to small JSON-safe summaries."""
 

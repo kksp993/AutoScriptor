@@ -6,6 +6,6 @@
 - `config.template.json`: 源码配置模板，可以提交。
 - `accounts/`: 本机账号、角色、任务状态文件。真实 `*.json` 含账号加密数据，不提交。
 - `custom_task/`: 用户自定义任务脚本，会被任务系统动态加载。
-- `battle_character/`: 运行态职业脚本唯一生效目录；`AutoScriptor/battle_character/` 只保留兼容导入入口。
+- `battle_character/`: 运行态职业脚本唯一生效目录；`ZmxyOL/battle_character/` 只保留兼容导入入口。
 
 不要在仓库根目录新建 `accounts/`、`custom_task/` 或 `battle_character/`。

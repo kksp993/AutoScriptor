@@ -6,17 +6,16 @@ import unittest
 import numpy as np
 
 from AutoScriptor.core import api
-from AutoScriptor.recognition.recognition_trace import (
+from AutoScriptor.logging.recognition_trace import (
     RECOGNITION_TRACE_LIMIT,
     RecognitionResult,
-    clear_recognition_trace,
+    _get_trace_buffer,
     create_recognition_result,
-    get_last_recognition_result,
     get_recent_recognition_results,
     record_recognition_result,
     serialize_recognition_results,
 )
-from AutoScriptor.utils.box import Box
+from AutoScriptor.core.box import Box
 
 
 class _FakeRecognitionControl:
@@ -29,10 +28,10 @@ class _FakeRecognitionControl:
 
 class RecognitionTraceTests(unittest.TestCase):
     def setUp(self):
-        clear_recognition_trace()
+        _get_trace_buffer().clear()
 
     def tearDown(self):
-        clear_recognition_trace()
+        _get_trace_buffer().clear()
 
     def test_trace_is_bounded_to_the_newest_results(self):
         for result_index in range(RECOGNITION_TRACE_LIMIT + 5):
@@ -92,7 +91,8 @@ class RecognitionTraceTests(unittest.TestCase):
         finally:
             api.mixctrl = previous_control
 
-        trace_result = get_last_recognition_result()
+        recent_results = get_recent_recognition_results(limit=1)
+        trace_result = recent_results[-1] if recent_results else None
         self.assertIs(actual_boxes, expected_boxes)
         self.assertIsNotNone(trace_result)
         self.assertEqual(trace_result.operation, "locate")

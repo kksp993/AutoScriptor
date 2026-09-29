@@ -14,7 +14,7 @@ import AutoScriptor.core.api as _core_api
 from AutoScriptor.core.api import ui_idx
 from ZmxyOL.nav.envs.decorators import LOC_ENV
 from .map_manager import mm
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 from typing import Any, Callable
 
 def _flatten_identifiers(idfs: list[Any]) -> tuple[list[Any], list[list[Any]]]:

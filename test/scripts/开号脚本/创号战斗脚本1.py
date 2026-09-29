@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from AutoScriptor.battle_character.hero import Hero
+from ZmxyOL.battle_character.hero import Hero
 from AutoScriptor import *
 RIGHT = B(190,562,159,151)
 LEFT = B(33,558,153,161)

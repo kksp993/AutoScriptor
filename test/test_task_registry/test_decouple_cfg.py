@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from AutoScriptor.utils.task_registry import task_registry
+from ZmxyOL.task_registry import task_registry
 from AutoScriptor.utils.app_config import cfg
 
 
@@ -125,7 +125,7 @@ class TestCfgNodeShape(unittest.TestCase):
 
     def test_table_param_defaults_add_new_columns_without_overwriting_user_values(self):
         import ZmxyOL.task.task_register as task_register_mod
-        from AutoScriptor.utils.table_param import TableParam
+        from ZmxyOL.table_param import TableParam
 
         cfg._config["tasks"] = {
             "每日任务": {
@@ -205,7 +205,7 @@ class TestCfgSaveClean(unittest.TestCase):
         cfg.ACCOUNTS_DIR = os.path.join(self._tmp, "accounts")
         os.makedirs(cfg.ACCOUNTS_DIR, exist_ok=True)
 
-        from AutoScriptor.utils.app_config import Account
+        from ZmxyOL.account_store import Account
 
         cfg._mgr.config_path = Path(cfg.CONFIG_PATH)
         cfg._mgr.default_accounts_dir = Path(cfg.ACCOUNTS_DIR)
@@ -540,7 +540,7 @@ class TestTaskStatusProgress(unittest.TestCase):
         task_registry._tasks = self._reg_backup
 
     def test_task_status_api_uses_current_task_path(self):
-        from AutoScriptor.utils.task_state import (
+        from ZmxyOL.task_state import (
             clear_task_status,
             get_task_status,
             set_current_task_path,

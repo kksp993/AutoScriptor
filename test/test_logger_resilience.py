@@ -8,7 +8,7 @@ import unittest
 
 import AutoScriptor
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import CaptureStd
-from AutoScriptor.utils import logger as logger_module
+from AutoScriptor.logging import logger as logger_module
 
 
 def _record(message: str) -> logging.LogRecord:

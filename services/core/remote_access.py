@@ -11,7 +11,7 @@ import threading
 import time
 from typing import Optional
 
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 
 class RemoteAccess:

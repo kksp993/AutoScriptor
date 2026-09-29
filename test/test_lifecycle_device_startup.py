@@ -47,7 +47,7 @@ def import_power_for_test():
     cancel.sleep_with_cancel = lambda seconds, cancel_check=None, chunk=0.05: (
         cancel_check() if cancel_check else None
     )
-    logger = types.ModuleType("AutoScriptor.utils.logger")
+    logger = types.ModuleType("AutoScriptor.logging.logger")
     logger.logger = logger_stub()
     module_name = "mumu_power_under_test"
     spec = importlib.util.spec_from_file_location(
@@ -65,7 +65,7 @@ def import_power_for_test():
         "AutoScriptor.control.MumuAdaptor.api.adb.direct": direct,
         "AutoScriptor.control.MumuAdaptor.device_facade": device_facade,
         "AutoScriptor.utils.cancel": cancel,
-        "AutoScriptor.utils.logger": logger,
+        "AutoScriptor.logging.logger": logger,
     }):
         assert spec.loader is not None
         spec.loader.exec_module(module)
@@ -93,7 +93,7 @@ def import_mumu_app_for_test():
     device_facade.get_device_facade = lambda: facade
     app_config = types.ModuleType("AutoScriptor.utils.app_config")
     app_config.cfg = {"emulator": {"adb_path": "adb", "adb_addr": "addr"}}
-    logger = types.ModuleType("AutoScriptor.utils.logger")
+    logger = types.ModuleType("AutoScriptor.logging.logger")
     logger.logger = logger_stub()
     module_name = "mumu_app_under_test"
     spec = importlib.util.spec_from_file_location(
@@ -111,7 +111,7 @@ def import_mumu_app_for_test():
         "AutoScriptor.control.MumuAdaptor.api.adb.direct": direct,
         "AutoScriptor.control.MumuAdaptor.device_facade": device_facade,
         "AutoScriptor.utils.app_config": app_config,
-        "AutoScriptor.utils.logger": logger,
+        "AutoScriptor.logging.logger": logger,
     }):
         assert spec.loader is not None
         spec.loader.exec_module(module)
@@ -209,15 +209,14 @@ def import_api_for_test():
     control_mod = mod("AutoScriptor.core.control")
     targets = mod("AutoScriptor.core.targets")
     ocr_rec = mod("AutoScriptor.recognition.ocr_rec")
-    rec = mod("AutoScriptor.recognition.rec")
-    recognition_trace = mod("AutoScriptor.recognition.recognition_trace")
-    box = mod("AutoScriptor.utils.box")
-    logger = mod("AutoScriptor.utils.logger")
+    rec = mod("AutoScriptor.recognition.locate")
+    recognition_trace = mod("AutoScriptor.logging.recognition_trace")
+    box = mod("AutoScriptor.core.box")
+    logger = mod("AutoScriptor.logging.logger")
     app_config = mod("AutoScriptor.utils.app_config")
-    app_resolve = mod("AutoScriptor.utils.app_package_resolve")
     mumu_mod = mod("AutoScriptor.control.MumuAdaptor.mumu")
     cancel = mod("AutoScriptor.utils.cancel")
-    tracer = mod("AutoScriptor.utils.tracer")
+    tracer = mod("AutoScriptor.logging.tracer")
 
     class Target:
         pass
@@ -299,7 +298,6 @@ def import_api_for_test():
             "run_in_background": False,
         },
     }
-    app_resolve.resolve_app_to_start = lambda mumu, cancel_check=None: "resolved.pkg"
     mumu_mod.Mumu = FakeMumu
     cancel.check_cancel_raise = lambda: None
     cancel.cancellable_sleep = lambda seconds, chunk=0.05: None
@@ -320,6 +318,9 @@ def import_api_for_test():
     with patch.dict(sys.modules, modules):
         assert spec.loader is not None
         spec.loader.exec_module(module)
+    # Package resolution is injected now: register a resolver instead of
+    # stubbing a module function the API no longer imports.
+    module.set_app_package_resolver(lambda mumu, cancel_check=None: "resolved.pkg")
     module.FakeMumu = FakeMumu
     module.FakePower = FakePower
     module.stub_modules = modules

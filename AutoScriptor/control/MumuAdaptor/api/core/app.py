@@ -7,7 +7,7 @@
 import json
 import os.path
 from AutoScriptor.control.MumuAdaptor.device_facade import get_device_facade
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 
 def _manager_failed(ret_code: int, retval) -> bool:

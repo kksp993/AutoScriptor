@@ -2,7 +2,7 @@ from ZmxyOL.nav.api import locate_region
 from ZmxyOL.nav.envs.decorators import HAS_SHEZHI
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.battle_character.hero import h
+from ZmxyOL.battle_character.hero import h
 
 
 @register_task(

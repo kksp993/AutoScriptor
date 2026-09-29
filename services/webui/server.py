@@ -18,11 +18,11 @@ from http.cookies import CookieError, SimpleCookie
 from queue import Empty, Full, Queue
 from typing import Any, Set
 
-from AutoScriptor.utils.logger import logger, _TaskFilter as _LogTaskFilter
+from AutoScriptor.logging.logger import logger, _TaskFilter as _LogTaskFilter
 
 from AutoScriptor.control.MumuAdaptor.device_facade import get_device_facade
 from AutoScriptor.utils.app_config import cfg
-from AutoScriptor.utils.game_profession import GAME_PROFESSIONS
+from ZmxyOL.game_profession import GAME_PROFESSIONS
 from AutoScriptor.utils.mumu_discovery import discover_mumu_setup
 from services.core.task_manager import TaskManager
 from services.core.banner import _print_banner
@@ -40,8 +40,10 @@ def _battle_flow_allowed_for_task(flow_value: str, task_path: str | None) -> boo
 
     return battle_flow_allowed_for_task(flow_value, task_path)
 
-# FastAPI Form/UploadFile 运行时依赖；显式导入以保证 multipart 解析可用。
-import multipart  # noqa: F401
+# FastAPI Form/UploadFile 运行时依赖。Starlette 优先使用 python-multipart
+# 提供的 `python_multipart`；显式导入它（而不是旧的 `multipart` shim），
+# 保证表单解析依赖在导入期就暴露缺失，而不是等到第一个上传请求。
+import python_multipart  # noqa: F401
 
 from fastapi import FastAPI, File, WebSocket, WebSocketDisconnect, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
@@ -79,7 +81,8 @@ _plain_fmt    = logging.Formatter(
     datefmt="%H:%M:%S",
 )
 
-from AutoScriptor.utils.paths import get_accounts_dir, get_app_root, get_data_root, get_logs_root, get_static_dir, get_vendor_dir
+from AutoScriptor.utils.paths import get_app_root, get_data_root, get_logs_root
+from ZmxyOL.paths import get_accounts_dir
 from services.webui.error_archives import (
     delete_archives,
     get_archive_detail,
@@ -227,8 +230,8 @@ def _require_credential_unlock(request: Request) -> JSONResponse | None:
     return None
 
 
-VENDOR_DIR = str(get_vendor_dir())
-STATIC_DIR = str(get_static_dir())
+VENDOR_DIR = str(get_app_root() / "services" / "webui" / "vendor")
+STATIC_DIR = str(get_app_root() / "services" / "webui" / "static")
 WEBAPP_ICON_PATH = os.path.join(str(get_app_root()), "webapp", "icon.png")
 
 
@@ -1025,7 +1028,7 @@ async def news_gift_code_redeem_api(request: Request):
 
         lifecycle_service.switch_character(server, character, reason="redeem code select character")
 
-        from AutoScriptor.utils.task_registry import task_registry
+        from ZmxyOL.task_registry import task_registry
 
         if not task_registry.has_task(_GIFT_REDEEM_TASK_PATH):
             lifecycle_service.reload_all(reason="reload redeem task")
@@ -1272,8 +1275,6 @@ async def ocr_status_api():
             "initialization_error": runtime_status["initialization_error"],
             "configured_model": runtime_status["configured_model"],
             "runtime_model": runtime_status["runtime_model"],
-            "configured_digit_model": runtime_status["configured_digit_model"],
-            "runtime_digit_model": runtime_status["runtime_digit_model"],
         }
     except Exception as e:
         logger.error("ocr_status error: %s", e)
@@ -1337,7 +1338,7 @@ def _build_overview_payload(now_ts: float | None = None) -> dict:
                     progress = task_status.get("progress") if isinstance(task_status, dict) else None
                     progress_display = None
                     if progress is not None:
-                        from AutoScriptor.utils.task_state import progress_label
+                        from ZmxyOL.task_state import progress_label
 
                         progress_display = progress_label(progress) or str(progress)
                     upcoming.append({

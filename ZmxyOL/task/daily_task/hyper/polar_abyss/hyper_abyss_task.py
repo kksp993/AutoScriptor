@@ -2,8 +2,8 @@ import enum
 
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
-from AutoScriptor.utils.table_param import TableParam
+from AutoScriptor.logging.logger import logger
+from ZmxyOL.table_param import TableParam
 
 
 class JhsyNandu(str, enum.Enum):

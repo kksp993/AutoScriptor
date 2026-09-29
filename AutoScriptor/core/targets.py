@@ -3,8 +3,8 @@ from abc import ABC
 from typing import Union
 from numpy import ndarray
 import copy
-from AutoScriptor.utils.box import Box
-from AutoScriptor.recognition.img_rec import _load_cv2
+from AutoScriptor.core.box import Box
+from AutoScriptor.recognition.locate import _load_cv2
     
 class UiEntry:
     def __init__(self, name="Lambda_UiEntry", box: Box = None, img: ndarray = None, text: str = None, px_py: tuple = None, color:str = None):

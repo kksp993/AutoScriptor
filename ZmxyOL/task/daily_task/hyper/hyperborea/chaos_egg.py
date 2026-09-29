@@ -1,6 +1,6 @@
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 # """
 @register_task(
     description="扫荡极北混沌蛋。",

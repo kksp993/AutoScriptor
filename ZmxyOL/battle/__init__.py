@@ -1,4 +1,4 @@
-from AutoScriptor.battle_character.hero import *
+from ZmxyOL.battle_character.hero import *
 from .procedure.heaven import *
 from .procedure.chaos import *
 from .procedure.kunlunshan import *
@@ -6,4 +6,5 @@ from .tasks import *
 
 __all__ = [
     "h", "combo", "get_task_table",
+    "Hero", "battle_plan", "flow", "BattlePlan",
 ]

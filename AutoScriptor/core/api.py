@@ -8,18 +8,71 @@ from AutoScriptor.core.background import bg
 from AutoScriptor.core.targets import Target, B
 from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget
 from AutoScriptor.recognition.ocr_rec import ocr_for_box
-from AutoScriptor.recognition.rec import get_box_color
-from AutoScriptor.recognition.recognition_trace import (
+from AutoScriptor.recognition.locate import get_box_color
+from AutoScriptor.logging.recognition_trace import (
     create_recognition_result,
     record_recognition_result,
 )
-from AutoScriptor.utils.box import Box, b2p
-from AutoScriptor.utils.tracer import save_debug_screenshot
-from AutoScriptor.utils.logger import logger, setup_logfile
+from AutoScriptor.core.box import Box, b2p
+from AutoScriptor.logging.tracer import save_debug_screenshot
+from AutoScriptor.logging.logger import logger, setup_logfile
 from AutoScriptor.utils.app_config import cfg
-from AutoScriptor.utils.app_package_resolve import resolve_app_to_start
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
 from AutoScriptor.utils.cancel import check_cancel_raise, cancellable_sleep, join_with_cancel, sleep_with_cancel
+
+
+# Package-name resolution is pluggable; register one with
+# set_app_package_resolver().
+_app_package_resolver: Callable[[Any, Callable[[], None] | None], str] | None = None
+
+
+def set_app_package_resolver(
+    resolver: Callable[[Any, Callable[[], None] | None], str] | None,
+) -> None:
+    """Register ``resolver(mumu, cancel_check) -> package_name``."""
+    global _app_package_resolver
+    _app_package_resolver = resolver
+
+
+def _resolve_app_package(mumu, cancel_check: Callable[[], None]) -> str:
+    """Resolve the package to launch, via the registered resolver when present.
+
+    Without a resolver only an explicit configured package can be used; an
+    empty or placeholder value fails visibly instead of guessing a channel.
+    """
+    if _app_package_resolver is not None:
+        return _app_package_resolver(mumu, cancel_check=cancel_check)
+
+    configured = str(cfg["app"].get("app_to_start") or "").strip()
+    if configured and not configured.startswith("YOUR_"):
+        return configured
+    raise RuntimeError(
+        "未配置可启动的游戏包名，且没有注册包名解析器（set_app_package_resolver）。"
+        "请在 data/config.json 设置 app.app_to_start，或注册一个解析器。"
+    )
+
+
+# Frame-size contract: reference assets, Box regions and tap coordinates are all
+# authored in 1280x720 landscape absolute pixels.
+MUMU_SIZE_1280_720 = (1280, 720)
+MUMU_SIZE_720_1280 = (720, 1280)
+EXPECTED_FRAME_SIZE = MUMU_SIZE_1280_720
+
+_configured_frame_size = EXPECTED_FRAME_SIZE
+
+
+def setFrameSize(frame_size: tuple[int, int]) -> None:
+    """Set the frame size used by regions whose bounds are implicit."""
+    global _configured_frame_size
+    if len(frame_size) != 2:
+        raise ValueError(f"frame_size 必须是 (宽, 高)，收到 {frame_size!r}")
+    _configured_frame_size = int(frame_size[0]), int(frame_size[1])
+
+
+def getFrameSize() -> tuple[int, int]:
+    """Return the frame size used by regions whose bounds are implicit."""
+    return _configured_frame_size
+
 
 def ensure_all_environment_ready():
     # 初始化编排器
@@ -86,7 +139,7 @@ def ensure_app_running(
     # 解析只在需要拉起应用时进行，避免 WebUI 初始化或纯设备探测误触 MuMuManager。
     if launch_app:
         cancel_check()
-        resolved = resolve_app_to_start(mumu, cancel_check=cancel_check)
+        resolved = _resolve_app_package(mumu, cancel_check)
         mumu.app.launch(resolved)
         cancel_check()
 
@@ -905,12 +958,12 @@ def extract_info(
     ensure_not_empty: bool = True,
     save_screenshot: bool = True,
     *,
-    mode: Literal["digital_only", "text", "img", "both"] = "text",
+    mode: Literal["text", "img", "both"] = "text",
     ocr_ttl: float = 0.5,
     max_retries: int = 10,
     screenshot_frame=None,
 ) -> Any:
-    """Extract numbers, OCR text, or registered UI image keys from Box targets.
+    """Extract OCR text or registered UI image keys from Box targets.
 
     ``target`` may be one Box-like target, a row, or a two-dimensional grid.
     Row and grid inputs preserve their original result shape. ``both`` checks
@@ -918,53 +971,13 @@ def extract_info(
     misses. Supplying ``screenshot_frame`` keeps every recognition operation on
     that fixed BGR frame.
     """
-    supported_modes = {"digital_only", "text", "img", "both"}
+    supported_modes = {"text", "img", "both"}
     if mode not in supported_modes:
         raise ValueError(
             f"Unsupported extract_info mode {mode!r}; expected one of {sorted(supported_modes)}"
         )
 
-    if mode == "digital_only":
-        from AutoScriptor.recognition.digit_rec import extract_digits
-
-        started_at = time.perf_counter()
-        screenshot = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
-        try:
-            result = extract_digits(screenshot, target)
-            if post_process:
-                result = post_process(result)
-        except Exception as error:
-            record_recognition_result(
-                create_recognition_result(
-                    operation="extract_info",
-                    success=False,
-                    target=target,
-                    result=None,
-                    started_at=started_at,
-                    frame_source="injected" if screenshot_frame is not None else "live",
-                    frame=screenshot,
-                    engine="digital_only",
-                    error=error,
-                    metadata={"mode": mode, "attempt_count": 1},
-                )
-            )
-            raise
-        record_recognition_result(
-            create_recognition_result(
-                operation="extract_info",
-                success=result is not None,
-                target=target,
-                result=result,
-                started_at=started_at,
-                frame_source="injected" if screenshot_frame is not None else "live",
-                frame=screenshot,
-                engine="digital_only",
-                metadata={"mode": mode, "attempt_count": 1},
-            )
-        )
-        return result
-
-    from AutoScriptor.recognition.info_rec import (
+    from AutoScriptor.recognition.locate import (
         BoxTargetLayout,
         extract_registered_image_keys,
     )
@@ -1158,55 +1171,3 @@ def wait_for_signal(
         if remaining <= 0:
             return False
         sleep(min(0.05, remaining))
-
-
-def detect_floating_window(debug: bool = False) -> dict:
-    """
-    检测屏幕边缘的 4399 悬浮窗（基于 HSV 绿色边缘扫描，不依赖模板匹配）。
-    
-    Returns:
-        dict: {'found': bool, 'edge': str, 'box': Box, 'center': (x,y), ...}
-    """
-    from AutoScriptor.recognition.floating_window import detect_floating_window as _detect
-    screenshot = mixctrl.screenshot()
-    return _detect(screenshot, debug=debug)
-
-
-def dismiss_floating_window(max_retries: int = 1, debug: bool = False) -> bool:
-    """
-    检测并移除 4399 悬浮窗：检测到后将其滑动到屏幕中央触发设置面板，然后隐藏。
-    
-    Args:
-        max_retries: 最大重试次数（悬浮窗可能需要多次截图才能稳定检测到）
-        debug: 保存调试图像
-    
-    Returns:
-        bool: True 表示检测到并处理了悬浮窗，False 表示未检测到
-    """
-    from AutoScriptor.recognition.floating_window import detect_floating_window as _detect
-
-    for attempt in range(max_retries):
-        check_cancel_raise()
-        screenshot = mixctrl.screenshot()
-        result = _detect(screenshot, debug=debug)
-        if not result["found"]:
-            cancellable_sleep(0.3)
-            continue
-
-        logger.info(f"🔍 检测到悬浮窗: {result['edge']}边 {result['box']} (第{attempt+1}次)")
-
-        # 从悬浮窗位置滑到屏幕中央，触发悬浮窗设置面板
-        cx, cy = result["center"]
-        swipe(B(cx, cy, 10, 10), B(640, 650, 10, 10), duration_s=1)
-        cancellable_sleep(1)
-        click(B(740, 555, 10, 10))
-        cancellable_sleep(0.5)
-
-        verify = _detect(mixctrl.screenshot(), debug=debug)
-        if not verify["found"]:
-            logger.info("✅ 悬浮窗已隐藏")
-            return True
-
-        logger.warning(f"⚠️ 悬浮窗关闭后仍检测到: {verify['edge']}边 {verify['box']}")
-
-    return False

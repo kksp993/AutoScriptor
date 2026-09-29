@@ -1,6 +1,6 @@
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 
 @register_task(
@@ -33,7 +33,7 @@ def daily_arena_task(
     click(B(970,230,80,80))
     while(ui_T(I("加载中"))): sleep(0.5)
     sleep(2)
-    from AutoScriptor.battle_character.hero import h
+    from ZmxyOL.battle_character.hero import h
     with bg.scope("决斗场") as scope:
         scope.add(
             name="try_exit",

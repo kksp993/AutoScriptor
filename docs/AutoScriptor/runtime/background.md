@@ -83,8 +83,7 @@ with bg.scope("battle") as watch:
 | `TRY_EXIT` | `try_exit` | 战斗循环退出 |
 | `PAUSE_BATTLE` | `Pause_battle` | 暂停战斗循环 |
 | `BUILTIN_ADVANCE` | `_builtin_advance` | 内置“前进”检测 |
-| `FAILED` | `failed` | 失败信号 |
-| `FAILED_LEGACY` | `Failed` | 历史别名，运行时归一到 `failed`，不是独立状态 |
+| `FAILED` | `Failed` | 失败信号（唯一失败态；小写 `failed` 仅作为历史别名被归一到这里） |
 | `EXIT` | `Exit` | 历史退出信号 |
 
 ```python

@@ -2,7 +2,7 @@ import unittest
 from time import sleep
 from unittest.mock import patch
 
-from AutoScriptor.battle_character.hero import Hero, battle_plan
+from ZmxyOL.battle_character.hero import Hero, battle_plan
 
 
 class FakeHero(Hero):
@@ -89,6 +89,11 @@ class FakeBg:
             if self.polls >= self.trigger_after:
                 self.signals[key] = True
         return self.signals.get(key, default)
+
+
+class _FakeMixctrl:
+    def release_all_keys(self):
+        return None
 
 
 class TestBattlePlan(unittest.TestCase):
@@ -216,7 +221,7 @@ class TestBattlePlan(unittest.TestCase):
         self.assertEqual(hero.actions, [("huashen", 4), ("zhenwu",)])
 
     def test_huashen_long_clicks_juechang_target(self):
-        from AutoScriptor.battle_character import hero as hero_mod
+        from ZmxyOL.battle_character import hero as hero_mod
 
         calls = []
 
@@ -233,7 +238,7 @@ class TestBattlePlan(unittest.TestCase):
         self.assertEqual(calls[0][2], {"if_exist": True})
 
     def test_builtin_bao_uses_bao_target_and_fast_throttle(self):
-        from AutoScriptor.battle_character import hero as hero_mod
+        from ZmxyOL.battle_character import hero as hero_mod
 
         class Registry:
             def __init__(self):
@@ -338,7 +343,7 @@ class TestBattlePlan(unittest.TestCase):
         self.assertEqual(DEFAULT_BATTLE_FLOW.value, "战斗循环")
 
     def test_subclass_without_profession_does_not_replace_default_profile(self):
-        from AutoScriptor.battle_character.hero import _hero_registry
+        from ZmxyOL.battle_character.hero import _hero_registry
 
         before = _hero_registry["default"]
 
@@ -360,7 +365,7 @@ class TestBattlePlan(unittest.TestCase):
             hero.way_to_exit(until=lambda: True)
 
     def test_way_to_exit_uses_bg_and_three_speed_search_step(self):
-        from AutoScriptor.battle_character import hero as hero_mod
+        from ZmxyOL.battle_character import hero as hero_mod
         from AutoScriptor.core.targets import T
 
         hero = FakeHero()
@@ -368,74 +373,81 @@ class TestBattlePlan(unittest.TestCase):
         target = T("还有")
         fake_bg = FakeBg(trigger_after=2)
         clock = FastClock()
+        fake_mixctrl = _FakeMixctrl()
 
         with (
             patch.object(hero_mod, "bg", fake_bg),
             patch.object(hero_mod, "time", clock),
             patch.object(hero_mod, "sleep", lambda seconds: None),
             patch.object(hero_mod, "switch_base", lambda base: None),
+            patch.object(hero_mod, "ui_T", lambda *args, **kwargs: False),
+            patch.object(hero_mod.core_api, "mixctrl", fake_mixctrl),
         ):
             hero.way_to_exit(
                 until=target,
                 exit_loc=250,
-                initial_wait=0,
                 monitor_interval=0.01,
                 timeout=10,
             )
 
         self.assertEqual(fake_bg.added[0][0], "离开完成")
         self.assertEqual(fake_bg.added[0][1], target)
+        self.assertEqual(fake_bg.added[1][0], "出口标记")
         self.assertIn("@[200,250,600,200]", repr(fake_bg.added[1][1]))
         self.assertEqual(fake_bg.intervals[-1], 0.01)
         self.assertEqual(hero.actions[:2], [
             ("move_right", 900, True),
             ("move_left", 250, True),
         ])
-        self.assertIn(("move_left", 70, True), hero.actions)
+        self.assertIn(("move_left", 50, True), hero.actions)
 
     def test_way_to_exit_uses_larger_search_step_at_one_speed(self):
-        from AutoScriptor.battle_character import hero as hero_mod
+        from ZmxyOL.battle_character import hero as hero_mod
         from AutoScriptor.core.targets import T
 
         hero = FakeHero()
         hero.speed_x = 1
         fake_bg = FakeBg(trigger_after=2)
         clock = FastClock()
+        fake_mixctrl = _FakeMixctrl()
 
         with (
             patch.object(hero_mod, "bg", fake_bg),
             patch.object(hero_mod, "time", clock),
             patch.object(hero_mod, "sleep", lambda seconds: None),
             patch.object(hero_mod, "switch_base", lambda base: None),
+            patch.object(hero_mod, "ui_T", lambda *args, **kwargs: False),
+            patch.object(hero_mod.core_api, "mixctrl", fake_mixctrl),
         ):
             hero.way_to_exit(
                 until=T("还有"),
-                initial_wait=0,
                 monitor_interval=0.01,
                 timeout=10,
             )
 
-        self.assertIn(("move_left", 110, True), hero.actions)
+        self.assertIn(("move_left", 50, True), hero.actions)
 
     def test_way_to_exit_holds_when_initial_move_already_hits_exit(self):
-        from AutoScriptor.battle_character import hero as hero_mod
+        from ZmxyOL.battle_character import hero as hero_mod
         from AutoScriptor.core.targets import T
 
         hero = FakeHero()
         hero.speed_x = 3
         fake_bg = FakeBg(trigger_after=1)
         clock = FastClock()
+        fake_mixctrl = _FakeMixctrl()
 
         with (
             patch.object(hero_mod, "bg", fake_bg),
             patch.object(hero_mod, "time", clock),
             patch.object(hero_mod, "sleep", lambda seconds: None),
             patch.object(hero_mod, "switch_base", lambda base: None),
+            patch.object(hero_mod, "ui_T", lambda *args, **kwargs: False),
+            patch.object(hero_mod.core_api, "mixctrl", fake_mixctrl),
         ):
             hero.way_to_exit(
                 until=T("加载中"),
                 exit_loc=25,
-                initial_wait=0,
                 timeout=10,
             )
 
@@ -445,37 +457,43 @@ class TestBattlePlan(unittest.TestCase):
         ])
 
     def test_way_to_exit_adjusts_after_seen_but_not_held(self):
-        from AutoScriptor.battle_character import hero as hero_mod
+        from ZmxyOL.battle_character import hero as hero_mod
         from AutoScriptor.core.targets import T
 
         hero = FakeHero()
         hero.speed_x = 3
         fake_bg = FakeBg(trigger_after=20)
         clock = FastClock()
+        fake_mixctrl = _FakeMixctrl()
 
         def signal(key, default=None):
             if str(key).startswith("way_to_exit_mark:"):
                 return True
             return FakeBg.signal(fake_bg, key, default)
 
+        def fake_wait_for_signal(signal_key, expected=True, seconds=0, **kwargs):
+            return bool(fake_bg.signal(signal_key, False)) is expected
+
         with (
             patch.object(hero_mod, "bg", fake_bg),
             patch.object(fake_bg, "signal", signal),
+            patch.object(hero_mod, "wait_for_signal", fake_wait_for_signal),
             patch.object(hero_mod, "time", clock),
             patch.object(hero_mod, "sleep", lambda seconds: None),
             patch.object(hero_mod, "switch_base", lambda base: None),
+            patch.object(hero_mod, "ui_T", lambda *args, **kwargs: False),
+            patch.object(hero_mod.core_api, "mixctrl", fake_mixctrl),
         ):
             hero.way_to_exit(
                 until=T("加载中"),
-                initial_wait=0,
                 monitor_interval=0.01,
                 timeout=30,
             )
 
-        self.assertIn(("move_right", 20, True), hero.actions)
+        self.assertIn(("move_right", 15, True), hero.actions)
 
     def test_battle_loop_timeout_is_checked_while_paused(self):
-        from AutoScriptor.battle_character import hero as hero_mod
+        from ZmxyOL.battle_character import hero as hero_mod
 
         class FakeBg:
             def __init__(self):
@@ -525,7 +543,7 @@ class TestBattlePlan(unittest.TestCase):
                 hero.battle_loop(flow_name="empty", max_duration=0.5)
 
     def test_builtin_advance_is_not_ignored_by_default(self):
-        from AutoScriptor.battle_character import hero as hero_mod
+        from ZmxyOL.battle_character import hero as hero_mod
 
         class FakeBg:
             def __init__(self):
@@ -581,7 +599,7 @@ class TestBattlePlan(unittest.TestCase):
         self.assertEqual(hero.travel_count, 1)
 
     def test_builtin_advance_grace_can_still_be_opted_in(self):
-        from AutoScriptor.battle_character import hero as hero_mod
+        from ZmxyOL.battle_character import hero as hero_mod
 
         class FakeBg:
             def __init__(self):

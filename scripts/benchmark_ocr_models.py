@@ -20,14 +20,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from AutoScriptor.recognition.paddle_ocr_compat import (  # noqa: E402
+from AutoScriptor.recognition.ocr_engine import (  # noqa: E402
     OCR_MODEL_PROFILES,
-    CompatiblePaddleOCR,
+    PPOCRv6Engine,
     get_paddleocr_version,
 )
 
 
-DEFAULT_MODEL_PROFILES = ("PP-OCRv4", "PP-OCRv6_small")
+DEFAULT_MODEL_PROFILES = ("PP-OCRv6_tiny", "PP-OCRv6_small")
 
 
 def _parse_roi(value: str) -> tuple[int, int, int, int]:
@@ -108,9 +108,8 @@ def _run_model_worker(arguments: argparse.Namespace) -> None:
     ]
 
     initialization_started_at = time.perf_counter()
-    engine = CompatiblePaddleOCR(
+    engine = PPOCRv6Engine(
         model_profile_name=model_profile_name,
-        language="ch",
         use_gpu=arguments.use_gpu,
     )
     initialization_seconds = time.perf_counter() - initialization_started_at
@@ -223,7 +222,7 @@ def _run_comparison(arguments: argparse.Namespace) -> None:
 
 def _build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Compare PP-OCRv4 and PP-OCRv6 with isolated model processes.",
+        description="Compare PP-OCRv6 model profiles with isolated model processes.",
     )
     parser.add_argument("images", nargs="+", type=Path, help="Screenshot image paths")
     parser.add_argument(
