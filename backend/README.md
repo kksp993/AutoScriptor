@@ -1,6 +1,6 @@
 # backend — 后端
 
-HTTP API、WebSocket、进程启动、安全、更新与通知。由原来的 `services/` 迁入。
+HTTP API、WebSocket、进程启动、安全、更新与通知。
 
 调度、排序、重试、执行互斥这些属于 `orchestrator/`；本层只调用它的接口。
 

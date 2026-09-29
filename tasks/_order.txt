@@ -3,5 +3,9 @@ weekly_task
 event_task
 normal_task
 battle_task_params
-custom_task_loader
 time
+task_params
+task_register
+task_registry
+task_state
+translations

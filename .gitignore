@@ -26,10 +26,12 @@ nuitka-crash-report.xml
 **/.venv
 **/.env
 **/.env.local
-# Cursor：默认忽略插件/缓存，但跟踪协作用 rules（*.mdc）
+# Cursor：默认忽略插件/缓存，但跟踪协作用 rules（*.mdc）与项目 skill
 /.cursor/*
 !/.cursor/rules/
 !/.cursor/rules/**
+!/.cursor/skills/
+!/.cursor/skills/**
 # Agent 本机目录：共享规则放 docs/agents/，不要提交工具私有 skill/cache 目录
 /.codex/
 /.claude/
@@ -68,5 +70,3 @@ webapp/buildResources/icon.ico
 /.autoscriptor/
 docs/*.json
 packaging_dllhost/
-tools/autoscriptor_cli.py
-tools/README.md

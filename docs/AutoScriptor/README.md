@@ -31,6 +31,8 @@
 | OpenAI 多智能体示例 | [reference/openai-multi-agents.md](reference/openai-multi-agents.md) |
 | 第三方资料 | [3rdparties/MumuAdaptor_README.md](3rdparties/MumuAdaptor_README.md) |
 
+在线截图/OCR 检查的入口与证据规范见 [docs/agents/online-screenshot-test.md](../agents/online-screenshot-test.md) 和 `.cursor/skills/autoscriptor-live-check/SKILL.md`。
+
 ## 维护规则
 
 - 行为、生命周期、API、状态语义或源码启动方式变化时，同步更新本索引里的对应文档。

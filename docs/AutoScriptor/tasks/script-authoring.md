@@ -92,23 +92,27 @@ WebUI 的“任务列表”使用全局 `task_ordering` 覆盖层保存用户拖
 
 新增参数类型只要加一个 `ParamSpec` 子类，注册、表单、执行三处自动一致。需要按任务裁剪选项的枚举（例如只对部分任务适用的战斗流程），由拥有该概念的模块用 `set_enum_option_filter()` 登记规则。
 
-默认值会写入 `params`，执行前由 `TaskManager._resolve_params()` 恢复：
+各类默认值在 JSON 里的存法与恢复方式：
 
-- 普通类型：直接保存 JSON 值。
-- `enum.Enum`：JSON 存枚举 `.name`，执行前恢复为枚举对象。
-- `list[Enum]` / `tuple[Enum]`：保存 name 列表。
-- `TableParam`：保存 dict-of-dicts，并通过 `param_meta` 恢复列类型。
+| 参数类型 | `params` 里的形态 | 执行时 |
+|----------|------------------|--------|
+| 普通值 | 原样 JSON | 原样传入 |
+| `enum.Enum` | 枚举 `.name` | 恢复为枚举对象 |
+| `list[Enum]` / `tuple[Enum]` | `.name` 列表 | 恢复为枚举对象列表 |
+| `TableParam` | dict-of-dicts | 重建 `TableParam`，并按列恢复枚举 |
 
-任务升级为 `TableParam` 增加默认行或列时，注册阶段会逐行补齐新默认值，同时保留已有用户值，避免旧账号看不到新配置项。
+表格参数在注册阶段逐行合并新默认值：新增的默认行、列会补齐，用户改过的格子保留，避免旧账号看不到新配置项。
 
 ```python
 import enum
-from AutoScriptor.utils.table_param import TableParam
+from ZmxyOL.battle.table_param import TableParam
+
 
 class Difficulty(str, enum.Enum):
     不打 = "不打"
     普通 = "普通"
     困难 = "困难"
+
 
 @register_task
 def task(
@@ -120,7 +124,6 @@ def task(
     for level, row in plan.items():
         ...
 ```
-
 WebUI 保存任务时会剥离运行时字段，只保存用户配置。活动任务不会因为位于 `活动任务/` 目录外的额外框架字段而默认每日调度；需要窗口、星期或 offset 时，在脚本的 `@register_task(...)` 中显式声明。
 
 ## Sleep 与取消
@@ -162,7 +165,7 @@ progress = get_task_status("progress")
 3. retry 耗尽后仍未完成：自动标记 `human_takeover_error`，WebUI 显示红色进度。
 4. `next_exec_time` 到期后会自动再试，成功后清除 `progress` 和 `human_takeover*`。
 
-需要清理状态时从 `AutoScriptor.utils.task_state` 导入 `clear_task_status`。
+需要清理状态时从 `tasks.task_state` 导入 `clear_task_status`。
 
 ## 错误语义
 
