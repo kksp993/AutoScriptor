@@ -30,8 +30,8 @@ from tasks.task_state import (
     progress_label,
     set_current_task_path,
 )
-from AutoScriptor.utils.paths import get_logs_root
 from AutoScriptor.core.runtime_context import runtime_ctx
+from AutoScriptor.logging.tracer import set_run_capture
 from AutoScriptor.logging.task_video_recorder import new_task_video_recorder
 from orchestrator.model import (
     CATEGORY_NEXT_DATE,
@@ -122,7 +122,6 @@ class TaskManager:
         if self._cancel_event.is_set():
             logger.info("⏹ 检测到终止请求，跳过本批任务")
             return 0, 0
-        self._clean_debug_dir()
         success = failed = 0
         for task in tasks:
             if self._cancel_event.is_set():
@@ -208,8 +207,11 @@ class TaskManager:
                 assert runtime_ctx.mixctrl is not None, "mixctrl 未初始化，请先调用 runtime_ctx.init()"
                 runtime_ctx.mixctrl.release_all_keys()
                 clear_task_status("progress", task_path=task, save=False)
-                record_video = cfg["app"].get("debug_mode") or is_task_debug_mode(task)
-                task_video = new_task_video_recorder(task, bool(record_video))
+                debug_run = bool(cfg["app"].get("debug_mode") or is_task_debug_mode(task))
+                # tracer 的运行期抓帧和任务录屏共用同一个开关：两者都是 debug
+                # 排障材料，只在这里决定，控制层无权猜。
+                set_run_capture(debug_run)
+                task_video = new_task_video_recorder(task, debug_run)
                 fn(**kwargs)
                 if self._task_progress_incomplete(task):
                     label = self._task_progress_label(task)
@@ -280,6 +282,9 @@ class TaskManager:
             finally:
                 if task_video:
                     task_video.stop(keep=False)
+                # 任务之间没有人在操作设备，停止抓帧；否则任务间隙的空闲
+                # 截图会继续填目录，也会把状态留给下一次调用。
+                set_run_capture(False)
                 self._set_current_task_path_for_runtime(None)
                 set_current_task_path(None)
                 set_current_task(None)
@@ -490,18 +495,6 @@ class TaskManager:
     def _archive_error(self, task: str, exc: Exception, video_path=None):
         from AutoScriptor.logging.log_archiver import archive_error
         try:
-            archive_error(task, exc, mixctrl=runtime_ctx.mixctrl, include_click_screenshots=True, video_path=video_path)
+            archive_error(task, exc, mixctrl=runtime_ctx.mixctrl, video_path=video_path)
         except Exception as e:
             logger.error(f"归档错误失败: {e}")
-
-    @staticmethod
-    def _clean_debug_dir():
-        d = get_logs_root() / "debug_screenshot"
-        if not d.is_dir():
-            return
-        for fp in d.iterdir():
-            if fp.is_file():
-                try:
-                    fp.unlink()
-                except OSError as e:
-                    logger.warning("清理 debug 截图失败: %s -> %s", fp, e)

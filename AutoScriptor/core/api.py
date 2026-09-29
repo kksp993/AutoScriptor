@@ -1,7 +1,7 @@
 import os
 import threading
 import time
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Iterable, Literal
 from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
 from AutoScriptor.core.control import MixControl, ControlModeProxy
 from AutoScriptor.core.background import bg
@@ -951,6 +951,262 @@ def input(text: str, target_field: Target|tuple[Target, ...] = None):
 def key_event(key_code: int):
     logger.info("Key event: {}".format(next((attr for attr in dir(AndroidKey) if attr.startswith("KEYCODE_") and getattr(AndroidKey, attr) == key_code), key_code)))
     mixctrl.key_event(key_code)
+
+def screenshot_region(box):
+    """只转换给定屏幕区域的快速截图（RGB、正向）。
+
+    ``box`` 为 ``(x, y, width, height)`` 或 ``Box``，使用与点击一致的屏幕
+    坐标（左上原点）。只对区域做颜色转换，适合「条子」类实时检测循环；
+    需要全帧时仍用 ``mixctrl.screenshot()``。
+    """
+    if isinstance(box, (tuple, list)):
+        box = Box(*box)
+    return mixctrl.screenshot_region(box)
+
+def finger_down(finger_id: int, x: float, y: float):
+    """按下 1..10 号手指（Nemu IPC 原生的多点触控通道）。"""
+    mixctrl.finger_down(int(finger_id), int(x), int(y))
+
+def finger_move(finger_id: int, x: float, y: float):
+    """移动已按住的手指（IPC 没有独立 move 事件：重复 down 即移动）。"""
+    mixctrl.finger_move(int(finger_id), int(x), int(y))
+
+def finger_up(finger_id: int):
+    """抬起 1..10 号手指。"""
+    mixctrl.finger_up(int(finger_id))
+
+def multi_finger_down(contacts):
+    """同时按下多根手指。
+
+    ``contacts`` 为 ``[(finger_id, x, y), ...]``；与逐个 ``click`` 不同，
+    每根手指的按下之间没有中间 up 事件，可表达双指同按/捏合起手。
+    """
+    normalized = [(int(finger_id), int(x), int(y)) for finger_id, x, y in contacts]
+    mixctrl.multi_finger_down(normalized)
+
+def release_all_fingers():
+    """兜底释放 1..10 号手指（不会抛错）；实时步骤的 ``finally`` 里调用。"""
+    mixctrl.release_all_fingers()
+
+
+REPLAY_MIN_FINGER_ID = 1
+REPLAY_MAX_FINGER_ID = 10
+_REPLAY_TOUCH_OPS = ("down", "move", "up")
+_REPLAY_COMMAND_OPS = ("command", "vcontrol")
+# 比这更短的等待直接 sleep；更长的等待分片，以便及时响应 WebUI 停止。
+_REPLAY_MIN_SLEEP_S = 0.002
+_REPLAY_SLEEP_SLICE_S = 0.005
+# 落后超过该值说明卡过，重新锚定时序而不是疯狂追赶。
+_REPLAY_REANCHOR_LAG_S = 0.5
+
+
+def _normalize_replay_event(event):
+    """把一条回放事件归一为 ``(t_ms, op, finger_id, nx, ny, payload)``。
+
+    同时接受三种来源，让生成的任务常量与工具侧事件流共用同一个回放器：
+    紧凑五元组 ``(t_ms, op, finger, nx, ny)``、dict（JSON 导出）、以及带同名
+    字段的对象（``scripts/mmor_to_fast_replay.py`` 的 ``Event``，其归一化坐标
+    字段名为 ``x``/``y``）。``up`` 事件没有坐标，缺省按 0 处理。
+    """
+    if isinstance(event, dict):
+        t_ms = event.get("t_ms", 0)
+        op = event.get("op")
+        finger_id = event.get("finger")
+        nx = event.get("nx", event.get("x"))
+        ny = event.get("ny", event.get("y"))
+        payload = event
+    elif hasattr(event, "op"):
+        t_ms = getattr(event, "t_ms", 0)
+        op = event.op
+        finger_id = getattr(event, "finger", None)
+        nx = getattr(event, "nx", None)
+        ny = getattr(event, "ny", None)
+        if nx is None:
+            nx = getattr(event, "x", None)
+        if ny is None:
+            ny = getattr(event, "y", None)
+        payload = {
+            "cmd": getattr(event, "cmd", None),
+            "params": getattr(event, "params", {}),
+        }
+    else:
+        fields = tuple(event)
+        if len(fields) < 5:
+            raise ValueError(
+                f"replay 事件需要 (t_ms, op, finger, nx, ny) 五个字段，收到 {event!r}"
+            )
+        t_ms, op, finger_id, nx, ny = fields[:5]
+        payload = {}
+    return (
+        int(t_ms),
+        str(op),
+        finger_id,
+        0.0 if nx is None else float(nx),
+        0.0 if ny is None else float(ny),
+        payload,
+    )
+
+
+def _validate_replay_finger(finger_id, op: str, index: int) -> int:
+    """校验手指编号落在 IPC 支持范围内。
+
+    录制文件的槽位号与 IPC 的 ``finger_id`` 不是同一编号空间：``.mmor`` 实测
+    样本出现槽位 19/20，而最大并发只有 3 指。所以越界必须显式报错，由调用方
+    先做槽位→手指重映射；夹取或取模会静默把手势落到错误手指上。
+    """
+    if finger_id is None:
+        raise ValueError(f"replay 事件 #{index} ({op}) 缺少手指编号")
+    finger_id = int(finger_id)
+    if not (REPLAY_MIN_FINGER_ID <= finger_id <= REPLAY_MAX_FINGER_ID):
+        raise ValueError(
+            f"replay 事件 #{index} 的手指编号 {finger_id} 超出 IPC 支持范围 "
+            f"[{REPLAY_MIN_FINGER_ID}, {REPLAY_MAX_FINGER_ID}]；录制槽位号需先"
+            f"重映射为手指编号（见 mmor_to_fast_replay.py 的 FingerPool）"
+        )
+    return finger_id
+
+
+def _resolve_replay_frame(frame_size, recording_size) -> tuple[int, int]:
+    """确定归一化坐标的目标分辨率，并拒绝跨方向缩放。"""
+    if frame_size is None:
+        frame_size = getFrameSize()
+    frame_width, frame_height = int(frame_size[0]), int(frame_size[1])
+    if frame_width <= 0 or frame_height <= 0:
+        raise ValueError(f"replay frame_size 非法: {frame_size!r}")
+    if recording_size is not None:
+        recording_width, recording_height = int(recording_size[0]), int(recording_size[1])
+        if (recording_width > recording_height) != (frame_width > frame_height):
+            raise ValueError(
+                f"录制分辨率 {recording_width}x{recording_height} 与运行分辨率 "
+                f"{frame_width}x{frame_height} 方向不一致；按轴独立缩放会得到错误"
+                f"落点，请在与运行方向一致的分辨率下重新录制"
+            )
+    return frame_width, frame_height
+
+
+def replay(
+    events: Iterable,
+    *,
+    speed: float = 1.0,
+    frame_size: tuple[int, int] | None = None,
+    recording_size: tuple[int, int] | None = None,
+    start_ms: int = 0,
+    end_ms: int | None = None,
+    on_command: Callable[[dict], None] | None = None,
+    cancel_check: Callable[[], None] | None = None,
+) -> int:
+    """按录制时序回放一条多点触控事件流，返回已执行的触摸事件数。
+
+    事件按 ``t_ms`` 升序排列，每条为 ``(t_ms, op, finger_id, nx, ny)``：
+    ``op`` 取 ``down`` / ``move`` / ``up``，``finger_id`` 为 1~10，``nx``/``ny``
+    是 0~1 归一化坐标（``up`` 时忽略）。**同一 ``t_ms`` 的多条事件即"多指同时"**，
+    因此一条扁平事件流就同时表达了多指与时序，不需要两套概念。
+
+    计时对齐绝对时间锚点而非逐条累加 sleep，长时间回放不会漂移；落后超过
+    0.5s 时重新锚定并告警。IPC 交付本身约 0.2ms，所以事件间的时间差就是你
+    给的时间差，不要为相邻事件再叠加人为 sleep 凑时序。
+
+    ``.mmor`` 的解析不属于核心：用 ``scripts/mmor_to_fast_replay.py`` 把录制
+    转成事件流（含槽位→手指重映射），本函数只负责回放。
+
+    Args:
+        events: 事件序列；元素可为五元组、dict 或带同名字段的对象。
+        speed: 倍速，>1 加速（等待与时序按比例压缩）。
+        frame_size: 归一化坐标的目标分辨率，默认取 ``getFrameSize()``。
+        recording_size: 录制分辨率 ``(宽, 高)``；与 ``frame_size`` 方向不一致时抛错。
+        start_ms: 只回放该时刻及之后的事件，用于分段调试。
+        end_ms: 只回放该时刻及之前的事件；``None`` 表示到结尾。
+        on_command: 处理 ``command`` / ``vcontrol`` 事件的回调；不给则跳过并记录一次。
+        cancel_check: 取消检查函数，默认 ``check_cancel_raise``。
+
+    Returns:
+        int: 已执行的触摸事件数。
+
+    Examples:
+        >>> EVENTS = [
+        ...     (0,   "down", 1, 0.50, 0.50),
+        ...     (0,   "down", 2, 0.70, 0.50),   # 同一 t_ms = 双指同按
+        ...     (120, "up",   1, 0.0,  0.0),
+        ...     (120, "up",   2, 0.0,  0.0),
+        ... ]
+        >>> replay(EVENTS, speed=1.5)
+        4
+    """
+    control = _require_mixctrl()
+    check = cancel_check or check_cancel_raise
+    if speed <= 0:
+        raise ValueError(f"replay speed 必须大于 0，收到 {speed!r}")
+    frame_width, frame_height = _resolve_replay_frame(frame_size, recording_size)
+    start_ms = int(start_ms)
+
+    anchor: float | None = None
+    pressed_fingers: set[int] = set()
+    executed_count = 0
+    skipped_command_count = 0
+    try:
+        for index, raw_event in enumerate(events):
+            t_ms, op, raw_finger_id, nx, ny, payload = _normalize_replay_event(raw_event)
+            if t_ms < start_ms:
+                continue
+            if end_ms is not None and t_ms > int(end_ms):
+                break
+            # 每个事件开头检查一次取消，这是唯一的检查点：事件本身足够密集，
+            # 不需要额外的循环前检查（多一次会让取消时机相对事件流前移一位）。
+            check()
+
+            if op in _REPLAY_COMMAND_OPS:
+                if on_command is not None:
+                    on_command(payload)
+                elif skipped_command_count == 0:
+                    logger.info("replay 跳过录制内嵌命令事件（未提供 on_command）")
+                skipped_command_count += 1
+                continue
+            if op not in _REPLAY_TOUCH_OPS:
+                raise ValueError(f"replay 事件 #{index} 的 op 非法: {op!r}")
+
+            finger_id = _validate_replay_finger(raw_finger_id, op, index)
+
+            # 绝对时间锚点：第一条事件立即执行，其余按录制时刻对齐。
+            offset_s = (t_ms - start_ms) / 1000.0 / speed
+            if anchor is None:
+                anchor = time.perf_counter() - offset_s
+            remaining_s = anchor + offset_s - time.perf_counter()
+            if remaining_s > _REPLAY_MIN_SLEEP_S:
+                sleep_with_cancel(remaining_s, check, chunk=_REPLAY_SLEEP_SLICE_S)
+            elif remaining_s < -_REPLAY_REANCHOR_LAG_S:
+                logger.warning(
+                    f"replay 落后 {-remaining_s * 1000:.0f}ms，重新锚定时序（事件 #{index}）"
+                )
+                anchor = time.perf_counter() - offset_s
+
+            if op == "up":
+                control.finger_up(finger_id)
+                pressed_fingers.discard(finger_id)
+            else:
+                point_x = min(max(0, int(round(nx * frame_width))), frame_width - 1)
+                point_y = min(max(0, int(round(ny * frame_height))), frame_height - 1)
+                if op == "down":
+                    control.finger_down(finger_id, point_x, point_y)
+                else:
+                    control.finger_move(finger_id, point_x, point_y)
+                pressed_fingers.add(finger_id)
+            executed_count += 1
+    finally:
+        # 只释放本次回放按住的手指：任务可能在回放之外异步按住别的手指，
+        # release_all_fingers() 会误伤。清理失败不得掩盖原始异常。
+        for finger_id in sorted(pressed_fingers):
+            try:
+                control.finger_up(finger_id)
+            except Exception as cleanup_error:
+                logger.warning(f"replay 清理手指 {finger_id} 失败: {cleanup_error}")
+
+    logger.info(
+        f"replay 完成: 执行 {executed_count} 个触摸事件"
+        + (f"，跳过 {skipped_command_count} 个命令事件" if skipped_command_count else "")
+        + f"，倍速 {speed}"
+    )
+    return executed_count
+
 
 def extract_info(
     target,

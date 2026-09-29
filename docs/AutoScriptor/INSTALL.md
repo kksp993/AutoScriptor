@@ -15,7 +15,7 @@ scripts\update.bat     快进更新当前 Git 分支
 - PowerShell
 - MuMu 或 MuMu12
 
-安装脚本会按需准备 Git、Node.js LTS、uv、Python 3.10.15 `.venv`、Python 依赖和 `webapp\node_modules`。
+安装脚本会按需准备 Git、Node.js LTS、uv、Python 3.10.15 `.venv`、Python 依赖和 `frontend\electron\node_modules`。
 
 ## 获取源码
 
@@ -82,7 +82,7 @@ git branch --show-current
 5. 准备 Electron：
 
    ```powershell
-   cd webapp
+   cd frontend\electron
    npm install
    cd ..
    ```
@@ -119,7 +119,7 @@ HTTP 地址和随机令牌自动生成，接口及登录页只监听本机。安
 机器人窗口需保持开启，不注册开机自启。第三方机器人有账号风控风险，建议使用专用小号。
 更多安装、重装、配置交接与错误处理见 [QQ 通知](operations/qq-notifications.md)。
 
-`npm start` 依赖 `webapp\node_modules`。如果直接进入 `webapp` 启动，必须先运行 `.\scripts\install.bat electron` 或在 `webapp` 手动执行 `npm install`。
+`npm start` 依赖 `frontend\electron\node_modules`。如果直接进入 `frontend\electron` 启动，必须先运行 `.\scripts\install.bat electron` 或在 `frontend\electron` 手动执行 `npm install`。
 
 ## 运行
 
@@ -133,8 +133,9 @@ HTTP 地址和随机令牌自动生成，接口及登录页只监听本机。安
 
 ```powershell
 .\start.bat
-.\local_start.bat
 ```
+
+`start.bat` 等价于 `scripts\run.bat electron`，`webui.bat` 等价于 `scripts\run.bat webui`。
 
 源码 WebUI：
 
@@ -155,7 +156,7 @@ http://127.0.0.1:5000
 .\.venv\Scripts\python.exe -X utf8 backend\webui\gui.py
 ```
 
-运行脚本不会安装依赖。缺 `.venv` 时运行 `.\scripts\install.bat python`，缺 `webapp\node_modules` 时运行 `.\scripts\install.bat electron`。
+运行脚本不会安装依赖。缺 `.venv` 时运行 `.\scripts\install.bat python`，缺 `frontend\electron\node_modules` 时运行 `.\scripts\install.bat electron`。
 
 ## OCR 与 Paddle 运行时
 

@@ -18,11 +18,14 @@ $CommonRequirements = Join-Path $Root "requirements.txt"
 $CpuRequirements = Join-Path $Root "requirements-cpu.txt"
 $GpuRequirements = Join-Path $Root "requirements-gpu.txt"
 $RuntimeConfig = Join-Path $Root "data\config.json"
-$WebappDir = Join-Path $Root "webapp"
+$ElectronDir = Join-Path $Root "frontend\electron"
 $PythonVersion = "3.10.15"
 $NodeMinimumVersion = [version]"22.12.0"
 $SetuptoolsUpperBound = "81"
 $SetuptoolsRequirement = "setuptools<$SetuptoolsUpperBound"
+# Set by Install-PythonDeps so the completion line reports the variant that was
+# actually installed, not the "auto" default the user typed.
+$ResolvedPaddleVariant = $null
 
 function Refresh-ProcessPath {
     $pathValues = @(
@@ -175,13 +178,19 @@ function Test-VenvPython {
         return $false
     }
 
-    $version = & $VenvPy -c "import sys; print('.'.join(map(str, sys.version_info[:3])))"
-    return $LASTEXITCODE -eq 0 -and $version.Trim() -eq $PythonVersion
+    # A venv can exist with a broken interpreter (moved folder, missing DLLs).
+    # Probing it must report "not usable" instead of aborting the installer.
+    try {
+        $version = & $VenvPy -c "import sys; print('.'.join(map(str, sys.version_info[:3])))" 2>$null
+    } catch {
+        return $false
+    }
+    return $LASTEXITCODE -eq 0 -and "$version".Trim() -eq $PythonVersion
 }
 
 function Ensure-Venv {
-    $uv = Ensure-Uv
-
+    # Check the venv first: a usable one needs no uv at all, so requiring the
+    # toolchain before this check would fail an install that had nothing to do.
     if (Test-Path -LiteralPath $VenvDir -PathType Container) {
         if (Test-VenvPython) {
             Write-Host ".venv already uses Python $PythonVersion"
@@ -190,10 +199,12 @@ function Ensure-Venv {
         throw ".venv exists but is not Python $PythonVersion. Remove .venv and rerun scripts\install.bat python."
     }
 
-    $BootstrapScript = Join-Path $Root "scripts\bootstrap-python310.ps1"
-    & $BootstrapScript -Root $Root -PythonVersion $PythonVersion
+    $uv = Ensure-Uv
+
+    Write-Host "Ensuring uv-managed Python $PythonVersion is available ..."
+    & $uv python install $PythonVersion
     if ($LASTEXITCODE -ne 0) {
-        throw "Python $PythonVersion bootstrap failed with exit code $LASTEXITCODE"
+        throw "uv python install $PythonVersion failed with exit code $LASTEXITCODE"
     }
 
     Write-Host "Creating source virtual environment with uv venv --python $PythonVersion ..."
@@ -251,6 +262,7 @@ function Test-PythonRuntimeCompatibility {
 
 function Install-PythonDeps {
     $selectedPaddleVariant = Resolve-PaddleVariant
+    $script:ResolvedPaddleVariant = $selectedPaddleVariant
     $variantRequirements = if ($selectedPaddleVariant -eq "gpu") { $GpuRequirements } else { $CpuRequirements }
 
     foreach ($requirementsPath in @($CommonRequirements, $variantRequirements)) {
@@ -292,15 +304,15 @@ function Install-PythonDeps {
 }
 
 function Install-ElectronDeps {
-    if (-not (Test-Path -LiteralPath (Join-Path $WebappDir "package.json") -PathType Leaf)) {
-        throw "Missing Electron package.json: $WebappDir"
+    if (-not (Test-Path -LiteralPath (Join-Path $ElectronDir "package.json") -PathType Leaf)) {
+        throw "Missing Electron package.json: $ElectronDir"
     }
 
     Ensure-Node
     $npm = Resolve-CommandPath @("npm.cmd", "npm")
 
-    Write-Host "Installing Electron dependencies in webapp with npm install ..."
-    Push-Location $WebappDir
+    Write-Host "Installing Electron dependencies in frontend\electron with npm install ..."
+    Push-Location $ElectronDir
     try {
         & $npm install
         if ($LASTEXITCODE -ne 0) {
@@ -310,7 +322,7 @@ function Install-ElectronDeps {
         Pop-Location
     }
 
-    $electronPackage = Join-Path $WebappDir "node_modules\electron\package.json"
+    $electronPackage = Join-Path $ElectronDir "node_modules\electron\package.json"
     if (-not (Test-Path -LiteralPath $electronPackage -PathType Leaf)) {
         throw "Electron dependency is missing after npm install: $electronPackage"
     }
@@ -351,5 +363,6 @@ if ($Target -eq "qq" -or $WithQQ) {
     Install-QQBot
 }
 
-Write-Host "Install complete: target=$Target, paddle=$PaddleVariant"
+$paddleSummary = if ($null -ne $script:ResolvedPaddleVariant) { $script:ResolvedPaddleVariant } else { "not requested" }
+Write-Host "Install complete: target=$Target, paddle=$paddleSummary"
 exit 0

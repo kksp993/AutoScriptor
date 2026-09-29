@@ -14,14 +14,11 @@ process itself (login, log stream, favicons). Everything else lives in
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import webbrowser
 from http.cookies import CookieError, SimpleCookie
-from queue import Empty, Full, Queue
-from typing import Set
 
-from AutoScriptor.logging.logger import logger, _TaskFilter as _LogTaskFilter
+from AutoScriptor.logging.logger import logger
 
 from AutoScriptor.utils.app_config import cfg
 from backend.core.banner import _print_banner
@@ -31,6 +28,11 @@ from backend.webui.api_context import (
     persistence_error_message,
 )
 from backend.webui.api_response import api_error
+from backend.webui.log_stream import (
+    apply_log_level,
+    broadcast_loop,
+    ws_clients,
+)
 from orchestrator import orchestrator
 
 # FastAPI Form/UploadFile 运行时依赖。Starlette 优先使用 python-multipart
@@ -42,94 +44,11 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-# ── 日志队列 ──
+# ── 日志 ──
+# 文件与浏览器两个 sink、级别策略、广播循环都在 backend/webui/log_stream.py。
+# 这里只挂载 WebSocket 端点。
 
-# 仿星铁风格的 ANSI 彩色 Formatter，ansi_up 可正确渲染为彩色 HTML
-class _ColoredFormatter(logging.Formatter):
-    _LEVEL_COLORS = {
-        'DEBUG':    '\033[36m',    # cyan
-        'INFO':     '\033[32m',    # green
-        'WARNING':  '\033[33m',    # yellow
-        'ERROR':    '\033[31m',    # red
-        'CRITICAL': '\033[1;31m',  # bold red
-    }
-    _RESET = '\033[0m'
-    _DIM   = '\033[2m'
-
-    def format(self, record: logging.LogRecord) -> str:
-        color = self._LEVEL_COLORS.get(record.levelname, '')
-        time_str = self.formatTime(record, '%H:%M:%S')
-        # 网页日志区：级别列收紧（常见 DEBUG/INFO 约 4–5 字符，不拉满 8 格）
-        level_tag = f"{color}{record.levelname:<5}{self._RESET}"
-        msg = record.getMessage()
-        if record.exc_info:
-            msg += '\n' + self.formatException(record.exc_info)
-        task_prefix = getattr(record, 'task_prefix', '')
-        return f"{self._DIM}{time_str}{self._RESET} | {level_tag} | {task_prefix}{msg}"
-
-
-_colored_fmt = _ColoredFormatter()
-_plain_fmt    = logging.Formatter(
-    "%(asctime)s | %(levelname)-8s | %(module)s:%(lineno)d - %(task_prefix)s%(message)s",
-    datefmt="%H:%M:%S",
-)
-
-from AutoScriptor.utils.paths import get_app_root, get_logs_root
-webui_log_path = os.path.join(str(get_logs_root()), 'webui.log')
-file_handler = logging.FileHandler(webui_log_path, encoding='utf-8')
-file_handler.setLevel(logging.INFO)
-file_handler.setFormatter(_plain_fmt)
-file_handler.addFilter(_LogTaskFilter())
-logger.addHandler(file_handler)
-
-log_queue: Queue[str] = Queue(maxsize=10000)
-
-
-class QueueHandler(logging.Handler):
-    def __init__(self, q: Queue, level=logging.DEBUG):
-        super().__init__(level)
-        self.q = q
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            msg = self.format(record)
-        except Exception:
-            self.handleError(record)
-            return
-
-        try:
-            self.q.put_nowait(msg)
-        except Full:
-            try:
-                self.q.get_nowait()
-            except Empty:
-                pass
-            try:
-                self.q.put_nowait(msg)
-            except Full:
-                pass
-
-
-queue_handler = QueueHandler(log_queue, level=logging.DEBUG)
-queue_handler.setFormatter(_colored_fmt)
-queue_handler.addFilter(_LogTaskFilter())
-logger.addHandler(queue_handler)
-
-
-def _apply_webui_log_level_from_config():
-    """按 config deploy.log_level 限制推送到 WebUI 的日志级别（与模板默认 info 一致）。"""
-    raw = (cfg._config.get("deploy") or {}).get("log_level", "debug")
-    if isinstance(raw, str):
-        name = raw.strip().upper()
-    else:
-        name = "INFO"
-    level = getattr(logging, name, None)
-    if not isinstance(level, int):
-        level = logging.INFO
-    queue_handler.setLevel(level)
-
-
-_apply_webui_log_level_from_config()
+from AutoScriptor.utils.paths import get_app_root
 
 # ── 全局状态 ──
 
@@ -154,7 +73,7 @@ from backend.webui.security import (
 
 VENDOR_DIR = str(get_app_root() / "backend" / "webui" / "vendor")
 STATIC_DIR = str(get_app_root() / "backend" / "webui" / "static")
-WEBAPP_ICON_PATH = os.path.join(str(get_app_root()), "webapp", "icon.png")
+ELECTRON_ICON_PATH = str(get_app_root() / "frontend" / "electron" / "icon.png")
 
 
 # ── 辅助函数 ──
@@ -162,7 +81,7 @@ WEBAPP_ICON_PATH = os.path.join(str(get_app_root()), "webapp", "icon.png")
 
 orchestrator.configure_lifecycle(
     mark_config_changed=mark_config_changed,
-    apply_log_level=_apply_webui_log_level_from_config,
+    apply_log_level=apply_log_level,
 )
 
 # ── FastAPI 应用 ──
@@ -344,11 +263,6 @@ app.mount("/vendor", StaticFiles(directory=VENDOR_DIR), name="vendor")
 app.mount("/fonts", StaticFiles(directory=os.path.join(VENDOR_DIR, 'fonts')), name="fonts")
 
 
-# ── WebSocket 日志广播 ──
-
-ws_clients: Set[WebSocket] = set()
-
-
 @app.websocket("/ws/logs")
 async def websocket_logs(websocket: WebSocket):
     password = cfg._config.get("deploy", {}).get("password")
@@ -369,34 +283,13 @@ async def websocket_logs(websocket: WebSocket):
         ws_clients.discard(websocket)
 
 
-async def _log_broadcaster():
-    """后台协程：从线程安全的日志队列取数据，广播给所有 WebSocket 客户端。"""
-    while True:
-        batch: list[str] = []
-        while True:
-            try:
-                batch.append(log_queue.get_nowait())
-            except Empty:
-                break
-        if batch:
-            payload = json.dumps({"data": "\n".join(batch)})
-            dead: set[WebSocket] = set()
-            for ws in ws_clients.copy():
-                try:
-                    await ws.send_text(payload)
-                except Exception:
-                    dead.add(ws)
-            ws_clients.difference_update(dead)
-        await asyncio.sleep(0.5)
-
-
 _init_done = False
 _init_error = ""
 
 
 @app.on_event("startup")
 async def _on_startup():
-    asyncio.create_task(_log_broadcaster())
+    asyncio.create_task(broadcast_loop())
     asyncio.create_task(_deferred_heavy_init())
 
 
@@ -456,15 +349,15 @@ async def favicon():
     path = os.path.join(STATIC_DIR, 'favicon.ico')
     if os.path.exists(path):
         return FileResponse(path)
-    if os.path.exists(WEBAPP_ICON_PATH):
-        return FileResponse(WEBAPP_ICON_PATH, media_type="image/png")
+    if os.path.exists(ELECTRON_ICON_PATH):
+        return FileResponse(ELECTRON_ICON_PATH, media_type="image/png")
     return JSONResponse(status_code=404, content={})
 
 
 @app.get("/favicon.png")
 async def favicon_png():
-    if os.path.exists(WEBAPP_ICON_PATH):
-        return FileResponse(WEBAPP_ICON_PATH, media_type="image/png")
+    if os.path.exists(ELECTRON_ICON_PATH):
+        return FileResponse(ELECTRON_ICON_PATH, media_type="image/png")
     return JSONResponse(status_code=404, content={})
 
 
@@ -510,7 +403,7 @@ def run_webui(restart_event=None):
     global _server
     import uvicorn
 
-    _apply_webui_log_level_from_config()
+    apply_log_level()
     _print_banner()
 
     # 仅传递重启事件；更新检查改为手动触发（点击「检查更新」）

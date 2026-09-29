@@ -1,0 +1,54 @@
+from ZmxyOL import *
+from AutoScriptor import *
+
+
+def buy(item):
+    item_box = locate(T(item), timeout=10)
+    if item_box is None:
+        raise RuntimeError(f"未找到物品: {item}，跳过购买")
+    tgt = T("购买", box=item_box + {"offset": (-20, 262), "resize": (180, 44)}, color="青色")
+    if ui_T(tgt, 2):
+        click(tgt)
+        swipe(B(472, 415), B(800, 415))
+        click(T("确定"))
+        sleep(4)
+
+
+@register_task(
+    description="处理冰窟商店每周兑换。",
+)
+def task():
+    switch_base("mumu")
+    ensure_in("幽冥冰窟")
+
+    click(T("奖励",box=Box(37,232,84,89)),offset=(0,-30), until=lambda:ui_T(T("领取奖励")))
+    click(T("领取奖励"))
+    sleep(1)
+    click(B(898,18,67,66),until=lambda:ui_F(T("领取奖励")))
+
+    click(T("商店"))
+    click(B(276,149,125,48))
+    buy("符印之匙")
+    swipe(B(640,600),B(640,300),duration_s=1,ensure_stable_after_swipe=False)
+    sleep(1)
+    buy("天陨星晶")
+    swipe(B(640,300),B(640,600),duration_s=1,ensure_stable_after_swipe=False)
+    sleep(1)
+    buy("精刻符")
+
+    click(B(395,149,130,48))
+    buy("随机初级灵晶礼包")
+    buy("下品仙玉")
+    buy("玉髓")
+    swipe(B(640,600),B(640,300),duration_s=1,ensure_stable_after_swipe=False)
+    swipe(B(640,600),B(640,300),duration_s=1,ensure_stable_after_swipe=False)
+    sleep(1)
+    buy("随机一级环境药剂")
+    buy("随机二级万灵药剂")
+    buy("随机三级环境药剂")
+
+    click(B(523,158,121,39))
+    buy("符印之匙")
+
+    sleep(1)
+    click(B(1200,30,30,30))

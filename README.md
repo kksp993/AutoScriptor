@@ -47,21 +47,21 @@ http://127.0.0.1:5000
 | 直接跑后端 | `.\.venv\Scripts\python.exe -X utf8 backend\webui\gui.py` |
 | 源码更新 | `.\scripts\update.bat` |
 
-安装脚本会按需准备 Git、Node.js LTS、uv、Python 3.10.15 `.venv`、`requirements.txt` 和 `webapp\node_modules`。直接进入 `webapp` 执行 `npm start` 前，必须先运行 `.\scripts\install.bat electron` 或手动 `npm install`。
+安装脚本会按需准备 Git、Node.js LTS、uv、Python 3.10.15 `.venv`、`requirements.txt` 和 `frontend\electron\node_modules`。直接进入 `frontend\electron` 执行 `npm start` 前，必须先运行 `.\scripts\install.bat electron` 或手动 `npm install`。
 
 ## 目录
 
 ```text
-AutoScriptor/          核心 API、识别、控制、路径、配置和日志
-ZmxyOL/                游戏任务、导航、战斗流程和任务注册
-backend/core/         调度器、任务管理、运行上下文、源码更新
-  backend/webui/        FastAPI 后端、API 路由、静态 WebUI
-  webapp/                源码 Electron 壳
-  examples/              可选示例，不参与源码主运行链
-  data/                  可编辑运行数据
+AutoScriptor/          自动化核心：设备控制、识别/OCR、配置、路径、日志
+ZmxyOL/                游戏业务：账号、角色、导航、战斗流程
+tasks/                 任务脚本：@register_task 实现与任务运行时状态
+orchestrator/          编排：定时、排序、跨角色派发、执行闸门、重试
+backend/               后端：core/ 运维 + webui/ FastAPI 服务与静态页面
+frontend/electron/     Electron 桌面壳
+data/                  可编辑运行数据
 logs/                  日志、错误归档、截图和运行缓存
 scripts/               安装、运行、更新脚本
-docs/AutoScriptor/     当前源码主线文档
+docs/                  项目文档
 ```
 
 关键数据位置：
@@ -92,7 +92,7 @@ Copy-Item "data\config.template.json" "data\config.json"
 
 ## 常见问题
 
-Electron 找不到 `electron.exe`：运行 `.\scripts\install.bat electron`，它会在 `webapp` 执行 `npm install`。
+Electron 找不到 `electron.exe`：运行 `.\scripts\install.bat electron`，它会在 `frontend\electron` 执行 `npm install`。
 
 WebUI 无法访问：确认 `webui.bat`、`scripts\run.bat webui` 或 Electron 后端正在运行，端口 `5000` 未被占用，并查看 `logs/`。
 

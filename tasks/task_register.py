@@ -7,7 +7,7 @@ from AutoScriptor.utils.app_config import cfg
 from tasks.task_registry import task_registry
 from AutoScriptor.logging.logger import logger
 from ZmxyOL.battle.table_param import TableParam
-from tasks.translations import normalize_cfg_key, source_name_to_cn
+from tasks.translations import normalize_cfg_key
 from tasks.task_params import describe_signature, hydrate_params
 from ZmxyOL.nav.api import locate_region
 
@@ -100,6 +100,9 @@ def register_task(
       - cfg["tasks"]（用户配置，持久化到 JSON）：on、next_exec_time、params、next_exec_offset_hours 等
       - TaskRegistry（运行时数据，不持久化）：fn、order、param_meta、param_keys、beta、custom、doc_flow、description、debug_mode、deprecated
 
+    内置任务的 cfg 路径由源码路径推导：目录名逐段翻译（daily_task → 每日任务、
+    village → 村庄），文件名就是中文显示名，所以内置脚本不写 path_cn。
+
     支持以下可选参数（仅对指定任务生效）：
       - default_offset_hours (int): 任务执行后延迟 N 小时再调度
       - beta (bool): 为 True 时 WebUI 任务名旁显示 Beta 标记，说明区首行提示实验性任务
@@ -109,9 +112,10 @@ def register_task(
         若本轮只执行 debug 任务，也跳过 post_execution 收尾动作。也兼容 debug=True 短写。
       - deprecated (bool): 弃用任务。源码和注册元数据保留，但不写入 cfg、不出现在 WebUI 或调度列表。
         已经存在的旧配置叶子由加载末尾的 catalog.prune_stale_tasks() 统一清理。
-      - path_cn (str): **仅 custom_task 目录下脚本必填**。斜杠分隔的 cfg 任务路径（中文键），
-        custom_task 脚本最终都会归一到「自定义任务」根节点；省略首段时会自动补齐。
-        示例：path_cn="自定义任务/示例/hello_custom"
+      - path_cn (str): **仅 custom_task 目录下脚本必填**，因为自定义脚本的文件名不受项目命名约定约束。
+        斜杠分隔的 cfg 任务路径（中文键），custom_task 脚本最终都会归一到「自定义任务」根节点；
+        省略首段时会自动补齐。示例：path_cn="自定义任务/示例/hello_custom"
+        内置任务写了 path_cn 会覆盖推导结果，只在目录结构与树形不一致时才需要。
       - legacy_path_cn (str): 可选。任务改名/重组前使用的 cfg 路径。注册时会把该路径上已保存的
         用户配置（开关、参数、next_exec_time）搬到当前路径并删除旧节点，避免用户状态丢失；
         这是任务改名的唯一表述方式，加载流程里没有别的迁移通道。
@@ -207,7 +211,8 @@ def register_task(
         if not keys:
             raise ValueError(f"path_cn 解析后为空: {path_cn!r}")
     else:
-        keys = [source_name_to_cn(key) for key in keys]
+        # 目录名逐段翻成中文分类/分组，文件名本身已是中文显示名
+        keys = [normalize_cfg_key(key) for key in keys]
 
     if legacy_path_cn:
         legacy_keys = [normalize_cfg_key(p) for p in str(legacy_path_cn).split("/") if p.strip()]
@@ -297,7 +302,8 @@ def task_wrapper(func):
         from AutoScriptor.core.background import bg
         bg.clear(clear_signals=True)
 
-        # 每个任务开始前清空调试截图目录，确保截图都属于当前任务
+        # 每个任务开始前清空调试截图目录，这样归档里的 debug_screenshots/
+        # 只属于失败的那个任务，而不是整批任务混在一起。
         from AutoScriptor.logging.tracer import clear_debug_screenshots
         clear_debug_screenshots()
 

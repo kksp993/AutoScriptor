@@ -62,6 +62,8 @@ from AutoScriptor import *
 | ---------------| ----------------------------------------------------------------------------|
 | 目标　　　　　| `B`、`I`、`T`、`Box`、`Target`、`ui`　　　　　　　　　　　　　　　　　　　 |
 | 操作　　　　　| `click`、`click_all`、`swipe`、`swipe_precise`、`input`、`key_event`、`sleep` |
+| 实时检测/多指 | `screenshot_region`、`finger_down`、`finger_move`、`finger_up`、`multi_finger_down`、`release_all_fingers` |
+| 录制回放　　　| `replay`　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
 | 定位/区域识别 | `locate`、`match`、`ui_T`、`ui_F`、`wait_for_appear`、`wait_for_disappear` |
 | OCR/提取颜色　| `extract_info`、`get_colors`、`coloris`　　　　　　　　　　　　　　　　　　|
 | 后台　　　　　| `bg`、`BG_SIGNALS`　　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
@@ -149,6 +151,60 @@ sleep(1)
 - `click(..., until=callable)` 会循环点击直到条件满足或超时；未传 `interval` 时循环间隔默认 0.5 秒，普通 `click()` 默认仍为 0 秒。
 - `offset` / `resize` 和 `Box + {"offset": ..., "resize": ...}` 使用同一坐标语义。
 - `click()`、`locate()` 超时较长时会保存失败截图到调试截图目录。
+
+### 实时检测与多指输入
+
+`screenshot_region()` 只转换给定屏幕区域，适合「条子」类实时闭环；`finger_*` 系列是 Nemu IPC 原生的 1..10 号手指通道，可表达多指同按、按住不放与异步点按。
+
+```python
+region = screenshot_region(B(0, 560, 1280, 160))   # ROI 截图，RGB、正向
+finger_down(1, 640, 620)                           # 1 号指按住
+finger_move(1, 660, 620)                           # 同一编号再按即拖动
+finger_up(1)                                       # 松开
+multi_finger_down([(1, 400, 300), (2, 900, 300)])  # 两指同按
+release_all_fingers()                              # finally 里兜底释放
+```
+
+规则：
+
+- `screenshot_region()` 的 `box` 用 `(x, y, width, height)` 或 `Box`，与点击同一套屏幕坐标；需要全帧时仍用 `mixctrl.screenshot()`。
+- 编号手指是独立触点（`finger_id` 1..10）：`click()`/`swipe()` 等普通 API 走另一个触点，两者互不干扰，可以「一号指按住、另一路正常点击」。
+- 实时循环中只在手指状态需要翻转时发 `finger_down`/`finger_up`；不要在循环里反复 `click()`，那会产生多余的抬起事件。
+- 任何退出路径（包括取消、异常）都要在 `finally` 里调用 `release_all_fingers()`，否则手指可能保持按住状态。
+- 手指编号无需人工管理；同一功能内固定用 1 号指即可，避免与同屏其他并发操作抢占编号。
+
+### 录制回放（replay）
+
+`replay()` 按录制时序回放一条多点触控事件流，是 `finger_*` 原语之上的数据驱动入口。
+一条**扁平事件流**同时表达多指与时序：同一 `t_ms` 的多条事件即「多指同时」。
+
+```python
+EVENTS = [
+    (0,   "down", 1, 0.50, 0.25),   # (t_ms, op, finger_id, nx, ny)
+    (0,   "down", 2, 0.75, 0.25),   # 同一 t_ms = 双指同按
+    (60,  "move", 1, 0.50, 0.50),
+    (120, "up",   1, 0.0,  0.0),
+    (120, "up",   2, 0.0,  0.0),
+]
+executed = replay(EVENTS, speed=1.5, recording_size=(1080, 1920))
+```
+
+- `op` 取 `down`/`move`/`up`；`nx`/`ny` 是 0~1 归一化坐标，回放时按 `frame_size`
+  （默认 `getFrameSize()`）换算为像素并夹取到帧内。返回已执行的触摸事件数。
+- 事件元素可为五元组、dict（`t_ms`/`op`/`finger`/`nx`/`ny`，或 `x`/`y` 别名）
+  或带同名字段的对象，因此工具侧导出的 timeline JSON 可直接喂入。
+- `speed` 为倍速，`start_ms`/`end_ms` 截取时间窗，便于分段调试长录制。
+- `recording_size` 与 `frame_size` **方向不一致时抛错**，不做静默按轴缩放。
+- `finger_id` 必须在 1..10；越界**显式抛错**。录制文件的槽位号（实测样本出现
+  19/20）与 `finger_id` 不是同一编号空间，必须先在转换侧重映射，夹取或取模会
+  把手势静默落到错误手指上。
+- 计时对齐绝对时间锚点而非逐条累加 sleep，长录制不会漂移；落后超过 0.5s 会重新
+  锚定并告警。IPC 交付约 0.2ms，事件间时间差就是你给的时间差，不要再叠加人为 sleep。
+- 中止（取消/异常）时只释放**本次回放**按住的手指，不调用 `release_all_fingers()`，
+  以免误伤任务在回放之外异步按住的手指；清理失败不会掩盖原始异常。
+- 录制内嵌的 `command`/`vcontrol` 事件默认跳过，需要处理时传 `on_command`。
+- `.mmor` 解析不属于核心：用 `mumuinner/scripts/mmor_to_fast_replay.py` 把录制转成
+  事件流（含槽位重映射），核心只认识 `replay(EVENTS)`。
 
 ## OCR、数字与提取颜色
 

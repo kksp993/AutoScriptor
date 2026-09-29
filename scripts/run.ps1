@@ -12,7 +12,7 @@ $ScriptDir = $PSScriptRoot
 $Root = (Resolve-Path -Path (Join-Path $ScriptDir "..")).Path
 $VenvPy = Join-Path $Root ".venv\Scripts\python.exe"
 $GuiScript = Join-Path $Root "backend\webui\gui.py"
-$WebappDir = Join-Path $Root "webapp"
+$ElectronDir = Join-Path $Root "frontend\electron"
 
 function Require-File {
     param(
@@ -56,10 +56,10 @@ if (-not $npm) {
     throw "npm not found. Run scripts\install.bat electron first."
 }
 
-Require-File (Join-Path $WebappDir "node_modules\electron\package.json") "Missing Electron dependencies. Run scripts\install.bat electron first; it runs npm install in webapp."
+Require-File (Join-Path $ElectronDir "node_modules\electron\package.json") "Missing Electron dependencies. Run scripts\install.bat electron first; it runs npm install in frontend\electron."
 
 Write-Host "Starting AutoScriptor Electron from source..."
-Push-Location $WebappDir
+Push-Location $ElectronDir
 try {
     & $npm start
     exit $LASTEXITCODE

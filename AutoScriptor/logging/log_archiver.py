@@ -1,9 +1,7 @@
 """Task error archive helpers for source runtime."""
 from __future__ import annotations
 
-import shutil
 import sys
-import time
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -16,8 +14,6 @@ from AutoScriptor.utils.paths import get_error_archives_dir, get_logs_root
 
 
 _DEFAULT_CONTEXT_CONFIG = {
-    "mm_current_region": True,
-    "locate_region_result": True,
     "bg_active_callbacks": True,
     "bg_signals": True,
     "bg_event_history": True,
@@ -260,7 +256,13 @@ def _write_error_log(
             handle.write("".join(traceback.format_exception_only(type(exc), exc)))
 
 
-def _save_screenshots(archive_dir: Path, mixctrl) -> None:
+def _save_current_frame(archive_dir: Path, mixctrl) -> None:
+    """Save the frame at the moment the error surfaced.
+
+    Earlier pictures are not taken after the fact: by the time an archive is
+    written the screen has usually moved on, so what matters is the run history
+    collected by ``tracer`` while the task was live.
+    """
     if mixctrl is None:
         return
     try:
@@ -270,65 +272,46 @@ def _save_screenshots(archive_dir: Path, mixctrl) -> None:
     except Exception as exc:
         logger.warning("save current screenshot failed: %s", exc)
 
-    for idx in range(1, 4):
-        time.sleep(1)
-        try:
-            img = mixctrl.screenshot()
-            if img is not None:
-                _imwrite_unicode(str(archive_dir / f"timed_screenshot_{idx}.png"), img)
-        except Exception as exc:
-            logger.warning("save timed screenshot %s failed: %s", idx, exc)
 
+def _collect_run_screenshots(archive_dir: Path) -> None:
+    """Move the run's debug screenshots into the archive."""
+    from AutoScriptor.logging.tracer import (
+        RUN_SCREENSHOT_DIR_NAME,
+        take_debug_screenshots,
+    )
 
-def _copy_click_screenshots(archive_dir: Path) -> None:
-    click_dir = get_logs_root() / "debug_screenshot"
-    if not click_dir.is_dir():
-        return
-
-    destination = archive_dir / "click_screenshots"
-    destination.mkdir(parents=True, exist_ok=True)
-    copied = 0
-    for src in click_dir.iterdir():
-        if src.is_file() and src.suffix.lower() in {".png", ".jpg", ".jpeg"}:
-            try:
-                shutil.copy2(src, destination / src.name)
-                copied += 1
-            except OSError as exc:
-                logger.warning("copy click screenshot failed: %s (%s)", src, exc)
-
-    if copied == 0:
+    destination = archive_dir / RUN_SCREENSHOT_DIR_NAME
+    moved = take_debug_screenshots(destination)
+    if not moved:
         try:
             destination.rmdir()
         except OSError:
             pass
-        return
-
-    for src in click_dir.iterdir():
-        if src.is_file() and src.suffix.lower() in {".png", ".jpg", ".jpeg"}:
-            try:
-                src.unlink()
-            except OSError as exc:
-                logger.warning("clear click screenshot failed: %s (%s)", src, exc)
 
 
 def archive_error(
     error_name: str,
     exc: Exception,
     mixctrl=None,
-    include_click_screenshots: bool = True,
+    include_run_screenshots: bool = True,
     extra_context: Optional[Dict[str, Any]] = None,
     video_path: str | Path | None = None,
 ) -> Optional[str]:
-    """Archive a task error with recent logs, context and screenshots."""
+    """Archive a task error with recent logs, context, screenshots and video.
+
+    ``mixctrl`` is optional: without it the archive still carries logs, context
+    and the run screenshots collected by the tracer, only missing the frame
+    taken at the moment of the error.
+    """
     try:
         ts = datetime.now().strftime("%y%m%d_%H%M%S")
         archive_dir = get_error_archives_dir() / f"{ts}_{_safe_archive_name(error_name)}"
         archive_dir.mkdir(parents=True, exist_ok=True)
 
         _write_error_log(archive_dir, ts, error_name, exc, extra_context)
-        _save_screenshots(archive_dir, mixctrl)
-        if include_click_screenshots:
-            _copy_click_screenshots(archive_dir)
+        _save_current_frame(archive_dir, mixctrl)
+        if include_run_screenshots:
+            _collect_run_screenshots(archive_dir)
         if video_path:
             from AutoScriptor.logging.task_video_recorder import copy_video_to_archive
 

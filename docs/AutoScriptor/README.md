@@ -29,6 +29,8 @@
 | QQ 角色结果通知 | [operations/qq-notifications.md](operations/qq-notifications.md) |
 | 另一台电脑独立部署 QQ 机器人 | [独立安装、启动与跨机配置](../../scripts/qq-robot-standalone/README.md) |
 | OpenAI 多智能体示例 | [reference/openai-multi-agents.md](reference/openai-multi-agents.md) |
+| Nemu IPC 快速路径与实时闭环 | [reference/fast-path.md](reference/fast-path.md) |
+| MuMu 实时化调研（2026-09-29） | [reference/mumu-realtime-control-research.md](reference/mumu-realtime-control-research.md) |
 | 第三方资料 | [3rdparties/MumuAdaptor_README.md](3rdparties/MumuAdaptor_README.md) |
 
 在线截图/OCR 检查的入口与证据规范见 [docs/agents/online-screenshot-test.md](../agents/online-screenshot-test.md) 和 `.cursor/skills/autoscriptor-live-check/SKILL.md`。

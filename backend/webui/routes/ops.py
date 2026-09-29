@@ -9,13 +9,20 @@ import json
 from fastapi import APIRouter, File, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 
+from AutoScriptor.control.MumuAdaptor.device_facade import get_device_facade
 from AutoScriptor.logging.logger import logger
 from AutoScriptor.utils.app_config import cfg
+from AutoScriptor.utils.mumu_discovery import discover_mumu_setup
+from backend.webui.api_context import guard_runtime_idle, public_config
 from backend.webui.api_response import api_error, api_ok
-from backend.webui.api_context import (
-    guard_runtime_idle,
-    public_config,
+from backend.webui.error_archives import (
+    delete_archives,
+    get_archive_detail,
+    import_zip_bytes,
+    list_error_archives,
+    read_archive_file,
 )
+from backend.webui.security import hash_deploy_password, verify_deploy_password
 from orchestrator import orchestrator
 
 
@@ -104,16 +111,16 @@ async def deploy_save_api(request: Request):
                 current_pwd = incoming.pop("current_password", None)
 
                 if incoming_pwd is None and existing_pwd:
-                    if not current_pwd or not _verify_deploy_password(current_pwd, existing_pwd):
+                    if not current_pwd or not verify_deploy_password(current_pwd, existing_pwd):
                         return JSONResponse(status_code=403, content={"error": "清除密码需要验证当前密码"})
                     incoming["password"] = None
                 elif incoming_pwd == "":
                     incoming["password"] = existing_pwd
                 elif incoming_pwd:
                     if existing_pwd:
-                        if not current_pwd or not _verify_deploy_password(current_pwd, existing_pwd):
+                        if not current_pwd or not verify_deploy_password(current_pwd, existing_pwd):
                             return JSONResponse(status_code=403, content={"error": "修改密码需要验证当前密码"})
-                    incoming["password"] = _hash_deploy_password(incoming_pwd)
+                    incoming["password"] = hash_deploy_password(incoming_pwd)
     return api_ok(status="ok", config_version=orchestrator.tasks.save_deploy_sections(data))
 
 

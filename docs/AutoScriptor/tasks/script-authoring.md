@@ -10,20 +10,39 @@
 
 | 类型 | 目录 | 路径规则 |
 |------|------|----------|
-| 内置任务 | `tasks/` | 推荐在 `@register_task(path_cn="...")` 中给出中文路径；未写时才用 `translations.py` 兼容旧脚本 |
-| 自定义任务 | `data/custom_task/` | 必须在 `@register_task(path_cn="...")` 中给出中文路径 |
+| 内置任务 | `tasks/` | 路径由源码路径推导，不写 `path_cn`：目录名逐段翻译，文件名即中文任务名 |
+| 自定义任务 | `data/custom_task/` | 必须写 `@register_task(path_cn="...")`，文件名不受项目命名约定约束 |
 
 ```python
-from tasks.task_register import register_task
+from tasks.task_register import register_task   # 或 from ZmxyOL import *
 from AutoScriptor import *
 
+@register_task(description="示例任务")
+def 每日签到(count: int = 1):
+    for _ in range(count):
+        click(T("开始"), if_exist=True)
+```
+
+内置任务的 cfg 路径完全由源码位置决定，两段信息各自来自一处：
+
+```text
+tasks/daily_task/village/宠物培养.py   →  每日任务/村庄/宠物培养
+        └ 分类 ┘ └ 分组 ┘ └ 文件名 ┘
+```
+
+- **分类与分组目录**：英文目录名由 `tasks/translations.py` 翻译成中文。新增目录要登记，否则英文名会原样进入任务树。
+- **任务名**：文件名去掉 `.py` 就是 cfg 键，所以文件名要写中文显示名，例如 `宠物培养.py` 而不是 `pet_upgrade.py`。
+
+自定义任务必须显式给路径：
+
+```python
 @register_task(path_cn="自定义任务/示例/hello", description="示例任务")
 def task(count: int = 1):
     for _ in range(count):
         click(T("开始"), if_exist=True)
 ```
 
-`custom_task` 下未提供 `path_cn` 会注册失败。首段推荐写 `自定义任务`；如果省略首段，例如 `path_cn="背包清空/进阶仙宝"`，后端会自动归一为 `自定义任务/背包清空/进阶仙宝`，以便 WebUI 自定义任务页加载。若旧版本已经把配置写在省略根节点的路径下，注册时会迁移到归一后的路径并清理空旧分支。自定义脚本不能通过 `path_cn` 创建新的顶级任务页。内置脚本的 `path_cn` 可选，但一旦提供就直接决定中文 cfg 路径，不再依赖对应文件名的 `translations.py` 映射；需要跟随项目维护的内置流程应放在 `tasks/`，不要只放在用户 `data/custom_task/`。
+`custom_task` 下未提供 `path_cn` 会注册失败。首段推荐写 `自定义任务`；如果省略首段，例如 `path_cn="背包清空/进阶仙宝"`，后端会自动归一为 `自定义任务/背包清空/进阶仙宝`，以便 WebUI 自定义任务页加载。若旧版本已经把配置写在省略根节点的路径下，注册时会迁移到归一后的路径并清理空旧分支。自定义脚本不能通过 `path_cn` 创建新的顶级任务页。内置脚本写了 `path_cn` 会覆盖推导结果，只在目录结构与树形不一致时才需要；需要跟随项目维护的内置流程应放在 `tasks/`，不要只放在用户 `data/custom_task/`。
 
 WebUI Editor 的“保存脚本”接口 `/api/editor/save-custom-task` 也必须生成同样形态的自定义任务文件：写入 `data/custom_task/`，使用 UTF-8，并带有 `@register_task(path_cn="自定义任务/...")`。保存弹窗提供 `文件名称`（默认 `.py` 后缀）、`脚本名称`（默认前缀为 `自定义任务/`，用户填写后续路径）、`description`、`task_docs` 和参数设置；参数字段包括字段名称、字段类型、字段解释，字段类型支持 `Enum(单选)` 和 `Enum(多选)`，enum 选项使用 `["普通","困难"]` 这类 JSON 数组填写。
 
@@ -37,7 +56,7 @@ Editor 操作录制区的“定位 > 区域识别 > 匹配目标（match）”�
 
 自定义任务导入失败会记录到 WebUI 公开配置的 `custom_task_load_errors`，并在本轮加载中跳过 stale 任务叶子清理和 `cfg.save_config()`。修复脚本语法或导入错误后重新加载即可恢复；不要因为任务临时消失就手动清空 `自定义任务` 配置分支。
 
-例如兑换码礼品兑换是内置一般任务，注册路径为 `一般任务/活动/兑换豪礼礼品兑换`，源码位于 `tasks/normal_task/huodong/redeem_gift.py`。
+例如兑换码礼品兑换是内置一般任务，注册路径为 `一般任务/活动/兑换豪礼礼品兑换`，源码位于 `tasks/normal_task/huodong/兑换豪礼礼品兑换.py`。
 
 ## 排序与路径身份
 
@@ -46,8 +65,8 @@ WebUI 的“任务列表”使用全局 `task_ordering` 覆盖层保存用户拖
 - `_order.txt` 只作为内置源码导入/注册 seed，保留历史稳定性；不是用户拖拽排序的持久化位置。
 - `items` 是当前持久化的用户分组顺序，支持任务节点和嵌套分组；`user_order` 是后端由 `items` 展平生成的兼容投影和旧数据导入 seed。有效顺序先递归展开 `items`，再回退到当前任务树顺序、运行时注册顺序和路径字典序。
 - 旧版 `hard_edges`、`layout`、`group_order` 会被后端规范化忽略，不再表达偏序关系或画布布局。
-- 改名任务用 `@register_task(legacy_path_cn="旧路径")` 声明前身：注册时把旧路径上的用户配置（开关、参数、`next_exec_time`）搬到当前路径并删除旧节点。这是唯一的改名通道。
-- 只改 `path_cn` 而不声明前身，等同于删除旧路径并新增新路径；旧排序路径会在 WebUI 诊断中显示为 stale，用户可拖拽后重新保存。
+- 改名任务（含重命名文件或换目录）要加 `@register_task(legacy_path_cn="旧路径")` 声明前身：注册时把旧路径上的用户配置（开关、参数、`next_exec_time`）搬到当前路径并删除旧节点。这是唯一的改名通道。
+- 只改文件位置而不声明前身，等同于删除旧路径并新增新路径；旧排序路径会在 WebUI 诊断中显示为 stale，用户可拖拽后重新保存。
 
 ## register_task 元数据
 
@@ -59,7 +78,7 @@ WebUI 的“任务列表”使用全局 `task_ordering` 覆盖层保存用户拖
 | `description`　　　　　　　 | WebUI 一句话简介；不传时生成占位，内置脚本不再使用集中默认描述表　　　　　　　　　　　　　　　　　　　　　　　 |
 | `debug_mode` / `debug=True` | 调试直跑：跳过自动登录/失败恢复/本轮 post_execution　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
 | `deprecated`　　　　　　　　| 弃用隐藏字段；`True` 时源码保留并记录注册元数据，但不写入 `cfg["tasks"]`、不出现在 WebUI/可见任务列表/调度列表；已存在的叶子由加载末尾的 prune 清理 |
-| `path_cn`　　　　　　　　　 | `data/custom_task` 必填中文路径并归一到 `自定义任务/...`；内置任务可选，提供后替代文件名翻译映射　　　　　　　 |
+| `path_cn`　　　　　　　　　 | `data/custom_task` 必填中文路径并归一到 `自定义任务/...`；内置任务不需要，写了会覆盖由源码路径推导的结果 |
 | `legacy_path_cn` | 任务改名/重组前的 cfg 路径；注册时把该路径上的用户配置搬到当前路径并删除旧节点 |
 | `sched_window_hours`　　　　| 本地可执行窗口 `[start, end)`　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
 | `allowed_weekdays`　　　　　| 允许星期，`1=周一 ... 7=周日`　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
@@ -193,6 +212,8 @@ progress = get_task_status("progress")
 ## 设备和识别
 
 - 普通任务只调用 `click/click_all/locate/match/swipe/input/key_event/extract_info/get_colors/coloris`。同屏多个相同按钮使用 `click_all(target)`；`click(..., repeat=N)` 只用于重复点击同一个命中位置。
+- 需要实时盯进度条/走条时用 `screenshot_region(target)` 只取目标区域，配合 `finger_down/finger_move/finger_up` 做「按住升、松开降」闭环；不要在全帧截图上循环做 OCR。多指同按用 `multi_finger_down([(1, x, y), (2, x, y)])`。
+- `finger_*` 使用编号手指（1..10），与 `click/swipe` 的触点互相独立；实时循环只在状态翻转时发按下/松开边沿，且必须在 `finally` 里调用 `release_all_fingers()` 兜底，避免任务失败后手指保持按住。
 - 内置游戏任务的截图、模板、`B/Box` 和点击坐标都按 `1280x720` 横屏绝对像素编写；`B(x, y, width, height)` 使用左上角与宽高，不编写相对坐标或静默缩放逻辑。
 - 内置游戏截图尺寸不符合合同时运行时只会节流 warning 并继续任务，不会自动缩放；应修正 MuMu 分辨率。明确操作竖屏外部应用时可使用其原生坐标；独立脚本先调用 `setFrameSize(...)` 后可直接使用 `.margin()`，共享进程任务则应显式传 `frame_size=(width, height)`。执行方向必须与录制方向一致。
 - 任务脚本只依赖现有公共识别 API，不导入或依赖内部 `RecognitionResult` 追踪结构。

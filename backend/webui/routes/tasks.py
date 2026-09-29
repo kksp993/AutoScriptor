@@ -19,9 +19,8 @@ from backend.webui.api_context import (
     public_config_unlocked,
     task_ordering_response,
 )
-from backend.webui.security import (
-    require_credential_unlock,
-)
+from backend.webui.log_stream import apply_log_level
+from backend.webui.security import require_credential_unlock
 from orchestrator import RuntimeExecutionBusyError, SchedulerState, orchestrator
 
 
@@ -62,8 +61,7 @@ async def refresh_config_api():
     try:
         with orchestrator.tasks.config_operation():
             consume_runtime_config_updates()
-            read_config()
-            _apply_webui_log_level_from_config()
+            apply_log_level()
             return public_config_unlocked()
     except Exception as e:
         logger.error("refresh error: %s", e)

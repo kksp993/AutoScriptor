@@ -5,9 +5,9 @@
 ## 主线入口
 
 ```text
-start.bat / local_start.bat
+start.bat
 └─ scripts\run.bat electron
-   └─ webapp\main.js
+   └─ frontend\electron\main.js
       └─ .venv\Scripts\python.exe -X utf8 backend\webui\gui.py --electron
 
 webui.bat / scripts\run.bat webui
@@ -20,7 +20,7 @@ webui.bat / scripts\run.bat webui
 
 | 层 | 位置 | 职责 |
 | --- | --- | --- |
-| 前端 | `frontend/`（现 `webapp/` + `backend/webui/static/`） | Electron 壳、Vue 页面与静态资源 |
+| 前端 | `frontend/electron/`（Electron 壳）+ `backend/webui/static/`（Vue 页面与静态资源，由 FastAPI 挂载） | 桌面壳与页面 |
 | 后端 | `backend/`（`core/` 运维 + `webui/` 服务） | FastAPI API、日志 WebSocket、安全、更新与通知 |
 | 编排层 | `orchestrator/` | 定时、排序、跨角色派发、执行闸门、retry、任务注册装配 |
 | 任务脚本 | `tasks/` | `@register_task` 任务实现与运行时任务状态 |
@@ -96,6 +96,15 @@ backend -> orchestrator -> tasks -> ZmxyOL -> AutoScriptor
 - `AutoScriptor` 和 `tasks/` 里的控制、时间、识别辅助函数是任务作者 API；没有仓库内静态引用不等于可删。
 - 可以删除已移除产品面的入口、脚本和文档，但不要只凭 `rg` 静态未命中删除 MuMu 控制属性、任务装饰器参数、`sleep/click/locate` 等任务脚本可调用面。
 
+## 设备输入通道边界
+
+- 默认输入走 Nemu IPC（`external_renderer_ipc.dll` 的 finger/touch 通道）：点击、滑动、文本输入与截图同源，没有 ADB subprocess 开销。`MixControl.mode` 默认 `"nemu"`；`"mumu"`（ADB）只作为显式回退。
+- IPC 输入失败（`NemuIpcError` / `RequestHumanTakeover`）时 `MixControl` 自动把本次运行回退到 ADB 并记录 error 日志；`switch_to_nemu()` 是复位快速通道的唯一入口。不要因为单次失败把热路径无条件改回 ADB，也不要吞掉回退日志。
+- 编号手指（1..10）是 IPC 原生的多点触控通道：`finger_down/finger_move/finger_up/multi_finger_down` 与普通 `click/swipe` 的触点互相独立。实时闭环步骤用它「按住/松开」，只在状态翻转时发边沿，且任何退出路径都要 `release_all_fingers()` 兜底。
+- 截图与输入可以并发（同一连接实测零错误）：`NemuIpcImpl.io_lock` 只保护连接管理与复用缓冲，不是截图/输入的全局互斥；`NemuIpc._ipc_lock` 只用于复合手势（点击/滑动）之间的互斥。不要恢复跨实例的全局锁，也不要把 worker 线程的截图逻辑包进调用方的锁。
+- 实时区域检测用 `screenshot_region` 只转换 ROI；不要在热路径上对全帧截图做 OCR 循环。
+- NemuIpc 截图返回复用缓冲之上的视图：拿到帧后要么立即消费，要么复制需要保留的部分，不要跨下一次采集持有。
+
 ## 源码启动与更新边界
 
 - Electron 只负责源码壳：创建加载窗口、清理本项目占用的 `5000` 端口、启动 `.venv\Scripts\python.exe -X utf8 backend\webui\gui.py --electron`。
@@ -103,7 +112,7 @@ backend -> orchestrator -> tasks -> ZmxyOL -> AutoScriptor
 - 加载窗口必须先于端口清理和 Python 后端启动出现；端口清理失败要写启动日志并显示在加载页，不修改 Windows 控制台 code page。
 - WebUI 更新器只处理源码 Git 通道：固定 `fetch origin main`、比较 `HEAD` 和 `origin/main` 的 ahead/behind，只有当前检出分支可快进到 `origin/main` 时才执行 `pull --ff-only origin main`。
 - 更新器拒绝 detached HEAD、非 Git 工作区和脏工作区；Git stderr、启动失败和 timeout 要原样进入 `last_error`。
-- 更新器不安装依赖。`requirements.txt`、`webapp/package*.json` 等依赖变更后，用户再运行 `scripts\install.bat`。
+- 更新器不安装依赖。`requirements.txt`、`frontend/electron/package*.json` 等依赖变更后，用户再运行 `scripts\install.bat`。
 
 ## 已移除产品面
 

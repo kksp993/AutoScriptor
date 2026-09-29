@@ -5,9 +5,12 @@ Groups the runtime diagnostics layer in one place:
 ``logger``
     Rich/plain console + file handlers, per-task prefix, source-path rewriting.
 ``log_archiver``
-    Task error archives (recent log lines, runtime context, screenshots).
+    Task error archives (recent log lines, runtime context, screenshots, video).
 ``tracer``
-    Annotated debug screenshots of click/OCR results.
+    Debug screenshots: annotated click/OCR frames and the run's routine frame
+    history. This module owns ``logs/debug_screenshot/``.
+``task_video_recorder``
+    Task-level ADB screen recording, kept behind one switch in TaskManager.
 ``recognition_trace``
     Bounded per-thread record of recent recognition operations.
 
@@ -32,6 +35,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     # annotated debug screenshots
     "save_debug_screenshot": ("AutoScriptor.logging.tracer", "save_debug_screenshot"),
     "clear_debug_screenshots": ("AutoScriptor.logging.tracer", "clear_debug_screenshots"),
+    "set_run_capture": ("AutoScriptor.logging.tracer", "set_run_capture"),
+    "capture_run_frame": ("AutoScriptor.logging.tracer", "capture_run_frame"),
+    "take_debug_screenshots": ("AutoScriptor.logging.tracer", "take_debug_screenshots"),
+    "debug_screenshot_dir": ("AutoScriptor.logging.tracer", "debug_screenshot_dir"),
     # error archives
     "archive_error": ("AutoScriptor.logging.log_archiver", "archive_error"),
     "collect_default_context": (

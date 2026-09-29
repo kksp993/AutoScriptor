@@ -24,11 +24,11 @@ Component convention:
 
 ## Source Electron Shell
 
-- Desktop source entry is `scripts\run.bat electron` or root `start.bat`; direct `cd webapp; npm start` is only the low-level command after source dependencies are installed.
-- `webapp/main.js` starts `backend\webui\gui.py --electron` with the repo root as cwd and only uses the source `.venv`; if it is missing, run `scripts\install.bat python`.
-- `webapp/preload.js` should expose only source runtime IPC needed by the shell.
-- `webapp/package.json` should stay focused on `start`, `electron`, and runtime helpers actually used by the source shell. Python install/bootstrap belongs in `scripts\install.*`, not npm lifecycle hooks.
-- `webapp/scripts/start-dev.cjs` should resolve the executable through Electron's package entry (`require('electron')`), not by hardcoding `node_modules/electron/dist/electron.exe`.
+- Desktop source entry is `scripts\run.bat electron` or root `start.bat`; direct `cd frontend\electron; npm start` is only the low-level command after source dependencies are installed.
+- `frontend/electron/main.js` starts `backend\webui\gui.py --electron` with the repo root as cwd and only uses the source `.venv`; if it is missing, run `scripts\install.bat python`.
+- `frontend/electron/preload.js` should expose only source runtime IPC needed by the shell.
+- `frontend/electron/package.json` should stay focused on `start`, `electron`, and runtime helpers actually used by the source shell. Python install/bootstrap belongs in `scripts\install.*`, not npm lifecycle hooks.
+- `frontend/electron/scripts/start-dev.cjs` should resolve the executable through Electron's package entry (`require('electron')`), not by hardcoding `node_modules/electron/dist/electron.exe`.
 - Keep the loading window visible before slow backend checks, and keep startup phase logs useful for first-run diagnosis.
 - Configure source Electron render mode before `app.whenReady()`. `AUTOSCRIPTOR_ELECTRON_RENDER_MODE` defaults to `software` to disable the fragile Windows GPU/Chromium paths; use `d3d11` to keep GPU with ANGLE D3D11, or `default` to compare the unmodified Electron behavior.
 - Do not change the Windows console code page from Electron. Encoding is handled by Python UTF-8 flags/env.
@@ -36,7 +36,7 @@ Component convention:
 
 ## Version Coupling
 
-- Electron package version comes from `webapp/package.json`.
+- Electron package version comes from `frontend/electron/package.json`.
 - About panel display version in `backend/webui/static/js/components/AboutPanel.js` should match it when the desktop-facing version changes.
 - Version display changes are source metadata only on this branch; do not add distribution machinery just to bump a displayed version.
 
@@ -87,7 +87,7 @@ Get-Process -Name "electron" -ErrorAction SilentlyContinue | Stop-Process -Force
 - The gift-code collector should inspect official announcements only: last 10 days, at most 15 posts, with `checked_post_ids` and active rows in runtime `logs/zmxy_redeem_codes.json` for incremental refresh.
 - The gift-code dialog iframe should load local `/api/news/gift_codes/page` and refresh through `/api/news/gift_codes?refresh=1`; do not use the stale external 4399 gift-code page.
 - Gift-code redemption uses `/api/news/redeem_targets` and `POST /api/news/gift_codes/redeem`; keep credential unlock/security-key checks, support `redeem_code` and batched `redeem_codes`, switch to the selected `server:character`, force login even for debug-mode redeem tasks, and pass each code as a one-time task param override to the built-in normal task `一般任务/活动/兑换豪礼礼品兑换`.
-- Keep the redeem task under `tasks.normal_task.huodong.redeem_gift`, not only under `data/custom_task`.
+- Keep the redeem task under `tasks/normal_task/huodong/兑换豪礼礼品兑换.py`, not only under `data/custom_task`.
 - Public config must not expose plaintext credentials.
 - Do not reuse the news account for game automation unless the user explicitly asks.
 

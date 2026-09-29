@@ -1836,8 +1836,8 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertNotIn("join_with_cancel(t, 5, cancel_check)", api)
 
     def test_electron_startup_reports_stages_before_backend_ready(self):
-        main = (ROOT / "webapp/main.js").read_text(encoding="utf-8")
-        loading = (ROOT / "webapp/renderer/loading.html").read_text(encoding="utf-8")
+        main = (ROOT / "frontend/electron/main.js").read_text(encoding="utf-8")
+        loading = (ROOT / "frontend/electron/renderer/loading.html").read_text(encoding="utf-8")
         gui = (ROOT / "backend/webui/gui.py").read_text(encoding="utf-8")
 
         for marker in [
@@ -1950,9 +1950,19 @@ print("OK")
             env=env,
             capture_output=True,
             text=True,
+            # 子进程被 -X utf8 强制为 UTF-8 输出，父进程也必须按 UTF-8 解码；
+            # 否则中文 Windows 会用 GBK 解码并在 Rich 日志处抛 UnicodeDecodeError，
+            # 让 stdout/stderr 变 None、returncode 变 1，测试随机失败。
+            encoding="utf-8",
+            errors="replace",
             timeout=20,
         )
-        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        # 断言消息不能自己先崩：stdout/stderr 在某些捕获路径下可能为 None。
+        self.assertEqual(
+            proc.returncode,
+            0,
+            f"stdout={proc.stdout!r} stderr={proc.stderr!r}",
+        )
         self.assertIn("OK", proc.stdout)
 
     def test_editor_device_actions_acquire_runtime_session_on_demand(self):
@@ -2457,7 +2467,7 @@ print("OK")
         self.assertNotIn("perf_boost", package_init)
 
     def test_electron_shell_does_not_use_host_performance_fallbacks(self):
-        main = (ROOT / "webapp/main.js").read_text(encoding="utf-8")
+        main = (ROOT / "frontend/electron/main.js").read_text(encoding="utf-8")
 
         for marker in [
             "powercfg",
@@ -2486,6 +2496,16 @@ class TestSourceDistributionContract(unittest.TestCase):
             "services/main_cli",
             "scripts/launcher-cli -l.bat",
             "scripts/launcher-l.bat",
+            # Aliases and one-hop wrappers around the three real entries.
+            "scripts/launcher.bat",
+            "scripts/launcher.ps1",
+            "scripts/bootstrap-python310.ps1",
+            "local_start.bat",
+            # One-off manual game flow: the quiz runner lived in test/ and was
+            # launched from scripts/. It is not a test and not an entry point.
+            "scripts/run_safety_education.bat",
+            "scripts/run_safety_education.ps1",
+            "test/manual_safety_education.py",
             "scripts/release_autoscriptor_locks.ps1",
             "services/installer",
             "scripts/release",
@@ -2494,16 +2514,23 @@ class TestSourceDistributionContract(unittest.TestCase):
             "scripts/npm-postinstall.js",
             "release_locks.bat",
             "docs/AutoScriptor/release",
-            "webapp/install-packaged.cjs",
-            "webapp/release-update.cjs",
-            "webapp/mumu-detect.cjs",
-            "webapp/renderer/installer.html",
-            "webapp/scripts/prepare-release-shell.cjs",
-            "webapp/scripts/verify-pack.cjs",
-            "webapp/scripts/test-install-packaged.cjs",
-            "webapp/scripts/test-release-update.cjs",
-            "webapp/scripts/gen_icon.py",
-            "webapp/scripts/ensure-ico.cjs",
+            "frontend/electron/install-packaged.cjs",
+            "frontend/electron/release-update.cjs",
+            "frontend/electron/mumu-detect.cjs",
+            "frontend/electron/renderer/installer.html",
+            "frontend/electron/scripts/prepare-release-shell.cjs",
+            "frontend/electron/scripts/verify-pack.cjs",
+            "frontend/electron/scripts/test-install-packaged.cjs",
+            "frontend/electron/scripts/test-release-update.cjs",
+            "frontend/electron/scripts/gen_icon.py",
+            "frontend/electron/scripts/ensure-ico.cjs",
+            "frontend/electron/renderer/installer.html",
+            "frontend/electron/scripts/prepare-release-shell.cjs",
+            "frontend/electron/scripts/verify-pack.cjs",
+            "frontend/electron/scripts/test-install-packaged.cjs",
+            "frontend/electron/scripts/test-release-update.cjs",
+            "frontend/electron/scripts/gen_icon.py",
+            "frontend/electron/scripts/ensure-ico.cjs",
             "backend/core/binary_delta.py",
             "backend/core/content_delta_update.py",
             "backend/core/content_update_security.py",
@@ -2516,10 +2543,10 @@ class TestSourceDistributionContract(unittest.TestCase):
                 self.assertFalse((ROOT / rel).exists())
 
     def test_electron_shell_is_source_only(self):
-        main = (ROOT / "webapp/main.js").read_text(encoding="utf-8")
-        preload = (ROOT / "webapp/preload.js").read_text(encoding="utf-8")
-        start_dev = (ROOT / "webapp/scripts/start-dev.cjs").read_text(encoding="utf-8")
-        package_json = json.loads((ROOT / "webapp/package.json").read_text(encoding="utf-8"))
+        main = (ROOT / "frontend/electron/main.js").read_text(encoding="utf-8")
+        preload = (ROOT / "frontend/electron/preload.js").read_text(encoding="utf-8")
+        start_dev = (ROOT / "frontend/electron/scripts/start-dev.cjs").read_text(encoding="utf-8")
+        package_json = json.loads((ROOT / "frontend/electron/package.json").read_text(encoding="utf-8"))
 
         self.assertIn("'backend', 'webui', 'gui.py'", main)
         self.assertIn("--electron", main)
@@ -2585,9 +2612,7 @@ class TestSourceDistributionContract(unittest.TestCase):
         install = (ROOT / "scripts/install.ps1").read_text(encoding="utf-8")
         run = (ROOT / "scripts/run.ps1").read_text(encoding="utf-8")
         update = (ROOT / "scripts/update.ps1").read_text(encoding="utf-8")
-        launcher = (ROOT / "scripts/launcher.ps1").read_text(encoding="utf-8")
         updater = (ROOT / "backend/core/updater.py").read_text(encoding="utf-8")
-        bootstrap = (ROOT / "scripts/bootstrap-python310.ps1").read_text(encoding="utf-8")
         requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
         package_init = (ROOT / "AutoScriptor/__init__.py").read_text(encoding="utf-8")
 
@@ -2599,14 +2624,14 @@ class TestSourceDistributionContract(unittest.TestCase):
             "scripts/update.bat",
             "scripts/update.ps1",
             "start.bat",
-            "local_start.bat",
+            "webui.bat",
         ]:
             with self.subTest(path=rel):
                 self.assertTrue((ROOT / rel).exists())
 
         self.assertIn("requirements.txt", install)
         self.assertIn(".venv", install)
-        self.assertIn("bootstrap-python310.ps1", install)
+        self.assertIn("uv python install", install)
         self.assertIn("Git.Git", install)
         self.assertIn("OpenJS.NodeJS.LTS", install)
         self.assertIn("astral-sh.uv", install)
@@ -2629,9 +2654,10 @@ class TestSourceDistributionContract(unittest.TestCase):
                 self.assertNotIn(stale_update, updater)
         self.assertNotIn("time.sleep", updater)
         self.assertNotIn("range(3)", updater)
-        self.assertIn("run.ps1", launcher)
-        self.assertIn("uv python install", bootstrap)
-        self.assertIn("3.10.15", bootstrap)
+        # The Python version and its uv bootstrap live in install.ps1 now, so the
+        # version appears exactly once for the whole install path.
+        self.assertIn("uv python install", install)
+        self.assertIn("3.10.15", install)
 
         for stale in [
             "services\\installer",
@@ -2649,9 +2675,7 @@ class TestSourceDistributionContract(unittest.TestCase):
                 self.assertNotIn(stale, install)
                 self.assertNotIn(stale, run)
                 self.assertNotIn(stale, update)
-                self.assertNotIn(stale, launcher)
                 self.assertNotIn(stale, updater)
-                self.assertNotIn(stale, bootstrap)
                 self.assertNotIn(stale, requirements)
                 self.assertNotIn(stale, package_init)
 
@@ -3040,7 +3064,7 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
         self.assertNotIn("<th>类型</th>", route)
         projection = (ROOT / "orchestrator/projection.py").read_text(encoding="utf-8")
         self.assertIn('"label": f"{server}:{character}"', projection)
-        redeem_task = (ROOT / "tasks/normal_task/huodong/redeem_gift.py").read_text(
+        redeem_task = (ROOT / "tasks/normal_task/huodong/兑换豪礼礼品兑换.py").read_text(
             encoding="utf-8",
             errors="ignore",
         )
@@ -3052,7 +3076,7 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
         self.assertIn('GIFT_REDEEM_TASK_PATH = "一般任务/活动/兑换豪礼礼品兑换"', server)
         self.assertIn("未找到兑换码任务，请确认一般任务已加载", server)
         self.assertFalse((ROOT / "tasks/_manifest.py").exists())
-        self.assertIn("'兑换豪礼礼品兑换': 'redeem_gift'", translations)
+        self.assertIn("'一般任务': 'normal_task'", translations)
         self.assertIn("def task(redeem_code: str | list[str] = \"1111\")", redeem_task)
         self.assertFalse((ROOT / "data/custom_task/zmxy_activity_redeem.py").exists())
         self.assertIn('task_runs = [', server)
