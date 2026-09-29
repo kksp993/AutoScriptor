@@ -25,6 +25,35 @@ DOWNLOAD_URL = f"https://github.com/NapNeko/NapCatQQ/releases/download/{VERSION}
 BOT_ROOT = Path(__file__).resolve().parents[2] / ".autoscriptor" / "qq-bot"
 REQUIRED_FILES = ("node.exe", "index.js", "wrapper.node", "QQNT.dll", "napcat/napcat.mjs")
 
+# Where a QQ session and an access token must never live. A synced folder copies
+# them to a server the user does not control, and a shared folder lets other
+# accounts on the machine read them. Same-machine programs are out of scope:
+# NapCat keeps its own session in plaintext by design, so locking only our copies
+# would protect nothing that matters.
+_UNSAFE_LOCATION_MARKERS = (
+    "onedrive",
+    "dropbox",
+    "google drive",
+    "googledrive",
+    "icloud",
+    "\\users\\public",
+    "\\public\\",
+)
+
+
+def assert_private_location(root: Path | None = None) -> None:
+    """Refuse a data root that other accounts or a cloud service can read."""
+    root = root or BOT_ROOT
+    text = str(root).lower()
+    if text.startswith("\\\\"):
+        raise OSError(f"机器人目录不能放在网络路径上：{root}")
+    for marker in _UNSAFE_LOCATION_MARKERS:
+        if marker in text:
+            raise OSError(
+                f"机器人目录位于同步盘或公共目录，QQ 登录态可能被复制出去：{root}\n"
+                f"请把项目移动到本地普通目录（例如 D:\\Projects\\AutoScriptor-s）后重试。"
+            )
+
 
 def read_document(path: Path) -> dict:
     document = json.loads(path.read_text(encoding="utf-8"))
@@ -56,6 +85,145 @@ def load_local_settings(root: Path | None = None) -> dict | None:
     ):
         raise ValueError("Invalid local NapCat connection settings; refusing to expose the service")
     return settings
+
+
+def cached_accounts(root: Path | None = None) -> list[str]:
+    """QQ numbers that have logged in here before, so they can skip the QR code.
+
+    NapCat writes ``napcat_<QQ>.json`` next to its shared config once a session
+    exists. That file is the reliable signal -- far better than remembering what
+    we last started, because it also reflects logins done through the panel.
+    """
+    root = root or BOT_ROOT
+    config_directory = root / "napcat" / "config"
+    if not config_directory.is_dir():
+        return []
+    accounts: list[str] = []
+    for path in config_directory.glob("napcat_*.json"):
+        number = path.stem[len("napcat_"):]
+        # ``napcat_protocol_<QQ>.json`` shares the prefix; a session file is digits only.
+        if number.isdigit():
+            accounts.append(number)
+    return sorted(accounts)
+
+
+def remember_account(account: str, root: Path | None = None) -> None:
+    """Record the account to quick-login next time."""
+    root = root or BOT_ROOT
+    settings = load_local_settings(root)
+    if settings is None:
+        raise ValueError("NapCat 尚未安装，无法记录账号")
+    settings["account"] = str(account or "").strip()
+    write_document(root / "autoscriptor.json", settings)
+
+
+def remembered_account(root: Path | None = None) -> str:
+    settings = load_local_settings(root)
+    if settings is None:
+        return ""
+    return str(settings.get("account") or "").strip()
+
+
+def webui_login_url(root: Path | None = None) -> str:
+    """The panel URL that shows the login QR code."""
+    root = root or BOT_ROOT
+    settings = load_local_settings(root)
+    if settings is None:
+        raise ValueError("NapCat 尚未安装")
+    document = read_document(root / "napcat" / "config" / "webui.json")
+    return f"http://127.0.0.1:{settings['web_port']}/webui?token={document['token']}"
+
+
+def _pid_file(root: Path) -> Path:
+    return root / ".bot.pid"
+
+
+def _bot_log(root: Path) -> Path:
+    """Where the bot's own output goes, since it runs without a console."""
+    return root / "bot.log"
+
+
+def running_bot_pid(root: Path | None = None) -> int | None:
+    """PID of the bot started by us, or ``None`` if it is not alive."""
+    root = root or BOT_ROOT
+    path = _pid_file(root)
+    if not path.is_file():
+        return None
+    try:
+        pid = int(path.read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        return None
+    # ``os.kill(pid, 0)`` is not a portable existence check: on Windows it raises
+    # SystemError for a signal it does not implement. Opening the process and
+    # closing the handle asks the same question without sending anything.
+    import ctypes
+
+    SYNCHRONIZE = 0x00100000
+    handle = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+    if not handle:
+        path.unlink(missing_ok=True)
+        return None
+    ctypes.windll.kernel32.CloseHandle(handle)
+    return pid
+
+
+def launch_bot(
+    root: Path | None = None,
+    account: str = "",
+    *,
+    visible: bool = False,
+) -> int:
+    """Start the bot in its own process and return immediately.
+
+    ``account`` selects NapCat's ``-q`` quick login, which is what makes the
+    second and later starts need no QR code at all.
+    """
+    root = root or BOT_ROOT
+    settings = load_local_settings(root)
+    if settings is None:
+        raise ValueError("NapCat 尚未安装，先运行一键设置")
+    if running_bot_pid(root) is not None:
+        raise OSError("机器人已经在运行")
+    for port in (settings["http_port"], settings["web_port"]):
+        with socket.socket() as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                raise OSError(f"端口 {port} 被占用，机器人可能已在运行") from None
+
+    command = [str(root / "node.exe"), str(root / "index.js")]
+    if account.strip():
+        command += ["-q", account.strip()]
+    environment = os.environ.copy()
+    # The upstream fork branch passes Electron-only --no-sandbox to Node.
+    environment["NAPCAT_DISABLE_MULTI_PROCESS"] = "1"
+
+    creation_flags = subprocess.CREATE_NEW_CONSOLE if visible else subprocess.CREATE_NO_WINDOW
+    log_path = _bot_log(root)
+    # Without a console the output needs somewhere to go: an inherited pipe would
+    # fill up and block the bot, and printing to the caller's terminal makes the
+    # setup output unreadable. Truncate rather than append so it stays one run.
+    with open(log_path, "wb") as log:
+        process = subprocess.Popen(  # noqa: S603 - fixed executable, fixed arguments
+            command, cwd=root, env=environment, creationflags=creation_flags,
+            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+        )
+    _pid_file(root).write_text(str(process.pid), encoding="ascii")
+    return process.pid
+
+
+def stop_bot(root: Path | None = None) -> bool:
+    """Terminate the bot we started. Returns whether anything was stopped."""
+    root = root or BOT_ROOT
+    pid = running_bot_pid(root)
+    if pid is None:
+        return False
+    # /T so the QQ runtime child process goes with it; /F because the bot has no
+    # shutdown channel of its own.
+    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                   capture_output=True, text=True, encoding="utf-8", errors="replace")
+    _pid_file(root).unlink(missing_ok=True)
+    return True
 
 
 def local_notification_settings(root: Path | None = None) -> dict:
@@ -227,29 +395,42 @@ def start_bot(root: Path | None = None) -> int:
     settings = load_local_settings(root)
     if settings is None:
         raise ValueError("Run scripts\\install.bat qq first")
+    account = remembered_account(root)
     with lock_bot(root):
         for port in (settings["http_port"], settings["web_port"]):
             with socket.socket() as probe:
                 probe.bind(("127.0.0.1", port))
-        print(f"NapCat login: http://127.0.0.1:{settings['web_port']}", flush=True)
-        print("Use the token in napcat/config/webui.json if prompted. Keep this window open.", flush=True)
+        if account:
+            print(f"Quick login as {account}; no QR code needed.", flush=True)
+        else:
+            print(f"No remembered account. Scan at {webui_login_url(root)}", flush=True)
+        print("Keep this window open. Close it to stop the robot.", flush=True)
         environment = os.environ.copy()
         # The upstream fork branch passes Electron-only --no-sandbox to Node.
         environment["NAPCAT_DISABLE_MULTI_PROCESS"] = "1"
-        return subprocess.call(
-            [str(root / "node.exe"), str(root / "index.js")], cwd=root, env=environment,
-        )
+        command = [str(root / "node.exe"), str(root / "index.js")]
+        if account:
+            command += ["-q", account]
+        return subprocess.call(command, cwd=root, env=environment)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("install", "start", "status"))
+    parser.add_argument("action", choices=("install", "start", "stop", "status", "accounts"))
     arguments = parser.parse_args()
     try:
         if arguments.action == "install":
             install_bot()
         elif arguments.action == "start":
             return start_bot()
+        elif arguments.action == "stop":
+            print("stopped" if stop_bot() else "not running")
+        elif arguments.action == "accounts":
+            print(json.dumps({
+                "cached": cached_accounts(),
+                "remembered": remembered_account(),
+                "running_pid": running_bot_pid(),
+            }, ensure_ascii=False))
         else:
             print(json.dumps(local_installation_status()))
     except (OSError, ValueError, zipfile.BadZipFile) as error:
