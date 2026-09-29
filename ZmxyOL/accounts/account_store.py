@@ -353,6 +353,21 @@ class AccountStore:
             return []
         return sorted(f[:-5] for f in os.listdir(acc_dir) if f.endswith(".json"))
 
+    def read_character_names(self, name: str, global_cfg: dict[str, Any]) -> dict[str, Any]:
+        """凭据无关地读取某个账号的角色名单（不切换当前账号，不解密）。
+
+        WebUI 需要为「还没切换过去的账号」列出角色选项；文件缺失或损坏返回空，
+        调用方据此展示空选择，而不是把整个请求打成错误。
+        """
+        path = self.account_path(name, global_cfg)
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                document = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return {}
+        characters = document.get("characters")
+        return characters if isinstance(characters, dict) else {}
+
     def verify_security_key(self, name: str, security_key: str, global_cfg: dict[str, Any]) -> bool:
         name = (name or "").strip()
         security_key = (security_key or "").strip()

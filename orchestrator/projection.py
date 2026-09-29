@@ -64,6 +64,15 @@ class TaskTreeService:
     def read_order_map(self) -> dict[str, int]:
         return self.task_ordering_projection().order_map
 
+    def sort_task_paths(self, paths: list[str]) -> list[str]:
+        """Order an explicit task list by the current effective order.
+
+        The HTTP layer gets "run these, in execution order" without keeping its
+        own copy of the order map; the projection is computed on demand.
+        """
+        order_map = self.read_order_map()
+        return sorted(paths, key=lambda path: order_map.get(path, float("inf")))
+
     def ordered_paths(self, data: dict, prefix: str = "") -> list[str]:
         if prefix:
             return collect_task_paths(data or {}, prefix)
@@ -331,6 +340,26 @@ class TaskTreeService:
                 out[srv][name] = normalize_game_profession(gp)
         return out
 
+    def account_role_options(self) -> list[dict]:
+        """Account → role choices for a picker, credential-free.
+
+        Covers every account on disk, not just the current one: the redeem flow
+        has to be able to target another account, and reading that account's
+        file is the account domain's job (``cfg.account_character_names``), not
+        the HTTP layer's.
+        """
+        current = cfg.current_account()
+        options = []
+        for name in cfg.list_accounts():
+            roles = [
+                {"server": str(server), "name": str(character), "label": f"{server}:{character}"}
+                for server, characters in (cfg.account_character_names(name) or {}).items()
+                if isinstance(characters, dict)
+                for character in characters
+            ]
+            options.append({"name": name, "current": name == current, "roles": roles})
+        return options
+
     def normalize_dispatch_queue(self, queue) -> list[dict[str, str]]:
         chars = cfg._account_data.get("characters", {}) or {}
         result: list[dict[str, str]] = []
@@ -511,7 +540,6 @@ class WebUILifecycleService:
         task_manager,
         scheduler,
         task_tree_service,
-        refresh_order_map: Callable[[], None],
         mark_config_changed: Callable[[str], int],
         apply_log_level: Callable[[], None] | None = None,
         clear_background: Callable[[], None] | None = None,
@@ -521,7 +549,6 @@ class WebUILifecycleService:
         self.task_manager = task_manager
         self.scheduler = scheduler
         self.task_tree_service = task_tree_service
-        self.refresh_order_map = refresh_order_map
         self.mark_config_changed = mark_config_changed
         self.apply_log_level = apply_log_level
         self.clear_background = clear_background
@@ -565,7 +592,6 @@ class WebUILifecycleService:
     def sync_all_config(self, security_key: str | None = None, *, reason: str = "sync config") -> int:
         with self.config_operation():
             self.cfg.reload_preserving_decrypted_credentials(security_key)
-            self.refresh_order_map()
             self._apply_log_level()
             return self.mark_config_changed(reason)
 
@@ -645,7 +671,6 @@ class WebUILifecycleService:
             current_overlay = normalize_task_ordering_overlay(self.cfg._config.get("task_ordering", {}))
             self.cfg._config["task_ordering"] = current_overlay
             self._save_global_config()
-            self.refresh_order_map()
             return self.mark_config_changed("save task ordering layout")
 
     def save_character_task(self, server: str, character: str, task_path: str, task_data: dict[str, Any]) -> int:
@@ -766,7 +791,6 @@ class WebUILifecycleService:
     def reload_verified_account(self, security_key: str) -> str:
         self.cfg.reload_preserving_decrypted_credentials(security_key)
         character_name = self.ensure_active_character_in_game()
-        self.refresh_order_map()
         return character_name
 
     def update_account_credentials(self, account: str, password: str, security_key: str) -> tuple[str, int]:
@@ -808,7 +832,6 @@ class WebUILifecycleService:
                 self.cfg._config[key] = value
             self.cfg.save_config()
         self._mark_tasks_updated()
-        self.refresh_order_map()
         self._apply_log_level()
         return self.mark_config_changed("import config")
 
@@ -903,7 +926,6 @@ class WebUILifecycleService:
 
     def _refresh_task_projection(self, reason: str) -> int:
         self._mark_tasks_updated()
-        self.refresh_order_map()
         return self.mark_config_changed(reason)
 
     def _save_global_config(self) -> None:

@@ -21,6 +21,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 
+def route_module(name: str) -> str:
+    """Source of the domain module that owns an API area."""
+    return (ROOT / "backend/webui/routes" / f"{name}.py").read_text(encoding="utf-8")
+
+
+def route_module_names() -> list[str]:
+    return sorted(p.stem for p in (ROOT / "backend/webui/routes").glob("*.py") if p.stem != "__init__")
+
+
 def import_task_tree_service_for_test():
     autoscriptor = types.ModuleType("AutoScriptor")
     utils = types.ModuleType("AutoScriptor.utils")
@@ -729,7 +738,6 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
             task_manager,
             scheduler,
             task_tree_service,
-            refresh_order_map=lambda: self.calls.append("read_config"),
             mark_config_changed=lambda reason: self.calls.append(("bump", reason)) or 42,
             apply_log_level=lambda: self.calls.append("apply_log_level"),
             clear_background=lambda: self.calls.append("bg_clear"),
@@ -754,7 +762,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
         self.assertEqual(version, 42)
         self.assertEqual(
             self.calls,
-            ["lock", "bg_clear", "mark_tasks_updated", "read_config", ("bump", "manual light reload")],
+            ["lock", "bg_clear", "mark_tasks_updated", ("bump", "manual light reload")],
         )
         self.assertNotIn(("reload_tasks", None), self.calls)
 
@@ -766,7 +774,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
         self.assertEqual(version, 42)
         self.assertEqual(
             self.calls,
-            ["lock", ("reload_config", "key"), "read_config", "apply_log_level", ("bump", "sync config")],
+            ["lock", ("reload_config", "key"), "apply_log_level", ("bump", "sync config")],
         )
         self.assertNotIn("bg_clear", self.calls)
         self.assertNotIn(("reload_tasks", "key"), self.calls)
@@ -792,8 +800,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
                 ("reload_tasks", None),
                 "invalidate_login",
                 "mark_tasks_updated",
-                "read_config",
-                ("bump", "add character"),
+                                ("bump", "add character"),
             ],
         )
 
@@ -811,8 +818,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
                 "reload_ui_map",
                 "bg_clear",
                 "mark_tasks_updated",
-                "read_config",
-                ("bump", "full reload"),
+                                ("bump", "full reload"),
             ],
         )
 
@@ -837,7 +843,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
         self.assertIn("param_meta", tasks["group"]["task"])
         self.assertEqual(
             self.calls,
-            ["lock", "save_config", "wake", "mark_tasks_updated", "read_config", ("bump", "save tasks")],
+            ["lock", "save_config", "wake", "mark_tasks_updated", ("bump", "save tasks")],
         )
 
     def test_save_tasks_clears_status_for_reactivated_or_error_reset_paths(self):
@@ -952,8 +958,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
                 ("switch_character", "s1", "hero"),
                 "invalidate_login",
                 "mark_tasks_updated",
-                "read_config",
-                ("bump", "select run character"),
+                                ("bump", "select run character"),
             ],
         )
 
@@ -974,8 +979,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
                 "lock",
                 ("switch_character", "s1", "hero"),
                 "mark_tasks_updated",
-                "read_config",
-                ("bump", "select task list run character"),
+                                ("bump", "select task list run character"),
             ],
         )
 
@@ -992,8 +996,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
                 ("switch_account", "main", "key"),
                 "invalidate_login",
                 "mark_tasks_updated",
-                "read_config",
-                ("bump", "switch account"),
+                                ("bump", "switch account"),
             ],
         )
         self.assertNotIn(("reload_tasks", "key"), self.calls)
@@ -1066,8 +1069,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
                 ("switch_account", "main", "key"),
                 "invalidate_login",
                 "mark_tasks_updated",
-                "read_config",
-                ("bump", "add account"),
+                                ("bump", "add account"),
             ],
         )
         self.assertNotIn(("reload_tasks", "key"), self.calls)
@@ -1086,8 +1088,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
                 "lock",
                 ("update_credentials", "user", "pwd", "key"),
                 "mark_tasks_updated",
-                "read_config",
-                ("bump", "update account credentials"),
+                                ("bump", "update account credentials"),
             ],
         )
         self.assertNotIn(("reload_tasks", "key"), self.calls)
@@ -1116,7 +1117,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
         self.assertEqual(cfg._config["deploy"], {"log_level": "warning"})
         self.assertEqual(
             self.calls,
-            ["lock", "save_config", "mark_tasks_updated", "read_config", "apply_log_level", ("bump", "import config")],
+            ["lock", "save_config", "mark_tasks_updated", "apply_log_level", ("bump", "import config")],
         )
         self.assertNotIn(("reload_tasks", None), self.calls)
 
@@ -1579,12 +1580,11 @@ class TestWebUIFrontendContract(unittest.TestCase):
 class TestWebUIServerRouteContract(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
-        cls.routes = set()
-        for line in content.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("@app.") and '("' in stripped:
-                cls.routes.add(stripped.split('("', 1)[1].split('"', 1)[0])
+        # Ask the composed app what it serves; that is the contract, and it stays
+        # true no matter which module a handler lives in.
+        from backend.webui.server import app
+
+        cls.routes = set(app.openapi()["paths"])
 
     def test_runtime_routes_are_registered(self):
         for path in {
@@ -1610,10 +1610,17 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertNotIn("/api/profiles/switch", self.routes)
 
     def test_webui_routes_do_not_bypass_task_lifecycle(self):
-        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
+        package = ROOT / "backend/webui"
+        sources = {
+            path: path.read_text(encoding="utf-8")
+            for path in package.rglob("*.py")
+            if "__pycache__" not in path.parts
+        }
 
-        self.assertNotIn("from orchestrator import load_tasks", content)
-        self.assertNotIn("with orchestrator.task_manager._cfg_lock", content)
+        for path, content in sources.items():
+            with self.subTest(module=path.name):
+                self.assertNotIn("from orchestrator import load_tasks", content)
+                self.assertNotIn("with orchestrator.task_manager._cfg_lock", content)
 
     def test_http_middlewares_do_not_wrap_request_body_with_base_http_middleware(self):
         content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
@@ -1625,16 +1632,16 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("app.add_middleware(_AuthAndApiErrorMiddleware)", content)
 
     def test_accounts_add_uses_standard_api_response(self):
-        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
+        content = route_module("accounts")
         start = content.index("async def accounts_add_api")
-        end = content.index("@app.post(\"/api/accounts/delete\")", start)
+        end = content.index('@router.post("/api/accounts/delete")', start)
         body = content[start:end]
 
         self.assertIn("api_ok(", body)
         self.assertIn("return api_error(400", body)
         self.assertIn("500,", body)
-        self.assertIn("diagnostics=_persistence_diagnostics()", body)
-        self.assertIn("_attach_credential_unlock_cookie", body)
+        self.assertIn("diagnostics=persistence_diagnostics()", body)
+        self.assertIn("attach_credential_unlock_cookie", body)
         self.assertIn('credential={"unlocked"', body)
 
     def test_accounts_add_switches_to_created_account(self):
@@ -1649,29 +1656,29 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("self.scheduler.invalidate_login()", body)
 
     def test_reload_routes_use_split_lifecycle_methods(self):
-        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
+        content = route_module("tasks")
 
-        start = content.index("@app.post(\"/api/tasks/reload\")")
-        end = content.index("@app.post(\"/api/config\")", start)
+        start = content.index('@router.post("/api/tasks/reload")')
+        end = content.index('@router.post("/api/config")', start)
         light_reload_body = content[start:end]
         self.assertIn("orchestrator.tasks.reload_task_state", light_reload_body)
         self.assertNotIn("orchestrator.tasks.reload_tasks", light_reload_body)
 
-        start = content.index("@app.post(\"/api/config/sync\")")
-        end = content.index("@app.post(\"/api/tasks/reload-all\")", start)
+        start = content.index('@router.post("/api/config/sync")')
+        end = content.index('@router.post("/api/tasks/reload-all")', start)
         sync_body = content[start:end]
         self.assertIn("orchestrator.tasks.sync_all_config", sync_body)
-        self.assertIn("_guard_runtime_idle", sync_body)
+        self.assertIn("guard_runtime_idle", sync_body)
 
-        start = content.index("@app.post(\"/api/tasks/reload-all\")")
-        end = content.index("@app.post(\"/api/config\")", start)
+        start = content.index('@router.post("/api/tasks/reload-all")')
+        end = content.index('@router.post("/api/config")', start)
         full_reload_body = content[start:end]
         self.assertIn("orchestrator.tasks.reload_all", full_reload_body)
 
     def test_run_route_scopes_character_login_skip_to_task_list_source(self):
-        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
-        start = content.index("@app.post(\"/api/run\")")
-        end = content.index("@app.get(\"/api/run/status\")", start)
+        content = route_module("tasks")
+        start = content.index('@router.post("/api/run")')
+        end = content.index('@router.get("/api/run/status")', start)
         body = content[start:end]
 
         self.assertIn('execution_source = str(body.get("execution_source")', body)
@@ -1716,15 +1723,16 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("${path}", content)
 
     def test_persistence_errors_include_runtime_paths(self):
-        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
+        context = (ROOT / "backend/webui/api_context.py").read_text(encoding="utf-8")
+        server = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
 
-        self.assertIn("def _persistence_diagnostics()", content)
-        self.assertIn("config_path", content)
-        self.assertIn("accounts_dir", content)
-        self.assertIn("dataRoot=", content)
-        self.assertIn("diagnostics=_persistence_diagnostics()", content)
-        self.assertIn("unhandled_api_error", content)
-        self.assertIn("保存任务失败", content)
+        self.assertIn("def persistence_diagnostics()", context)
+        self.assertIn("config_path", context)
+        self.assertIn("accounts_dir", context)
+        self.assertIn("dataRoot=", context)
+        # the middleware attaches the same diagnosis to an unhandled API error
+        self.assertIn("diagnostics=persistence_diagnostics()", server)
+        self.assertIn("unhandled_api_error", server)
 
     def test_webui_startup_does_not_initialize_device_controls(self):
         content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
@@ -1777,9 +1785,9 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertNotIn("enum_options_failed", server)
 
     def test_ocr_status_fail_instead_of_probe_defaults(self):
-        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
-        start = content.index("@app.get(\"/api/ocr-status\")")
-        end = content.index("@app.get(\"/api/scheduler/status\")", start)
+        content = route_module("ops")
+        start = content.index('@router.get("/api/ocr-status")')
+        end = content.index('@router.get("/api/device/diagnostics")', start)
         body = content[start:end]
 
         self.assertNotIn("def _safe", body)
@@ -1871,7 +1879,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
 
     def test_device_facade_centralizes_manager_adb_nemu_checks(self):
         content = (ROOT / "AutoScriptor/control/MumuAdaptor/device_facade.py").read_text(encoding="utf-8")
-        server = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
+        server = route_module("ops")
 
         self.assertIn("class DeviceFacade", content)
         self.assertIn("MuMuManager for official lifecycle commands", content)
@@ -1967,21 +1975,21 @@ print("OK")
         self.assertNotIn("ctx.mixctrl", content)
 
     def test_remote_access_requires_deploy_password(self):
-        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
+        content = route_module("ops")
         start = content.index('async def remote_access_toggle_api')
-        end = content.index('# ── 多账号 API ──', start)
+        end = content.index('@router.get("/api/deploy")', start)
         body = content[start:end]
 
         self.assertIn('cfg._config.get("deploy", {}).get("password")', body)
         self.assertIn("deploy_password_required", body)
 
     def test_account_verify_does_not_start_scheduler(self):
-        content = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
+        content = route_module("accounts")
         start = content.index('async def verify_account_api')
-        end = content.index('@app.post("/api/account")', start)
+        end = content.index('@router.post("/api/account")', start)
         body = content[start:end]
 
-        self.assertIn("_grant_credential_unlock()", body)
+        self.assertIn("grant_credential_unlock()", body)
         self.assertNotIn("orchestrator.scheduler.activate()", body)
         self.assertNotIn("orchestrator.scheduler.wake()", body)
         self.assertIn("waiting for explicit run", body)
@@ -2995,10 +3003,7 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
             encoding="utf-8",
             errors="ignore",
         )
-        server = (ROOT / "backend/webui/server.py").read_text(
-            encoding="utf-8",
-            errors="ignore",
-        )
+        server = route_module("news")
         scheduler = (ROOT / "orchestrator/scheduler.py").read_text(
             encoding="utf-8",
             errors="ignore",
@@ -3033,7 +3038,8 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
                 self.assertIn(marker, route)
 
         self.assertNotIn("<th>类型</th>", route)
-        self.assertIn('label": f"{server}:{char_name}"', server)
+        projection = (ROOT / "orchestrator/projection.py").read_text(encoding="utf-8")
+        self.assertIn('"label": f"{server}:{character}"', projection)
         redeem_task = (ROOT / "tasks/normal_task/huodong/redeem_gift.py").read_text(
             encoding="utf-8",
             errors="ignore",
@@ -3043,7 +3049,7 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
             errors="ignore",
         )
 
-        self.assertIn('_GIFT_REDEEM_TASK_PATH = "一般任务/活动/兑换豪礼礼品兑换"', server)
+        self.assertIn('GIFT_REDEEM_TASK_PATH = "一般任务/活动/兑换豪礼礼品兑换"', server)
         self.assertIn("未找到兑换码任务，请确认一般任务已加载", server)
         self.assertFalse((ROOT / "tasks/_manifest.py").exists())
         self.assertIn("'兑换豪礼礼品兑换': 'redeem_gift'", translations)

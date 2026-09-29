@@ -47,7 +47,6 @@ class Orchestrator:
     def configure_lifecycle(
         self,
         *,
-        refresh_order_map: Callable[[], None],
         mark_config_changed: Callable[[str], int],
         apply_log_level: Callable[[], None] | None = None,
         clear_background: Callable[[], None] | None = None,
@@ -63,7 +62,6 @@ class Orchestrator:
             self.task_manager,
             self.scheduler,
             self.tree,
-            refresh_order_map,
             mark_config_changed,
             apply_log_level,
             clear_background,

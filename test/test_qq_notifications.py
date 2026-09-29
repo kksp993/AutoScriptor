@@ -13,7 +13,8 @@ from starlette.requests import Request
 from orchestrator.delivery import CharacterReports
 from orchestrator.delivery import DeliveryError, QQNotifier, QQSettings, send_message
 from orchestrator.projection import WebUILifecycleService
-from backend.webui.routes.notifications import create_notifications_router
+from orchestrator import orchestrator
+from backend.webui.routes.notifications import router as notifications_router
 
 
 class TestCharacterReports(unittest.TestCase):
@@ -191,7 +192,7 @@ class TestQQSettingsLifecycle(unittest.TestCase):
         self.manager.config_transaction.side_effect = nullcontext
         self.version = Mock(return_value=2)
         self.lifecycle = WebUILifecycleService(
-            self.config, self.manager, Mock(), Mock(), Mock(), self.version,
+            self.config, self.manager, Mock(), Mock(), self.version,
         )
 
     def test_save_only_global_config_and_preserve_or_clear_token(self):
@@ -225,17 +226,35 @@ class TestQQSettingsLifecycle(unittest.TestCase):
         self.assertEqual(self.config.get("notify.qq.access_token"), "test-token")
         self.assertNotIn("token_set", self.config.get("notify.qq"))
 
+    def _notification_endpoint(self, path, method, busy=None):
+        """Locate a notification endpoint and bind it to this test's service.
+
+        The router reaches the orchestrator directly instead of taking injected
+        collaborators, so a test supplies its own service by swapping
+        ``orchestrator.tasks`` and stubbing only the execution guard.
+        """
+        guard = (lambda action: busy) if busy is not None else (lambda action: None)
+        patches = [
+            patch.object(orchestrator, "tasks", self.lifecycle),
+            patch("backend.webui.routes.notifications.guard_runtime_idle", guard),
+        ]
+        return next(
+            route.endpoint
+            for route in notifications_router.routes
+            if route.path == path and method in route.methods
+        ), patches
+
     def call_endpoint(self, path, method, payload=None, busy=None):
-        router = create_notifications_router(self.lifecycle, lambda action: busy)
-        endpoint = next(route.endpoint for route in router.routes if route.path == path and method in route.methods)
-        if method == "GET":
-            return endpoint()
-        body = json.dumps(payload).encode("utf-8")
+        endpoint, patches = self._notification_endpoint(path, method, busy)
+        with patches[0], patches[1]:
+            if method == "GET":
+                return endpoint()
+            body = json.dumps(payload).encode("utf-8")
 
-        async def receive():
-            return {"type": "http.request", "body": body, "more_body": False}
+            async def receive():
+                return {"type": "http.request", "body": body, "more_body": False}
 
-        return asyncio.run(endpoint(Request({"type": "http", "method": method, "path": path}, receive)))
+            return asyncio.run(endpoint(Request({"type": "http", "method": method, "path": path}, receive)))
 
     def test_read_hides_token_and_test_does_not_save(self):
         self.lifecycle.save_qq_settings({"target_id": "12345", "access_token": "test-token"})
@@ -259,12 +278,10 @@ class TestQQSettingsLifecycle(unittest.TestCase):
 
     def test_local_bot_handoff_preserves_recipient_and_hides_token(self):
         self.lifecycle.save_qq_settings({"target_id": "12345", "enabled": True})
-        router = create_notifications_router(self.lifecycle, lambda action: None)
-        endpoint = next(route.endpoint for route in router.routes if (
-            route.path == "/api/notify/qq/local" and "POST" in route.methods
-        ))
+        endpoint, patches = self._notification_endpoint("/api/notify/qq/local", "POST")
         connection = {"endpoint": "http://127.0.0.1:3010", "access_token": "local-secret"}
-        with patch("backend.webui.routes.notifications.local_notification_settings", return_value=connection):
+        with patches[0], patches[1], \
+             patch("backend.webui.routes.notifications.local_notification_settings", return_value=connection):
             response = asyncio.run(endpoint())
         self.assertTrue(response["ok"])
         settings = self.lifecycle.prepare_qq_settings({})
@@ -276,11 +293,9 @@ class TestQQSettingsLifecycle(unittest.TestCase):
 
     def test_busy_local_handoff_does_not_read_installation(self):
         sentinel = object()
-        router = create_notifications_router(self.lifecycle, lambda action: sentinel)
-        endpoint = next(route.endpoint for route in router.routes if (
-            route.path == "/api/notify/qq/local" and "POST" in route.methods
-        ))
-        with patch("backend.webui.routes.notifications.local_notification_settings") as read_local:
+        endpoint, patches = self._notification_endpoint("/api/notify/qq/local", "POST", busy=sentinel)
+        with patches[0], patches[1], \
+             patch("backend.webui.routes.notifications.local_notification_settings") as read_local:
             self.assertIs(asyncio.run(endpoint()), sentinel)
         read_local.assert_not_called()
         self.config.save_global_config.assert_not_called()

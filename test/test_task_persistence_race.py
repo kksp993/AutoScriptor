@@ -23,7 +23,7 @@ class TaskPersistenceRaceContractTests(unittest.TestCase):
 
     def test_ordering_response_cannot_replace_unsaved_task_draft(self):
         frontend = (ROOT / "backend/webui/static/js/app.js").read_text(encoding="utf-8")
-        backend = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
+        backend = (ROOT / "backend/webui/routes/tasks.py").read_text(encoding="utf-8")
 
         save_ordering_start = frontend.index("async function saveTaskOrdering")
         save_ordering_end = frontend.index("function orderedTaskPathsForSoftOrder", save_ordering_start)
@@ -33,12 +33,12 @@ class TaskPersistenceRaceContractTests(unittest.TestCase):
         self.assertIn("applyTaskOrderingPayload(data)", save_ordering)
         self.assertNotIn("applyPublicConfigPayload(data)", save_ordering)
 
-        route_start = backend.index('@app.post("/api/task-ordering")')
-        route_end = backend.index('@app.post("/api/task-ordering/layout")', route_start)
+        route_start = backend.index('@router.post("/api/task-ordering")')
+        route_end = backend.index('@router.post("/api/task-ordering/layout")', route_start)
         route = backend[route_start:route_end]
 
-        self.assertIn("_make_task_ordering_response_unlocked()", route)
-        self.assertNotIn("_make_public_config_unlocked()", route)
+        self.assertIn("task_ordering_response()", route)
+        self.assertNotIn("public_config_unlocked()", route)
 
     def test_runtime_poll_compares_with_current_version_after_response(self):
         frontend = (ROOT / "backend/webui/static/js/app.js").read_text(encoding="utf-8")

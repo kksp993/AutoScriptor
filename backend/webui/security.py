@@ -1,14 +1,20 @@
 ﻿"""
 WebUI 安全模块
 ==============
-密码哈希、会话管理、速率限制、重放攻击防护。
-独立于 server.py 以便于测试。
+密码哈希、会话管理、速率限制、重放攻击防护，以及路由层要的那几层薄封装
+（登录限流、凭据解锁 cookie、解锁校验）。独立于 server.py 以便于测试。
 """
 from __future__ import annotations
 
 import hashlib as _hashlib
 import secrets as _secrets
 import time as _time
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+from AutoScriptor.utils.app_config import cfg
+from backend.webui.api_response import api_error
 
 
 # ── 密码哈希 ──
@@ -198,3 +204,63 @@ def revoke_credential_unlock(token: str | None) -> None:
 def get_credential_unlock_tokens_for_tests() -> dict[str, float]:
     """仅测试用：返回内部令牌表副本"""
     return dict(_credential_unlock_tokens)
+
+
+# ── 请求层的薄封装 ──
+# 每个需要登录 / 需要解锁 / 需要限流的路由都用这几个入口，避免各处自己拼 cookie
+# 名、自己数失败次数、自己决定 403 的载荷。
+
+def is_rate_limited(ip: str) -> bool:
+    return login_limiter.is_limited(ip)
+
+
+def record_login_failure(ip: str) -> None:
+    login_limiter.record_failure(ip)
+
+
+def is_verify_rate_limited(ip: str) -> bool:
+    return verify_limiter.is_limited(ip)
+
+
+def record_verify_failure(ip: str) -> None:
+    verify_limiter.record_failure(ip)
+
+
+def credential_unlock_from_request(request: Request) -> str | None:
+    return request.cookies.get(CREDENTIAL_UNLOCK_COOKIE_NAME) or request.headers.get(
+        "X-Credential-Unlock"
+    )
+
+
+def attach_credential_unlock_cookie(response: JSONResponse, token: str) -> JSONResponse:
+    response.set_cookie(
+        CREDENTIAL_UNLOCK_COOKIE_NAME,
+        token,
+        httponly=True,
+        samesite="strict",
+        max_age=CREDENTIAL_UNLOCK_TTL,
+        path="/",
+    )
+    return response
+
+
+def clear_credential_unlock_cookie(response: JSONResponse) -> JSONResponse:
+    response.delete_cookie(CREDENTIAL_UNLOCK_COOKIE_NAME, path="/")
+    return response
+
+
+def require_credential_unlock(request: Request) -> JSONResponse | None:
+    """执行自动化前仅依据 cfg 中是否已有已解密账密判断。"""
+    if cfg.has_decrypted_credentials():
+        return None
+    return credential_locked_response("请先验证账号密码后再执行任务")
+
+
+def credential_locked_response(message: str) -> JSONResponse:
+    return api_error(
+        403,
+        message,
+        code="credential_locked",
+        need_credential_unlock=True,
+        need_security_key=True,
+    )
