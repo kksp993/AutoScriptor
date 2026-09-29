@@ -4,14 +4,22 @@ Read this when changing task registration, scheduling, runtime context, or OCR/b
 
 ## TaskRegistry And Task Config
 
-- Runtime task data lives in `AutoScriptor.utils.task_registry.task_registry`.
+- Runtime task data lives in `tasks.task_registry.task_registry`.
 - User task config lives in `cfg["tasks"]`; task status/progress lives under `cfg["status"]["tasks"]`.
 - Link both by slash path, for example `每日任务/村庄/宠物培养`.
 - Do not store or read `fn`, `order`, `param_meta`, `param_keys`, `beta`, `custom`, `debug_mode`, `task_description`, `task_doc_flow`, `_due`, or `progress_display` from persisted `cfg["tasks"]`.
+- Parameter specs (`tasks/task_params.py`) are the single definition behind the JSON default, the WebUI form description, and execution decoding; `param_meta` is computed from them at projection time and never persisted.
 - Leaf detection is `TaskTree.is_leaf(node)` or `'on' in node`.
 - `Scheduler._collect_due` must filter with `task_registry.has_task(path)`.
 - `TaskTreeService.inject_public_task_fields()` hides unregistered leaf tasks in WebUI projections.
 - Test task function replacement should use `task_registry.set_fn(path, fn)` or registry helpers, not cfg mutation.
+
+## Reload Boundary
+
+- A task reload re-imports task scripts and rebuilds `tasks` plus `tasks.battle_task_params` (the flow enum aggregates character-script `@flow` registrations).
+- It keeps `tasks.task_registry` (the registry singleton readers already hold) and the authoring plumbing (`task_params`, `task_register`, `task_state`, `translations`, `time`). `orchestrator/catalog.py` holds the list.
+- `ZmxyOL` is not purged: it owns cross-boundary types such as `TableParam`, and character scripts are refreshed by `reload_character_modules()`. `ZmxyOL.drop_cached_exports()` clears lazily bound re-exports so a star-import serves the post-reload enum.
+- The stale-leaf prune refuses to run on an empty registry: that state means registration did not reach the registry being read, and pruning there deletes every leaf.
 - Reload path clears and rebuilds the registry; check `force_reload_tasks()` before changing reload semantics.
 - `tasks/**/_order.txt` is an explicit source ordering input; task loading should not rewrite those files during normal startup.
 - Custom task scripts live in `data/custom_task/` and must use explicit `path_cn`.
@@ -69,5 +77,4 @@ Useful docs:
 Useful docs:
 
 - `docs/AutoScriptor/schedule/scheduler.md`
-
 

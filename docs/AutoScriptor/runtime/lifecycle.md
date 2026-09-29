@@ -140,6 +140,8 @@ WebUI reload 分三类：
 
 自定义任务导入失败会记录到公开配置的 `custom_task_load_errors`。本轮自定义任务存在导入错误时，任务加载会跳过 stale 自定义任务配置清理和本轮 `cfg.save_config()`，避免把临时坏脚本误判为已删除任务并持久化清空用户配置。
 
+stale 叶子清理还要求注册表非空。空注册表表示本轮注册没有落到读它的那份注册表上，而不是用户的配置树过期；在这种状态下清理会删掉整棵树。清理同时把 deprecated 任务计入"注册确实跑过"的证据，因为它们虽然不写配置叶子，却正是要清掉的那类残留。
+
 保存任务、切换账号/角色、账号解锁、更新账号凭据和普通配置导入只保存或同步配置并刷新投影/order/config_version，不重建职业脚本和任务注册表。
 
 自动跨角色调度、重试轮切换角色和执行后回切首个调度角色也使用 `TaskManager.switch_character()` 或 `cfg.switch_character()` 做轻量切换；这些路径只刷新登录状态和 WebUI 投影，不走完整 reload。
@@ -147,10 +149,23 @@ WebUI reload 分三类：
 `TaskManager.reload_tasks()` 会：
 
 1. 保留已解密凭据重新加载配置。
-2. 清除 `ZmxyOL.*` 模块缓存。
+2. 丢弃任务脚本模块，让它们的 `@register_task` 重新执行。
 3. `reload_character_modules()` 重载职业脚本。
-4. `force_reload_tasks()` 重建任务注册表。
-5. 最后 `bg.clear(clear_signals=True)` 清理残留监听。
+4. `ZmxyOL.drop_cached_exports()` 让包级惰性再导出重新解析。
+5. `force_reload_tasks()` 清空并重建任务注册表。
+6. 最后 `bg.clear(clear_signals=True)` 清理残留监听。
+
+### 重载保留哪些模块
+
+重载会重建任务脚本、`tasks` 包和 `tasks.battle_task_params`（流程枚举汇总职业脚本的 `@flow` 注册，所以要跟着重建），但保留持有进程级对象的模块：
+
+| 保留 | 原因 |
+|------|------|
+| `tasks.task_registry` | 注册表单例。重新导入会造出第二个空注册表，而任务管理器、目录和清理逻辑仍读第一个——任务解析不到，清理还会把整棵树删掉。 |
+| `tasks.task_params` / `task_register` / `task_state` / `translations` / `time` | 编写期基础设施，不携带每轮状态；`task_params` 按类身份识别 `TableParam` 默认值，替换它会让表格参数不再被识别。 |
+| `ZmxyOL.*` | 拥有跨边界类型（`TableParam`、职业表）。重新导入会让类型身份分裂：任务签名里的表格默认值判不出类型，进而以原始对象写进 `cfg`。职业脚本由 `reload_character_modules()` 单独处理。 |
+
+`orchestrator/catalog.py` 的 `TASK_MODULES_KEPT_ON_RELOAD` 是保留清单，`is_reloadable_task_module()` 是唯一判据；`test/test_task_registry/test_task_reload_contract.py` 钉住这两侧。
 
 ## 性能边界
 

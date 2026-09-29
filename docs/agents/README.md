@@ -17,6 +17,7 @@ This directory is the shared rule layer for all coding agents working on AutoScr
 - `CLAUDE.md`: Claude Code project entry.
 - `.cursor/rules/00-shared-project-rules.mdc`: Cursor always-on entry.
 - `.cursor/rules/online-screenshot-test.mdc`: Cursor screenshot-test trigger.
+- `.cursor/skills/autoscriptor-live-check/`: the runnable live-check procedure (device session, frame, OCR, fixed-frame recognition, timeout checks).
 
 Project-local `.codex/` and `.claude/` skill/cache directories are intentionally git-ignored; keep durable shared rules in `docs/agents/`.
 

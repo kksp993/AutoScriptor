@@ -70,7 +70,7 @@ from AutoScriptor import *
 | 帧尺寸　　　　| `setFrameSize`、`getFrameSize`、`MUMU_SIZE_1280_720`、`MUMU_SIZE_720_1280` |
 | 错误　　　　　| `TaskRequireReTry`、`RequestHumanTakeover`　　　　　　　　　　　　　　　　 |
 
-`clear_task_status` 目前不是 `AutoScriptor.__all__` 公共导出；需要清理状态时从 `AutoScriptor.utils.task_state` 导入。
+`clear_task_status` 不是 `AutoScriptor.__all__` 公共导出；需要清理状态时从 `tasks.task_state` 导入。
 
 独立设备脚本直接调用 `init()`；若目标是游戏盒等其他 App，不希望先拉起配置中的游戏，则调用 `init(launch_app=False)`，然后使用 `launch_app(package_name)`、`close_app(package_name)` 和 `go_home()`。不要从星号导入后长期保存 `mixctrl/mumu` 快照。
 

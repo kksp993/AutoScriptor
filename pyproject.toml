@@ -35,7 +35,7 @@ dependencies = [
 # OCR 运行时二选一，与 data/config.json -> ocr.use_gpu 保持一致。
 cpu = ["paddlepaddle==3.2.0", "mkl>=2023.0.0"]
 gpu = ["paddlepaddle-gpu==3.2.2"]
-# WebUI 后端（services/webui）与编辑器依赖，不属于框架本身。
+# WebUI 后端（backend/webui）与编辑器依赖，不属于框架本身。
 web = [
     "fastapi",
     "python-multipart>=0.0.9",

@@ -2,6 +2,27 @@
 
 When the user asks to "截张图测一下", "在线测一下", "拿当前页面跑一下", or otherwise test code against the live emulator/device screen, treat it as an online screenshot test.
 
+## Entry Points
+
+A check runs in-process against `AutoScriptor`; there is no separate CLI. A probe is
+a short script run with the project venv, and it uses the same device session and
+recognition helpers tasks use.
+
+| Step | Call |
+|------|------|
+| Device session | `runtime_ctx.ensure_device_session(reason=..., launch_app=False)` returns `(mixctrl, mumu)` |
+| Frame | `mixctrl.screenshot()` returns a BGR ndarray |
+| Target match | `ocr(frame, ["浏览器", ...])` returns `list[list[Box]]`, one inner list per target |
+| Region text | `ocr_for_box(frame, box)` returns the raw string of that region |
+| Fixed-frame locate | `locate(target, screenshot=frame)` |
+| Fixed-frame presence | `ui_T(target, screenshot=frame)` |
+| Fixed-frame extract | `extract_info(target, screenshot_frame=frame)`, `mode="both"` prefers registered UI images and falls back to OCR |
+| Frame size | `AutoScriptor.core.api.getFrameSize()` reports the convention helpers assume |
+
+Standalone scripts that need their own session use
+`AutoScriptor.init(start_emulator=..., launch_app=...)` and then the public
+`launch_app()` / `close_app()` / `go_home()` wrappers.
+
 ## Workflow
 
 1. Capture one live screenshot first, save it under the current logs root with a timestamp (`logs/` in source mode), and reuse that exact frame for all locate/OCR/extract calls in the test. Do not mix multiple implicit screenshots unless the test is explicitly about UI transitions or timeout behavior.
@@ -29,6 +50,6 @@ Use this workflow when verifying bugs like "after entering a page, X does not ap
 
 ## Notes
 
-- Prefer package imports such as `from AutoScriptor.core.box_grid import make_box_grid, indexof`; top-level `tools` can be shadowed after PaddleOCR imports.
+- Prefer package imports such as `from AutoScriptor.core.box_grid import make_box_grid, indexof`.
 - Keep OCR semantics separate from business semantics.
 - If the user says not to peek at a newly added difficult screenshot before implementation, implement first, then inspect it for validation.

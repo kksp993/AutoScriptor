@@ -1,8 +1,8 @@
 """AutoScriptor source WebUI entry point.
 
-Electron starts this file with ``--electron``. Direct source use can run:
+    Electron starts this file with ``--electron``. Direct source use can run:
 
-    .venv\\Scripts\\python.exe -X utf8 services\\webui\\gui.py
+        .venv\\Scripts\\python.exe -X utf8 backend\\webui\\gui.py
 """
 from __future__ import annotations
 

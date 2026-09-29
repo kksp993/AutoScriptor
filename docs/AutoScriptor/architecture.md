@@ -78,6 +78,18 @@ backend -> orchestrator -> tasks -> ZmxyOL -> AutoScriptor
 - `tasks/**/_order.txt` 是 legacy 源码导入/注册 seed；任务加载可读取它保持内置脚本稳定注册顺序，但用户显示和执行顺序由全局 `task_ordering` 投影决定，不在运行时反写源码树。
 - 有效任务顺序通过确定性总排序计算：先递归展开用户拖拽保存的 `items` 分组顺序，再回退到当前任务树顺序、运行时注册顺序和路径字典序。旧版 `hard_edges`、`layout`、`group_order` 会被规范化忽略，不再参与显示或执行顺序。
 
+## 任务重载边界
+
+任务重载重新导入任务脚本，让它们的 `@register_task` 再跑一遍，同时重建 `tasks` 包和 `tasks.battle_task_params`（流程枚举汇总职业脚本的 `@flow` 注册）。持有进程级对象的模块保持不动：
+
+| 保留 | 原因 |
+|------|------|
+| `tasks.task_registry` | 注册表单例。重新导入会造出第二个空注册表，而任务管理器、任务目录和 stale 清理仍读第一个。 |
+| `tasks.task_params` / `task_register` / `task_state` / `translations` / `time` | 编写期基础设施，不携带每轮状态；`task_params` 按类身份识别 `TableParam` 默认值。 |
+| `ZmxyOL.*` | 拥有跨边界类型（`TableParam`、职业表）；职业脚本由 `reload_character_modules()` 单独刷新。`ZmxyOL.drop_cached_exports()` 清掉包级惰性再导出。 |
+
+保留清单在 `orchestrator/catalog.py`（`TASK_MODULES_KEPT_ON_RELOAD`、`is_reloadable_task_module()`），`test/test_task_registry/test_task_reload_contract.py` 钉住它。stale 叶子清理在注册表为空时拒绝执行：那表示注册没落到读它的注册表上，而不是用户配置过期。详见 [运行生命周期](runtime/lifecycle.md#重载保留哪些模块)。
+
 ## 动态 API 边界
 
 - MuMu 适配器有动态转发：`BaseMumuControl.__getattr__` 会把未知属性转给当前 `Mumu().select(...)` 实例。

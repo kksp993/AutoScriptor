@@ -9,7 +9,7 @@ Read this when changing task scripts, task APIs, operator dispatch patterns, or 
 - Use task status/progress APIs when a task can partially complete:
   - `set_task_status("progress", "5/6")`
   - `get_task_status("progress")`
-- Import `clear_task_status` from `AutoScriptor.utils.task_state`; it is not currently exported by `from AutoScriptor import *`.
+- Import `clear_task_status` from `tasks.task_state`; it is not exported by `from AutoScriptor import *`.
 - Prefer `RequestHumanTakeover` for conditions that require user attention or game-state intervention.
 - Prefer `TaskRequireReTry` for transient recoverable failures.
 - Wrap multiple recognition targets in tuple/list for `locate`, `ui_T`, `wait_for_appear`, and `click`; a second positional argument is usually a timeout or click option, not another target.
@@ -47,4 +47,3 @@ Use judgment; do not apply these as mechanical lint rules.
 - Do not wrap code in broad defensive `try/except` without a recovery action.
 - Use `assert` only for programmer invariants, not user/game/runtime recoverable states.
 - Delete dead code instead of preserving commented branches.
-

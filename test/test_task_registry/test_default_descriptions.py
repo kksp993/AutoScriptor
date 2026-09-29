@@ -15,7 +15,6 @@ class TestRegisterTaskMetadata(unittest.TestCase):
 
         skip_files = {
             "battle_task_params.py",
-            "custom_task_loader.py",
             "task_register.py",
             "translations.py",
         }
