@@ -41,6 +41,43 @@ _CUSTOM_TASK_MODULE_PREFIX = "tasks._ct_"
 _last_custom_load_errors: list[dict[str, str]] = []
 _loaded = False
 
+# Modules under ``tasks/`` that a reload must keep.
+#
+# A reload re-imports the scripts so their decorators run again. Everything that
+# merely *supports* those scripts has to survive, because re-importing it would
+# replace objects other modules already hold:
+#
+# - ``task_registry`` owns the process-wide registry singleton. A second import
+#   builds a second, empty registry while the task manager and this module keep
+#   reading the first one -- no task resolves and the prune pass sees nothing.
+# - ``task_params`` / ``task_register`` / ``task_state`` / ``translations`` /
+#   ``time`` are the authoring plumbing. They hold no per-load state, and
+#   ``task_params`` compares parameter defaults against ``TableParam`` by class
+#   identity, so replacing it (or the game module that defines the class) makes
+#   every table default unrecognizable.
+#
+# ``tasks`` itself and ``tasks.battle_task_params`` are deliberately absent: the
+# package init re-exports the flow enum, and that enum aggregates ``@flow``
+# registrations from the character scripts, so both have to be rebuilt for an
+# edited character script to show up.
+TASK_MODULES_KEPT_ON_RELOAD = frozenset({
+    "tasks.task_params",
+    "tasks.task_register",
+    "tasks.task_registry",
+    "tasks.task_state",
+    "tasks.time",
+    "tasks.translations",
+})
+
+
+def is_reloadable_task_module(module_name: str) -> bool:
+    """True when a reload should re-import this module."""
+    if module_name == "tasks":
+        return True
+    if module_name == "tasks.battle_task_params":
+        return True
+    return module_name.startswith("tasks.") and module_name not in TASK_MODULES_KEPT_ON_RELOAD
+
 
 # ── Discovery and import order ──
 
@@ -174,9 +211,20 @@ def prune_stale_tasks() -> bool:
     on. Skipped when custom-task imports failed: an import error usually means
     the task exists but could not load, and deleting its config would lose user
     state.
+
+    Also skipped when the registry came back empty. An empty registry never
+    means "the user's tree is stale"; it means registration did not run against
+    the registry this function reads. Pruning there would delete every leaf --
+    the whole saved tree -- so the guard is the difference between a bug and
+    data loss.
     """
     if _last_custom_load_errors:
         logger.warning("custom_task: 本轮导入存在错误，跳过 stale 配置清理以保护用户配置")
+        return False
+    # include_deprecated: a task that only registers as deprecated still proves
+    # registration ran, and its config leaf is exactly what the prune should drop.
+    if not task_registry.all_paths(include_deprecated=True):
+        logger.error("任务注册表为空，跳过 stale 配置清理以保护用户配置")
         return False
     tasks = cfg["tasks"]
     if not isinstance(tasks, dict):

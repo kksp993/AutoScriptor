@@ -177,3 +177,17 @@ def __getattr__(name: str) -> _Any:
 
 def __dir__() -> list[str]:
     return sorted(set(globals()) | set(_PUBLIC_NAMES) | set(_SUBMODULES))
+
+
+def drop_cached_exports() -> None:
+    """Forget names this package resolved from a module that gets re-imported.
+
+    ``__getattr__`` memoizes each export into ``globals()`` on first access, so a
+    later ``from ZmxyOL import *`` reuses the bound object. A reload re-imports
+    ``tasks`` and ``tasks.battle_task_params`` -- the task authoring surface and
+    the flow enum -- and those names would otherwise keep serving the objects
+    from before the reload. Names whose owning module survived the reload resolve
+    back to the same object, so forgetting them is free.
+    """
+    for name in list(_EXPORTS):
+        globals().pop(name, None)
