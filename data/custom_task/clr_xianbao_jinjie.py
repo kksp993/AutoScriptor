@@ -2,7 +2,7 @@
 from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
 from ZmxyOL.nav.api import ensure_in
 from ZmxyOL.nav.envs.decorators import HAS_SHEZHI
-from ZmxyOL.task.task_register import register_task
+from tasks.task_register import register_task
 from AutoScriptor import *
 
 

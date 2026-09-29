@@ -20,11 +20,12 @@ webui.bat / scripts\run.bat webui
 
 | 层 | 位置 | 职责 |
 | --- | --- | --- |
-| 桌面壳 | `webapp/` | 源码 Electron 启动、后端进程管理、加载本地 WebUI |
-| WebUI | `services/webui/` | FastAPI API、页面、日志 WebSocket、配置/任务/更新面板 |
-| 服务层 | `services/core/` | 调度器、任务管理、运行上下文、源码 Git 更新 |
+| 前端 | `frontend/`（现 `webapp/` + `services/webui/static/`） | Electron 壳、Vue 页面与静态资源 |
+| 后端 | `backend/`（现 `services/`） | FastAPI API、日志 WebSocket、安全、更新与通知 |
+| 编排层 | `orchestrator/`（待从 `services/core/`、`services/webui/` 抽出） | 定时、排序、跨角色派发、执行闸门、retry |
+| 任务脚本 | `tasks/` | `@register_task` 任务实现、注册机制与运行时任务状态 |
 | 自动化核心 | `AutoScriptor/` | 识别、控制、配置、路径、日志、截图和通用 API |
-| 游戏任务 | `ZmxyOL/` | 任务注册、任务实现、导航和战斗流程 |
+| 游戏业务 | `ZmxyOL/` | 账号（`accounts/`，含 `crypto`）、角色（`character/`）、导航、战斗、参数表 |
 | 用户数据 | `data/` | 配置、账号、职业脚本、自定义任务 |
 | 运行产物 | `logs/` | 日志、错误归档、截图、礼包码缓存 |
 | 维护脚本 | `scripts/` | 安装、运行、更新和少量当前主线需要的维护脚本 |
@@ -40,7 +41,7 @@ webui.bat / scripts\run.bat webui
 - 可选本机 QQ 机器人：`services/core/qq_bot.py` 管理官方包安装与独立启动，运行文件和令牌在
   Git 忽略的 `.autoscriptor/qq-bot`；WebUI 通过 lifecycle 接收连接配置，不把安装逻辑放进游戏任务。
 - 自定义任务：`data/custom_task/`
-- 用户职业脚本：`data/battle_character/`
+- 用户职业脚本：`data/character/`
 - 可变缓存和采集结果：`logs/`
 
 代码里的路径入口统一使用 `AutoScriptor.utils.paths`。不要把运行数据放回 `docs/`，也不要恢复根目录 `tools/`。
@@ -53,13 +54,13 @@ webui.bat / scripts\run.bat webui
 - 两者用 slash 路径关联，例如 `每日任务/村庄/宠物培养`。
 - 保存配置前必须剥离 `fn`、`order`、`param_meta`、`param_keys`、`_due`、`progress_display` 等运行时字段。
 - 调度器收集到期任务时必须通过 `task_registry.has_task(path)` 过滤未注册残留叶子。
-- `ZmxyOL/task/**/_order.txt` 是 legacy 源码导入/注册 seed；任务加载可读取它保持内置脚本稳定注册顺序，但用户显示和执行顺序由全局 `task_ordering` 投影决定，不在运行时反写源码树。
+- `tasks/**/_order.txt` 是 legacy 源码导入/注册 seed；任务加载可读取它保持内置脚本稳定注册顺序，但用户显示和执行顺序由全局 `task_ordering` 投影决定，不在运行时反写源码树。
 - 有效任务顺序通过确定性总排序计算：先递归展开用户拖拽保存的 `items` 分组顺序，再回退到当前任务树顺序、运行时注册顺序和路径字典序。旧版 `hard_edges`、`layout`、`group_order` 会被规范化忽略，不再参与显示或执行顺序。
 
 ## 动态 API 边界
 
 - MuMu 适配器有动态转发：`BaseMumuControl.__getattr__` 会把未知属性转给当前 `Mumu().select(...)` 实例。
-- `AutoScriptor` 和 `ZmxyOL/task` 里的控制、时间、识别辅助函数是任务作者 API；没有仓库内静态引用不等于可删。
+- `AutoScriptor` 和 `tasks/` 里的控制、时间、识别辅助函数是任务作者 API；没有仓库内静态引用不等于可删。
 - 可以删除已移除产品面的入口、脚本和文档，但不要只凭 `rg` 静态未命中删除 MuMu 控制属性、任务装饰器参数、`sleep/click/locate` 等任务脚本可调用面。
 
 ## 源码启动与更新边界

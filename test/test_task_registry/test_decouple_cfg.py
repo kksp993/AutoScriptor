@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from ZmxyOL.task_registry import task_registry
+from tasks.task_registry import task_registry
 from AutoScriptor.utils.app_config import cfg
 
 
@@ -78,7 +78,7 @@ class TestCfgNodeShape(unittest.TestCase):
 
 
     def test_builtin_path_cn_defines_cfg_and_registry_path(self):
-        import ZmxyOL.task.task_register as task_register_mod
+        import tasks.task_register as task_register_mod
 
         old_counter = task_register_mod.registration_counter
         try:
@@ -86,7 +86,7 @@ class TestCfgNodeShape(unittest.TestCase):
                 pass
 
             fake_file = os.path.join(
-                os.path.dirname(__file__), "..", "..", "ZmxyOL", "task", "daily_task", "village", "no_translation_task.py"
+                os.path.dirname(__file__), "..", "..", "tasks", "daily_task", "village", "no_translation_task.py"
             )
             with patch("inspect.getfile", return_value=fake_file):
                 task_register_mod.register_task(
@@ -103,7 +103,7 @@ class TestCfgNodeShape(unittest.TestCase):
 
 
     def test_deprecated_register_is_not_visible_or_written_to_cfg(self):
-        import ZmxyOL.task.task_register as task_register_mod
+        import tasks.task_register as task_register_mod
 
         old_counter = task_register_mod.registration_counter
         cfg._config["tasks"] = {"每日任务": {"村庄": {"仙盟建设": {"on": True, "next_exec_time": 1}}}}
@@ -112,7 +112,7 @@ class TestCfgNodeShape(unittest.TestCase):
                 pass
 
             fake_file = os.path.join(
-                os.path.dirname(__file__), "..", "..", "ZmxyOL", "task", "daily_task", "village", "alliance_build.py"
+                os.path.dirname(__file__), "..", "..", "tasks", "daily_task", "village", "alliance_build.py"
             )
             with patch("inspect.getfile", return_value=fake_file):
                 task_register_mod.register_task(fn, path_cn="每日任务/村庄/仙盟建设", deprecated=True, description="旧任务")
@@ -124,8 +124,8 @@ class TestCfgNodeShape(unittest.TestCase):
             task_register_mod.registration_counter = old_counter
 
     def test_table_param_defaults_add_new_columns_without_overwriting_user_values(self):
-        import ZmxyOL.task.task_register as task_register_mod
-        from ZmxyOL.table_param import TableParam
+        import tasks.task_register as task_register_mod
+        from ZmxyOL.battle.table_param import TableParam
 
         cfg._config["tasks"] = {
             "每日任务": {
@@ -154,7 +154,7 @@ class TestCfgNodeShape(unittest.TestCase):
             pass
 
         fake_file = os.path.join(
-            os.path.dirname(__file__), "..", "..", "ZmxyOL", "task", "daily_task", "hgwj", "yijingfuben.py"
+            os.path.dirname(__file__), "..", "..", "tasks", "daily_task", "hgwj", "yijingfuben.py"
         )
         old_counter = task_register_mod.registration_counter
         try:
@@ -205,7 +205,7 @@ class TestCfgSaveClean(unittest.TestCase):
         cfg.ACCOUNTS_DIR = os.path.join(self._tmp, "accounts")
         os.makedirs(cfg.ACCOUNTS_DIR, exist_ok=True)
 
-        from ZmxyOL.account_store import Account
+        from ZmxyOL.accounts.account_store import Account
 
         cfg._mgr.config_path = Path(cfg.CONFIG_PATH)
         cfg._mgr.default_accounts_dir = Path(cfg.ACCOUNTS_DIR)
@@ -328,7 +328,7 @@ class TestSortTasks(unittest.TestCase):
         task_registry._tasks = self._reg_backup
 
     def test_sort_by_registry_order(self):
-        from ZmxyOL.task.pkg_utils import sort_tasks
+        from tasks.pkg_utils import sort_tasks
 
         task_registry.register("cat/Z任务", lambda: None, order=1)
         task_registry.register("cat/A任务", lambda: None, order=2)
@@ -344,7 +344,7 @@ class TestSortTasks(unittest.TestCase):
         self.assertEqual(keys, ["Z任务", "A任务"])
 
     def test_unregistered_tasks_sort_last(self):
-        from ZmxyOL.task.pkg_utils import sort_tasks
+        from tasks.pkg_utils import sort_tasks
 
         task_registry.register("cat/注册过", lambda: None, order=1)
 
@@ -540,7 +540,7 @@ class TestTaskStatusProgress(unittest.TestCase):
         task_registry._tasks = self._reg_backup
 
     def test_task_status_api_uses_current_task_path(self):
-        from ZmxyOL.task_state import (
+        from tasks.task_state import (
             clear_task_status,
             get_task_status,
             set_current_task_path,
@@ -557,7 +557,7 @@ class TestTaskStatusProgress(unittest.TestCase):
             set_current_task_path(None)
 
     def test_normal_return_with_incomplete_progress_marks_human_takeover_after_retry_exhausted(self):
-        from AutoScriptor import set_task_status
+        from tasks.task_state import set_task_status
         from services.core import task_manager as tm_mod
         from services.core.task_manager import TaskManager
 

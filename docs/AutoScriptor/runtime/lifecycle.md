@@ -99,7 +99,7 @@ Editor 自定义代码执行由 `/api/editor/execute-code` 拥有路由内执行
 - 全局配置：源码运行使用 `data/config.json`。
 - 账号配置：`data/accounts/*.json`。
 - 自定义任务：`data/custom_task/`。
-- 职业脚本：`data/battle_character/`。
+- 职业脚本：`data/character/`。
 - 日志与错误归档：`logs/`。
 - 配置/账号保存只使用同目录临时文件加原子替换；默认不强制 `fsync`，避免低内存、杀毒扫描或慢盘把小 JSON 写入拖成秒级阻塞。需要严格刷盘时设置 `AUTOSCRIPTOR_STRICT_FSYNC=1`。
 - 纯全局配置保存（如基础配置、deploy、notify、update、remote_access）只写 `data/config.json`，不重写当前账号 JSON。任务、状态、账号、角色变更才写 `accounts/*.json`。
@@ -124,11 +124,11 @@ WebUI 公开配置必须剥离账号、密码、加密块、运行时任务字�
 - 当前 `data/config.json`
 - 当前账号文件
 - `data/custom_task/`
-- `data/battle_character/`
+- `data/character/`
 
 如果未在执行任务，直接 `TaskManager.reload_tasks()`。如果正在执行，则先 `cfg.reload_preserving_decrypted_credentials()` 同步磁盘变更，设置 `_reload_deferred`，等任务安全边界再重建任务注册表和职业脚本。
 
-调度器自己写入任务状态、进度或 `next_exec_time` 时，也会更新 `data/config.json` 或当前账号文件。此类内部持久化只用于同步 WebUI 展示，不应在下一轮被误判为外部配置变更并再次触发 `TaskManager.reload_tasks()`；调度循环会把已处理的配置/账号 JSON 写入标记为已见。`data/custom_task/` 和 `data/battle_character/` 的脚本变更仍按热重载处理。
+调度器自己写入任务状态、进度或 `next_exec_time` 时，也会更新 `data/config.json` 或当前账号文件。此类内部持久化只用于同步 WebUI 展示，不应在下一轮被误判为外部配置变更并再次触发 `TaskManager.reload_tasks()`；调度循环会把已处理的配置/账号 JSON 写入标记为已见。`data/custom_task/` 和 `data/character/` 的脚本变更仍按热重载处理。
 
 WebUI reload 分三类：
 
@@ -148,7 +148,7 @@ WebUI reload 分三类：
 
 1. 保留已解密凭据重新加载配置。
 2. 清除 `ZmxyOL.*` 模块缓存。
-3. `reload_battle_character_modules()` 重载职业脚本。
+3. `reload_character_modules()` 重载职业脚本。
 4. `force_reload_tasks()` 重建任务注册表。
 5. 最后 `bg.clear(clear_signals=True)` 清理残留监听。
 

@@ -187,7 +187,7 @@ data/config.json          全局配置
 data/config.template.json 配置模板
 data/accounts/            账号、角色、任务配置和状态
 data/custom_task/         用户自定义任务
-data/battle_character/    用户职业脚本
+data/character/    用户职业脚本
 logs/                     日志、截图、错误归档、礼包码缓存
 ```
 

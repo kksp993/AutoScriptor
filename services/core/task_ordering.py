@@ -152,7 +152,7 @@ def collect_task_paths(task_tree: dict[str, Any], prefix: str = "") -> list[str]
 
 def _legacy_registry_order(path: str) -> int | float:
     try:
-        from ZmxyOL.task_registry import task_registry
+        from tasks.task_registry import task_registry
 
         return task_registry.get_order(path)
     except Exception:

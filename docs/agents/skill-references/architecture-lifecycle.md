@@ -13,9 +13,9 @@ Read this when changing task registration, scheduling, runtime context, or OCR/b
 - `TaskTreeService.inject_public_task_fields()` hides unregistered leaf tasks in WebUI projections.
 - Test task function replacement should use `task_registry.set_fn(path, fn)` or registry helpers, not cfg mutation.
 - Reload path clears and rebuilds the registry; check `force_reload_tasks()` before changing reload semantics.
-- `ZmxyOL/task/**/_order.txt` is an explicit source ordering input; task loading should not rewrite those files during normal startup.
+- `tasks/**/_order.txt` is an explicit source ordering input; task loading should not rewrite those files during normal startup.
 - Custom task scripts live in `data/custom_task/` and must use explicit `path_cn`.
-- Runtime battle character scripts live in `data/battle_character/`; old YAML profiles are not the active battle-flow path.
+- Runtime battle character scripts live in `data/character/`; old YAML profiles are not the active battle-flow path.
 - MuMu adapter attributes and task-authoring helpers may be reached dynamically through `BaseMumuControl.__getattr__`, `from AutoScriptor import *`, or user scripts; static no-call evidence alone is not deletion proof.
 
 Useful docs:

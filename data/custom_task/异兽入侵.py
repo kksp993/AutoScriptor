@@ -1,7 +1,7 @@
 from AutoScriptor import *
 from ZmxyOL.nav.api import *
 from ZmxyOL.nav.envs.decorators import *
-from ZmxyOL.task.task_register import register_task
+from tasks.task_register import register_task
 from ZmxyOL import *
 @register_task(
     path_cn='自定义任务/编辑器保存/异兽入侵',

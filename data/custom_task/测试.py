@@ -4,7 +4,7 @@ import AutoScriptor.core.api as core_api
 from AutoScriptor.utils.cancel import check_cancel_raise
 from ZmxyOL.nav.api import *
 from ZmxyOL.nav.envs.decorators import *
-from ZmxyOL.task.task_register import register_task
+from tasks.task_register import register_task
 from ZmxyOL import *
 @register_task(
     path_cn='自定义任务/编辑器保存/离开关卡',

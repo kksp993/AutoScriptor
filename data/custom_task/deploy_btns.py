@@ -1,6 +1,6 @@
 
 from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
-from ZmxyOL.task.task_register import register_task
+from tasks.task_register import register_task
 from AutoScriptor import *
 
 

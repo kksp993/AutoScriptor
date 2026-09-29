@@ -38,7 +38,7 @@ MAX_CONSECUTIVE_ERRORS = 3
 
 def collect_active_times_from_tasks_tree(tasks: dict) -> list[float]:
     """收集任务树中所有 on=True 且已注册任务的「有效」下次执行时间（含 sched_window / 星期限制）。"""
-    from ZmxyOL.task_registry import task_registry
+    from tasks.task_registry import task_registry
     from services.core.task_manager import (
         parse_sched_window_hours,
         clamp_to_sched_window,
@@ -132,7 +132,7 @@ def next_display_timestamp_from_times(times: list[float]) -> float | None:
 
 def is_task_due(val: dict, path: str, now_ts: float) -> bool:
     """判定单个任务是否到期（与 Scheduler._collect_due 完全一致的判定逻辑，无副作用）。"""
-    from ZmxyOL.task_registry import task_registry
+    from tasks.task_registry import task_registry
     from services.core.task_manager import (
         parse_sched_window_hours,
         clamp_to_sched_window,
@@ -164,7 +164,7 @@ def is_task_due(val: dict, path: str, now_ts: float) -> bool:
 def is_task_debug_mode(task_path: str, task_data: dict | None = None) -> bool:
     """Lightweight debug-mode lookup that does not import task runtime modules."""
     from AutoScriptor.utils.app_config import cfg
-    from ZmxyOL.task_registry import task_registry
+    from tasks.task_registry import task_registry
     import dpath
 
     if task_registry.get_debug_mode(task_path):
@@ -461,7 +461,7 @@ class Scheduler:
     def _collect_active_times(self) -> list[float]:
         """收集当前账号下所有角色的 on=True 任务的「有效」下次执行时间（含 sched_window 等）。"""
         from AutoScriptor.utils.app_config import cfg
-        from ZmxyOL.task_registry import task_registry
+        from tasks.task_registry import task_registry
 
         if not self._retry_exhausted_tasks:
             return collect_active_times_from_all_characters(cfg, dispatch_only=True)
@@ -520,11 +520,11 @@ class Scheduler:
     def _loop(self):
         from services.core.watcher import ConfigWatcher
         from AutoScriptor.utils.app_config import cfg
-        from ZmxyOL.paths import get_battle_character_dir, get_custom_task_dir
+        from ZmxyOL.accounts import get_character_dir, get_custom_task_dir
 
         def _extra_reload_paths() -> list[str]:
             paths = [
-                str(get_battle_character_dir()),
+                str(get_character_dir()),
                 str(get_custom_task_dir()),
             ]
             if cfg.current_account():
@@ -566,7 +566,7 @@ class Scheduler:
     # ── 到期任务收集 ──
 
     def _collect_due(self, node: dict, prefix: str, now_ts: float) -> list[str]:
-        from ZmxyOL.task_registry import task_registry
+        from tasks.task_registry import task_registry
         from AutoScriptor.utils.app_config import cfg
         from services.core.task_manager import (
             parse_sched_window_hours,

@@ -6,16 +6,16 @@
 
 | 组件 | 职责 |
 |------|------|
-| `ZmxyOL/task/task_register.py` | `@register_task` 注册任务路径，维护用户配置叶节点，并把运行时元数据写入 `TaskRegistry` |
-| `AutoScriptor/utils/task_registry.py` | 运行时注册表，保存 `fn/order/param_meta/doc/debug_mode`，不持久化 |
+| `tasks/task_register.py` | `@register_task` 注册任务路径，维护用户配置叶节点，并把运行时元数据写入 `TaskRegistry` |
+| `tasks/task_registry.py` | 运行时注册表，保存 `fn/order/param_meta/doc/debug_mode`，不持久化 |
 | `services/core/scheduler.py` | 后台线程、动态等待、跨角色收集到期任务、调度周期 retry、状态机 |
 | `services/core/task_manager.py` | 单任务执行、参数恢复、任务内 retry、进度判定、人工接管标记、执行后时间更新 |
-| `AutoScriptor/utils/task_state.py` | 当前任务本地状态 API，例如 `progress` |
+| `tasks/task_state.py` | 当前任务本地状态 API，例如 `progress` |
 | `services/webui/task_tree_service.py` / `server.py` | 将任务树投影为 WebUI 状态、进度、到期与错误展示 |
 
 ## 任务注册与数据归属
 
-任务是一个被 `@register_task` 装饰的 Python 函数。内置任务来自 `ZmxyOL/task/`；自定义任务来自 `data/custom_task/`，并需要显式 `path_cn`。
+任务是一个被 `@register_task` 装饰的 Python 函数。内置任务来自 `tasks/`；自定义任务来自 `data/custom_task/`，并需要显式 `path_cn`。
 
 注册数据分两层：
 
@@ -186,8 +186,7 @@ else:
 任务状态 API：
 
 ```python
-from AutoScriptor import set_task_status, get_task_status
-from AutoScriptor.utils.task_state import clear_task_status
+from tasks.task_state import set_task_status, get_task_status, clear_task_status
 
 set_task_status("progress", "5/6")
 progress = get_task_status("progress")

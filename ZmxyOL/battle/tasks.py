@@ -1,5 +1,5 @@
 from AutoScriptor import *
-from ZmxyOL.battle_character.hero import combo
+from ZmxyOL.character.hero import combo
 from ZmxyOL.nav.api import ensure_in, try_close_via_x
 EXIT_RADIUS=0  # 退出范围 for safety
 
@@ -101,17 +101,17 @@ def get_task_table(task_name:str|list[str]|tuple[str]):
     
 
 def challenge_task():
-    from ZmxyOL.battle_character.hero import h
+    from ZmxyOL.character.hero import h
     h.battle_tasks(set(TASK_TABLE_LIST).union(set(JIYUAN_TASK_TABLE)))
 
 
 def challenge_task_jiyuan():
-    from ZmxyOL.battle_character.hero import h
+    from ZmxyOL.character.hero import h
     h.battle_tasks(JIYUAN_TASK_TABLE)
 
 
 def challenge_task_daily():
-    from ZmxyOL.battle_character.hero import h
+    from ZmxyOL.character.hero import h
     h.battle_tasks(TASK_TABLE_LIST)
 
 

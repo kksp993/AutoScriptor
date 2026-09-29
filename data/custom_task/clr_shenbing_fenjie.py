@@ -1,7 +1,7 @@
 from AutoScriptor import *
 from ZmxyOL.nav.api import *
 from ZmxyOL.nav.envs.decorators import *
-from ZmxyOL.task.task_register import register_task
+from tasks.task_register import register_task
 
 
 @register_task(

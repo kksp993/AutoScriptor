@@ -13,8 +13,8 @@ from time import time
 
 from AutoScriptor import *
 from ZmxyOL import *
-from ZmxyOL.task.task_register import register_task
-from ZmxyOL.battle_character.hero import h
+from tasks.task_register import register_task
+from ZmxyOL.character.hero import h
 
 
 

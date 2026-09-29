@@ -2,7 +2,7 @@ import unittest
 from time import sleep
 from unittest.mock import patch
 
-from ZmxyOL.battle_character.hero import Hero, battle_plan
+from ZmxyOL.character.hero import Hero, battle_plan
 
 
 class FakeHero(Hero):
@@ -221,7 +221,7 @@ class TestBattlePlan(unittest.TestCase):
         self.assertEqual(hero.actions, [("huashen", 4), ("zhenwu",)])
 
     def test_huashen_long_clicks_juechang_target(self):
-        from ZmxyOL.battle_character import hero as hero_mod
+        from ZmxyOL.character import hero as hero_mod
 
         calls = []
 
@@ -238,7 +238,7 @@ class TestBattlePlan(unittest.TestCase):
         self.assertEqual(calls[0][2], {"if_exist": True})
 
     def test_builtin_bao_uses_bao_target_and_fast_throttle(self):
-        from ZmxyOL.battle_character import hero as hero_mod
+        from ZmxyOL.character import hero as hero_mod
 
         class Registry:
             def __init__(self):
@@ -301,7 +301,7 @@ class TestBattlePlan(unittest.TestCase):
         )
 
     def test_battle_profile_uses_configured_game_profession(self):
-        from ZmxyOL.task import battle_task_params
+        from tasks import battle_task_params
 
         hero = Hero()
 
@@ -311,7 +311,7 @@ class TestBattlePlan(unittest.TestCase):
         self.assertEqual(hero.profession, "琉离")
 
     def test_missing_profession_does_not_borrow_other_profession_flow(self):
-        from ZmxyOL.task import battle_task_params
+        from tasks import battle_task_params
 
         hero = Hero()
 
@@ -324,7 +324,7 @@ class TestBattlePlan(unittest.TestCase):
         )
 
     def test_profession_flow_is_kept_for_matching_profile(self):
-        from ZmxyOL.task import battle_task_params
+        from tasks import battle_task_params
 
         hero = Hero()
 
@@ -338,12 +338,12 @@ class TestBattlePlan(unittest.TestCase):
         )
 
     def test_default_battle_flow_prefers_named_default(self):
-        from ZmxyOL.task.battle_task_params import DEFAULT_BATTLE_FLOW
+        from tasks.battle_task_params import DEFAULT_BATTLE_FLOW
 
         self.assertEqual(DEFAULT_BATTLE_FLOW.value, "战斗循环")
 
     def test_subclass_without_profession_does_not_replace_default_profile(self):
-        from ZmxyOL.battle_character.hero import _hero_registry
+        from ZmxyOL.character.hero import _hero_registry
 
         before = _hero_registry["default"]
 
@@ -365,7 +365,7 @@ class TestBattlePlan(unittest.TestCase):
             hero.way_to_exit(until=lambda: True)
 
     def test_way_to_exit_uses_bg_and_three_speed_search_step(self):
-        from ZmxyOL.battle_character import hero as hero_mod
+        from ZmxyOL.character import hero as hero_mod
         from AutoScriptor.core.targets import T
 
         hero = FakeHero()
@@ -402,7 +402,7 @@ class TestBattlePlan(unittest.TestCase):
         self.assertIn(("move_left", 50, True), hero.actions)
 
     def test_way_to_exit_uses_larger_search_step_at_one_speed(self):
-        from ZmxyOL.battle_character import hero as hero_mod
+        from ZmxyOL.character import hero as hero_mod
         from AutoScriptor.core.targets import T
 
         hero = FakeHero()
@@ -428,7 +428,7 @@ class TestBattlePlan(unittest.TestCase):
         self.assertIn(("move_left", 50, True), hero.actions)
 
     def test_way_to_exit_holds_when_initial_move_already_hits_exit(self):
-        from ZmxyOL.battle_character import hero as hero_mod
+        from ZmxyOL.character import hero as hero_mod
         from AutoScriptor.core.targets import T
 
         hero = FakeHero()
@@ -457,7 +457,7 @@ class TestBattlePlan(unittest.TestCase):
         ])
 
     def test_way_to_exit_adjusts_after_seen_but_not_held(self):
-        from ZmxyOL.battle_character import hero as hero_mod
+        from ZmxyOL.character import hero as hero_mod
         from AutoScriptor.core.targets import T
 
         hero = FakeHero()
@@ -493,7 +493,7 @@ class TestBattlePlan(unittest.TestCase):
         self.assertIn(("move_right", 15, True), hero.actions)
 
     def test_battle_loop_timeout_is_checked_while_paused(self):
-        from ZmxyOL.battle_character import hero as hero_mod
+        from ZmxyOL.character import hero as hero_mod
 
         class FakeBg:
             def __init__(self):
@@ -543,7 +543,7 @@ class TestBattlePlan(unittest.TestCase):
                 hero.battle_loop(flow_name="empty", max_duration=0.5)
 
     def test_builtin_advance_is_not_ignored_by_default(self):
-        from ZmxyOL.battle_character import hero as hero_mod
+        from ZmxyOL.character import hero as hero_mod
 
         class FakeBg:
             def __init__(self):
@@ -599,7 +599,7 @@ class TestBattlePlan(unittest.TestCase):
         self.assertEqual(hero.travel_count, 1)
 
     def test_builtin_advance_grace_can_still_be_opted_in(self):
-        from ZmxyOL.battle_character import hero as hero_mod
+        from ZmxyOL.character import hero as hero_mod
 
         class FakeBg:
             def __init__(self):

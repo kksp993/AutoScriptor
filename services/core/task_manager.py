@@ -23,9 +23,9 @@ from AutoScriptor.core.background import bg
 from AutoScriptor.errors import TaskRequireReTry
 from AutoScriptor.utils.cancel import cancellable_sleep as sleep
 from AutoScriptor.utils.app_config import cfg
-from ZmxyOL.task_registry import task_registry
+from tasks.task_registry import task_registry
 from AutoScriptor.logging.logger import set_current_task
-from ZmxyOL.task_state import (
+from tasks.task_state import (
     clear_task_status,
     get_task_status,
     progress_incomplete,
@@ -233,14 +233,19 @@ class TaskManager:
         with self._cfg_lock:
             try:
                 cfg.reload_preserving_decrypted_credentials(security_key)
-                # 清除 ZmxyOL 子模块缓存，强制重新导入
-                for name in [m for m in sys.modules if m == "ZmxyOL" or m.startswith("ZmxyOL.")]:
+                # 清除 ZmxyOL 与 tasks 子模块缓存，强制重新导入。
+                # 任务模块现在住顶层 tasks 包，漏掉它会让重载读到旧任务函数。
+                for name in [
+                    m for m in sys.modules
+                    if m in ("ZmxyOL", "tasks")
+                    or m.startswith(("ZmxyOL.", "tasks."))
+                ]:
                     sys.modules.pop(name, None)
-                from ZmxyOL.battle_character.hero import reload_battle_character_modules
+                from ZmxyOL.character.hero import reload_character_modules
 
-                reload_battle_character_modules()
+                reload_character_modules()
                 # 重新发现并注册任务（不再由 import 自动触发）
-                from ZmxyOL.task import force_reload_tasks
+                from tasks import force_reload_tasks
                 force_reload_tasks()
                 logger.info("✅ 任务重新加载完成")
             except Exception as e:
@@ -438,7 +443,7 @@ class TaskManager:
     @staticmethod
     def _coerce_table_param(value, meta: dict):
         """将 JSON dict-of-dicts 还原为 TableParam（含枚举恢复）。"""
-        from ZmxyOL.table_param import TableParam
+        from ZmxyOL.battle.table_param import TableParam
         if isinstance(value, TableParam):
             return value
         if not isinstance(value, dict):

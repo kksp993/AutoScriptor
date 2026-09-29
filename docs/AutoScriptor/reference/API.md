@@ -40,13 +40,13 @@ Editor 遥控和自定义脚本可以操作其他应用的原生截图尺寸，�
 | `data/config.json`　　　　　　　　| 源码运行的全局配置　　　　　　　　　　　　　　　　　　　　 |
 | `data/accounts/*.json`　　　　　　| 账号、角色、任务树、任务状态、加密凭据；真实账号文件不提交 |
 | `data/custom_task/`　　　　　　　 | 用户自定义任务脚本　　　　　　　　　　　　　　　　　　　　 |
-| `data/battle_character/`　　　　　| 当前有效的运行态职业脚本目录　　　　　　　　　　　　　　　 |
+| `data/character/`　　　　　| 当前有效的运行态职业脚本目录　　　　　　　　　　　　　　　 |
 | `logs/zmxy_redeem_codes.json`　　 | 4399 兑换码采集器生成的运行态缓存；不提交到仓库　　　　　　|
 | `ZmxyOL/assets/config/ui_map.csv` | UI 名称到图片、文本、坐标的映射　　　　　　　　　　　　　　|
 | `ZmxyOL/assets/pic/`　　　　　　　| 模板图片资源　　　　　　　　　　　　　　　　　　　　　　　 |
 | `logs/`　　　　　　　　　　　　　 | `get_logs_root()` 返回的运行日志、调试截图、错误归档目录　 |
 
-路径统一通过 `AutoScriptor.utils.paths` 解析。不要在仓库根目录新增散落的 `accounts/`、`custom_task/` 或 `battle_character/`。
+路径统一通过 `AutoScriptor.utils.paths` 解析。不要在仓库根目录新增散落的 `accounts/`、`custom_task/` 或 `character/`。
 
 ## 公共导入
 
@@ -194,10 +194,10 @@ progress = get_task_status("progress")
 
 ## 任务入口
 
-内置任务放在 `ZmxyOL/task/`，自定义任务放在 `data/custom_task/`。
+内置任务放在 `tasks/`，自定义任务放在 `data/custom_task/`。
 
 ```python
-from ZmxyOL.task.task_register import register_task
+from tasks.task_register import register_task
 from AutoScriptor import *
 
 @register_task(default_offset_hours=10, description="示例任务")

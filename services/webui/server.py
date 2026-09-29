@@ -22,7 +22,7 @@ from AutoScriptor.logging.logger import logger, _TaskFilter as _LogTaskFilter
 
 from AutoScriptor.control.MumuAdaptor.device_facade import get_device_facade
 from AutoScriptor.utils.app_config import cfg
-from ZmxyOL.game_profession import GAME_PROFESSIONS
+from ZmxyOL.character.profession import GAME_PROFESSIONS
 from AutoScriptor.utils.mumu_discovery import discover_mumu_setup
 from services.core.task_manager import TaskManager
 from services.core.banner import _print_banner
@@ -36,7 +36,7 @@ from services.core.task_ordering import summarize_ordering_generations
 
 
 def _battle_flow_allowed_for_task(flow_value: str, task_path: str | None) -> bool:
-    from ZmxyOL.task.battle_task_params import battle_flow_allowed_for_task
+    from tasks.battle_task_params import battle_flow_allowed_for_task
 
     return battle_flow_allowed_for_task(flow_value, task_path)
 
@@ -82,7 +82,7 @@ _plain_fmt    = logging.Formatter(
 )
 
 from AutoScriptor.utils.paths import get_app_root, get_data_root, get_logs_root
-from ZmxyOL.paths import get_accounts_dir
+from ZmxyOL.accounts import get_accounts_dir
 from services.webui.error_archives import (
     delete_archives,
     get_archive_detail,
@@ -1028,7 +1028,7 @@ async def news_gift_code_redeem_api(request: Request):
 
         lifecycle_service.switch_character(server, character, reason="redeem code select character")
 
-        from ZmxyOL.task_registry import task_registry
+        from tasks.task_registry import task_registry
 
         if not task_registry.has_task(_GIFT_REDEEM_TASK_PATH):
             lifecycle_service.reload_all(reason="reload redeem task")
@@ -1338,7 +1338,7 @@ def _build_overview_payload(now_ts: float | None = None) -> dict:
                     progress = task_status.get("progress") if isinstance(task_status, dict) else None
                     progress_display = None
                     if progress is not None:
-                        from ZmxyOL.task_state import progress_label
+                        from tasks.task_state import progress_label
 
                         progress_display = progress_label(progress) or str(progress)
                     upcoming.append({
