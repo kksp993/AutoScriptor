@@ -17,15 +17,15 @@ from threading import Event, RLock
 import dpath
 from dpath.exceptions import PathNotFound
 from AutoScriptor.utils.cancel import TaskCancelled, bind_cancel_event
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 from AutoScriptor.core.background import bg
 from AutoScriptor.errors import TaskRequireReTry
 from AutoScriptor.utils.cancel import cancellable_sleep as sleep
 from AutoScriptor.utils.app_config import cfg
-from AutoScriptor.utils.task_registry import task_registry
-from AutoScriptor.utils.logger import set_current_task
-from AutoScriptor.utils.task_state import (
+from ZmxyOL.task_registry import task_registry
+from AutoScriptor.logging.logger import set_current_task
+from ZmxyOL.task_state import (
     clear_task_status,
     get_task_status,
     progress_incomplete,
@@ -34,7 +34,7 @@ from AutoScriptor.utils.task_state import (
 )
 from AutoScriptor.utils.paths import get_logs_root
 from services.core.runtime_context import runtime_ctx
-from AutoScriptor.utils.task_video_recorder import new_task_video_recorder
+from AutoScriptor.logging.task_video_recorder import new_task_video_recorder
 
 
 # ── 下次执行时间计算 ──
@@ -236,7 +236,7 @@ class TaskManager:
                 # 清除 ZmxyOL 子模块缓存，强制重新导入
                 for name in [m for m in sys.modules if m == "ZmxyOL" or m.startswith("ZmxyOL.")]:
                     sys.modules.pop(name, None)
-                from AutoScriptor.battle_character.hero import reload_battle_character_modules
+                from ZmxyOL.battle_character.hero import reload_battle_character_modules
 
                 reload_battle_character_modules()
                 # 重新发现并注册任务（不再由 import 自动触发）
@@ -438,7 +438,7 @@ class TaskManager:
     @staticmethod
     def _coerce_table_param(value, meta: dict):
         """将 JSON dict-of-dicts 还原为 TableParam（含枚举恢复）。"""
-        from AutoScriptor.utils.table_param import TableParam
+        from ZmxyOL.table_param import TableParam
         if isinstance(value, TableParam):
             return value
         if not isinstance(value, dict):
@@ -611,7 +611,7 @@ class TaskManager:
     # ── 工具 ──
 
     def _archive_error(self, task: str, exc: Exception, video_path=None):
-        from AutoScriptor.utils.log_archiver import archive_error
+        from AutoScriptor.logging.log_archiver import archive_error
         try:
             archive_error(task, exc, mixctrl=runtime_ctx.mixctrl, include_click_screenshots=True, video_path=video_path)
         except Exception as e:

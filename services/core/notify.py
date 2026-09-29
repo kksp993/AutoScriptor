@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import subprocess
 
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 
 def handle_notify(config_yaml: str, title: str = "", content: str = "") -> bool:

@@ -1,14 +1,122 @@
-from ZmxyOL.battle import *
-from ZmxyOL.nav import *
-from ZmxyOL.task import *
-from AutoScriptor import get_task_status, set_task_status
-from AutoScriptor.utils.logger import log_flush
+"""ZmxyOL package: game layer — battle, navigation, task, account and crypto.
 
-__all__ = [
+Exports stay lazy (PEP 562) on purpose. Importing this package eagerly used to
+pull in ``ZmxyOL.battle`` -> ``battle_character`` -> ``data/battle_character``
+-> ``AutoScriptor``, which re-enters ``AutoScriptor.utils.app_config`` while it
+is still initializing and fails on a partially initialized ``cfg``.
+
+Resolving each name on first access keeps ``from ZmxyOL import *`` and
+``from ZmxyOL import h`` working exactly as before, while a lightweight
+submodule import such as ``ZmxyOL.crypto.config_manager`` no longer drags the
+whole battle/task chain into a caller that is mid-initialization.
+
+This package also owns the account/task domains that ``AutoScriptor`` only
+consumes through injected contracts (``account_store`` registers itself with
+``AutoScriptor.utils.app_config.set_account_backend``).
+"""
+from __future__ import annotations
+
+# Underscore-prefixed on purpose: a star-import that falls back to the module
+# namespace (see __getattr__ below) must not leak these into callers.
+import sys as _sys
+from importlib import import_module as _import_module
+from typing import TYPE_CHECKING as _TYPE_CHECKING, Any as _Any
+
+# Register the asset tree before anything can load the UI map.
+from ZmxyOL.paths import register_assets_root as _register_assets_root
+
+_register_assets_root()
+
+if _TYPE_CHECKING:
+    from ZmxyOL.battle import (
+        BattlePlan as BattlePlan,
+        Hero as Hero,
+        battle_plan as battle_plan,
+        combo as combo,
+        flow as flow,
+        get_task_table as get_task_table,
+        h as h,
+    )
+    from ZmxyOL.nav import (
+        Env as Env,
+        Loc as Loc,
+        LoginClient as LoginClient,
+        MapManager as MapManager,
+        ensure_in as ensure_in,
+        login as login,
+        mm as mm,
+        path as path,
+        try_close_via_x as try_close_via_x,
+    )
+    from ZmxyOL.nav.envs.decorators import LOC_ENV as LOC_ENV
+    from ZmxyOL.task import (
+        BattleFlowName as BattleFlowName,
+        DEFAULT_BATTLE_FLOW as DEFAULT_BATTLE_FLOW,
+        DEFAULT_JJC_BATTLE_FLOW as DEFAULT_JJC_BATTLE_FLOW,
+        get_battle_profile as get_battle_profile,
+        register_task as register_task,
+        task_registry as task_registry,
+    )
+
+# Public name -> module that owns it. Resolution happens on first access.
+_EXPORTS: dict[str, str] = {
+    # battle layer
+    "h": "ZmxyOL.battle",
+    "combo": "ZmxyOL.battle",
+    "get_task_table": "ZmxyOL.battle",
+    "Hero": "ZmxyOL.battle",
+    "battle_plan": "ZmxyOL.battle",
+    "flow": "ZmxyOL.battle",
+    "BattlePlan": "ZmxyOL.battle",
+    # nav layer
+    "MapManager": "ZmxyOL.nav",
+    "Loc": "ZmxyOL.nav",
+    "Env": "ZmxyOL.nav",
+    "mm": "ZmxyOL.nav",
+    "path": "ZmxyOL.nav",
+    "ensure_in": "ZmxyOL.nav",
+    "try_close_via_x": "ZmxyOL.nav",
+    "LoginClient": "ZmxyOL.nav",
+    "login": "ZmxyOL.nav",
+    "LOC_ENV": "ZmxyOL.nav.envs.decorators",
+    # 4399 平台悬浮窗业务
+    "detect_floating_window": "ZmxyOL.nav.envs.floating_window",
+    "detect_floating_window_on_frame": "ZmxyOL.nav.envs.floating_window",
+    "dismiss_floating_window": "ZmxyOL.nav.envs.floating_window",
+    # task layer
+    "register_task": "ZmxyOL.task",
+    "task_registry": "ZmxyOL.task",
+    "BattleFlowName": "ZmxyOL.task",
+    "DEFAULT_BATTLE_FLOW": "ZmxyOL.task",
+    "DEFAULT_JJC_BATTLE_FLOW": "ZmxyOL.task",
+    "get_battle_profile": "ZmxyOL.task",
+    # runtime task state helpers
+    "get_task_status": "ZmxyOL.task_state",
+    "set_task_status": "ZmxyOL.task_state",
+}
+
+# Subpackages / modules addressable as attributes, e.g. ``ZmxyOL.task.load_tasks``.
+_SUBMODULES = (
+    "account_store",
+    "app_package_resolve",
+    "battle",
+    "battle_character",
+    "crypto",
+    "game_profession",
+    "nav",
+    "table_param",
+    "task",
+    "task_registry",
+    "task_state",
+)
+
+_PUBLIC_NAMES = [
     "h","combo",
+    "Hero", "battle_plan", "flow", "BattlePlan",
     # nav
     'MapManager', 'Loc', 'Env', 'mm', 'path', 'ensure_in', 'try_close_via_x',
     'LoginClient', 'login',
+    "detect_floating_window", "detect_floating_window_on_frame", "dismiss_floating_window",
     # task
     'register_task', "task_registry", "get_task_table",
     "get_task_status", "set_task_status",
@@ -16,3 +124,52 @@ __all__ = [
     # loc env
     "LOC_ENV"  
 ]
+
+
+def _package_init_is_running() -> bool:
+    """True while a ``ZmxyOL`` subpackage ``__init__`` is still executing.
+
+    Only package initializers count. A leaf module that is mid-import (for
+    example ``ZmxyOL/task/daily_task/hgwj/yijingfuben.py``) must still see the
+    full export list, because those modules rely on ``from ZmxyOL import *`` to
+    pick up names such as ``DEFAULT_BATTLE_FLOW``.
+    """
+    prefix = __name__ + "."
+    for module_name, module in tuple(_sys.modules.items()):
+        if not module_name.startswith(prefix):
+            continue
+        if not hasattr(module, "__path__"):
+            continue
+        spec = getattr(module, "__spec__", None)
+        if spec is not None and getattr(spec, "_initializing", False):
+            return True
+    return False
+
+
+def __getattr__(name: str) -> _Any:
+    if name == "__all__":
+        # Modules imported from a subpackage __init__ (task_register.py and the
+        # battle procedures) run `from ZmxyOL import *` while that subpackage is
+        # only partially built, so some export names cannot exist yet. Publishing
+        # __all__ there would turn a historically silent star-import into a hard
+        # AttributeError. Report "no __all__" for that window only, and publish
+        # the full list for every later import.
+        if _package_init_is_running():
+            raise AttributeError(
+                "__all__ is not available while ZmxyOL submodules initialize"
+            )
+        return _PUBLIC_NAMES
+    source = _EXPORTS.get(name)
+    if source is not None:
+        value = getattr(_import_module(source), name)
+        globals()[name] = value
+        return value
+    if name in _SUBMODULES:
+        module = _import_module(f"{__name__}.{name}")
+        globals()[name] = module
+        return module
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_PUBLIC_NAMES) | set(_SUBMODULES))

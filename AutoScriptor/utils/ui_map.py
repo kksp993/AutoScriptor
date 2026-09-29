@@ -3,8 +3,8 @@ import time
 from pathlib import Path
 
 from AutoScriptor.core.targets import UiEntry
-from AutoScriptor.utils.box import Box
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.core.box import Box
+from AutoScriptor.logging.logger import logger
 from AutoScriptor.utils.paths import get_assets_dir
 
 

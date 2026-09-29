@@ -1,6 +1,6 @@
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 @register_task(
     path_cn="每日任务/村庄/宠物培养",

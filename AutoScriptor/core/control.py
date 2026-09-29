@@ -2,17 +2,16 @@ import time
 from collections import defaultdict
 from functools import wraps
 from typing import Callable
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import (
     NemuIpc,
     NemuIpcError,
     RequestHumanTakeover,
 )
-from AutoScriptor.core.display_contract import EXPECTED_FRAME_SIZE, get_frame_size
-from AutoScriptor.recognition.rec import locate_on_screen
-from AutoScriptor.utils.box import Box
-from AutoScriptor.utils.tracer import save_debug_screenshot
+from AutoScriptor.recognition.locate import locate_on_screen
+from AutoScriptor.core.box import Box
+from AutoScriptor.logging.tracer import save_debug_screenshot
 
 class BaseMumuControl:
     def screenshot(self):
@@ -156,9 +155,13 @@ class MixControl(BaseMumuControl):
         return screenshot
 
     def _warn_if_resolution_mismatch(self, screenshot) -> None:
-        actual_size = get_frame_size(screenshot)
-        if actual_size is None:
+        # Imported lazily: AutoScriptor.core.api imports this module at import time.
+        from AutoScriptor.core.api import EXPECTED_FRAME_SIZE
+
+        frame_shape = getattr(screenshot, "shape", None)
+        if frame_shape is None or len(frame_shape) < 2:
             return
+        actual_size = (int(frame_shape[1]), int(frame_shape[0]))
         if actual_size == EXPECTED_FRAME_SIZE:
             self._last_resolution_warning_size = None
             return

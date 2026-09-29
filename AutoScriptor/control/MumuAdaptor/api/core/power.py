@@ -12,7 +12,7 @@ from typing import Callable
 
 from AutoScriptor.control.MumuAdaptor.device_facade import get_device_facade
 from AutoScriptor.utils.cancel import TaskCancelled, check_cancel_raise, sleep_with_cancel
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 
 class Power:

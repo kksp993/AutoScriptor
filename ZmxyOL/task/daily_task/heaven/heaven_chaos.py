@@ -1,6 +1,6 @@
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.battle_character.hero import h
+from ZmxyOL.battle_character.hero import h
 
 
 @register_task(

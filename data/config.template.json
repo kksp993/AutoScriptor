@@ -10,8 +10,7 @@
     },
     "ocr": {
         "use_gpu": false,
-        "model": "PP-OCRv6_small",
-        "digit_model": "PP-OCRv6_tiny"
+        "model": "PP-OCRv6_small"
     },
     "emulator": {
         "index": 0,

@@ -7,7 +7,7 @@ from AutoScriptor import *
     debug_mode=True,
 )
 def task():
-    from AutoScriptor.utils.logger import logger
+    from AutoScriptor.logging.logger import logger
     from services.core.runtime_context import runtime_ctx
 
     logger.info("开始重启所有设备")

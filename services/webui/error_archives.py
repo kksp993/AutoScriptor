@@ -1,6 +1,6 @@
 """
 错误归档 WebUI：列出、详情、文件、导入 zip、删除。
-与 AutoScriptor.utils.log_archiver 产出的目录结构一致。
+与 AutoScriptor.logging.log_archiver 产出的目录结构一致。
 """
 from __future__ import annotations
 

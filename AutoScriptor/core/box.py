@@ -2,7 +2,7 @@ from typing import Optional, Tuple, Union
 import collections
 import random
 
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 
 class Box(collections.namedtuple('Box', 'left top width height')):
@@ -174,7 +174,7 @@ class Box(collections.namedtuple('Box', 'left top width height')):
         ``setFrameSize()`` 设置的当前脚本帧尺寸，默认仍为 1280x720 横屏。
         """
         if frame_size is None:
-            from AutoScriptor.core.display_contract import getFrameSize
+            from AutoScriptor.core.api import getFrameSize
 
             frame_size = getFrameSize()
         frame_width, frame_height = frame_size

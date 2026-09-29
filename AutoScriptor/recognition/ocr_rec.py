@@ -1,17 +1,45 @@
 import hashlib
+import os
 import threading
 import time
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
 from fuzzywuzzy import fuzz
 
-from AutoScriptor.recognition.ocr_runtime_config import (
-    ocr_runtime_config,
-    read_configured_ocr_runtime,
-)
-from AutoScriptor.utils.box import Box
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.utils.app_config import cfg
+from AutoScriptor.core.box import Box
+from AutoScriptor.logging.logger import logger
+
+
+DEFAULT_OCR_MODEL_PROFILE = "PP-OCRv6_small"
+
+
+@dataclass(frozen=True)
+class OCRRuntimeConfig:
+    """OCR settings that remain stable for the lifetime of the process."""
+
+    use_gpu: bool
+    model_profile: str
+
+
+def read_configured_ocr_runtime() -> OCRRuntimeConfig:
+    """Read the current persisted/in-memory configuration and environment overrides."""
+
+    model_profile = os.environ.get(
+        "AUTOSCRIPTOR_OCR_MODEL",
+        str(cfg.get("ocr.model", DEFAULT_OCR_MODEL_PROFILE)),
+    ).strip() or DEFAULT_OCR_MODEL_PROFILE
+    return OCRRuntimeConfig(
+        use_gpu=bool(cfg.get("ocr.use_gpu", False)),
+        model_profile=model_profile,
+    )
+
+
+# Paddle engines cannot be safely moved between CPU and GPU in place, so the
+# process freezes its OCR settings once and only a restart applies new ones.
+ocr_runtime_config = read_configured_ocr_runtime()
 
 
 OCR_MODEL_PROFILE = ocr_runtime_config.model_profile
@@ -22,20 +50,17 @@ def _load_ocr_runtime():
 
     import paddle
 
-    from AutoScriptor.recognition.paddle_ocr_compat import (
-        CompatiblePaddleOCR,
-        get_paddleocr_version,
-    )
+    from AutoScriptor.recognition.ocr_engine import get_paddleocr_version
 
-    return paddle, CompatiblePaddleOCR, get_paddleocr_version
+    return paddle, get_paddleocr_version
 
 
 def _create_ocr_engine():
-    from AutoScriptor.recognition.paddle_ocr_compat import CompatiblePaddleOCR
+    """Build the PP-OCRv6 engine; only the OCR worker thread may call this."""
+    from AutoScriptor.recognition.ocr_engine import PPOCRv6Engine
 
-    return CompatiblePaddleOCR(
+    return PPOCRv6Engine(
         model_profile_name=OCR_MODEL_PROFILE,
-        language="ch",
         use_gpu=ocr_runtime_config.use_gpu,
     )
 
@@ -68,7 +93,7 @@ class OCRManager:
             try:
                 logger.info("正在后台导入 Paddle/PaddleOCR 运行时...")
                 runtime_import_start_time = time.perf_counter()
-                paddle_module, ocr_constructor, version_reader = _load_ocr_runtime()
+                paddle_module, version_reader = _load_ocr_runtime()
                 runtime_import_elapsed = time.perf_counter() - runtime_import_start_time
                 logger.info(
                     "Paddle/PaddleOCR 运行时导入完成，耗时 %.2f 秒",
@@ -85,11 +110,9 @@ class OCRManager:
                     OCR_MODEL_PROFILE,
                 )
                 engine_start_time = time.perf_counter()
-                self.ocr_engine = ocr_constructor(
-                    model_profile_name=OCR_MODEL_PROFILE,
-                    language="ch",
-                    use_gpu=ocr_runtime_config.use_gpu,
-                )
+                # Single engine-construction path: keep _create_ocr_engine as the
+                # only place that knows the PaddleOCR constructor arguments.
+                self.ocr_engine = _create_ocr_engine()
                 logger.info(
                     "PaddleOCR 初始化参数 model=%s, use_gpu=%s, 当前设备=%s",
                     OCR_MODEL_PROFILE,
@@ -149,8 +172,6 @@ def get_ocr_runtime_status() -> dict:
         "engine_device": getattr(engine, "device_name", None),
         "configured_model": configured_runtime.model_profile,
         "runtime_model": ocr_runtime_config.model_profile,
-        "configured_digit_model": configured_runtime.digit_model_profile,
-        "runtime_digit_model": ocr_runtime_config.digit_model_profile,
         "restart_required": configured_runtime != ocr_runtime_config,
         "engine_ready": ocr_manager.is_ready(),
         "initialization_error": (

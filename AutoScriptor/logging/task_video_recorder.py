@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 from AutoScriptor.control.MumuAdaptor.api.adb.direct import adb_base_args
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 from AutoScriptor.utils.paths import get_logs_root
 
 ENABLE_TASK_VIDEO_RECORDING = True

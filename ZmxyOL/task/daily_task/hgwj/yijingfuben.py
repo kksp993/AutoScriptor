@@ -1,12 +1,12 @@
 import enum
 
-from AutoScriptor.utils.logger import logger
-from AutoScriptor.utils.table_param import TableParam
+from AutoScriptor.logging.logger import logger
+from ZmxyOL.table_param import TableParam
 
 from ZmxyOL.nav.api import locate_region
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.battle_character.hero import h
+from ZmxyOL.battle_character.hero import h
 
 
 class YijingNandu(str, enum.Enum):

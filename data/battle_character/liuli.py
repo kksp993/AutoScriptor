@@ -4,7 +4,7 @@
 """
 from __future__ import annotations
 
-from AutoScriptor.battle_character.hero import Hero, battle_plan
+from ZmxyOL.battle_character.hero import Hero, battle_plan
 
 
 class LiuLi(Hero):

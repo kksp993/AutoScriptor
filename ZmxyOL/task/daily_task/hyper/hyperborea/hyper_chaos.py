@@ -3,7 +3,7 @@ from ZmxyOL.battle.procedure.chaos import DEFAULT_LINGQI_PRIORITY_VALUES, sort_s
 from ZmxyOL.battle.tasks import JIBEI_CHAOS_TABLE, get_task_table
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 @register_task(
     description="按灵气和难度选择极北混沌并挑战。",

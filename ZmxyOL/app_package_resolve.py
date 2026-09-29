@@ -6,7 +6,7 @@ import os
 from typing import Any, Callable
 
 from AutoScriptor.utils.cancel import check_cancel_raise, sleep_with_cancel
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 # 与常见渠道一致；新渠道可追加到此列表（优先靠前的先匹配）
 ZMXY_PACKAGE_FALLBACK_ORDER: tuple[str, ...] = (
@@ -107,3 +107,16 @@ def resolve_app_to_start(mumu, cancel_check: Callable[[], None] | None = None) -
         logger.info("已自动解析并写入 app_to_start: %s（原: %s）", chosen, prev or "(空)")
 
     return chosen
+
+
+def _register_resolver() -> None:
+    """Let the generic device layer launch the game without importing us."""
+    from AutoScriptor.core.api import set_app_package_resolver
+
+    set_app_package_resolver(resolve_app_to_start)
+
+
+_register_resolver()
+
+
+__all__ = ["ZMXY_PACKAGE_FALLBACK_ORDER", "resolve_app_to_start"]

@@ -1,10 +1,10 @@
 from enum import Enum
 
 from numpy import arange
-from AutoScriptor.utils import box
+from AutoScriptor.core import box
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 class FFT_difficulty(Enum):
     past = "过去"
     now = "现在"
@@ -18,7 +18,7 @@ class FFT_preference(Enum):
 def battle():
     bg.set_signal("short_cut", False)
     wait_for_disappear(I("加载中"))
-    from AutoScriptor.battle_character.hero import h
+    from ZmxyOL.battle_character.hero import h
     sleep(0.5)
     with bg.scope("梵天塔") as scope:
         scope.add(

@@ -8,8 +8,8 @@
 |------|------|
 | [`data/battle_character/hero.py`](../../../data/battle_character/hero.py) | 运行态 `Hero` 基类、`battle_loop` 外壳、职业注册表、`@flow`、`battle_plan` 接入 |
 | [`data/battle_character/liuli.py`](../../../data/battle_character/liuli.py) | 示例职业脚本；通过 `profession = "琉离"` 注册 |
-| [`AutoScriptor/battle_character/hero.py`](../../../AutoScriptor/battle_character/hero.py) | 兼容入口，加载 `data/battle_character/hero.py` |
-| [`AutoScriptor/battle_character/plan.py`](../../../AutoScriptor/battle_character/plan.py) | `BattlePlan` DSL：`first`、`at`、`every`、`combo` |
+| [`ZmxyOL/battle_character/hero.py`](../../../ZmxyOL/battle_character/hero.py) | 兼容入口，加载 `data/battle_character/hero.py` |
+| [`ZmxyOL/battle_character/plan.py`](../../../ZmxyOL/battle_character/plan.py) | `BattlePlan` DSL：`first`、`at`、`every`、`combo` |
 | [`ZmxyOL/task/battle_task_params.py`](../../../ZmxyOL/task/battle_task_params.py) | 聚合职业与 flow，生成 `HeroProfession`、`BattleFlowName` |
 | [`ZmxyOL/task/task_register.py`](../../../ZmxyOL/task/task_register.py) | 任务执行前加载当前职业，并注入 WebUI 选择的 `battle_flow` |
 

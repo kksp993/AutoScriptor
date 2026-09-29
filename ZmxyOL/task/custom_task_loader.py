@@ -6,10 +6,10 @@ import hashlib
 import importlib.util
 import sys
 
-from AutoScriptor.utils.logger import logger
-from AutoScriptor.utils.paths import get_custom_task_dir
+from AutoScriptor.logging.logger import logger
+from ZmxyOL.paths import get_custom_task_dir
 from AutoScriptor.utils.app_config import cfg
-from AutoScriptor.utils.task_registry import task_registry
+from ZmxyOL.task_registry import task_registry
 from services.core.task_tree import TaskTree
 
 _MODULE_PREFIX = "ZmxyOL.task._ct_"

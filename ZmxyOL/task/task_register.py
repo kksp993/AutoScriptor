@@ -4,9 +4,9 @@ from copy import deepcopy
 from ZmxyOL import *
 import enum
 from AutoScriptor.utils.app_config import cfg
-from AutoScriptor.utils.task_registry import task_registry
-from AutoScriptor.utils.logger import logger
-from AutoScriptor.utils.table_param import TableParam
+from ZmxyOL.task_registry import task_registry
+from AutoScriptor.logging.logger import logger
+from ZmxyOL.table_param import TableParam
 from ZmxyOL.task.translations import normalize_cfg_key, normalize_to_cn
 from ZmxyOL.nav.api import locate_region
 
@@ -164,7 +164,7 @@ def register_task(
         # 注入导航相关的符号
         from ZmxyOL.nav import ensure_in as _ensure_in
         from ZmxyOL.nav.envs.decorators import LOC_ENV
-        from AutoScriptor.battle_character.hero import h
+        from ZmxyOL.battle_character.hero import h
         from ZmxyOL.battle.tasks import get_task_table
         setattr(module, "ensure_in", _ensure_in)
         setattr(module, "LOC_ENV", LOC_ENV)
@@ -309,7 +309,7 @@ def register_task(
 
 def _apply_task_battle_startup(kwargs: dict) -> None:
     """任务函数执行前：加载配招职业，并把 WebUI 中的 battle_flow 挂到 h 上供 battle_loop 等使用。"""
-    from AutoScriptor.battle_character.hero import h
+    from ZmxyOL.battle_character.hero import h
     from ZmxyOL.task.battle_task_params import get_battle_profile, resolve_battle_flow_for_profile
     get_battle_profile(h)
     h.task_context_battle_flow = resolve_battle_flow_for_profile(
@@ -319,7 +319,7 @@ def _apply_task_battle_startup(kwargs: dict) -> None:
 
 
 def _clear_task_battle_startup() -> None:
-    from AutoScriptor.battle_character.hero import h
+    from ZmxyOL.battle_character.hero import h
     h.task_context_battle_flow = None
 
 
@@ -329,7 +329,7 @@ def task_wrapper(func):
         bg.clear(clear_signals=True)
 
         # 每个任务开始前清空调试截图目录，确保截图都属于当前任务
-        from AutoScriptor.utils.tracer import clear_debug_screenshots
+        from AutoScriptor.logging.tracer import clear_debug_screenshots
         clear_debug_screenshots()
 
         # 在任务执行前注入必要的导航符号到函数的全局命名空间
@@ -337,7 +337,7 @@ def task_wrapper(func):
         if 'ensure_in' not in func_globals:
             from ZmxyOL.nav import ensure_in
             from ZmxyOL.nav.envs.decorators import LOC_ENV
-            from AutoScriptor.battle_character.hero import h
+            from ZmxyOL.battle_character.hero import h
             from ZmxyOL.battle.tasks import get_task_table
             func_globals['ensure_in'] = ensure_in
             func_globals['LOC_ENV'] = LOC_ENV

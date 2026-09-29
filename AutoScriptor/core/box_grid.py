@@ -7,7 +7,7 @@ included in each returned box.
 
 from __future__ import annotations
 
-from AutoScriptor.utils.box import Box
+from AutoScriptor.core.box import Box
 
 
 def _as_box(box) -> Box:

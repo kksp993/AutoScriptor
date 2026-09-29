@@ -9,7 +9,7 @@ from __future__ import annotations
 from threading import Lock, Thread, current_thread
 from typing import Any, Callable, Literal
 
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 from services.core.scheduler import Scheduler
 from services.core.task_manager import TaskManager
 from services.webui.api_response import api_error

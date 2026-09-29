@@ -27,7 +27,7 @@
 
 ## 调试截图命名
 
-`AutoScriptor.utils.tracer.save_debug_screenshot()` 当前生成：
+`AutoScriptor.logging.tracer.save_debug_screenshot()` 当前生成：
 
 ```text
 YYMMDD_HHMMSS_micro_c.png   # 成功点击前截图与点击点
@@ -65,7 +65,7 @@ YYMMDD_HHMMSS_micro_e.png   # OCR/提取信息截图
 ## 手动归档
 
 ```python
-from AutoScriptor.utils.log_archiver import archive_error
+from AutoScriptor.logging.log_archiver import archive_error
 
 try:
     ...

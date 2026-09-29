@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import json
 import importlib.util
 import subprocess
@@ -32,7 +33,7 @@ def import_task_tree_service_for_test():
         list_characters=lambda: {},
     )
 
-    game_profession = types.ModuleType("AutoScriptor.utils.game_profession")
+    game_profession = types.ModuleType("ZmxyOL.game_profession")
     game_profession.GAME_PROFESSIONS = ("悟空", "唐僧")
     game_profession.normalize_game_profession = (
         lambda raw: raw if raw in game_profession.GAME_PROFESSIONS else "悟空"
@@ -42,7 +43,7 @@ def import_task_tree_service_for_test():
         "AutoScriptor": autoscriptor,
         "AutoScriptor.utils": utils,
         "AutoScriptor.utils.app_config": app_config,
-        "AutoScriptor.utils.game_profession": game_profession,
+        "ZmxyOL.game_profession": game_profession,
     }):
         sys.modules.pop("services.webui.task_tree_service", None)
         import services.webui.task_tree_service as module
@@ -53,7 +54,7 @@ def import_task_tree_service_for_test():
 def autoscriptor_logger_stubs() -> dict[str, types.ModuleType]:
     autoscriptor = types.ModuleType("AutoScriptor")
     utils = types.ModuleType("AutoScriptor.utils")
-    logger_module = types.ModuleType("AutoScriptor.utils.logger")
+    logger_module = types.ModuleType("AutoScriptor.logging.logger")
     logger_module.logger = SimpleNamespace(
         debug=lambda *args, **kwargs: None,
         info=lambda *args, **kwargs: None,
@@ -65,24 +66,18 @@ def autoscriptor_logger_stubs() -> dict[str, types.ModuleType]:
     return {
         "AutoScriptor": autoscriptor,
         "AutoScriptor.utils": utils,
-        "AutoScriptor.utils.logger": logger_module,
+        "AutoScriptor.logging.logger": logger_module,
         "AutoScriptor.utils.paths": paths,
     }
 
 
 def import_app_config_for_test(tmp_root: str):
     autoscriptor = types.ModuleType("AutoScriptor")
-    crypto = types.ModuleType("AutoScriptor.crypto")
-    crypto_config = types.ModuleType("AutoScriptor.crypto.config_manager")
-    crypto_config.ConfigManager = SimpleNamespace(
-        encrypt_data=lambda data, key: {"encrypted_data": json.dumps(data), "key": key},
-        decrypt_data=lambda enc, key: json.loads(enc.get("encrypted_data", "{}")),
-    )
     utils = types.ModuleType("AutoScriptor.utils")
-    game_profession = types.ModuleType("AutoScriptor.utils.game_profession")
+    game_profession = types.ModuleType("ZmxyOL.game_profession")
     game_profession.DEFAULT_GAME_PROFESSION = "default_profession"
     game_profession.normalize_game_profession = lambda raw: raw or "default_profession"
-    logger_module = types.ModuleType("AutoScriptor.utils.logger")
+    logger_module = types.ModuleType("AutoScriptor.logging.logger")
     logger_module.logger = SimpleNamespace(
         debug=lambda *args, **kwargs: None,
         info=lambda *args, **kwargs: None,
@@ -90,10 +85,7 @@ def import_app_config_for_test(tmp_root: str):
         error=lambda *args, **kwargs: None,
     )
     paths = types.ModuleType("AutoScriptor.utils.paths")
-    paths.get_data_root = lambda: tmp_root
-    paths.get_editable_data_root = lambda: Path(tmp_root)
     paths.get_config_path = lambda: Path(tmp_root) / "config.json"
-    paths.get_accounts_dir = lambda: Path(tmp_root) / "accounts"
 
     module_name = "app_config_under_test"
     spec = importlib.util.spec_from_file_location(
@@ -103,16 +95,145 @@ def import_app_config_for_test(tmp_root: str):
     module = importlib.util.module_from_spec(spec)
     with patch.dict(sys.modules, {
         "AutoScriptor": autoscriptor,
-        "AutoScriptor.crypto": crypto,
-        "AutoScriptor.crypto.config_manager": crypto_config,
         "AutoScriptor.utils": utils,
-        "AutoScriptor.utils.game_profession": game_profession,
-        "AutoScriptor.utils.logger": logger_module,
+        "ZmxyOL.game_profession": game_profession,
+        "AutoScriptor.logging.logger": logger_module,
         "AutoScriptor.utils.paths": paths,
     }):
         assert spec.loader is not None
         spec.loader.exec_module(module)
+    # The account domain is injected now: attach a minimal backend so the
+    # generic config layer can be exercised without the full ZmxyOL runtime.
+    module.set_account_backend(_FakeAccountBackend(Path(tmp_root)))
     return module
+
+
+class _FakeAccountBackend:
+    """Minimal account domain used to pin AppConfig's backend contract.
+
+    Credentials are stored as plaintext JSON instead of AES-GCM: these tests
+    cover config lifecycle, not cryptography (that lives in ZmxyOL.crypto).
+    """
+
+    def __init__(self, root: Path):
+        self.default_accounts_dir = root / "accounts"
+        self.current_acc = None
+
+    def normalize_accounts_dir(self, global_cfg):
+        return None
+
+    def _dir(self, global_cfg):
+        raw = str((global_cfg.get("accounts") or {}).get("dir") or "").strip()
+        if not raw:
+            return self.default_accounts_dir
+        candidate = Path(raw)
+        if candidate.is_absolute():
+            return candidate
+        if candidate.as_posix().strip("/") in {"accounts", "data/accounts"}:
+            return self.default_accounts_dir
+        return self.default_accounts_dir.parent / candidate
+
+    def resolved_accounts_dir(self, global_cfg):
+        return self._dir(global_cfg)
+
+    def account_path(self, name, global_cfg):
+        return self._dir(global_cfg) / f"{name}.json"
+
+    def _empty_document(self):
+        return {"encryption": {}, "active_character": {"server": "", "name": ""}, "characters": {}}
+
+    def load_account(self, name, pwd, global_cfg, writer):
+        path = self.account_path(name, global_cfg)
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            writer(path, self._empty_document())
+        document = json.loads(path.read_text(encoding="utf-8"))
+        self.current_acc = SimpleNamespace(
+            account_name=name,
+            root=document,
+            credentials={"account": "", "password": ""},
+        )
+        encrypted = (document.get("encryption") or {}).get("encrypted_data")
+        if pwd and encrypted:
+            self.current_acc.credentials = json.loads(encrypted)
+
+    def save(self, flat, global_cfg, writer):
+        self.save_account_file(global_cfg, writer)
+
+    def save_account_file(self, global_cfg, writer):
+        if self.current_acc is None:
+            return
+        writer(self.account_path(self.current_acc.account_name, global_cfg), self.current_acc.root)
+
+    @property
+    def account_data(self):
+        return self.current_acc.root if self.current_acc else {}
+
+    def flat_overlay(self):
+        if self.current_acc is None:
+            return {"tasks": {}, "status": {}, "game": {}}
+        game = {"character_name": "", "server_name": "", "game_profession": "default_profession"}
+        game.update(self.current_acc.credentials)
+        return {"tasks": {}, "status": {}, "game": game}
+
+    def list_accounts(self, global_cfg):
+        directory = self._dir(global_cfg)
+        if not directory.is_dir():
+            return []
+        return sorted(f[:-5] for f in os.listdir(directory) if f.endswith(".json"))
+
+    def verify_security_key(self, name, security_key, global_cfg):
+        return bool(name and security_key)
+
+    def add_account(self, name, account, password, server, character_name, security_key,
+                    global_cfg, writer):
+        writer(
+            self.account_path(name, global_cfg),
+            {
+                "encryption": {"encrypted_data": json.dumps({"account": account, "password": password})},
+                "active_character": {"server": server, "name": character_name},
+                "characters": {
+                    server: {character_name: {"tasks": {}, "status": {}, "game_profession": "default_profession"}}
+                },
+            },
+        )
+
+    def delete_account(self, name, current_account, global_cfg):
+        path = self.account_path(name, global_cfg)
+        if path.exists():
+            path.unlink()
+
+    def update_credentials(self, account, password, security_key, saver):
+        self.account_data["encryption"] = {
+            "encrypted_data": json.dumps({"account": account, "password": password})
+        }
+        saver()
+
+    def switch_character(self, server, character):
+        return None
+
+    def set_character_game_profession(self, server, character, profession):
+        return None
+
+    def add_character(self, server, character_name):
+        return None
+
+    def delete_character(self, server, character_name):
+        return None
+
+    def rebind_characters(self):
+        return None
+
+    def restore_credentials(self, credentials):
+        if self.current_acc is not None and credentials:
+            self.current_acc.credentials = dict(credentials)
+
+    def clear_credentials(self):
+        if self.current_acc is not None:
+            self.current_acc.credentials = {"account": "", "password": ""}
+
+    def current_credentials(self):
+        return dict(self.current_acc.credentials) if self.current_acc else {}
 
 
 def import_watcher_for_test():
@@ -174,7 +295,7 @@ class TestTaskTreeServiceContract(unittest.TestCase):
             def get_doc_flow(self, path):
                 return []
 
-        task_registry = types.ModuleType("AutoScriptor.utils.task_registry")
+        task_registry = types.ModuleType("ZmxyOL.task_registry")
         task_registry.task_registry = FakeTaskRegistry()
         scheduler = types.ModuleType("services.core.scheduler")
         scheduler.is_task_due = lambda node, path, now_ts: bool(node.get("on")) and now_ts >= node.get("next_exec_time", 0)
@@ -182,13 +303,13 @@ class TestTaskTreeServiceContract(unittest.TestCase):
             lambda node, now_ts=None: bool(node.get("human_takeover_error"))
             and (now_ts is None or now_ts < node.get("next_exec_time", 0))
         )
-        task_state = types.ModuleType("AutoScriptor.utils.task_state")
+        task_state = types.ModuleType("ZmxyOL.task_state")
         task_state.progress_label = lambda value: value if isinstance(value, str) else None
         return {
             "AutoScriptor": types.ModuleType("AutoScriptor"),
             "AutoScriptor.utils": types.ModuleType("AutoScriptor.utils"),
-            "AutoScriptor.utils.task_registry": task_registry,
-            "AutoScriptor.utils.task_state": task_state,
+            "ZmxyOL.task_registry": task_registry,
+            "ZmxyOL.task_state": task_state,
             "services.core.scheduler": scheduler,
         }
 
@@ -745,7 +866,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
         )
 
         cleared = []
-        with patch("AutoScriptor.utils.task_state.clear_task_status", side_effect=lambda *a, **k: cleared.append((a, k))):
+        with patch("ZmxyOL.task_state.clear_task_status", side_effect=lambda *a, **k: cleared.append((a, k))):
             service.save_tasks({"group": {"task": {"on": True, "next_exec_time": 0}}})
 
         self.assertEqual(task_manager.cleared, ["group/task"])
@@ -991,8 +1112,11 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
 class TestConfigLifecycleContract(unittest.TestCase):
     def test_account_can_restore_decrypted_credentials_after_config_only_reload(self):
         with tempfile.TemporaryDirectory() as tmp:
-            module = import_app_config_for_test(tmp)
-            account = module.Account("main", {"characters": {}, "active_character": {}, "encryption": {}})
+            # The account entity lives in the game layer now; AutoScriptor only
+            # keeps the generic config surface plus the injected backend contract.
+            from ZmxyOL.account_store import Account
+
+            account = Account("main", {"characters": {}, "active_character": {}, "encryption": {}})
             account.restore_credentials({"account": "user", "password": "pwd"})
 
             self.assertEqual(account.credentials, {"account": "user", "password": "pwd"})
@@ -1033,6 +1157,35 @@ class TestConfigLifecycleContract(unittest.TestCase):
 
             cfg.load_config("key")
             self.assertTrue(cfg.has_decrypted_credentials())
+
+    def test_runtime_dates_do_not_depend_on_save_or_reload_ordering(self):
+        """``cfg["weekday"]`` must be valid as soon as the flat view exists.
+
+        Village daily tasks read it with a hard subscript, so the calendar can
+        neither wait for a save-then-refresh sequence nor be wiped by a config
+        reload that rebuilds the view from disk.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            module = import_app_config_for_test(tmp)
+            cfg = module.cfg
+            today = datetime.datetime.now()
+
+            self.assertEqual(cfg["year"], today.year)
+            self.assertEqual(cfg["month"], today.month)
+            self.assertEqual(cfg["day"], today.day)
+            self.assertEqual(cfg["weekday"], today.weekday() + 1)
+
+            # A reload replaces the in-memory global config with the file on disk.
+            cfg.load_config()
+            self.assertEqual(cfg["weekday"], today.weekday() + 1)
+
+            cfg.save_config()
+            self.assertEqual(cfg["weekday"], today.weekday() + 1)
+
+            # ...and the calendar stays a runtime value: never written to disk.
+            saved = json.loads((Path(tmp) / "config.json").read_text(encoding="utf-8"))
+            for date_key in ("year", "month", "day", "weekday"):
+                self.assertNotIn(date_key, saved)
 
     def test_task_manager_reload_uses_config_reload_preserving_credentials(self):
         content = (ROOT / "services/core/task_manager.py").read_text(encoding="utf-8")
@@ -1913,7 +2066,7 @@ print("OK")
         api = (ROOT / "AutoScriptor/core/api.py").read_text(encoding="utf-8")
 
         self.assertIn("counts = extract_info(make_box_grid", frontend)
-        self.assertIn('mode="digital_only"', frontend)
+        self.assertIn('mode="text"', frontend)
         self.assertIn("@click=\"stopCustomCodeExecution\"", frontend)
         self.assertIn("apiPost('/execute-code/stop'", frontend)
         self.assertIn("stopCustomLoading", frontend)
@@ -1921,7 +2074,7 @@ print("OK")
         self.assertIn("if (e.shiftKey)", frontend)
         self.assertIn("line.startsWith('    ')", frontend)
 
-        self.assertIn("from AutoScriptor.utils.box_grid import indexof, make_box_grid", backend)
+        self.assertIn("from AutoScriptor.core.box_grid import indexof, make_box_grid", backend)
         self.assertIn('"make_box_grid": make_box_grid', backend)
         self.assertIn('"indexof": indexof', backend)
         self.assertIn('"__import__": _editor_safe_import', backend)
@@ -1931,7 +2084,7 @@ print("OK")
         self.assertIn("check_cancel_raise", backend)
         self.assertIn("asyncio.to_thread(_execute_editor_code_sync", backend)
 
-        self.assertIn('mode: Literal["digital_only", "text", "img", "both"] = "text"', api)
+        self.assertIn('mode: Literal["text", "img", "both"] = "text"', api)
         self.assertNotIn("digital: bool | None = None", api)
         self.assertNotIn("digit_only: bool = False", api)
 
@@ -1984,13 +2137,13 @@ print("OK")
         self.assertNotIn("recorded_code: recordedCode.value || ''", frontend)
         self.assertNotIn("custom_exec_code: customExecCode.value || ''", frontend)
         self.assertIn("PythonCodeEditor.js?v=3", index)
-        self.assertIn("EditorPanel.js?v=35", index)
+        self.assertIn("EditorPanel.js?v=36", index)
 
         self.assertIn('@router.post("/save-custom-task")', backend)
         self.assertIn("def _normalize_editor_custom_task_filename", backend)
         self.assertIn("def _normalize_editor_task_path", backend)
         self.assertIn("def _normalize_editor_param_specs", backend)
-        self.assertIn("from AutoScriptor.utils.paths import get_custom_task_dir", backend)
+        self.assertIn("from ZmxyOL.paths import get_custom_task_dir", backend)
         self.assertIn("os.replace(tmp_path, target_path)", backend)
         self.assertIn("api_ok(", backend)
         self.assertIn("api_error(", backend)
@@ -2321,7 +2474,7 @@ class TestSourceDistributionContract(unittest.TestCase):
             "services/core/content_delta_update.py",
             "services/core/content_update_security.py",
             "AutoScriptor/utils/filter.py",
-            "AutoScriptor/crypto/update_config.py",
+            "ZmxyOL/crypto/update_config.py",
         ]
 
         for rel in removed_paths:

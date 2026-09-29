@@ -35,6 +35,7 @@ webui.bat / scripts\run.bat webui
 - 配置模板：`data/config.template.json`
 - 账号/角色/任务状态：`data/accounts/`
 - 全局任务排序覆盖层：`data/config.json` 的 `task_ordering`
+- 运行时日历：`cfg` 拍平视图里的 `year` / `month` / `day` / `weekday`（`weekday` 为 `1=周一 ... 7=周日`）。它不在 `_GLOBAL_KEYS` 里，因此**永不落盘**，由 `AutoConfig._refresh_flat_config()` 在每次生成视图时写入，只反映进程当前时间。任务脚本可以直接下标读取，不需要先保存一次配置。
 - QQ 结果通知：`data/config.json` 的 `notify.qq`；角色结果聚合与 OneBot 发送分离，见 [通知边界](operations/qq-notifications.md)。
 - 可选本机 QQ 机器人：`services/core/qq_bot.py` 管理官方包安装与独立启动，运行文件和令牌在
   Git 忽略的 `.autoscriptor/qq-bot`；WebUI 通过 lifecycle 接收连接配置，不把安装逻辑放进游戏任务。

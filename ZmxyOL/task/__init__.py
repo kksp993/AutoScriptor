@@ -1,5 +1,11 @@
 from AutoScriptor.utils.app_config import cfg
-from AutoScriptor.utils.task_registry import task_registry
+from ZmxyOL.task_registry import task_registry
+
+# 游戏层启动时把账号域、包名解析、错误归档上下文注册进通用层。
+# 这些模块自注册，导入即生效（幂等）。
+from ZmxyOL import account_store  # noqa: F401
+from ZmxyOL import app_package_resolve  # noqa: F401
+from ZmxyOL import nav  # noqa: F401
 from ZmxyOL.task.pkg_utils import (
     gather_py_files, sort_py_files, import_modules,
     sort_tasks, normalize_cfg_tasks_to_cn,

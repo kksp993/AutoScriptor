@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 
 import cv2
 
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 from AutoScriptor.utils.paths import get_error_archives_dir, get_logs_root
 
 
@@ -25,6 +25,34 @@ _DEFAULT_CONTEXT_CONFIG = {
     "python_version": True,
     "timestamp": True,
 }
+
+
+# Extra archive context supplied by providers registered at startup.
+_context_providers: Dict[str, Any] = {}
+
+
+def register_context_provider(key: str, provider) -> None:
+    """Register a zero-argument callable that supplies ``key`` for error archives.
+
+    The provider result is stored verbatim; raising from it is recorded as
+    ``failed: ...`` for that key only and never breaks archiving.
+    """
+    _context_providers[str(key)] = provider
+    _DEFAULT_CONTEXT_CONFIG.setdefault(str(key), True)
+
+
+def _context_provider_keys() -> tuple[str, ...]:
+    return tuple(_context_providers)
+
+
+def _collect_provider_value(key: str) -> Any:
+    provider = _context_providers.get(key)
+    if provider is None:
+        return "unavailable"
+    try:
+        return provider()
+    except Exception as exc:
+        return f"failed: {exc}"
 
 
 def _imwrite_unicode(path: str, img) -> bool:
@@ -78,30 +106,10 @@ def collect_default_context(config: Optional[Dict[str, bool]] = None) -> Dict[st
         merged.update(config)
     context: Dict[str, Any] = {}
 
-    if merged.get("mm_current_region"):
-        try:
-            from ZmxyOL.nav.map_manager import mm
-
-            cur_env, cur_loc = mm.get_region()
-            context["mm_current_region"] = {"env": cur_env, "loc": cur_loc}
-        except Exception as exc:
-            context["mm_current_region"] = f"failed: {exc}"
-
-    if merged.get("locate_region_result"):
-        try:
-            from ZmxyOL.nav.api import locate_region
-
-            result = locate_region(cnt=0, check_only=True)
-            if isinstance(result, tuple) and len(result) == 2:
-                detected_env, detected_loc = result
-                context["locate_region_result"] = {
-                    "env": detected_env,
-                    "loc": detected_loc,
-                }
-            else:
-                context["locate_region_result"] = f"unresolved: {result}"
-        except Exception as exc:
-            context["locate_region_result"] = f"failed: {exc}"
+    # Provider-supplied context; see register_context_provider().
+    for key in _context_provider_keys():
+        if merged.get(key):
+            context[key] = _collect_provider_value(key)
 
     if merged.get("bg_active_callbacks"):
         try:
@@ -146,7 +154,7 @@ def collect_default_context(config: Optional[Dict[str, bool]] = None) -> Dict[st
 
     if merged.get("recognition_trace"):
         try:
-            from AutoScriptor.recognition.recognition_trace import (
+            from AutoScriptor.logging.recognition_trace import (
                 get_recent_recognition_results,
                 serialize_recognition_results,
             )
@@ -322,7 +330,7 @@ def archive_error(
         if include_click_screenshots:
             _copy_click_screenshots(archive_dir)
         if video_path:
-            from AutoScriptor.utils.task_video_recorder import copy_video_to_archive
+            from AutoScriptor.logging.task_video_recorder import copy_video_to_archive
 
             copy_video_to_archive(video_path, archive_dir)
 

@@ -1,7 +1,7 @@
-﻿"""战斗类任务在 WebUI 中的参数。
+"""战斗类任务在 WebUI 中的参数。
 
 BattleFlowName 枚举成员由 Hero 子类上 @flow 注册的流程名聚合（见
-AutoScriptor.battle_character.hero.get_registered_flows）。职业列表来自职业注册表。
+ZmxyOL.battle_character.hero.get_registered_flows）。职业列表来自职业注册表。
 
 @flow(..., task=None) 的流程对所有任务可选；仅当某流程在所有注册中均带非空 task
 时，才按该 task 与 cfg 任务路径最后一级匹配过滤（见 battle_flow_allowed_for_task）。
@@ -15,7 +15,7 @@ import re
 from typing import Iterable
 
 from AutoScriptor.utils.app_config import cfg
-from AutoScriptor.battle_character.hero import ensure_battle_heroes_loaded
+from ZmxyOL.battle_character.hero import ensure_battle_heroes_loaded
 
 
 def _enum_member_key(raw: str) -> str:
@@ -63,7 +63,7 @@ def _dedupe_keys(names: Iterable[str], *, sort_unique: bool = True) -> list[tupl
 
 def _profession_names_from_registry() -> list[str]:
     """从 Hero 子类 profession 注册表收集名称（ensure_battle_heroes_loaded 已调用）。"""
-    from AutoScriptor.battle_character.hero import _hero_registry
+    from ZmxyOL.battle_character.hero import _hero_registry
 
     names = [k for k in _hero_registry.keys() if k]
     if "default" in names:
@@ -74,7 +74,7 @@ def _profession_names_from_registry() -> list[str]:
 
 def _discover_registered_flow_names() -> list[str]:
     """从 Hero @flow 注册表收集全部流程显示名（跨职业去重）。"""
-    from AutoScriptor.battle_character.hero import get_registered_flows
+    from ZmxyOL.battle_character.hero import get_registered_flows
 
     names = {e["flow_name"] for e in get_registered_flows()}
     return sorted(names, key=lambda s: (len(s), s))
@@ -82,7 +82,7 @@ def _discover_registered_flow_names() -> list[str]:
 
 def _build_flow_scope_from_registration() -> dict[str, frozenset[str] | None]:
     """流程名 -> None 表示任意任务可选；否则为允许的任务路径叶名集合（与 @flow 的 task= 一致）。"""
-    from AutoScriptor.battle_character.hero import get_registered_flows
+    from ZmxyOL.battle_character.hero import get_registered_flows
 
     by_flow: dict[str, set[str | None]] = {}
     for e in get_registered_flows():
@@ -167,7 +167,7 @@ def _resolve_profession() -> str:
 def get_battle_profile(h) -> None:
     """Load the configured battle profession."""
     prof = _resolve_profession()
-    from AutoScriptor.battle_character.hero import _hero_registry
+    from ZmxyOL.battle_character.hero import _hero_registry
 
     ensure_battle_heroes_loaded()
     if prof not in _hero_registry:

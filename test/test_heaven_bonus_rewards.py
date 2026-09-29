@@ -15,7 +15,7 @@ class FakeBg:
         self.callbacks = {}
 
     def _canonical_signal_key(self, key):
-        if key == BG_SIGNALS.FAILED_LEGACY:
+        if key == "failed":
             return BG_SIGNALS.FAILED
         return key
 
@@ -100,7 +100,7 @@ class RetryOnceAfterFailureHero(FakeHero):
                 self.bg.signal(BG_SIGNALS.TRY_EXIT),
                 self.bg.signal(BG_SIGNALS.PAUSE_BATTLE),
                 self.bg.signal(BG_SIGNALS.FAILED),
-                self.bg.signal(BG_SIGNALS.FAILED_LEGACY),
+                self.bg.signal("failed"),
             ))
             return
 
@@ -123,21 +123,21 @@ class FailingPioneerHero(FakeHero):
 
 class TestHeavenBonusRewards(unittest.TestCase):
 
-    def test_background_failed_legacy_signal_is_alias(self):
+    def test_background_lowercase_failed_signal_is_alias(self):
         from AutoScriptor.core.background import BackgroundMonitor
 
         monitor = BackgroundMonitor()
         try:
-            monitor.set_signal(BG_SIGNALS.FAILED_LEGACY, True)
+            monitor.set_signal("failed", True)
             self.assertTrue(monitor.signal(BG_SIGNALS.FAILED))
-            self.assertTrue(monitor.signal(BG_SIGNALS.FAILED_LEGACY))
+            self.assertTrue(monitor.signal("failed"))
 
             with monitor._lock:
                 self.assertIn(BG_SIGNALS.FAILED, monitor._signals)
-                self.assertNotIn(BG_SIGNALS.FAILED_LEGACY, monitor._signals)
+                self.assertNotIn("failed", monitor._signals)
 
             monitor.set_signal(BG_SIGNALS.FAILED, False)
-            self.assertFalse(monitor.signal(BG_SIGNALS.FAILED_LEGACY))
+            self.assertFalse(monitor.signal("failed"))
         finally:
             monitor.stop()
 

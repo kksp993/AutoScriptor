@@ -29,6 +29,6 @@ Use this workflow when verifying bugs like "after entering a page, X does not ap
 
 ## Notes
 
-- Prefer package imports such as `from AutoScriptor.utils.box_grid import make_box_grid, indexof`; top-level `tools` can be shadowed after PaddleOCR imports.
+- Prefer package imports such as `from AutoScriptor.core.box_grid import make_box_grid, indexof`; top-level `tools` can be shadowed after PaddleOCR imports.
 - Keep OCR semantics separate from business semantics.
 - If the user says not to peek at a newly added difficult screenshot before implementation, implement first, then inspect it for validation.

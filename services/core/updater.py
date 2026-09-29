@@ -10,7 +10,7 @@ import os
 import subprocess
 import threading
 
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 from AutoScriptor.utils.paths import get_app_root
 
 

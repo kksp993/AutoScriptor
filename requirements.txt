@@ -4,35 +4,28 @@
 adbutils==1.2.15
 numpy>=1.24.4,<2.0.0
 opencv-python
-pure-python-adb==0.3.0.dev0
 pillow>=10.0.0
 openpyxl
-loguru>=0.7.0
 rich>=13.0.0
-typing-extensions>=4.0.0
 pypinyin>=0.54.0
 cryptography
 paddleocr==3.7.0
 fuzzywuzzy
+# fuzzywuzzy.StringMatcher 直接 `from Levenshtein import *`；缺失会退回纯 Python
+# 匹配并显著拖慢 OCR 文本比对，属于性能必需件。
 python-Levenshtein
-colormath
 uiautomator2==2.16.17
 uiautomator2cache==0.3.1
-astor>=0.8.1
-# jax==0.4.27
-# jaxlib == 0.4.27
 fastapi
-# Form / UploadFile support. pip package: python-multipart; import name: multipart.
+# Form / UploadFile support. pip package: python-multipart.
+# 不要再安装同名的独立 `multipart` 包：它会遮蔽 python-multipart 的 multipart 模块。
 python-multipart>=0.0.9
-multipart
 uvicorn[standard]
-websockets
 dpath
 requests
 lxml
 pyyaml
-pywebio
-inflection
 onepush>=1.3.0
 setuptools<81
-tkinter-embed>=3.10.0
+# 构建期依赖：setuptools 80 需要 packaging>=22（本机 20.9 会导致构建失败）。
+packaging>=22

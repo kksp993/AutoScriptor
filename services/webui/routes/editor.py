@@ -26,8 +26,8 @@ import numpy as np
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from AutoScriptor.utils.app_config import cfg
-from AutoScriptor.utils.logger import logger
-from AutoScriptor.utils.box import b2p
+from AutoScriptor.logging.logger import logger
+from AutoScriptor.core.box import b2p
 from AutoScriptor.utils.cancel import TaskCancelled, check_cancel_raise, suppress_cancel_checks
 from AutoScriptor.core.targets import B
 from services.webui.api_response import api_error, api_ok
@@ -67,8 +67,8 @@ def _editor_safe_import(name, globals=None, locals=None, fromlist=(), level=0):
 def _locate_text_at_scale(screenshot, text, margin_box, color, scale):
     """在指定 scale 下测试 OCR locate，复用 locate_on_screen 的核心逻辑。"""
     from AutoScriptor.recognition.ocr_rec import ocr as _ocr
-    from AutoScriptor.recognition.rec import get_box_color as _color
-    from AutoScriptor.utils.box import Box
+    from AutoScriptor.recognition.locate import get_box_color as _color
+    from AutoScriptor.core.box import Box
 
     roi = screenshot[margin_box.top:margin_box.top + margin_box.height,
                      margin_box.left:margin_box.left + margin_box.width]
@@ -292,7 +292,7 @@ class _EditorVirtualMixControl:
         return self._screenshot
 
     def locate(self, tgt_triples, confidence=0.8, screenshot=None):
-        from AutoScriptor.recognition.rec import locate_on_screen
+        from AutoScriptor.recognition.locate import locate_on_screen
 
         sources, boxes, colors = zip(*tgt_triples)
         frame = self._screenshot if screenshot is None else screenshot
@@ -681,7 +681,7 @@ def _editor_nav_namespace() -> dict:
 
 def _editor_battle_namespace() -> dict:
     """Expose the shared runtime hero used by editor battle snippets."""
-    from AutoScriptor.battle_character.hero import h
+    from ZmxyOL.battle_character.hero import h
 
     return {"h": h}
 
@@ -861,8 +861,8 @@ async def editor_color(request: Request):
         if _last_screenshot is None:
             return JSONResponse(status_code=400, content={"error": "请先获取截图"})
 
-        from AutoScriptor.recognition.rec import get_box_color
-        from AutoScriptor.utils.box import Box
+        from AutoScriptor.recognition.locate import get_box_color
+        from AutoScriptor.core.box import Box
         color = get_box_color(_last_screenshot, Box(left, top, width, height)) or ""
         return {"color": color}
     except Exception as e:
@@ -897,7 +897,7 @@ async def editor_locate(request: Request):
                 return JSONResponse(status_code=500, content={"error": "截图返回空"})
             _last_screenshot = screenshot
 
-        from AutoScriptor.utils.box import Box
+        from AutoScriptor.core.box import Box
         frame_height, frame_width = screenshot.shape[:2]
         tgt_box = Box(left, top, width, height).margin(
             frame_size=(frame_width, frame_height),
@@ -959,8 +959,8 @@ async def editor_locate_image(request: Request):
         if _last_template is None:
             return JSONResponse(status_code=400, content={"error": "请先框选区域以生成模板"})
 
-        from AutoScriptor.utils.box import Box
-        from AutoScriptor.recognition.img_rec import _locateAll_opencv
+        from AutoScriptor.core.box import Box
+        from AutoScriptor.recognition.locate import _locateAll_opencv
 
         screenshot = _last_screenshot
         template = _last_template
@@ -1306,8 +1306,8 @@ def _run_editor_snippet(
     import traceback as tb_mod
 
     from AutoScriptor.core.targets import B, I, T
-    from AutoScriptor.utils.box import Box
-    from AutoScriptor.utils.box_grid import indexof, make_box_grid
+    from AutoScriptor.core.box import Box
+    from AutoScriptor.core.box_grid import indexof, make_box_grid
 
     from AutoScriptor.core import api as api_mod
 
@@ -1521,7 +1521,7 @@ async def editor_save_custom_task(request: Request):
         raw_name = str(data.get("name") or os.path.splitext(filename)[0])
         source, wrapped, task_path = _prepare_editor_custom_task_source(raw_name, code, data)
 
-        from AutoScriptor.utils.paths import get_custom_task_dir
+        from ZmxyOL.paths import get_custom_task_dir
 
         root = get_custom_task_dir()
         root.mkdir(parents=True, exist_ok=True)

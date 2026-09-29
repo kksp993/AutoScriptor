@@ -16,7 +16,7 @@ import AutoScriptor as autoscriptor_package
 import AutoScriptor.core.api as core_api
 from AutoScriptor import B, T, Box, click, count, init, locate, sleep, swipe, ui_F, ui_T, wait_for_appear
 from AutoScriptor.core.targets import Target
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 
 FULL_PORTRAIT_BOX = Box(0, 0, 720, 1280)

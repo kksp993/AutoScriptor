@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import MagicMock, call, patch
 
 from AutoScriptor.core.targets import B, T
-from AutoScriptor.utils.box import Box
+from AutoScriptor.core.box import Box
 
 
 class ClickOffsetSemanticsTest(unittest.TestCase):
@@ -18,7 +18,7 @@ class ClickOffsetSemanticsTest(unittest.TestCase):
             Box(850, 430, 60, 30),
         ]]
 
-        with patch("AutoScriptor.utils.box.random.randint", return_value=0):
+        with patch("AutoScriptor.core.box.random.randint", return_value=0):
             clicked_count = click_all(
                 target,
                 timeout=0,
@@ -61,7 +61,7 @@ class ClickOffsetSemanticsTest(unittest.TestCase):
         mock_ctrl.locate.return_value = [[found_box]]
         mock_ctrl.click = MagicMock()
 
-        with patch("AutoScriptor.utils.box.random.randint", return_value=0):
+        with patch("AutoScriptor.core.box.random.randint", return_value=0):
             click(
                 target,
                 timeout=0,

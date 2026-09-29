@@ -1,9 +1,9 @@
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 from AutoScriptor.utils.cancel import check_cancel_raise
 from ZmxyOL.nav.api import locate_region
 from ZmxyOL import *
 from AutoScriptor import *
-from AutoScriptor.battle_character.hero import h
+from ZmxyOL.battle_character.hero import h
 from time import time
 
 

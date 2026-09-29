@@ -943,7 +943,7 @@ const EditorPanel = {
         return;
       }
       const first = `Box(${b.left},${b.top},${b.width},${b.height})`;
-      const line = `counts = extract_info(make_box_grid(${first}, ${first}, row=1, col=1), mode="digital_only")`;
+      const line = `counts = extract_info(make_box_grid(${first}, ${first}, row=1, col=1), mode="text")`;
       appendCode(line);
       ElementPlus.ElMessage.success('已添加「数字网格」模板');
     }

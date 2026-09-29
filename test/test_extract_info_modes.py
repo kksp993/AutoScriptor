@@ -9,12 +9,21 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from AutoScriptor.core.api import extract_info
-from AutoScriptor.recognition.info_rec import extract_registered_image_keys
-from AutoScriptor.recognition.recognition_trace import (
-    clear_recognition_trace,
-    get_last_recognition_result,
+from AutoScriptor.recognition.locate import extract_registered_image_keys
+from AutoScriptor.logging.recognition_trace import (
+    _get_trace_buffer,
+    get_recent_recognition_results,
 )
-from AutoScriptor.utils.box import Box
+from AutoScriptor.core.box import Box
+
+
+def _clear_trace():
+    _get_trace_buffer().clear()
+
+
+def _last_trace_result():
+    recent_results = get_recent_recognition_results(limit=1)
+    return recent_results[-1] if recent_results else None
 
 
 class TestExtractInfoModes(unittest.TestCase):
@@ -62,7 +71,7 @@ class TestExtractInfoModes(unittest.TestCase):
         targets = [Box(0, 0, 10, 10), Box(10, 0, 10, 10)]
 
         with patch(
-            "AutoScriptor.recognition.info_rec.extract_registered_image_keys",
+            "AutoScriptor.recognition.locate.extract_registered_image_keys",
             return_value=["物品甲", None],
         ):
             result = extract_info(
@@ -92,7 +101,7 @@ class TestExtractInfoModes(unittest.TestCase):
         targets = [Box(0, 0, 20, 20), Box(20, 0, 20, 20)]
 
         with patch(
-            "AutoScriptor.recognition.info_rec._get_registered_image_candidates",
+            "AutoScriptor.recognition.locate._get_registered_image_candidates",
             return_value=[("物品甲", template)],
         ):
             result = extract_registered_image_keys(
@@ -108,7 +117,7 @@ class TestExtractInfoModes(unittest.TestCase):
 
         with (
             patch(
-                "AutoScriptor.recognition.info_rec.extract_registered_image_keys",
+                "AutoScriptor.recognition.locate.extract_registered_image_keys",
                 return_value=["物品甲", None],
             ),
             patch(
@@ -128,7 +137,7 @@ class TestExtractInfoModes(unittest.TestCase):
         self.assertEqual(mocked_ocr.call_count, 1)
 
     def test_post_process_failure_returns_none_after_retries_exhausted(self):
-        clear_recognition_trace()
+        _clear_trace()
 
         def parse_wave_number(raw_text):
             return int(raw_text.strip().split("/")[0])
@@ -143,14 +152,14 @@ class TestExtractInfoModes(unittest.TestCase):
                 screenshot_frame=object(),
             )
 
-        recognition_result = get_last_recognition_result()
+        recognition_result = _last_trace_result()
         self.assertIsNone(result)
         self.assertIsNotNone(recognition_result)
         self.assertFalse(recognition_result.success)
         self.assertIn("ValueError", recognition_result.error)
 
     def test_post_process_failure_retries_until_processed_value_is_valid(self):
-        clear_recognition_trace()
+        _clear_trace()
 
         def parse_wave_number(raw_text):
             return int(raw_text.strip().split("/")[0])
@@ -168,7 +177,7 @@ class TestExtractInfoModes(unittest.TestCase):
                 screenshot_frame=object(),
             )
 
-        recognition_result = get_last_recognition_result()
+        recognition_result = _last_trace_result()
         self.assertEqual(result, 7)
         self.assertEqual(mocked_ocr.call_count, 2)
         self.assertIsNotNone(recognition_result)

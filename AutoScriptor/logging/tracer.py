@@ -6,9 +6,9 @@ import numpy as np
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 from AutoScriptor.core.targets import Target
-from AutoScriptor.utils.box import Box
+from AutoScriptor.core.box import Box
 
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -107,8 +107,8 @@ def save_debug_screenshot(
         prior_clicks: 两次截图保存之间累积的 BoxTarget 点击位置列表（可选）
     
     Examples:
-        from AutoScriptor.utils.tracer import save_debug_screenshot
-        from AutoScriptor.utils.box import Box
+        from AutoScriptor.logging.tracer import save_debug_screenshot
+        from AutoScriptor.core.box import Box
         
         # 点击截图
         save_debug_screenshot(target=T("确定"), screenshot=img, box=box, pt=(100, 200))

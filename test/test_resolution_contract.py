@@ -5,14 +5,13 @@ import numpy as np
 
 import AutoScriptor
 from AutoScriptor.core.control import MixControl
-from AutoScriptor.core.display_contract import (
+from AutoScriptor.core.api import (
     EXPECTED_FRAME_SIZE,
     MUMU_SIZE_1280_720,
     MUMU_SIZE_720_1280,
-    get_frame_size,
     setFrameSize,
 )
-from AutoScriptor.utils.box import Box
+from AutoScriptor.core.box import Box
 
 
 class _FakeScreenshotControl:
@@ -39,7 +38,7 @@ class ResolutionContractTests(unittest.TestCase):
         frame = np.zeros((720, 1280, 3), dtype=np.uint8)
 
         self.assertEqual(EXPECTED_FRAME_SIZE, (1280, 720))
-        self.assertEqual(get_frame_size(frame), EXPECTED_FRAME_SIZE)
+        self.assertEqual((frame.shape[1], frame.shape[0]), EXPECTED_FRAME_SIZE)
 
     def test_margin_can_clamp_to_explicit_portrait_frame_size(self):
         portrait_target = Box(277, 1231, 166, 23)

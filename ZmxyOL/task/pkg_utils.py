@@ -2,7 +2,7 @@ import importlib
 import pathlib
 
 from AutoScriptor.utils.app_config import cfg
-from AutoScriptor.utils.task_registry import task_registry
+from ZmxyOL.task_registry import task_registry
 from ZmxyOL.task.translations import normalize_cfg_key, translate_path_part
 
 

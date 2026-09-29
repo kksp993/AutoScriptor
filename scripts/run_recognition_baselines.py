@@ -17,8 +17,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from AutoScriptor.core.display_contract import EXPECTED_FRAME_SIZE, get_frame_size
-from AutoScriptor.recognition.img_rec import imgOnScreen
+from AutoScriptor.core.api import EXPECTED_FRAME_SIZE
+from AutoScriptor.recognition.locate import imgOnScreen
 
 
 SUPPORTED_SCHEMA_VERSION = 1
@@ -123,7 +123,7 @@ def _run_case(case: dict[str, Any], manifest_directory: Path) -> dict[str, Any]:
             field_name="screenshot",
         )
         screenshot = _read_image(screenshot_path)
-        actual_size = get_frame_size(screenshot)
+        actual_size = (int(screenshot.shape[1]), int(screenshot.shape[0]))
         if actual_size != EXPECTED_FRAME_SIZE:
             raise ValueError(
                 f"Baseline frame must be {EXPECTED_FRAME_SIZE[0]}x{EXPECTED_FRAME_SIZE[1]}, "
@@ -200,7 +200,7 @@ def _run_template_case(
 
 def _run_ocr_case(case: dict[str, Any], screenshot: np.ndarray) -> dict[str, Any]:
     from AutoScriptor.recognition.ocr_rec import ocr_for_box
-    from AutoScriptor.utils.box import Box
+    from AutoScriptor.core.box import Box
 
     box_values = case.get("box")
     if not isinstance(box_values, list) or len(box_values) != 4:

@@ -2,10 +2,10 @@ from threading import Thread
 from time import time
 from AutoScriptor import *
 from ZmxyOL import *
-from AutoScriptor.battle_character.hero import h, combo
+from ZmxyOL.battle_character.hero import h, combo
 from AutoScriptor.utils.cancel import TaskCancelled
 from ZmxyOL.nav.api import ensure_in
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 _ZHUQUE_EXIT_DELAY = 30.0
 _ZHUQUE_TOKEN_SIGNAL = "kunlunshan_zhuque_token"

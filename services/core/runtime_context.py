@@ -25,7 +25,7 @@ import sys
 from typing import Callable, TYPE_CHECKING
 
 from AutoScriptor.utils.cancel import check_cancel_raise
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 if TYPE_CHECKING:
     from AutoScriptor.core.control import MixControl

@@ -22,14 +22,14 @@ from time import time
 from typing import Any
 
 from AutoScriptor import *
-from AutoScriptor.battle_character.plan import BattlePlan, battle_plan
+from ZmxyOL.battle_character.plan import BattlePlan, battle_plan
 from AutoScriptor.core.api import ctrl_mumu, ui_T
 import AutoScriptor.core.api as core_api
 from AutoScriptor.core.background import BG_PRIORITY_BUILTIN_ADVANCE, BG_SIGNALS
 from AutoScriptor.core.targets import Target
 from AutoScriptor.utils.cancel import check_cancel_raise
-from AutoScriptor.utils.logger import logger
-from AutoScriptor.utils.paths import get_battle_character_dir
+from AutoScriptor.logging.logger import logger
+from ZmxyOL.paths import get_battle_character_dir
 
 WUSHUANG_SPEED_1X = 0.0175
 WUSHUANG_SPEED_3X = 0.00815
@@ -671,7 +671,7 @@ def _load_character_modules() -> None:
         if py_file.name in skip:
             continue
         digest = hashlib.sha256(str(py_file.resolve()).encode("utf-8")).hexdigest()[:16]
-        mod_name = f"AutoScriptor.battle_character._user_{digest}"
+        mod_name = f"ZmxyOL.battle_character._user_{digest}"
         if mod_name in sys.modules:
             continue
         try:
@@ -750,7 +750,7 @@ def reload_battle_character_modules() -> None:
     global _heroes_loaded
     reset_hero_registry_for_reload()
     for name in list(sys.modules.keys()):
-        if name.startswith("AutoScriptor.battle_character._user_") or name.startswith("battle_character._user_"):
+        if name.startswith("ZmxyOL.battle_character._user_") or name.startswith("battle_character._user_"):
             del sys.modules[name]
     _load_character_modules()
     _heroes_loaded = True

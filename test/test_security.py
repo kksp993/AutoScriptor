@@ -37,7 +37,7 @@ def load_config_manager_for_test():
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: F401
     from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC  # noqa: F401
 
-    logger_mod = types.ModuleType("AutoScriptor.utils.logger")
+    logger_mod = types.ModuleType("AutoScriptor.logging.logger")
     logger_mod.logger = type("_Logger", (), {
         "debug": staticmethod(lambda *args, **kwargs: None),
         "info": staticmethod(lambda *args, **kwargs: None),
@@ -50,14 +50,14 @@ def load_config_manager_for_test():
     utils.__path__ = [os.path.join(ROOT, "AutoScriptor", "utils")]
     spec = importlib.util.spec_from_file_location(
         "_config_manager_under_test",
-        os.path.join(ROOT, "AutoScriptor", "crypto", "config_manager.py"),
+        os.path.join(ROOT, "ZmxyOL", "crypto", "config_manager.py"),
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     with patch.dict(sys.modules, {
         "AutoScriptor": autoscriptor,
         "AutoScriptor.utils": utils,
-        "AutoScriptor.utils.logger": logger_mod,
+        "AutoScriptor.logging.logger": logger_mod,
     }):
         spec.loader.exec_module(module)
     return module.ConfigManager
@@ -373,7 +373,7 @@ class TestAttackScenarios(unittest.TestCase):
             ConfigManager = load_config_manager_for_test()
         except ImportError:
             import sys as _s
-            mod = _s.modules.get("AutoScriptor.crypto.config_manager")
+            mod = _s.modules.get("ZmxyOL.crypto.config_manager")
             if not mod:
                 self.skipTest("ConfigManager 不可用")
             ConfigManager = mod.ConfigManager

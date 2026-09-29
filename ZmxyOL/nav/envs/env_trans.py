@@ -1,4 +1,4 @@
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 from AutoScriptor import *
 from ZmxyOL.nav.map_manager import mm, path
 from .login import login
