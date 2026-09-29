@@ -207,9 +207,10 @@ class TaskManager:
                 assert runtime_ctx.mixctrl is not None, "mixctrl 未初始化，请先调用 runtime_ctx.init()"
                 runtime_ctx.mixctrl.release_all_keys()
                 clear_task_status("progress", task_path=task, save=False)
-                debug_run = bool(cfg["app"].get("debug_mode") or is_task_debug_mode(task))
+                debug_run = is_task_debug_mode(task)
                 # tracer 的运行期抓帧和任务录屏共用同一个开关：两者都是 debug
-                # 排障材料，只在这里决定，控制层无权猜。
+                # 排障材料，只在这里决定，控制层无权猜。判据是任务注册时的
+                # debug_mode，与任务在哪个目录无关。
                 set_run_capture(debug_run)
                 task_video = new_task_video_recorder(task, debug_run)
                 fn(**kwargs)
@@ -263,10 +264,12 @@ class TaskManager:
                 if task_video:
                     task_video.cleanup_local()
                     task_video = None
+                # debug 任务失败即停：不恢复应用、不重试，也不标记人工接管冷却，
+                # 否则一次调试会污染后续正常调度。
                 if is_task_debug_mode(task):
                     logger.info("🔄 debug_mode: 跳过失败恢复，不关闭/重启游戏: %s", task)
                     return False
-                if not self._try_recover_app(attempt, task=task):
+                if not self._try_recover_app(attempt):
                     with self._cfg_lock:
                         self._mark_incomplete_progress_takeover(task, f"执行失败: {e}")
                     return False
@@ -403,11 +406,13 @@ class TaskManager:
 
     # ── 错误恢复 ──
 
-    def _try_recover_app(self, retry_count: int, task: str | None = None) -> bool:
-        """尝试恢复应用到可执行状态。"""
-        if task and is_task_debug_mode(task):
-            logger.info("🔄 debug_mode: 跳过失败恢复，不关闭/重启游戏: %s", task)
-            return False
+    def _try_recover_app(self, retry_count: int) -> bool:
+        """尝试恢复应用到可执行状态。
+
+        Only recovery lives here. Whether a task should recover at all is the
+        caller's decision, because skipping recovery also skips the takeover
+        marking that follows a failed recovery.
+        """
         if not cfg["app"].get("restart_on_error"):
             return False
         app_name = cfg["app"]["app_to_start"]

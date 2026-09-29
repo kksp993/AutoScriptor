@@ -578,17 +578,39 @@ class TestTaskManagerPrepare(unittest.TestCase):
         with self.assertRaises(KeyError):
             tm._prepare_task("测试/幽灵")
 
-    def test_debug_task_skips_failure_recovery(self):
+    def test_debug_task_failure_skips_recovery_and_progress_takeover(self):
+        """debug 任务失败即停：不恢复应用，也不留人工接管冷却标。
+
+        The debug policy lives at the failure branch, not inside
+        ``_try_recover_app``: skipping recovery also has to skip the takeover
+        marking that a failed recovery would otherwise trigger.
+        """
+        from orchestrator import task_manager as tm_mod
         from orchestrator.task_manager import TaskManager
 
         cfg._config.setdefault("app", {})["restart_on_error"] = True
+        cfg._config.setdefault("app", {})["max_retry"] = 0
         cfg._config["tasks"] = {
             "测试": {"调试任务": {"on": True, "next_exec_time": 0, "params": {}}}
         }
-        task_registry.register("测试/调试任务", lambda: None, order=1, debug_mode=True)
+
+        def boom():
+            raise RuntimeError("debug boom")
+
+        task_registry.register("测试/调试任务", boom, order=1, debug_mode=True)
 
         tm = TaskManager()
-        self.assertFalse(tm._try_recover_app(0, task="测试/调试任务"))
+        with patch.object(
+            tm_mod.runtime_ctx, "mixctrl", SimpleNamespace(release_all_keys=lambda: None)
+        ):
+            with patch.object(tm_mod, "new_task_video_recorder", return_value=None):
+                with patch.object(tm, "_archive_error"):
+                    with patch.object(tm, "_try_recover_app") as recover_app:
+                        with patch.object(tm, "_mark_incomplete_progress_takeover") as mark_takeover:
+                            self.assertFalse(tm._execute_single_task("测试/调试任务"))
+
+        recover_app.assert_not_called()
+        mark_takeover.assert_not_called()
 
 
 class TestTaskStatusProgress(unittest.TestCase):

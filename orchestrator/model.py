@@ -20,10 +20,6 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
-import dpath
-
-from AutoScriptor.utils.app_config import cfg
-
 
 TASK_ORDERING_SCHEMA_VERSION = 1
 
@@ -561,23 +557,16 @@ def is_task_due(val: dict, path: str, now_ts: float) -> bool:
     return True
 
 
-def is_task_debug_mode(task_path: str, task_data: dict | None = None) -> bool:
-    """Debug-run policy: registry first, explicit task data second, cfg last.
+def is_task_debug_mode(task_path: str) -> bool:
+    """Whether the task itself was registered with ``debug_mode=True``.
 
-    Kept free of task-runtime imports so it stays usable from the scheduler and
-    the UI projection alike.
+    Registration is the only source. The app-level switch and the saved-leaf
+    fallback used to answer the same question differently, which is why a run
+    could look debug to one layer and normal to another.
     """
     from tasks.task_registry import task_registry
 
-    if task_registry.get_debug_mode(task_path):
-        return True
-    if isinstance(task_data, dict):
-        return bool(task_data.get("debug_mode") or task_data.get("debug"))
-    try:
-        data = dpath.get(cfg["tasks"], task_path)
-    except Exception:
-        return False
-    return isinstance(data, dict) and bool(data.get("debug_mode") or data.get("debug"))
+    return task_registry.get_debug_mode(task_path)
 
 
 def calc_effective_next_time(val: dict, now_ts: float) -> float:
