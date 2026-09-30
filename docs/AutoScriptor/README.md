@@ -6,6 +6,7 @@
 
 | 文档 | 用途 |
 | --- | --- |
+| [GETTING-STARTED.md](GETTING-STARTED.md) | 从零开始的完整教程：安装、启动、配模拟器、建账号、跑任务、排错 |
 | [architecture.md](architecture.md) | 当前主线、代码分层、数据边界、已移除产品面 |
 | [INSTALL.md](INSTALL.md) | 源码安装、运行、更新、排错 |
 | [reference/API.md](reference/API.md) | 运行入口和核心 API 约定 |

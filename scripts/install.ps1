@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateSet("tools", "python", "electron", "qq", "all")]
     [string]$Target = "all",
 
@@ -9,6 +9,72 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# 这个脚本的目标是「用户只要会双击就能装完」。所以：
+#   - 每一步都先说明正在做什么；
+#   - 任何失败都给出「哪一步 / 为什么 / 你可以怎么做 / 等价命令」；
+#   - 全过程写进日志文件，用户可以直接把这份日志发出来。
+
+$script:CurrentStep = "准备"
+$script:CurrentHints = @()
+
+function Write-Head {
+    param([string]$Message)
+    Write-Host 
+    Write-Host "==> $Message" -ForegroundColor Cyan
+}
+
+function Set-Step {
+    param([string]$Name, [string[]]$Hints)
+    $script:CurrentStep = $Name
+    $script:CurrentHints = $Hints
+    Write-Head $Name
+}
+
+function Fail-Install {
+    param(
+        [string]$Step,
+        [string]$Reason,
+        [string[]]$Actions,
+        [string]$ManualCommand
+    )
+    Write-Host ""
+    Write-Host "================ 安装没有完成 ================" -ForegroundColor Red
+    Write-Host "  哪一步：$Step"
+    Write-Host "  为什么：$Reason"
+    if ($ManualCommand) {
+        Write-Host ""
+        Write-Host "  手动做等价的事：" -ForegroundColor Yellow
+        Write-Host "    $ManualCommand" -ForegroundColor Yellow
+    }
+    if ($Actions -and $Actions.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  你可以这样做："
+        $index = 1
+        foreach ($action in $Actions) {
+            Write-Host "    $index) $action"
+            $index++
+        }
+    }
+    Write-Host ""
+    Write-Host "  完整输出已保存在：$InstallLogPath"
+    Write-Host "  照着上面做完，再运行一次 .\scripts\install.bat 即可。" -ForegroundColor Green
+    Write-Host "=============================================" -ForegroundColor Red
+    exit 1
+}
+
+function Initialize-InstallLog {
+    # transcript 让用户能直接发一份完整输出；失败不影响安装。
+    try {
+        $logDir = Join-Path $Root logs
+        New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+        $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
+        $script:InstallLogPath = Join-Path $logDir "install_$stamp.log"
+        Start-Transcript -Path $script:InstallLogPath -Force | Out-Null
+    } catch {
+        $script:InstallLogPath = "(没有生成日志文件)"
+    }
+}
 
 $ScriptDir = $PSScriptRoot
 $Root = (Resolve-Path -Path (Join-Path $ScriptDir "..")).Path
@@ -27,7 +93,12 @@ $SetuptoolsRequirement = "setuptools<$SetuptoolsUpperBound"
 # actually installed, not the "auto" default the user typed.
 $ResolvedPaddleVariant = $null
 
+Initialize-InstallLog
+
 function Refresh-ProcessPath {
+    # 用户把工具装在哪儿都可能：winget、官网安装包、Scoop、Chocolatey、nvm、fnm、
+    # 以及「只为当前用户安装」。注册表里的 PATH 已经覆盖大部分情况，这里再补上
+    # 各家用默认路径，避免出现「明明装了却找不到」。
     $pathValues = @(
         [Environment]::GetEnvironmentVariable("Path", "Machine"),
         [Environment]::GetEnvironmentVariable("Path", "User"),
@@ -36,7 +107,21 @@ function Refresh-ProcessPath {
         (Join-Path $env:LOCALAPPDATA "Programs\Python\Launcher"),
         (Join-Path $env:USERPROFILE ".local\bin"),
         (Join-Path $env:ProgramFiles "Git\cmd"),
-        (Join-Path $env:ProgramFiles "nodejs")
+        (Join-Path $env:ProgramFiles "nodejs"),
+        # Git：官网安装包在 64 位系统上也可能是 Program Files (x86)
+        (Join-Path ${env:ProgramFiles(x86)} "Git\cmd"),
+        # Git / Node 的「仅当前用户」安装
+        (Join-Path $env:LOCALAPPDATA "Programs\Git\cmd"),
+        (Join-Path $env:LOCALAPPDATA "Programs\nodejs"),
+        # npm 全局 bin（有些工具只装在这里）
+        (Join-Path $env:APPDATA "npm"),
+        # Scoop / Chocolatey
+        (Join-Path $env:USERPROFILE "scoop\shims"),
+        (Join-Path $env:ProgramData "chocolatey\bin"),
+        # nvm-windows 的当前软链、fnm 的 shims
+        (Join-Path $env:APPDATA "nvm"),
+        (Join-Path $env:LOCALAPPDATA "fnm_multishells"),
+        (Join-Path $env:LOCALAPPDATA "Volta\bin")
     )
     $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $paths = foreach ($value in $pathValues) {
@@ -65,7 +150,14 @@ function Resolve-CommandPath {
 function Require-Winget {
     $winget = Resolve-CommandPath @("winget.exe", "winget")
     if (-not $winget) {
-        throw "winget not found. Install App Installer from Microsoft Store, reopen PowerShell, then rerun scripts\install.bat."
+        Fail-Install `
+            -Step "检查 winget" `
+            -Reason "这台电脑上没有 winget（应用安装程序），它用来自动装 Git / Node.js / uv" `
+            -Actions @(
+                "打开「Microsoft Store」，搜索并安装「应用安装程序」(App Installer)，然后重新打开 PowerShell 再运行一次本脚本",
+                "装不了商店时也可以手动装这三个软件，然后重新运行本脚本（脚本会自动跳过已装好的）"
+            ) `
+            -ManualCommand "Git for Windows: https://git-scm.com/download/win     Node.js LTS: https://nodejs.org/     uv: 在 PowerShell 里执行 irm https://astral.sh/uv/install.ps1 | iex"
     }
     return $winget
 }
@@ -106,6 +198,9 @@ function Ensure-ExecutionPolicy {
 }
 
 function Ensure-Git {
+    Set-Step "检查 Git" @(
+        "Git 用来拉取源码；如果只是运行已下载的源码，可以先不管它"
+    )
     $git = Resolve-CommandPath @("git.exe", "git")
     if (-not $git) {
         Invoke-WingetInstall -Id "Git.Git" -Name "Git for Windows"
@@ -131,6 +226,9 @@ function Get-NodeVersion {
 }
 
 function Ensure-Node {
+    Set-Step "检查 Node.js（Electron 桌面窗口需要）" @(
+        "只想用浏览器打开 WebUI 的话，这一步不是必须的"
+    )
     $version = Get-NodeVersion
     $npm = Resolve-CommandPath @("npm.cmd", "npm")
     if ($version -and $version -ge $NodeMinimumVersion -and $npm) {
@@ -154,6 +252,7 @@ function Ensure-Node {
 }
 
 function Ensure-Uv {
+    Set-Step "检查 uv（用来装 Python 环境）" @()
     $uv = Resolve-CommandPath @("uv.exe", "uv")
     if (-not $uv) {
         Invoke-WingetInstall -Id "astral-sh.uv" -Name "uv"
@@ -167,6 +266,9 @@ function Ensure-Uv {
 }
 
 function Install-Tools {
+    Set-Step "准备 PowerShell 执行策略" @(
+        "这一步只影响当前用户，不需要管理员权限"
+    )
     Ensure-ExecutionPolicy
     Ensure-Git
     Ensure-Node
@@ -271,9 +373,16 @@ function Install-PythonDeps {
         }
     }
 
+    Set-Step "准备 Python 虚拟环境（.venv）" @(
+        "Python 版本固定为 $PythonVersion；重新安装不会影响 data\ 里的账号和配置"
+    )
     Ensure-Venv
 
     $uv = Ensure-Uv
+    Set-Step "安装 Python 依赖（第一次会比较慢，视网速可能十几分钟）" @(
+        "装不上通常是网络问题：换成手机热点或稍后重试"
+        "国内网络可以先执行：$env:UV_DEFAULT_INDEX = https://pypi.tuna.tsinghua.edu.cn/simple 再重跑本脚本"
+    )
     Write-Host "Installing common Python dependencies from requirements.txt ..."
     & $uv pip install --python $VenvPy -r $CommonRequirements
     if ($LASTEXITCODE -ne 0) {
@@ -311,6 +420,9 @@ function Install-ElectronDeps {
     Ensure-Node
     $npm = Resolve-CommandPath @("npm.cmd", "npm")
 
+    Set-Step "安装 Electron 依赖（只影响桌面窗口）" @(
+        "npm 慢或失败可以换淘宝镜像：npm config set registry https://registry.npmmirror.com"
+    )
     Write-Host "Installing Electron dependencies in frontend\electron with npm install ..."
     Push-Location $ElectronDir
     try {
@@ -337,32 +449,57 @@ function Install-QQBot {
     }
 }
 
-if ($Target -eq "tools" -or $Target -eq "all") {
-    Install-Tools
-}
+try {
+    Write-Head "AutoScriptor 安装（目标：$Target）"
+    Write-Host "    源码目录：$Root"
+    Write-Host "    日志文件：$InstallLogPath"
 
-if ($Target -eq "python" -or $Target -eq "all") {
-    Install-PythonDeps
-}
-
-if ($Target -eq "electron" -or $Target -eq "all") {
-    Install-ElectronDeps
-}
-
-if ($Target -eq "all" -and -not $WithQQ) {
-    if (Test-Path -LiteralPath (Join-Path $Root ".autoscriptor\qq-bot\autoscriptor.json")) {
-        $WithQQ = $true
-    } else {
-        Write-Host "Optional QQ notifications: installs third-party NapCat (~112 MiB)."
-        Write-Host "Manual QQ login required; a dedicated account is recommended."
-        $answer = Read-Host "Install the local QQ robot? [y/N]"
-        $WithQQ = $answer -match '^(y|yes)$'
+    if ($Target -eq "tools" -or $Target -eq "all") {
+        Install-Tools
     }
-}
-if ($Target -eq "qq" -or $WithQQ) {
-    Install-QQBot
+
+    if ($Target -eq "python" -or $Target -eq "all") {
+        Install-PythonDeps
+    }
+
+    if ($Target -eq "electron" -or $Target -eq "all") {
+        Install-ElectronDeps
+    }
+
+    if ($Target -eq "all" -and -not $WithQQ) {
+        if (Test-Path -LiteralPath (Join-Path $Root ".autoscriptor\qq-bot\autoscriptor.json")) {
+            $WithQQ = $true
+        } else {
+            Write-Host ""
+            Write-Host "可选：QQ 通知机器人（第三方 NapCat，约 112 MB）。" -ForegroundColor DarkGray
+            Write-Host "      需要手机扫码登录一个 QQ 小号；不装也完全不影响任务执行。" -ForegroundColor DarkGray
+            $answer = Read-Host "    现在安装吗？[y/N]"
+            $WithQQ = $answer -match '^(y|yes)$'
+        }
+    }
+    if ($Target -eq "qq" -or $WithQQ) {
+        Install-QQBot
+    }
+} catch {
+    Fail-Install `
+        -Step $script:CurrentStep `
+        -Reason $_.Exception.Message `
+        -Actions $script:CurrentHints
 }
 
-$paddleSummary = if ($null -ne $script:ResolvedPaddleVariant) { $script:ResolvedPaddleVariant } else { "not requested" }
-Write-Host "Install complete: target=$Target, paddle=$paddleSummary"
+$paddleSummary = if ($null -ne $script:ResolvedPaddleVariant) { $script:ResolvedPaddleVariant } else { "未安装" }
+Write-Host ""
+Write-Host "================ 安装完成 ================" -ForegroundColor Green
+Write-Host "  Paddle 运行时：$paddleSummary"
+Write-Host ""
+Write-Host "  下一步：" -ForegroundColor Cyan
+Write-Host "    1) 启动（二选一）"
+Write-Host "         浏览器版：双击 webui.bat   （会打印形如 http://127.0.0.1:5000 的地址）"
+Write-Host "         桌面窗口：双击 start.bat"
+Write-Host "    2) 在打开的页面里新建账号 → 选角色 → 打开要跑的任务"
+Write-Host "    3) 设置里的「启动诊断」可以检查 MuMu 和 OCR 是否正常"
+Write-Host ""
+Write-Host "  完整教程：docs\AutoScriptor\GETTING-STARTED.md"
+Write-Host "  本次安装日志：$InstallLogPath"
+Write-Host "==========================================" -ForegroundColor Green
 exit 0

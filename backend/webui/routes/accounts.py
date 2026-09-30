@@ -427,8 +427,10 @@ async def update_account_credentials_api(request: Request):
                 return JSONResponse(status_code=401, content={"error": "当前安全密码验证失败"})
        
 
+    # 只有真的存在加密凭据时才谈「覆盖」：新账号本来就没有凭据，拿角色名当理由
+    # 会让第一次填账密的用户看到一句「会覆盖当前已有的加密设置」而不敢继续。
     existing_name = cfg._config.get("game", {}).get("character_name", "")
-    if existing_name and not confirmed:
+    if cfg.has_encrypted_credentials() and not confirmed:
         return {
             "need_confirm": True,
             "message": f"更新账密会覆盖当前已有的加密设置（当前角色: {existing_name}），是否继续？"

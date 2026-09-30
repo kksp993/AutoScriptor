@@ -20,11 +20,8 @@ cd AutoScriptor
 .\webui.bat
 ```
 
-访问：
-
-```text
-http://127.0.0.1:5000
-```
+启动脚本会挑一个空闲端口并把它打印出来（默认 `5000`），照那个地址访问即可。
+想固定端口用 `.\webui.bat -Port 8080`，或设置环境变量 `AUTOSCRIPTOR_PORT`。
 
 从远端 `main` 更新源码：
 
@@ -75,15 +72,13 @@ data/character/        用户职业脚本
 logs/                         日志、错误归档、截图和礼包码缓存
 ```
 
-首次缺少配置时：
-
-```powershell
-Copy-Item "data\config.template.json" "data\config.json"
-```
+首次启动不需要手动建 `data\config.json`：缺少它时会用 `data\config.template.json` 的默认值，
+在界面里改设置会按需生成。完整的新手步骤见 [从零开始](docs/AutoScriptor/GETTING-STARTED.md)。
 
 ## 文档
 
 - [架构基线](docs/AutoScriptor/architecture.md)
+- [从零开始](docs/AutoScriptor/GETTING-STARTED.md)
 - [安装与运行](docs/AutoScriptor/INSTALL.md)
 - [文档索引](docs/AutoScriptor/README.md)
 - [WebUI API 契约](docs/AutoScriptor/webui/api-contract.md)
@@ -94,7 +89,9 @@ Copy-Item "data\config.template.json" "data\config.json"
 
 Electron 找不到 `electron.exe`：运行 `.\scripts\install.bat electron`，它会在 `frontend\electron` 执行 `npm install`。
 
-WebUI 无法访问：确认 `webui.bat`、`scripts\run.bat webui` 或 Electron 后端正在运行，端口 `5000` 未被占用，并查看 `logs/`。
+WebUI 无法访问：确认 `webui.bat`、`scripts\run.bat webui` 或 Electron 后端正在运行，并查看 `logs/`。
+端口被别的软件占用时会自动顺延并在窗口里说明，所以**认命令行打印的那个地址**；
+如果双击后提示「已经在运行」，说明上一次的实例还开着。
 
 MuMu 连接失败：检查 `data/config.json` 中的 `emulator.adb_addr`、`emulator.emu_path`、`emulator.adb_path`，再通过 WebUI 启动诊断分层排查 Manager、ADB、App、NemuIpc、OCR、UI Map。
 

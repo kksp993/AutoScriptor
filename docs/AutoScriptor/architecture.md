@@ -107,7 +107,7 @@ backend -> orchestrator -> tasks -> ZmxyOL -> AutoScriptor
 
 ## 源码启动与更新边界
 
-- Electron 只负责源码壳：创建加载窗口、清理本项目占用的 `5000` 端口、启动 `.venv\Scripts\python.exe -X utf8 backend\webui\gui.py --electron`。
+- Electron 只负责源码壳：创建加载窗口、清理本项目占用的 WebUI 端口（先按 `AUTOSCRIPTOR_PORT`／缺省 `5000` 挑一个空闲端口，再把同一个端口通过环境变量交给后端）、启动 `.venv\Scripts\python.exe -X utf8 backend\webui\gui.py --electron`。
 - Electron 壳在 `app.whenReady()` 前配置 Chromium render mode；默认 `AUTOSCRIPTOR_ELECTRON_RENDER_MODE=software` 只影响桌面壳，不改变浏览器访问 WebUI 的行为。
 - 加载窗口必须先于端口清理和 Python 后端启动出现；端口清理失败要写启动日志并显示在加载页，不修改 Windows 控制台 code page。
 - WebUI 更新器只处理源码 Git 通道：固定 `fetch origin main`、比较 `HEAD` 和 `origin/main` 的 ahead/behind，只有当前检出分支可快进到 `origin/main` 时才执行 `pull --ff-only origin main`。

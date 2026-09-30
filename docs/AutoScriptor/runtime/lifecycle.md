@@ -4,7 +4,8 @@
 
 ## 启动边界
 
-- Source Electron configures Chromium render mode before `app.whenReady()`. `AUTOSCRIPTOR_ELECTRON_RENDER_MODE` supports `software` (default, hardware acceleration disabled plus GPU composition/raster/zero-copy switches), `d3d11` (GPU kept with ANGLE D3D11), and `default` (no Electron render switches for comparison). The shell logs the render mode and GPU feature status; browser access to `http://127.0.0.1:5000` is unchanged.
+- Source Electron configures Chromium render mode before `app.whenReady()`. `AUTOSCRIPTOR_ELECTRON_RENDER_MODE` supports `software` (default, hardware acceleration disabled plus GPU composition/raster/zero-copy switches), `d3d11` (GPU kept with ANGLE D3D11), and `default` (no Electron render switches for comparison). The shell logs the render mode and GPU feature status; browser access to the WebUI is unchanged.
+- WebUI 监听端口取 `AUTOSCRIPTOR_PORT`（缺省 `5000`），由启动方先挑好再通过环境变量交给后端：Electron 外壳和 `scripts\run.ps1` 都会在首选端口被占用时顺延到下一个空闲端口，并把真实地址打印出来。Electron 不允许顺延（外壳必须和后端连同一个端口），端口被占时明确报错并给出改端口的办法。`backend/webui/port.py` 是端口规则与可用性探测的唯一出处。
 - OCR 在进程启动时冻结 `ocr.use_gpu`、普通模型和数字模型。全局 OCR、线程局部 OCR
   和数字 OCR 都使用该快照；保存新配置不会热切换已加载或稍后创建的 Paddle 引擎。
   `GET /api/device/diagnostics` 的 OCR 段通过 `configured_*`、`runtime_*`、`engine_*`
@@ -25,7 +26,7 @@
 - 长生命周期模块不要保存 `from AutoScriptor import *` 或 `from AutoScriptor import mixctrl` 得到的 `mixctrl/mumu` 快照；需要运行态对象时从 `runtime_ctx` 或 `AutoScriptor.core.api` 读取当前值。
 - 源码 Electron 启动必须先创建可见加载窗口，再执行端口清理和 Python 后端启动。加载页要持续显示阶段日志，包括运行目录检查、端口检查、Python 进程创建、WebUI 模块导入、等待本地 WebUI 响应；不要让首次运行长时间无输出。
 - Electron 不修改 Windows 控制台 code page。后端编码通过 `-X utf8`、`PYTHONUTF8=1` 和 `PYTHONIOENCODING=utf-8` 保证。
-- 端口 `5000` 清理只会杀本项目目录匹配到的旧进程；清理失败必须写 `startup.log` 并显示在加载页，不能静默吞掉。
+- WebUI 端口清理只会杀本项目目录匹配到的旧进程；清理失败必须写 `startup.log` 并显示在加载页，不能静默吞掉。
 
 ## 设备会话
 

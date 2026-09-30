@@ -8,7 +8,61 @@ const http = require('http');
 const fs = require('fs');
 
 const startupProcessStartedAt = Date.now();
-const SERVER_URL = 'http://127.0.0.1:5000';
+const PORT_ENV = 'AUTOSCRIPTOR_PORT';
+const DEFAULT_WEBUI_PORT = 5000;
+
+/** 用户显式指定的端口；写法非法时直接说明，而不是默默退回 5000。 */
+function parsePortEnv() {
+  const raw = String(process.env[PORT_ENV] || '').trim();
+  if (!raw) return DEFAULT_WEBUI_PORT;
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`${PORT_ENV} 必须是 1-65535 的整数，收到 ${JSON.stringify(raw)}`);
+  }
+  return port;
+}
+
+/** netstat 里处于 LISTENING 的端口号；拿不到时返回 null 表示“判断不了”。 */
+function listListeningPorts() {
+  if (process.platform !== 'win32') return null;
+  try {
+    const output = execFileSync('netstat.exe', ['-ano'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+    const ports = new Set();
+    for (const line of output.split(/\r?\n/)) {
+      if (!line.includes('LISTENING')) continue;
+      const match = line.match(/:([0-9]{1,5})\s/);
+      if (match) ports.add(Number(match[1]));
+    }
+    return ports;
+  } catch (err) {
+    console.warn('[main] 无法读取端口占用情况:', err && err.message ? err.message : String(err));
+    return null;
+  }
+}
+
+/**
+ * 后端要监听的端口。
+ *
+ * 外壳必须和后端用同一个端口，所以由这里先挑好再通过环境变量交给 Python。
+ * 首选端口被别的程序占用时向后顺延，避免用户卡在“5000 打不开”上——那是最常见
+ * 的一类问题，而用户往往不知道该改哪里。
+ */
+function pickWebUiPort() {
+  const preferred = parsePortEnv();
+  const busy = listListeningPorts();
+  if (!busy || !busy.has(preferred)) return preferred;
+  for (let candidate = preferred + 1; candidate <= Math.min(preferred + 20, 65535); candidate += 1) {
+    if (!busy.has(candidate)) {
+      console.warn(`[main] 端口 ${preferred} 已被占用，改用 ${candidate}。设置 ${PORT_ENV}=${candidate} 可固定它。`);
+      return candidate;
+    }
+  }
+  console.warn(`[main] 从 ${preferred} 起连续 20 个端口都被占用，仍交给后端去报错。`);
+  return preferred;
+}
+
+const webuiPort = pickWebUiPort();
+const SERVER_URL = `http://127.0.0.1:${webuiPort}`;
 const BOSS_KEY = 'Alt+W';
 // The shell lives at frontend/electron/, so the repository root is two levels up.
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -326,13 +380,13 @@ Get-CimInstance Win32_Process | ForEach-Object {
   }
 }
 
-function killStalePort5000(extraRoots = []) {
+function killStaleWebUiPort(extraRoots = []) {
   if (process.platform !== 'win32') return;
   try {
     const output = execFileSync('netstat.exe', ['-ano'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
     const pids = new Set();
     for (const line of output.split('\n')) {
-      if (line.includes(':5000') && line.includes('LISTENING')) {
+      if (line.includes(`:${webuiPort}`) && line.includes('LISTENING')) {
         const parts = line.trim().split(/\s+/);
         const pid = parseInt(parts[parts.length - 1], 10);
         if (pid > 0 && pid !== process.pid) pids.add(pid);
@@ -342,7 +396,7 @@ function killStalePort5000(extraRoots = []) {
 
     const roots = autoScriptorKillRoots(extraRoots);
     if (roots.length === 0) {
-      console.warn('[main] Port 5000 is occupied, but no AutoScriptor root is known; leaving it alone.');
+      console.warn(`[main] 端口 ${webuiPort} 被占用，但看不出是本项目的进程，先不动它。`);
       return;
     }
 
@@ -377,13 +431,13 @@ foreach ($pidValue in $pids) {
       { encoding: 'utf8', windowsHide: true, timeout: 30000 },
     );
     for (const line of String(result || '').split(/\r?\n/).filter(Boolean)) {
-      console.log('[main] port5000 cleanup:', line);
+      console.log('[main] WebUI port cleanup:', line);
     }
   } catch (err) {
     const message = err && err.message ? err.message : String(err);
-    startupLog('port5000-cleanup-failed', message);
-    console.warn('[main] Port 5000 cleanup failed:', message);
-    sendToRenderer('log', `[warning] Port 5000 cleanup failed: ${message}`);
+    startupLog('webui-port-cleanup-failed', message);
+    console.warn('[main] WebUI port cleanup failed:', message);
+    sendToRenderer('log', `[warning] 端口 ${webuiPort} 清理失败: ${message}`);
   }
 }
 
@@ -468,6 +522,8 @@ function startPython() {
     AUTOSCRIPTOR_ELECTRON_PIPE: '1',
     AUTOSCRIPTOR_ELECTRON: '1',
     NO_COLOR: '1',
+    // 后端照这个端口监听，避免两边各挑一个。
+    [PORT_ENV]: String(webuiPort),
   };
   delete backendEnv.ELECTRON_RUN_AS_NODE;
 
@@ -653,7 +709,7 @@ ipcMain.on('window-close', () => {
 function finishQuit() {
   pyPid = null;
   pyProc = null;
-  killStalePort5000();
+  killStaleWebUiPort();
   killAutoScriptorProcessResidue();
   setTimeout(() => {
     tray?.destroy();
@@ -690,8 +746,8 @@ app.whenReady().then(() => {
   createTray();
   registerBossKey();
   setTimeout(() => {
-    reportStartupStep('checking-port', 'Checking local port 5000');
-    killStalePort5000();
+    reportStartupStep('checking-port', `Checking local port ${webuiPort}`);
+    killStaleWebUiPort();
     startPython();
   }, 250);
 });

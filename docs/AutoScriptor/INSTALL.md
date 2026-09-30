@@ -2,11 +2,17 @@
 
 当前 `src` 分支只维护源码运行。架构总图见 [architecture.md](architecture.md)。
 
+**第一次用请先看 [从零开始](GETTING-STARTED.md)**：那是「装完怎么真正跑起来」的逐步教程。
+本文是同一套脚本的参考手册，讲参数、边界和排错细节。
+
 ```text
 scripts\install.bat    安装/修复依赖
 scripts\run.bat        启动 WebUI 或 Electron
 scripts\update.bat     快进更新当前 Git 分支
 ```
+
+两个脚本都会把失败写成一段可照做的说明（哪一步、为什么、你可以怎么做、等价命令），
+并把完整输出留在 `logs\install_*.log`；它们也可以反复运行，已装好的部分自动跳过。
 
 ## 环境
 
@@ -150,10 +156,37 @@ HTTP 地址和随机令牌自动生成，接口及登录页只监听本机。安
 http://127.0.0.1:5000
 ```
 
+端口不是固定的：启动脚本会先挑一个空闲端口，把结果写进 `AUTOSCRIPTOR_PORT` 并打印出来，
+后端照它监听。首选端口被占用时自动顺延并在窗口里说明，所以**认命令行打印的那个地址**，
+不要认固定的 5000。
+
+固定端口：
+
+```powershell
+.\scripts\run.bat webui -Port 8080     # 单次
+$env:AUTOSCRIPTOR_PORT = '8080'        # 环境变量，长期有效
+```
+
+`AUTOSCRIPTOR_PORT` 写法非法时启动会直接说明哪里不对，不会静默退回 5000。
+Electron 外壳和后端必须用同一个端口，所以桌面版不允许顺延：端口被占时会明确报错，
+而不是两边各挑一个。
+
+启动脚本还会识别「已经在运行」：端口上已经有 AutoScriptor 时会提示并直接打开浏览器，
+不再重复启动第二个实例。
+
+启动前的自检失败（缺 `.venv`、缺 Electron 依赖、端口被占满…）都会打印
+「哪一步 / 为什么 / 你可以怎么做」，不会只丢一句异常。
+
 直接运行后端：
 
 ```powershell
 .\.venv\Scripts\python.exe -X utf8 backend\webui\gui.py
+```
+
+这样直接跑时端口同样取 `AUTOSCRIPTOR_PORT`（缺省 5000）；也可以显式指定：
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 backend\webui\gui.py --port 8080
 ```
 
 运行脚本不会安装依赖。缺 `.venv` 时运行 `.\scripts\install.bat python`，缺 `frontend\electron\node_modules` 时运行 `.\scripts\install.bat electron`。
@@ -192,11 +225,9 @@ data/character/    用户职业脚本
 logs/                     日志、截图、错误归档、礼包码缓存
 ```
 
-首次缺少配置：
-
-```powershell
-Copy-Item "data\config.template.json" "data\config.json"
-```
+首次启动**不需要**手动创建 `data\config.json`：缺少它时后端会直接读
+`data/config.template.json` 里的默认值，一样能进界面。界面里改设置会按需生成
+`data/config.json`。只有 `install.bat` 判断 CPU/GPU Paddle 变体时会读它，缺文件按 CPU 处理。
 
 常见模拟器字段：
 
@@ -306,13 +337,25 @@ $env:AUTOSCRIPTOR_ELECTRON_RENDER_MODE = "software"
 Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue
 ```
 
+正常情况下不需要处理：`run.bat` / `webui.bat` 会自动顺延并打印新地址。要看是谁占着：
+
+```powershell
+Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue |
+    Select-Object OwningProcess,
+        @{n='Process';e={ (Get-Process -Id $_.OwningProcess).ProcessName }}
+```
+
+想固定端口就用 `-Port` 或 `AUTOSCRIPTOR_PORT`（见「运行」）。
+
 WebUI 启动但模拟器不可用：先修正 `data/config.json` 中的 MuMu 和 ADB 路径，再通过 WebUI 启动诊断看具体层级。
 
 ## 验收
 
 - `scripts\install.bat` 能校验 Git、Node.js LTS、uv、Python `.venv` 和 Electron 依赖。
+- `scripts\install.bat` 失败时输出「哪一步 / 为什么 / 你可以怎么做」并把完整输出写进 `logs\install_*.log`。
 - `scripts\run.bat electron` 或 `start.bat` 能打开 Electron。
 - `scripts\run.bat webui` 或 `webui.bat` 能启动 WebUI。
-- `http://127.0.0.1:5000` 可访问。
+- 启动成功时命令行打印真实地址，该地址可访问；`-Port` 与 `AUTOSCRIPTOR_PORT` 都能改变它。
+- 首选端口被占用时自动顺延并说明；端口上已有 AutoScriptor 时提示「已经在运行」而不是重复启动。
 - 日志页通过原生 WebSocket `/ws/logs` 显示日志。
 - 任务树能加载、保存、刷新。
