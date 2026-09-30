@@ -16,7 +16,7 @@
 3. 任务路径是否存在于 `TaskRegistry`；未注册叶子不会显示/执行。
 4. 任务是否 `on=True`。
 5. `next_exec_time` 是否到期。
-6. 是否被 `sched_window_hours` 或 `allowed_weekdays` 推迟。
+6. 是否被生效 `reschedule` 的 `window` 或 `weekdays` 推迟。
 7. 是否处于人工接管冷却：`human_takeover_error` 存在且 `now < next_exec_time`。
 8. 是否在本次调度激活周期内 retry 耗尽。
 
@@ -34,7 +34,7 @@ scheduler.task_call("每日任务/村庄/宠物培养")
 
 ## 新任务默认值
 
-首次注册新叶节点默认：
+首次注册新任务条目默认（`cfg["tasks"]` 以任务 `id` 为键的平表）：
 
 ```json
 {"on": false, "next_exec_time": 0, "params": {...}}

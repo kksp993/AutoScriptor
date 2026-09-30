@@ -217,6 +217,79 @@ const app = createApp({
       return {};
     });
 
+    // 自定义任务脚本导入失败时后端会把错误放进公开配置；这里让它在页面上可见，
+    // 否则脚本写坏了只会表现为「任务凭空少了几个」。
+    const customTaskLoadErrors = computed(() => {
+      const errors = configData.custom_task_load_errors;
+      return Array.isArray(errors) ? errors : [];
+    });
+
+    // ── 任务级调度与调试：作者声明默认值，用户在任务弹窗里覆盖 ──
+    // 存储只认这几种形态：缺省 = 一次性，字符串 = daily/weekly，数字 = N 小时，
+    // 字典 = 带窗口/星期的规则。这里只暴露「下一次什么时候」这一层。
+    const RESCHEDULE_MODE_LABELS = {
+      once: '一次性（执行后关闭）',
+      daily: '每天 05:00',
+      weekly: '每周一 05:00',
+      offset: '每隔 N 小时',
+    };
+    const rescheduleModeLabels = RESCHEDULE_MODE_LABELS;
+
+    // 显示优先级：用户覆盖值 → 作者声明的生效值。否则内置任务会被误显示成「一次性」，
+    // 而它其实有作者默认调度。
+    const editTaskRescheduleMode = computed(() => {
+      const raw = editTaskData.value ? editTaskData.value.reschedule : undefined;
+      if (raw === null || raw === undefined) {
+        const effective = editTaskData.value ? editTaskData.value.reschedule_effective : null;
+        return (effective && effective.mode) || 'once';
+      }
+      if (typeof raw === 'string') return raw;
+      if (typeof raw === 'number') return 'offset';
+      if (typeof raw === 'object') return raw.mode || 'once';
+      return 'once';
+    });
+
+    const editTaskRescheduleHours = computed(() => {
+      const raw = editTaskData.value ? editTaskData.value.reschedule : undefined;
+      if (typeof raw === 'number') return raw;
+      if (raw && typeof raw === 'object' && raw.hours) return raw.hours;
+      const effective = editTaskData.value ? editTaskData.value.reschedule_effective : null;
+      if (effective && effective.hours) return effective.hours;
+      return 1;
+    });
+
+    const editTaskDebug = computed(() => {
+      const data = editTaskData.value;
+      if (data && typeof data.debug === 'boolean') return data.debug;
+      return !!(data && data.debug_effective === true);
+    });
+
+    function setEditTaskDebug(value) {
+      const data = editTaskData.value;
+      if (!data) return;
+      data.debug = !!value;
+    }
+
+    function setEditTaskRescheduleMode(mode) {
+      const data = editTaskData.value;
+      if (!data) return;
+      const hours = editTaskRescheduleHours.value;
+      if (mode === 'once') {
+        delete data.reschedule;   // 缺省就是一次性
+      } else if (mode === 'offset') {
+        data.reschedule = { mode: 'offset', hours };
+      } else {
+        data.reschedule = mode;
+      }
+    }
+
+    function setEditTaskRescheduleHours(hours) {
+      const data = editTaskData.value;
+      if (!data) return;
+      const value = Math.max(1, Math.floor(Number(hours) || 1));
+      data.reschedule = { mode: 'offset', hours: value };
+    }
+
     const taskOrderingProjection = computed(() => {
       return configData.task_ordering_projection || {
         schema_version: 1,
@@ -1096,6 +1169,12 @@ const app = createApp({
       }
     }
 
+    /** deploy 段的保存由设置页自己发起；这里只把新配置读回来重绘日志过滤等派生状态。 */
+    async function refreshAfterDeploy() {
+      await refreshConfig(true);
+      await fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
+    }
+
 
     function clearLogs() {
       logs.value.length = 0;
@@ -1431,6 +1510,10 @@ const app = createApp({
 
     return {
       configData, activeTab, newsRefreshKey, logs, characterName, filteredConfig, currentTasks,
+      customTaskLoadErrors,
+      rescheduleModeLabels, editTaskRescheduleMode, editTaskRescheduleHours,
+      setEditTaskRescheduleMode, setEditTaskRescheduleHours,
+      editTaskDebug, setEditTaskDebug,
       schedulerStatus, runtimeStatus, overviewData, activeGroupPath, pageTitle,
       editModalVisible, editTaskData, editTaskPath, editModalSaveOnClose, overviewEditContext, paramEnumOptions, paramLabel,
       addDialogVisible, addForm,
@@ -1456,7 +1539,7 @@ const app = createApp({
       onEditModalClose, onEditModalClosed,
       isTableParam, getTableRows, getTableColumns, getTableColumnLabel, getTableEnumOptions, tableRowsCache,
       addListItem, removeListItem,
-      saveTasks, saveSettings, clearLogs, reloadTasks,
+      saveTasks, saveSettings, refreshAfterDeploy, clearLogs, reloadTasks,
       submitAddAccount,
       isElectron, minimizeToTray, navigateTo,
       pendingEditorImportUrl, goToEditorWithImage, onEditorImported,

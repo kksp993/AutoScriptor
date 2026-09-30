@@ -68,15 +68,15 @@ backend -> orchestrator -> tasks -> ZmxyOL -> AutoScriptor
 
 ## 任务注册边界
 
-- `TaskRegistry` 保存运行时任务数据：函数、排序、参数 spec、说明、beta/custom/debug 标记。参数 spec 由 `describe_signature(fn)` 生成，默认值/表单/执行解码共用（见 [任务脚本编写](tasks/script-authoring.md#参数)）。
-- `cfg["tasks"]` 只保存用户配置：开关、下次执行时间、参数、调度窗口和星期限制。
-- `task_ordering` 保存用户排序覆盖层：当前持久化可嵌套总顺序 `items`；`user_order` 是由 `items` 展平得到的兼容投影和旧数据导入 seed。它是全局配置，不写入账号 JSON。
-- 两者用 slash 路径关联，例如 `每日任务/村庄/宠物培养`。
-- `cfg["tasks"]` 是注册集的镜像：注册写叶子（改名任务用 `legacy_path_cn` 自己搬配置），加载末尾 prune 掉没有任务认领的叶子，再按注册顺序排序。没有独立的改名通道，也没有键翻译通道。
-- 保存配置前必须剥离 `fn`、`order`、`param_meta`、`param_keys`、`_due`、`progress_display` 等运行时字段；`param_meta` 由 spec 现算，从不落盘。
-- 调度器收集到期任务时必须通过 `task_registry.has_task(path)` 过滤未注册残留叶子。
-- `tasks/**/_order.txt` 是 legacy 源码导入/注册 seed；任务加载可读取它保持内置脚本稳定注册顺序，但用户显示和执行顺序由全局 `task_ordering` 投影决定，不在运行时反写源码树。
-- 有效任务顺序通过确定性总排序计算：先递归展开用户拖拽保存的 `items` 分组顺序，再回退到当前任务树顺序、运行时注册顺序和路径字典序。旧版 `hard_edges`、`layout`、`group_order` 会被规范化忽略，不再参与显示或执行顺序。
+- `TaskRegistry` 保存运行时任务数据：函数、参数 spec、说明、custom 标记，以及作者声明的 `reschedule`/`debug` 默认值。参数 spec 由 `describe_signature(fn)` 生成，默认值/表单/执行解码共用（见 [任务脚本编写](tasks/script-authoring.md#参数)）。
+- `cfg["tasks"]` 是**以任务 id 为键的平表**，只保存用户配置：开关、下次执行时间、参数、调度窗口和星期限制。
+- 一个任务有两个字符串，别混：`id` 是身份（`cfg["tasks"]` 和 `task_ordering` 的键），`path` 是显示位置（UI 树、执行顺序、参数标签），例如 `每日任务/村庄/宠物培养`。`id` 就是任务名（文件名去掉 `.py`），所以**换目录不动用户数据**；只有重命名文件时在 `@register_task(id="旧任务名")` 里把身份钉住。
+- `task_ordering` 保存用户排序覆盖层，**同样以 id 为键**：持久化可嵌套总顺序 `items`；`user_order` 是由 `items` 展平得到的兼容投影和旧数据导入 seed。它是全局配置，不写入账号 JSON。存储说 id、投影和 WebUI 说显示路径，两个键空间只在 `retarget_ordering_overlay()` 处换键。
+- `cfg["tasks"]` 是注册集的镜像：注册按 id 写条目，加载末尾 prune 掉没有任务认领的条目（`catalog.prune_stale_tasks()`）。UI 树由 `TaskTreeService.build_task_tree()` 按显示路径拼出、叶子带 `id`，保存时 `flatten_payload_tasks()` 拼回平表；**存储从不依赖树的形状**。
+- 保存配置前必须剥离 `fn`、`order`、`param_meta`、`param_keys`、`_due`、`progress_display`、`id` 等运行时字段；`param_meta` 由 spec 现算，`id` 只活在线上的 payload 里，由键本身表达。
+- 调度器收集到期任务时必须通过 `task_registry.has_task(path)` 过滤未注册残留条目。
+- 内置任务的默认顺序来自源码路径排序；用户显示和执行顺序由全局 `task_ordering` 投影决定，不在运行时反写源码。
+- 有效任务顺序通过确定性总排序计算：先把存储里的 id 键 overlay 换成显示路径，再递归展开用户拖拽保存的 `items` 分组顺序，最后回退到当前注册顺序和路径字典序。旧版 `hard_edges`、`layout`、`group_order` 会被规范化忽略，不再参与显示或执行顺序。
 
 ## 任务重载边界
 
@@ -84,11 +84,11 @@ backend -> orchestrator -> tasks -> ZmxyOL -> AutoScriptor
 
 | 保留 | 原因 |
 |------|------|
-| `tasks.task_registry` | 注册表单例。重新导入会造出第二个空注册表，而任务管理器、任务目录和 stale 清理仍读第一个。 |
-| `tasks.task_params` / `task_register` / `task_state` / `time` | 编写期基础设施，不携带每轮状态；`task_params` 按类身份识别 `TableParam` 默认值。 |
+| `tasks.task_register` | 注册表单例。重新导入会造出第二个空注册表，而任务管理器、任务目录和 stale 清理仍读第一个。 |
+| `tasks.task_params` / `task_state` / `time` | 编写期基础设施，不携带每轮状态；`task_params` 按类身份识别 `TableParam` 默认值。 |
 | `ZmxyOL.*` | 拥有跨边界类型（`TableParam`、职业表）；职业脚本由 `reload_character_modules()` 单独刷新。`ZmxyOL.drop_cached_exports()` 清掉包级惰性再导出。 |
 
-保留清单在 `orchestrator/catalog.py`（`TASK_MODULES_KEPT_ON_RELOAD`、`is_reloadable_task_module()`），`test/test_task_registry/test_task_reload_contract.py` 钉住它。stale 叶子清理在注册表为空时拒绝执行：那表示注册没落到读它的注册表上，而不是用户配置过期。详见 [运行生命周期](runtime/lifecycle.md#重载保留哪些模块)。
+保留清单在 `orchestrator/catalog.py`（`TASK_MODULES_KEPT_ON_RELOAD`、`is_reloadable_task_module()`），`test/test_task_register/test_task_reload_contract.py` 钉住它。stale 叶子清理在注册表为空时拒绝执行：那表示注册没落到读它的注册表上，而不是用户配置过期。详见 [运行生命周期](runtime/lifecycle.md#重载保留哪些模块)。
 
 ## 动态 API 边界
 

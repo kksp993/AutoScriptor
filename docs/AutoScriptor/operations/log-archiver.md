@@ -20,7 +20,7 @@
 | `error.log`　　　　　　　　　　　　　　　　　　　　 | 最近日志、异常信息、上下文、完整堆栈和局部变量　　　　　　　　　|
 | `current_screenshot.png`　　　　　　　　　　　　　　| 异常浮出时的当前画面　　　　　　　　　　　　　　　　　　　　　　|
 | `debug_screenshots/`　　　　　　　　　　　　　　　　| 本次运行的调试截图（标注帧 + 运行期抓帧）　　　　　　　　　　　　|
-| `task_video/segment_*.mp4`　　　　　　　　　　　　　| `debug_mode` 下失败保留的录屏分段；任务成功或取消时删除　　　　　|
+| `task_video/segment_*.mp4`　　　　　　　　　　　　　| 任务 debug 打开时失败保留的录屏分段；任务成功或取消时删除　　　　|
 
 归档里不再有异常后补拍的多张截图：等归档开始写时画面往往已经变了，有价值的是任务运行期间
 真正发生过的画面。`AutoScriptor.logging.tracer` 独占 `get_logs_root()/debug_screenshot/`，
@@ -32,9 +32,9 @@
 需要的恰恰是失败前的几分钟。实现取 165 秒一段、只保留最新 3 段（约最后 8 分钟），每段都让
 设备自己按 `--time-limit` 收尾，保证 MP4 尾部写完整；拉取后还会用 OpenCV 校验可解码性。
 
-录屏与运行期抓帧共用同一个判据：任务注册时的 `debug_mode=True`。它是这个开关的唯一来源，
+录屏与运行期抓帧共用同一个判据：任务生效的 `debug`，即用户在 cfg 里的覆盖优先、其次作者在 `@register_task` 声明的默认值。它是这个开关的唯一来源，
 `cfg["app"]` 里没有也不再有 debug 键；任务在哪个目录、是不是自定义任务都不影响判定。
-未声明 `debug_mode` 的任务不产生录屏和 `r` 帧，这就是"有时有视频、有时没有"的真实边界。
+debug 关闭的任务不产生录屏和 `r` 帧，这就是"有时有视频、有时没有"的真实边界。
 
 ## 调试截图命名
 
@@ -70,6 +70,7 @@ YYMMDD_HHMMSS_micro_r.png   # debug 运行中每 5 秒一张的例行抓帧
 - `bg_active_callbacks`
 - `bg_signals`
 - `bg_event_history`
+- `action_history`
 - `recognition_trace`
 - `python_version`
 - `error_timestamp`
@@ -77,7 +78,13 @@ YYMMDD_HHMMSS_micro_r.png   # debug 运行中每 5 秒一张的例行抓帧
 需要追加业务信息时，在调用 `archive_error()` 时传入 `extra_context`，或用
 `register_context_provider()` 注册一个零参数取数函数。
 
+`action_history` 是最近 120 条输入动作（点击、滑动、按键…），带毫秒时间戳，每轮任务开始时清空。它存在的理由是**日志里的重复动作有节流**：`MixControl._log_action` 对同类动作按 1 秒合并，只在放行时写一行 INFO，并把期间被合并的条数附在后面（`（另有 N 次同类操作未逐条记录）`）。所以「日志里没有这一行」只说明被合并，不说明没执行；要判断某一步到底点没点，看 `action_history`。
+
 `recognition_trace` 是当前任务线程最近识别结果的结构化摘要：运行时环形缓冲最多保留 32 条，归档默认写入最近 16 条。摘要包含操作、成功状态、目标/结果概况、耗时、帧来源和帧形状，不保留截图数组；读取追踪本身不会初始化设备、截图或重跑 OCR/识别。
+
+`error.log` 开头的日志段写出来源和条数（`Recent log lines (tail N of <path>)`），并只从日志文件尾部读固定窗口，不把整个文件读进内存。日志文件本身按 8 MB × 3 轮转，不会无限增长。
+
+位置诊断 `locate_region_result` 由 `ZmxyOL.nav` 注册，用 `cnt=1` 调用 `locate_region(check_only=True)`：跳过冷启动分支，归档时不会顺手启动游戏或 `sleep`。「当前位置未知」只在真的没有任何环境/位置匹配时出现。
 
 ## 手动归档
 
@@ -118,10 +125,11 @@ except Exception as e:
 ## 排查顺序
 
 1. 看 `error.log` 的异常类型、异常信息和最后日志。
-2. 识别类失败先看 `recognition_trace` 的最后几条操作、耗时、帧来源和结果摘要。
-3. 看 `bg_event_history` 是否有信号、回调或 `clear()`。
-4. 看 `*_s.png` 失败即时截图。
-5. 看 `*_r.png` 时间线，还原失败前几分钟的页面变化。
-6. 看 `task_video/segment_*.mp4` 里失败前最后几段录屏。
-7. 看 `current_screenshot.png` 确认异常浮出时的画面。
-8. 看堆栈局部变量，确认参数、角色、任务状态是否异常。
+2. 用 `action_history` 确认「这一步到底执行了没有、什么时候执行的」，再判断后面为什么没反应。
+3. 识别类失败看 `recognition_trace` 的最后几条操作、耗时、帧来源和结果摘要。
+4. 看 `bg_event_history` 是否有信号、回调或 `clear()`。
+5. 看 `*_s.png` 失败即时截图。
+6. 看 `*_r.png` 时间线，还原失败前几分钟的页面变化。
+7. 看 `task_video/segment_*.mp4` 里失败前最后几段录屏。
+8. 看 `current_screenshot.png` 确认异常浮出时的画面。
+9. 看堆栈局部变量，确认参数、角色、任务状态是否异常。

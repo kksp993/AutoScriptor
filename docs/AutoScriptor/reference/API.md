@@ -38,7 +38,7 @@ Editor 遥控和自定义脚本可以操作其他应用的原生截图尺寸，�
 | 目录/文件　　　　　　　　　　　　 | 说明　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
 | -----------------------------------| ------------------------------------------------------------|
 | `data/config.json`　　　　　　　　| 源码运行的全局配置　　　　　　　　　　　　　　　　　　　　 |
-| `data/accounts/*.json`　　　　　　| 账号、角色、任务树、任务状态、加密凭据；真实账号文件不提交 |
+| `data/accounts/*.json`　　　　　　| 账号、角色、任务配置、任务状态、加密凭据；真实账号文件不提交 |
 | `data/custom_task/`　　　　　　　 | 用户自定义任务脚本　　　　　　　　　　　　　　　　　　　　 |
 | `data/character/`　　　　　| 当前有效的运行态职业脚本目录　　　　　　　　　　　　　　　 |
 | `logs/zmxy_redeem_codes.json`　　 | 4399 兑换码采集器生成的运行态缓存；不提交到仓库　　　　　　|
@@ -203,7 +203,7 @@ executed = replay(EVENTS, speed=1.5, recording_size=(1080, 1920))
 - 中止（取消/异常）时只释放**本次回放**按住的手指，不调用 `release_all_fingers()`，
   以免误伤任务在回放之外异步按住的手指；清理失败不会掩盖原始异常。
 - 录制内嵌的 `command`/`vcontrol` 事件默认跳过，需要处理时传 `on_command`。
-- `.mmor` 解析不属于核心：用 `mumuinner/scripts/mmor_to_fast_replay.py` 把录制转成
+- `.mmor` 解析不属于核心：用 外部 `mumuinner` 项目的 `mmor_to_fast_replay.py` 把录制转成
   事件流（含槽位重映射），核心只认识 `replay(EVENTS)`。
 
 ## OCR、数字与提取颜色
@@ -256,21 +256,21 @@ progress = get_task_status("progress")
 from tasks.task_register import register_task
 from AutoScriptor import *
 
-@register_task(default_offset_hours=10, description="示例任务")
+@register_task(reschedule=10, description="示例任务")
 def task(count: int = 1):
     for _ in range(count):
         click(T("开始"), timeout=10)
 ```
 
-自定义任务必须提供中文路径：
+自定义任务和内置任务写法一致，路径由文件落在 `custom_task/` 下的位置决定：
 
 ```python
-@register_task(path_cn="自定义任务/示例/hello")
+@register_task(reschedule="daily", description="示例任务")
 def task():
     ...
 ```
 
-运行时元数据保存在 `TaskRegistry`，用户配置保存在 `cfg["tasks"]`。脚本不要依赖 `fn/order/param_meta/_due` 等字段被持久化。
+运行时元数据保存在 `TaskRegistry`，用户配置保存在 `cfg["tasks"]`（以任务 `id` 为键的平表；`id` 就是任务名，换目录不变，重命名文件时用 `@register_task(id="旧任务名")` 钉住）。脚本不要依赖 `fn/param_meta/_due/id` 等投影字段被持久化；`debug` 和 `reschedule` 是用户数据，会正常存下来。
 
 ## WebUI 入口
 

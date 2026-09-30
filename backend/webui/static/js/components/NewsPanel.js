@@ -45,8 +45,7 @@ const NewsPanel = {
       this.error = '';
       try {
         const qs = force ? '?force=1' : '';
-        const res = await fetch('/api/news/posts' + qs, { credentials: 'same-origin' });
-        const data = await res.json();
+        const data = await window.WebUIApi.get('/news/posts' + qs);
         this.bbsSessionEligible = !!data.bbs_session_eligible;
         this.posts = data.posts || [];
         if (data.error) this.error = data.error;
@@ -78,10 +77,9 @@ const NewsPanel = {
     async refreshGiftCodes() {
       this.giftLoading = true;
       try {
-        const res = await fetch('/api/news/gift_codes?refresh=1', { credentials: 'same-origin' });
-        const raw = await res.text();
-        const data = raw ? JSON.parse(raw) : {};
-        if (!res.ok) throw new Error(data.detail || data.message || raw || res.statusText);
+        const res = await window.WebUIApi.request('GET', '/news/gift_codes?refresh=1');
+        const data = res.data;
+        if (!res.ok) throw new Error(window.WebUIApi.errorMessage(data, '刷新失败'));
         if (data.error) throw new Error(data.error);
         this.giftIframeKey += 1;
       } catch (e) {

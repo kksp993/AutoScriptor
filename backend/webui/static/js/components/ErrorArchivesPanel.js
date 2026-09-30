@@ -59,9 +59,9 @@ const ErrorArchivesPanel = {
     async refreshList() {
       this.loading = true;
       try {
-        const r = await fetch('/api/error-archives');
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error || '加载失败');
+        const r = await window.WebUIApi.request('GET', '/error-archives');
+        const d = r.data;
+        if (!r.ok) throw new Error(window.WebUIApi.errorMessage(d, '加载失败'));
         this.items = d.items || [];
         this.groups = d.groups || {};
         const validFolders = new Set(this.items.map((x) => x.folder));
@@ -92,9 +92,9 @@ const ErrorArchivesPanel = {
       this.detailLoading = true;
       try {
         const q = new URLSearchParams({ folder });
-        const r = await fetch(`/api/error-archives/detail?${q}`);
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error || '读取失败');
+        const r = await window.WebUIApi.request('GET', `/error-archives/detail?${q}`);
+        const d = r.data;
+        if (!r.ok) throw new Error(window.WebUIApi.errorMessage(d, '读取失败'));
         this.detail = d;
       } catch (e) {
         ElementPlus.ElMessage.error(String(e.message || e));
@@ -132,13 +132,9 @@ const ErrorArchivesPanel = {
         return;
       }
       try {
-        const r = await fetch('/api/error-archives', {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ folders }),
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error || '删除失败');
+        const r = await window.WebUIApi.request('DELETE', '/error-archives', { folders });
+        const d = r.data;
+        if (!r.ok) throw new Error(window.WebUIApi.errorMessage(d, '删除失败'));
         if (d.errors && d.errors.length) {
           ElementPlus.ElMessage.warning(`部分未删除: ${d.errors.join(', ')}`);
         } else {
@@ -169,9 +165,9 @@ const ErrorArchivesPanel = {
       try {
         const fd = new FormData();
         fd.append('file', file);
-        const r = await fetch('/api/error-archives/import', { method: 'POST', body: fd });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error || '导入失败');
+        const r = await window.WebUIApi.request('POST', '/error-archives/import', fd);
+        const d = r.data;
+        if (!r.ok) throw new Error(window.WebUIApi.errorMessage(d, '导入失败'));
         ElementPlus.ElMessage.success('导入成功');
         await this.refreshList();
         if (d.folder) this.selectArchive(d.folder);

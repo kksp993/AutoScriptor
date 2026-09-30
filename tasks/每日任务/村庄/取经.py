@@ -3,10 +3,11 @@ from AutoScriptor import *
 from AutoScriptor.logging.logger import logger
 @register_task(
     description="完成每日取经流程。",
-    task_doc="【弃用】该任务保留旧每日取经流程。",
     deprecated=True,
+    reschedule="daily",
 )
 def daily_qujing_task():
+    """【弃用】该任务保留旧每日取经流程。"""
     ensure_in("村庄")
     logger.info("====取经====")
     click(B(10,10,10,10))

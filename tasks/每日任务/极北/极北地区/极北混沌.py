@@ -7,6 +7,7 @@ from AutoScriptor.logging.logger import logger
 
 @register_task(
     description="按灵气和难度选择极北混沌并挑战。",
+    reschedule="daily",
 )
 def task(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,

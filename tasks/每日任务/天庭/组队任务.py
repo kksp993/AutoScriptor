@@ -7,6 +7,7 @@ from time import time
 
 @register_task(
     description="完成东天王殿组队流程。",
+    reschedule="daily",
 )
 def zudui_task(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
     ensure_in("天庭",-1)

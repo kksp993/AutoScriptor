@@ -286,8 +286,8 @@ OCR 配置为 GPU 但提示 Paddle 不含 CUDA：
 .\.venv\Scripts\python.exe -X utf8 -c "import paddle; print(paddle.__version__); print(paddle.device.is_compiled_with_cuda()); print(paddle.device.cuda.device_count())"
 ```
 
-也可读取 `GET /api/ocr-status`，核对 `configured_use_gpu`、`runtime_use_gpu`、
-`engine_device` 和 `restart_required`。GPU Paddle 已安装但 `gpu_count=0` 时先检查
+也可读取 `GET /api/device/diagnostics` 的 OCR 段，核对 `configured_use_gpu`、
+`runtime_use_gpu`、`engine_device` 和 `restart_required`。GPU Paddle 已安装但 `gpu_count=0` 时先检查
 NVIDIA 驱动和设备可见性。`AUTOSCRIPTOR_ELECTRON_RENDER_MODE` 只控制 Electron/Chromium
 渲染，与 OCR 使用 CPU 还是 GPU 无关。
 

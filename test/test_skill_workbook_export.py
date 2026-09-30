@@ -7,7 +7,32 @@ from openpyxl import load_workbook
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-EXPORT_MODULE_PATH = PROJECT_ROOT / "tasks" / "一般任务" / "_仙术表.py"
+EXPORT_MODULE_PATH = PROJECT_ROOT / "tasks" / "其他任务" / "特殊功能" / "_仙术表.py"
+
+# 生成器唯一的外部输入就是 skills.txt，所以夹具自带一份，测试不依赖仓库根目录的
+# 用户数据。每行「基础名·等级」；基础名都用骨架里已有的名字，不会落入「其他仙术」区。
+FIXTURE_SKILLS_TEXT = "\n".join(
+    (
+        # 龙年仙术/金/主动：下、中、上 三档连号
+        "乾坤一掷·下",
+        "乾坤一掷·中",
+        "乾坤一掷·上",
+        # 龙年仙术/水/主动：缺「下」，用来验证只有连号前缀才高亮
+        "水华漫天·中",
+        "水华漫天·上",
+        # 小小英雄/火/主动：只断言技能名来自骨架，等级随意给一档
+        "灭烬残炎·下",
+        # 马年仙术/木/主动：四档齐全
+        "竹影灵侍·下",
+        "竹影灵侍·中",
+        "竹影灵侍·上",
+        "竹影灵侍·绝",
+        # 须弥仙术/雷/被动：只有 下/中/上，没有「绝」
+        "雷暴·下",
+        "雷暴·中",
+        "雷暴·上",
+    )
+)
 
 
 def load_export_module():
@@ -27,10 +52,12 @@ class SkillWorkbookExportTest(unittest.TestCase):
         export_module = load_export_module()
 
         with tempfile.TemporaryDirectory() as temporary_directory:
-            output_path = Path(temporary_directory) / "仙术持有情况.xlsx"
+            temporary_root = Path(temporary_directory)
+            skills_path = temporary_root / "skills.txt"
+            skills_path.write_text(FIXTURE_SKILLS_TEXT, encoding="utf-8")
+            output_path = temporary_root / "仙术持有情况.xlsx"
             generated_path = export_module.skills_to_excel(
-                skills_path=PROJECT_ROOT / "skills.txt",
-                template_path=PROJECT_ROOT / "仙术已有记录 7.23.xlsx",
+                skills_path=skills_path,
                 output_path=output_path,
             )
             worksheet = load_workbook(generated_path)["Sheet1"]
@@ -55,7 +82,7 @@ class SkillWorkbookExportTest(unittest.TestCase):
             self.assertTrue(
                 (worksheet[coordinate].fill.fgColor.rgb or "").endswith("DDEBF7")
             )
-        # skills.txt 中「雷暴」只有 下/中/上，没有「绝」档。
+        # 夹具里「雷暴」只有 下/中/上，没有「绝」档。
         self.assertIsNone(worksheet["N43"].value)
 
         self.assertIsNone(worksheet["H2"].value)

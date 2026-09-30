@@ -11,6 +11,7 @@
 | [reference/API.md](reference/API.md) | 运行入口和核心 API 约定 |
 | [runtime/lifecycle.md](runtime/lifecycle.md) | 启动、配置、账号、设备和任务生命周期 |
 | [webui/api-contract.md](webui/api-contract.md) | WebUI API、日志通道、更新通道 |
+| [debug-lessons.md](debug-lessons.md) | 反复踩的失败根因与排查手法（上限 1000 字，持续更新） |
 
 ## 功能域
 
@@ -21,6 +22,7 @@
 | 主机性能策略 | [schedule/README.md](schedule/README.md)、[schedule/perf.md](schedule/perf.md) |
 | 任务编写 | [tasks/script-authoring.md](tasks/script-authoring.md) |
 | 任务安全 | [tasks/script-authoring-safety.md](tasks/script-authoring-safety.md) |
+| 任务列表交互与排序持久化 | [tasks/task-ordering-graph-plan.md](tasks/task-ordering-graph-plan.md) |
 | OCR 模型实验 | [reference/ocr-model-experiment.md](reference/ocr-model-experiment.md) |
 | 识别质量维护 | [reference/API.md](reference/API.md)、[operations/log-archiver.md](operations/log-archiver.md)、`scripts/audit_ui_assets.py`、`scripts/run_recognition_baselines.py` |
 | 战斗流程 | [tasks/battle-flows.md](tasks/battle-flows.md) |

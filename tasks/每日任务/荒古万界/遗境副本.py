@@ -20,7 +20,8 @@ _CLICK_TARGETS = {
     "虎神之崖": T("虎神之崖", box=Box(106, 389, 94, 37).margin()),
     "苍龙幽谷": T("苍龙幽谷", box=Box(183, 598, 116, 73).margin()),
     "溟海之渊": T("溟海之渊", box=Box(557, 332, 218, 95).margin()),
-    "雀炎之地": T("雀炎之地", box=Box(713,601,134,81).margin())
+    "雀炎之地": T("雀炎之地", box=Box(713,601,134,81).margin()),
+    "裂岳冥窟": T("裂岳冥窟", box=Box(974,396,118,51).margin())
 }
 
 _DEFAULT_BATTLE_CONFIG = TableParam(
@@ -46,6 +47,12 @@ _DEFAULT_BATTLE_CONFIG = TableParam(
         "雀炎之地": {
             "difficulty": YijingNandu.灾厄,
             "cancel_on_failed": True,
+            "fight_pioneer": False,
+            "battle_flow": DEFAULT_BATTLE_FLOW,
+        },
+        "裂岳冥窟": {
+            "difficulty": YijingNandu.灾厄,
+            "cancel_on_failed": True,
             "fight_pioneer": True,
             "battle_flow": DEFAULT_BATTLE_FLOW,
         },
@@ -63,6 +70,7 @@ _DIFF_ORDER = {"初难": 1, "灾厄": 2, "浩劫": 3}
 
 @register_task(
     description="完成遗境副本挑战，根据配置自行选择挑战难度和关卡。",
+    reschedule="daily",
 )
 def task(
     battle_config: TableParam = _DEFAULT_BATTLE_CONFIG,

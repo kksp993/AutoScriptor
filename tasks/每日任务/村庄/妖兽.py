@@ -4,13 +4,12 @@ from AutoScriptor.logging.logger import logger
 
 @register_task(
     description="在开放时段挑战灵域妖兽。",
-    task_doc="【注意】需要解锁法相，只在周五至周日的开放时段挑战灵域妖兽。",
-    sched_window_hours=(10, 22),
-    allowed_weekdays=[5, 6, 7],
+    reschedule={"mode": "daily", "window": (10, 22), "weekdays": [5, 6, 7]},
 )
 def task(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):
+    """【注意】需要解锁法相，只在周五至周日的开放时段挑战灵域妖兽。"""
     global cfg
     if cfg["weekday"] in [1,2,3,4]:
         logger.info(f"今日{cfg['weekday']}为周一至周四，不进行妖兽任务")

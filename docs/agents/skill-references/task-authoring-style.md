@@ -14,11 +14,11 @@ Read this when changing task scripts, task APIs, operator dispatch patterns, or 
 - Prefer `TaskRequireReTry` for transient recoverable failures.
 - Wrap multiple recognition targets in tuple/list for `locate`, `ui_T`, `wait_for_appear`, and `click`; a second positional argument is usually a timeout or click option, not another target.
 - Incomplete progress after retry exhaustion is expected to become `human_takeover_error`; do not treat "function finished" as success if progress remains `5/6`.
-- When adding custom tasks under `data/custom_task/`, register them with explicit `path_cn`; prefer `@register_task(path_cn="自定义任务/...")`. If the root is omitted, backend registration must prepend `自定义任务` so the WebUI custom task tab can project it.
+- A custom task's display path is its location under `data/custom_task/`, prefixed with the `自定义任务` root, so `data/custom_task/背包清空/进阶仙宝.py` registers as `自定义任务/背包清空/进阶仙宝`. There is no path parameter.
 - Built-in tasks maintained by source Git should live in `tasks/`; user-editable local experiments belong in `data/custom_task/`.
 - Do not leave incomplete debug placeholders registered as built-in tasks. Scripts that hard-stop with `raise Stop here`, print internal tables, or keep the real flow unreachable should be deleted or kept unregistered.
-- Do not add task-file direct-run wrappers with broad `try/except`, `traceback.print_exc()`, `bg.stop()`, or `exit(0)`; use WebUI direct run and `debug_mode` metadata for on-device debugging.
-- Use `task_doc`, `description`, `beta`, and `debug_mode` metadata instead of persisting UI-only fields into config.
+- Do not add task-file direct-run wrappers with broad `try/except`, `traceback.print_exc()`, `bg.stop()`, or `exit(0)`; use WebUI direct run and the task's `debug` setting for on-device debugging.
+- The authoring surface is five fields: `id`, `reschedule`, `debug`, `description`, `deprecated`. Long documentation belongs in the function docstring, not in a parameter. Do not add other metadata parameters; the remaining key=value arguments are for task-private data only.
 
 Useful docs:
 

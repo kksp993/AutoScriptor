@@ -25,7 +25,7 @@ class ShituolingDiff(IntEnum):
 
 @register_task(
     description="在周末执行狮驼岭任务。",
-    allowed_weekdays=[6, 7],
+    reschedule={"mode": "weekly", "weekdays": [6, 7]},
 )
 def task(
     diff: ShituolingDiff = ShituolingDiff.D15,

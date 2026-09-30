@@ -4,10 +4,11 @@ from AutoScriptor.logging.logger import logger
 
 @register_task(
     description="执行宠物培养相关日常操作。",
-    task_doc="【弃用】该任务保留旧宠物培养流程。",
     deprecated=True,
+    reschedule="daily",
 )
 def upgrade_pet():
+    """【弃用】该任务保留旧宠物培养流程。"""
     ensure_in(["村庄","仙盟","极北村庄"])
     logger.info("====喂养宠物====")
     click(I("导航-菜单"))

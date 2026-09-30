@@ -25,7 +25,8 @@ def _register_error_context_providers() -> None:
     def locate_region_result():
         from ZmxyOL.nav.api import locate_region
 
-        result = locate_region(cnt=0, check_only=True)
+        # cnt=1 跳过冷启动分支：归档诊断不该顺手启动游戏并 sleep 2 秒。
+        result = locate_region(cnt=1, check_only=True)
         if isinstance(result, tuple) and len(result) == 2:
             detected_env, detected_loc = result
             return {"env": detected_env, "loc": detected_loc}

@@ -10,7 +10,7 @@ Read this when changing WebUI, the source Electron shell, source update UI, or 4
 - API routes use `/api/`.
 - Frontend pulls config through `GET /api/refresh`; do not reintroduce Jinja config injection.
 - Public config must strip sensitive fields such as encryption, account, password, and runtime-only task fields.
-- Task save must strip runtime fields through `TaskTreeService.strip_runtime_fields()`; WebUI projections may inject fields such as `param_meta`, `param_keys`, `beta`, `custom`, `debug_mode`, `task_description`, `task_doc_flow`, `_due`, and `progress_display`.
+- Task save must go through `TaskTreeService.flatten_payload_tasks()`, which rebuilds the flat, id-keyed `cfg["tasks"]` table from the WebUI tree leaves and strips runtime fields. Reads go through `build_task_tree()`, which lays the flat table out by display path and writes `id` back onto each leaf. WebUI projections may inject fields such as `param_meta`, `param_keys`, `custom`, `debug_effective`, `reschedule_effective`, `task_description`, `task_doc_flow`, `_due`, and `progress_display`; that list lives in `ZmxyOL.accounts.account_store.INJECTED_TASK_FIELDS`, which both the save path and the projection import instead of keeping two copies.
 - Task-list run actions must send `execution_source=task_list`; this preserves the current in-game login and skips character validation only for those direct runs. Do not spread this policy to scheduler, cross-character, default direct-run, or gift-code execution, and do not bypass credential unlock or runtime busy guards.
 - Overview, scheduler, and task-list stop buttons must share `stop-dispatch` and `/api/stop`. Stopping preserves cooperative cancel until workers exit, but immediately restores scheduler `pending`, consecutive-error budget, and retry-exhaustion budget; post-cancel failures must not consume the restored budget.
 - Component state is managed in `app.js`; components receive props and emit events upward.
@@ -86,8 +86,8 @@ Get-Process -Name "electron" -ErrorAction SilentlyContinue | Stop-Process -Force
 - News proxy should retry once with a fresh 4399 session when the upstream page redirects to the 4399 login wall; stale cached sessions must not become permanent placeholders.
 - The gift-code collector should inspect official announcements only: last 10 days, at most 15 posts, with `checked_post_ids` and active rows in runtime `logs/zmxy_redeem_codes.json` for incremental refresh.
 - The gift-code dialog iframe should load local `/api/news/gift_codes/page` and refresh through `/api/news/gift_codes?refresh=1`; do not use the stale external 4399 gift-code page.
-- Gift-code redemption uses `/api/news/redeem_targets` and `POST /api/news/gift_codes/redeem`; keep credential unlock/security-key checks, support `redeem_code` and batched `redeem_codes`, switch to the selected `server:character`, force login even for debug-mode redeem tasks, and pass each code as a one-time task param override to the built-in normal task `一般任务/活动/兑换豪礼礼品兑换`.
-- Keep the redeem task under `tasks/一般任务/活动/兑换豪礼礼品兑换.py`, not only under `data/custom_task`.
+- Gift-code redemption uses `/api/news/redeem_targets` and `POST /api/news/gift_codes/redeem`; keep credential unlock/security-key checks, support `redeem_code` and batched `redeem_codes`, switch to the selected `server:character`, force login even for debug-mode redeem tasks, and pass each code as a one-time task param override to the built-in task `其他任务/活动脚本/兑换豪礼礼品兑换`.
+- Keep the redeem task under `tasks/其他任务/活动脚本/兑换豪礼礼品兑换.py`, not only under `data/custom_task`.
 - Public config must not expose plaintext credentials.
 - Do not reuse the news account for game automation unless the user explicitly asks.
 

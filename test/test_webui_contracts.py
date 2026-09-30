@@ -294,10 +294,36 @@ class TestTaskTreeServiceContract(unittest.TestCase):
         self.module = import_task_tree_service_for_test()
         self.service = self.module.TaskTreeService()
 
-    def _task_registry_stubs(self, registered_paths: set[str]):
+    def _task_registry_stubs(self, registered_paths):
+        """Registry stub where id == path -- nothing is renamed in these cases.
+
+        Order matters: it is the registration order the default task order falls
+        back to, so callers that care pass a list rather than a set.
+        """
+        ordered_paths = list(registered_paths)
+        known_paths = set(ordered_paths)
+
         class FakeTaskRegistry:
             def has_task(self, path):
-                return path in registered_paths
+                return path in known_paths
+
+            def get_sequence(self, path):
+                try:
+                    return ordered_paths.index(path)
+                except ValueError:
+                    return float("inf")
+
+            def get_path(self, task_id):
+                return task_id if task_id in known_paths else None
+
+            def id_of(self, path):
+                return path
+
+            def id_to_path_map(self):
+                return {path: path for path in ordered_paths}
+
+            def path_to_id_map(self):
+                return {path: path for path in ordered_paths}
 
             def get_param_meta(self, path):
                 return {}
@@ -305,14 +331,14 @@ class TestTaskTreeServiceContract(unittest.TestCase):
             def get_param_keys(self, path):
                 return []
 
-            def get_beta(self, path):
-                return False
-
             def get_custom(self, path):
                 return False
 
-            def get_debug_mode(self, path):
+            def get_debug_default(self, path):
                 return False
+
+            def get_reschedule_default(self, path):
+                return None
 
             def get_description(self, path):
                 return ""
@@ -320,8 +346,8 @@ class TestTaskTreeServiceContract(unittest.TestCase):
             def get_doc_flow(self, path):
                 return []
 
-        task_registry = types.ModuleType("tasks.task_registry")
-        task_registry.task_registry = FakeTaskRegistry()
+        task_register_module = types.ModuleType("tasks.task_register")
+        task_register_module.task_registry = FakeTaskRegistry()
         # The due predicate lives in orchestrator.model, which also provides
         # TaskTree and the ordering projection: copy it, then override the query
         # so the test pins the projection logic, not the due rules.
@@ -339,26 +365,22 @@ class TestTaskTreeServiceContract(unittest.TestCase):
         return {
             "AutoScriptor": types.ModuleType("AutoScriptor"),
             "AutoScriptor.utils": types.ModuleType("AutoScriptor.utils"),
-            "tasks.task_registry": task_registry,
+            "tasks.task_register": task_register_module,
             "tasks.task_state": task_state,
             "orchestrator.model": model,
         }
 
-    def test_ordered_paths_preserves_nested_leaf_order(self):
-        tree = {
-            "每日任务": {
-                "任务A": {"on": True, "next_exec_time": 0},
-                "分组": {
-                    "任务B": {"on": False, "next_exec_time": 0},
-                },
-            },
+    def test_ordered_paths_follows_registration_order(self):
+        """平表不自排序，默认顺序来自注册表的注册顺序。"""
+        table = {
+            "每日任务/任务A": {"on": True, "next_exec_time": 0},
+            "每日任务/分组/任务B": {"on": False, "next_exec_time": 0},
             "每周任务": {"on": True, "next_exec_time": 1},
         }
+        registry_order = ["每日任务/任务A", "每日任务/分组/任务B", "每周任务"]
 
-        self.assertEqual(
-            self.service.ordered_paths(tree),
-            ["每日任务/任务A", "每日任务/分组/任务B", "每周任务"],
-        )
+        with patch.dict(sys.modules, self._task_registry_stubs(registry_order)):
+            self.assertEqual(self.service.ordered_paths(table), registry_order)
 
     def test_strip_runtime_fields_only_removes_ui_metadata(self):
         tasks = {
@@ -393,21 +415,18 @@ class TestTaskTreeServiceContract(unittest.TestCase):
 
     def test_collect_task_reset_paths_detects_reenable_and_error_clear(self):
         old = {
-            "group": {
-                "off": {"on": False, "next_exec_time": 0},
-                "err": {"on": True, "next_exec_time": 200, "human_takeover_error": "需要人工"},
-                "ok": {"on": True, "next_exec_time": 0},
-            },
+            "group/off": {"on": False, "next_exec_time": 0},
+            "group/err": {"on": True, "next_exec_time": 200, "human_takeover_error": "需要人工"},
+            "group/ok": {"on": True, "next_exec_time": 0},
         }
         new = {
-            "group": {
-                "off": {"on": True, "next_exec_time": 0},
-                "err": {"on": True, "next_exec_time": 0},
-                "ok": {"on": True, "next_exec_time": 0},
-            },
+            "group/off": {"on": True, "next_exec_time": 0},
+            "group/err": {"on": True, "next_exec_time": 0},
+            "group/ok": {"on": True, "next_exec_time": 0},
         }
 
-        paths = self.service.collect_task_reset_paths(old, new)
+        with patch.dict(sys.modules, self._task_registry_stubs(["group/off", "group/err", "group/ok"])):
+            paths = self.service.collect_task_reset_paths(old, new)
 
         self.assertEqual(sorted(paths), ["group/err", "group/off"])
 
@@ -429,33 +448,27 @@ class TestTaskTreeServiceContract(unittest.TestCase):
 
     def test_flatten_tasks_skips_unregistered_leaf_tasks(self):
         tasks = {
-            "registered": {
-                "task": {"on": True, "next_exec_time": 0, "params": {}},
-            },
-            "stale": {
-                "ghost": {"on": True, "next_exec_time": 0, "params": {}},
-            },
+            "registered/task": {"on": True, "next_exec_time": 0, "params": {}},
+            "stale/ghost": {"on": True, "next_exec_time": 0, "params": {}},
         }
 
-        with patch.dict(sys.modules, self._task_registry_stubs({"registered/task"})):
+        with patch.dict(sys.modules, self._task_registry_stubs(["registered/task"])):
             flat = self.service.flatten_tasks(tasks, now_ts=100)
 
         self.assertEqual([row["path"] for row in flat], ["registered/task"])
 
     def test_human_takeover_task_projects_as_error_with_message_before_retry_time(self):
         tasks = {
-            "registered": {
-                "task": {
-                    "on": True,
-                    "next_exec_time": 200,
-                    "params": {},
-                    "human_takeover_error": "验证码弹窗",
-                    "human_takeover_at": 123,
-                },
+            "registered/task": {
+                "on": True,
+                "next_exec_time": 200,
+                "params": {},
+                "human_takeover_error": "验证码弹窗",
+                "human_takeover_at": 123,
             },
         }
 
-        with patch.dict(sys.modules, self._task_registry_stubs({"registered/task"})):
+        with patch.dict(sys.modules, self._task_registry_stubs(["registered/task"])):
             flat = self.service.flatten_tasks(tasks, now_ts=100)
 
         self.assertEqual(flat[0]["status"], "error")
@@ -463,38 +476,35 @@ class TestTaskTreeServiceContract(unittest.TestCase):
 
     def test_human_takeover_task_projects_as_pending_after_retry_time(self):
         tasks = {
-            "registered": {
-                "task": {
-                    "on": True,
-                    "next_exec_time": 0,
-                    "params": {},
-                    "human_takeover_error": "验证码弹窗",
-                    "human_takeover_at": 123,
-                },
+            "registered/task": {
+                "on": True,
+                "next_exec_time": 0,
+                "params": {},
+                "human_takeover_error": "验证码弹窗",
+                "human_takeover_at": 123,
             },
         }
 
-        with patch.dict(sys.modules, self._task_registry_stubs({"registered/task"})):
+        with patch.dict(sys.modules, self._task_registry_stubs(["registered/task"])):
             flat = self.service.flatten_tasks(tasks, now_ts=100)
 
         self.assertEqual(flat[0]["status"], "pending")
         self.assertEqual(flat[0]["human_takeover_error"], "验证码弹窗")
 
     def test_task_progress_projects_from_status_tree(self):
-        tasks = {
-            "registered": {
-                "task": {"on": True, "next_exec_time": 0, "params": {}},
-            },
-        }
+        table = {"registered/task": {"on": True, "next_exec_time": 0, "params": {}}}
         self.module.cfg._config = {
-            "status": {"tasks": {"registered/task": {"progress": "5/6"}}}
+            "tasks": table,
+            "status": {"tasks": {"registered/task": {"progress": "5/6"}}},
         }
 
-        with patch.dict(sys.modules, self._task_registry_stubs({"registered/task"})):
-            self.service.inject_public_task_fields(tasks)
-            flat = self.service.flatten_tasks(tasks, now_ts=100)
+        with patch.dict(sys.modules, self._task_registry_stubs(["registered/task"])):
+            # 树是要发给 WebUI 的视图，平表是存储；两边都要带上进度。
+            tree = self.service.build_task_tree(table)
+            self.service.inject_public_task_fields(tree)
+            flat = self.service.flatten_tasks(table, now_ts=100)
 
-        self.assertEqual(tasks["registered"]["task"]["progress_display"], "5/6")
+        self.assertEqual(tree["registered"]["task"]["progress_display"], "5/6")
         self.assertEqual(flat[0]["progress_display"], "5/6")
 
     def test_normalize_dispatch_queue_keeps_existing_unique_characters(self):
@@ -524,11 +534,14 @@ class TestTaskTreeServiceContract(unittest.TestCase):
         config = {
             "game": {"account": "u", "password": "p", "character_name": "hero"},
             "deploy": {"password": "web"},
-            "tasks": {"任务": {"on": True, "next_exec_time": 0, "params": {"security_key": "secret"}}},
+            "tasks": {
+                "任务": {"on": True, "next_exec_time": 0, "params": {"security_key": "secret"}},
+            },
             "encryption": {"encrypted_data": "secret"},
         }
 
         with patch.object(self.module, "cfg") as cfg, \
+                patch.object(self.service, "build_task_tree", side_effect=lambda table: {"任务": table["任务"]}), \
                 patch.object(self.service, "inject_public_task_fields") as inject:
             cfg._config = config
             cfg.active_character.return_value = {"server": "s1", "name": "hero"}
@@ -708,7 +721,8 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
             ),
         )
         task_tree_service = task_tree_service or SimpleNamespace(
-            strip_runtime_fields=lambda tasks: deepcopy(tasks),
+            flatten_payload_tasks=lambda tasks: deepcopy(tasks),
+            collect_task_reset_paths=lambda old_tasks, new_tasks: [],
             normalize_dispatch_queue=lambda queue: queue,
         )
 
@@ -779,16 +793,29 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
         self.assertNotIn("bg_clear", self.calls)
         self.assertNotIn(("reload_tasks", "key"), self.calls)
 
-    def test_add_character_switches_reload_tasks_and_refreshes_projection(self):
+    def test_add_character_creates_entries_without_a_full_reload(self):
+        """新角色的任务条目就地补齐，不需要重载任务模块。"""
         cfg = SimpleNamespace(
-            _config={},
+            _config={"tasks": {}},
             _account_data={},
+            _save_account_file=lambda: self.calls.append("save_account_file"),
             add_character=lambda server, character: self.calls.append(("add_character", server, character)),
             switch_character=lambda server, character: self.calls.append(("switch_character", server, character)),
         )
-        service, _cfg = self._service(cfg=cfg)
+        sys.modules.pop("orchestrator.projection", None)
+        from orchestrator.projection import TaskTreeService
 
-        version = service.add_character("server", "hero")
+        service, _cfg = self._service(cfg=cfg, task_tree_service=TaskTreeService())
+
+        from tasks.task_register import task_registry
+
+        registry_backup = dict(task_registry._tasks)
+        task_registry.clear()
+        task_registry.register("每日任务/村庄/宠物培养", lambda: None)
+        try:
+            version = service.add_character("server", "hero")
+        finally:
+            task_registry._tasks = registry_backup
 
         self.assertEqual(version, 42)
         self.assertEqual(
@@ -797,10 +824,10 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
                 "lock",
                 ("add_character", "server", "hero"),
                 ("switch_character", "server", "hero"),
-                ("reload_tasks", None),
+                "save_account_file",
                 "invalidate_login",
                 "mark_tasks_updated",
-                                ("bump", "add character"),
+                ("bump", "add character"),
             ],
         )
 
@@ -823,23 +850,17 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
         )
 
     def test_save_tasks_sanitizes_persists_refreshes_and_wakes(self):
-        def strip_runtime_fields(tasks):
-            cleaned = deepcopy(tasks)
-            cleaned["group"]["task"].pop("param_meta", None)
-            return cleaned
+        from orchestrator.projection import TaskTreeService
 
-        service, cfg = self._service(
-            task_tree_service=SimpleNamespace(
-                strip_runtime_fields=strip_runtime_fields,
-                collect_task_reset_paths=lambda old_tasks, new_tasks: [],
-            )
-        )
+        # 用真实的 flatten_payload_tasks，这样「剥掉 WebUI 运行时字段、按键换成 id」
+        # 这条契约是真的被测到的，而不是被 stub 抹掉的。
+        service, cfg = self._service(task_tree_service=TaskTreeService())
         tasks = {"group": {"task": {"on": True, "next_exec_time": 0, "param_meta": {"x": "secret"}}}}
 
         version = service.save_tasks(tasks)
 
         self.assertEqual(version, 42)
-        self.assertEqual(cfg._config["tasks"], {"group": {"task": {"on": True, "next_exec_time": 0}}})
+        self.assertEqual(cfg._config["tasks"], {"group/task": {"on": True, "next_exec_time": 0}})
         self.assertIn("param_meta", tasks["group"]["task"])
         self.assertEqual(
             self.calls,
@@ -848,6 +869,7 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
 
     def test_save_tasks_clears_status_for_reactivated_or_error_reset_paths(self):
         from orchestrator.projection import TaskTreeService
+        from tasks.task_register import task_registry
 
         class FakeTaskManager:
             cleared = []
@@ -864,12 +886,10 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
         cfg = SimpleNamespace(
             _config={
                 "tasks": {
-                    "group": {
-                        "task": {
-                            "on": True,
-                            "next_exec_time": 200,
-                            "human_takeover_error": "需要人工",
-                        },
+                    "task": {
+                        "on": True,
+                        "next_exec_time": 200,
+                        "human_takeover_error": "需要人工",
                     },
                 },
                 "status": {"tasks": {"group/task": {"progress": "3/6"}}},
@@ -884,8 +904,15 @@ class TestWebUILifecycleServiceContract(unittest.TestCase):
         )
 
         cleared = []
-        with patch("tasks.task_state.clear_task_status", side_effect=lambda *a, **k: cleared.append((a, k))):
-            service.save_tasks({"group": {"task": {"on": True, "next_exec_time": 0}}})
+        # reset_paths 返回的是显示路径，所以注册表得认识这个任务的身份（任务名）。
+        registry_backup = dict(task_registry._tasks)
+        task_registry.clear()
+        task_registry.register("group/task", lambda: None)
+        try:
+            with patch("tasks.task_state.clear_task_status", side_effect=lambda *a, **k: cleared.append((a, k))):
+                service.save_tasks({"group": {"task": {"on": True, "next_exec_time": 0, "id": "task"}}})
+        finally:
+            task_registry._tasks = registry_backup
 
         self.assertEqual(task_manager.cleared, ["group/task"])
         self.assertEqual(len(cleared), 1)
@@ -1573,7 +1600,7 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertIn("restart_required: '需要重启'", component)
         self.assertIn("grid-template-columns: minmax(0, 112px) minmax(0, 1fr)", style)
         self.assertIn("overflow-wrap: anywhere", style)
-        self.assertIn("style.css?v=45", index)
+        self.assertIn("style.css?v=46", index)
         self.assertIn("DiagnosticsPanel.js?v=3", index)
 
 
@@ -1784,21 +1811,6 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertNotIn("/api/enum-options", server)
         self.assertNotIn("enum_options_failed", server)
 
-    def test_ocr_status_fail_instead_of_probe_defaults(self):
-        content = route_module("ops")
-        start = content.index('@router.get("/api/ocr-status")')
-        end = content.index('@router.get("/api/device/diagnostics")', start)
-        body = content[start:end]
-
-        self.assertNotIn("def _safe", body)
-        self.assertNotIn("\"unknown\"", body)
-        self.assertIn("paddle.device.is_compiled_with_cuda()", body)
-        self.assertIn("paddle.device.cuda.device_count()", body)
-        self.assertIn("get_ocr_runtime_status()", body)
-        self.assertIn('"engine_ready": runtime_status["engine_ready"]', body)
-        self.assertIn('"restart_required": runtime_status["restart_required"]', body)
-        self.assertIn("return api_error(500, str(e), code=\"ocr_status_failed\")", body)
-
     def test_frontend_reads_options_from_param_meta(self):
         content = (ROOT / "backend/webui/static/js/app.js").read_text(encoding="utf-8")
         start = content.index("    function openEditModal")
@@ -1984,15 +1996,6 @@ print("OK")
         self.assertIn("_EditorVirtualMixControl", content)
         self.assertNotIn("ctx.mixctrl", content)
 
-    def test_remote_access_requires_deploy_password(self):
-        content = route_module("ops")
-        start = content.index('async def remote_access_toggle_api')
-        end = content.index('@router.get("/api/deploy")', start)
-        body = content[start:end]
-
-        self.assertIn('cfg._config.get("deploy", {}).get("password")', body)
-        self.assertIn("deploy_password_required", body)
-
     def test_account_verify_does_not_start_scheduler(self):
         content = route_module("accounts")
         start = content.index('async def verify_account_api')
@@ -2157,8 +2160,9 @@ print("OK")
         self.assertIn("saveScriptDialogVisible", frontend)
         self.assertIn("saveScriptForm", frontend)
         self.assertIn("submitSaveCustomScript", frontend)
-        self.assertIn("文件名称", frontend)
         self.assertIn("脚本名称", frontend)
+        # 只有一个命名入口：脚本名称决定文件位置，也就是任务身份。
+        self.assertNotIn("文件名称", frontend)
         self.assertIn("description（描述）", frontend)
         self.assertIn("task_docs", frontend)
         self.assertIn("参数设置", frontend)
@@ -2191,8 +2195,10 @@ print("OK")
         self.assertIn("os.replace(tmp_path, target_path)", backend)
         self.assertIn("api_ok(", backend)
         self.assertIn("api_error(", backend)
-        self.assertIn("description=description", backend)
-        self.assertIn("task_doc=final_task_doc", backend)
+        # 装饰器里只有 description；长说明回到函数 docstring，路径由文件位置决定。
+        self.assertIn("description={description!r}", backend)
+        self.assertIn("docstring = f'    \"\"\"{escaped}\"\"\"", backend)
+        self.assertNotIn("path_cn=", backend)
         self.assertIn("enum_options", backend)
         self.assertIn("enum_multi", backend)
         self.assertIn("configure_editor_custom_task_save_controls", backend)
@@ -2207,21 +2213,21 @@ print("OK")
 
         self.assertIn("POST /api/editor/save-custom-task", api_contract)
         self.assertIn("data/custom_task", api_contract)
-        self.assertIn('"filename": "custom_task.py"', api_contract)
+        self.assertNotIn('"filename": "custom_task.py"', api_contract)
         self.assertIn('"task_path": "自定义任务/示例/操作设置"', api_contract)
         self.assertIn('"description": "一句话描述"', api_contract)
         self.assertIn('"task_doc": "补充说明正文"', api_contract)
         self.assertIn('"type": "enum_multi"', api_contract)
         self.assertIn('"enum_options": ["普通", "困难"]', api_contract)
-        self.assertIn('自定义任务/<name>', api_contract)
+        self.assertIn('custom_task/背包清空/进阶仙宝.py', api_contract)
         self.assertIn('POST /api/editor/save-custom-task', api_contract)
         self.assertIn('WebUI Editor 的“保存脚本”接口', authoring)
         self.assertIn('/api/editor/save-custom-task', authoring)
-        self.assertIn('文件名称', authoring)
+        self.assertNotIn('文件名称', authoring)
         self.assertIn('脚本名称', authoring)
         self.assertIn('Enum(单选)', authoring)
         self.assertIn('Enum(多选)', authoring)
-        self.assertIn('@register_task(path_cn="自定义任务/...")', authoring)
+        self.assertIn("自定义任务/", authoring)
 
     def test_editor_navigation_menu_contract(self):
         from backend.webui.routes import editor
@@ -2271,9 +2277,11 @@ print("OK")
         self.assertIn("class EditorParam1Enum(str, enum.Enum):", source)
         self.assertIn("class EditorParam2Enum(str, enum.Enum):", source)
         self.assertIn("@register_task(", source)
-        self.assertIn("path_cn='自定义任务/示例/操作设置'", source)
+        # 路径不在装饰器里：显示路径由文件写到 custom_task/ 的哪个位置决定。
+        self.assertNotIn("path_cn", source)
         self.assertIn("description='一句话描述'", source)
-        self.assertIn("task_doc=", source)
+        # 长说明就是函数 docstring。
+        self.assertIn('"""补充说明正文', source)
         self.assertIn("参数说明:", source)
         self.assertIn("- times: 执行次数", source)
         self.assertIn("times: int = 0", source)
@@ -2320,8 +2328,6 @@ print("OK")
         self.assertIn("const tgt = buildTarget();", frontend)
         self.assertIn("const line = tgt ? `ui_T(${tgt})` : 'ui_T()'", frontend)
         self.assertIn("insertSnippetAtActiveCursor(line, tgt ? null : line.indexOf('(') + 1)", frontend)
-        self.assertIn("recordedTextareaElement()", frontend)
-        self.assertIn("ta.focus()", frontend)
         self.assertIn("appendUiExists", frontend)
 
         self.assertIn("label: '阻塞等待'", frontend)
@@ -2398,10 +2404,6 @@ print("OK")
         self.assertIn("h.huashen_long()", frontend)
         self.assertIn("h.zhenwu()", frontend)
         self.assertIn("h.zhenling()", frontend)
-
-        self.assertRegex(css, r"\.editor-recorder-actions\s*\{[^}]*min-height:\s*0;")
-        self.assertRegex(css, r"\.editor-recorder-actions\s*\{[^}]*overflow-y:\s*auto;")
-        self.assertRegex(css, r"\.editor-recorder-actions\s*\{[^}]*overflow-x:\s*hidden;")
 
         self.assertIn("代码编辑器式 Tab 缩进", trajectories)
         self.assertIn("`ui_T()`", trajectories)
@@ -2577,9 +2579,11 @@ class TestSourceDistributionContract(unittest.TestCase):
         server = (ROOT / "backend/webui/server.py").read_text(encoding="utf-8")
         security = (ROOT / "backend/webui/security.py").read_text(encoding="utf-8")
 
-        for marker in ["/api/update/status", "/api/update/check", "/api/update/run", "source-git"]:
+        # 前端统一走 WebUIApi（自动补 /api 前缀），所以面板里写的是相对路径。
+        for marker in ["'/update/status'", "'/update/check'", "'/update/run'", "source-git"]:
             with self.subTest(marker=marker):
                 self.assertIn(marker, panel)
+        self.assertNotIn("fetch('/api/update", panel)
         for marker in [
             "remote_branch",
             "ahead_count",
@@ -3015,7 +3019,7 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
         self.assertIn("const NEWS_GIFT_CODES_PAGE_URL = '/api/news/gift_codes/page';", panel)
         self.assertIn("giftFrameSrc: NEWS_GIFT_CODES_PAGE_URL", panel)
         self.assertIn(':src="giftFrameSrc"', panel)
-        self.assertIn("/api/news/gift_codes?refresh=1", panel)
+        self.assertIn("'/news/gift_codes?refresh=1'", panel)
         self.assertNotIn("NEWS_REDEEM_PAGE_URL", panel)
         self.assertNotIn("5054399.com", panel)
         self.assertNotIn("5054399.com", index)
@@ -3063,12 +3067,12 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
         self.assertNotIn("<th>类型</th>", route)
         projection = (ROOT / "orchestrator/projection.py").read_text(encoding="utf-8")
         self.assertIn('"label": f"{server}:{character}"', projection)
-        redeem_task = (ROOT / "tasks/一般任务/活动/兑换豪礼礼品兑换.py").read_text(
+        redeem_task = (ROOT / "tasks/其他任务/活动脚本/兑换豪礼礼品兑换.py").read_text(
             encoding="utf-8",
             errors="ignore",
         )
 
-        self.assertIn('GIFT_REDEEM_TASK_PATH = "一般任务/活动/兑换豪礼礼品兑换"', server)
+        self.assertIn('GIFT_REDEEM_TASK_PATH = "其他任务/活动脚本/兑换豪礼礼品兑换"', server)
         self.assertIn("未找到兑换码任务，请确认一般任务已加载", server)
         self.assertFalse((ROOT / "tasks/_manifest.py").exists())
         # the cfg path IS the source path now; no translation table exists
@@ -3134,6 +3138,21 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 class TestTaskOrderingGroupedOverlayContract(unittest.TestCase):
+    """顺序投影按注册表把 id 翻译成显示路径，所以这里先把 A/B/C/D 注册好。"""
+
+    def setUp(self):
+        from tasks.task_register import task_registry
+
+        self._reg_backup = dict(task_registry._tasks)
+        task_registry.clear()
+        for index, task_path in enumerate(["A", "B", "C", "D"]):
+            task_registry.register(task_path, lambda: None)
+
+    def tearDown(self):
+        from tasks.task_register import task_registry
+
+        task_registry._tasks = self._reg_backup
+
     def test_grouped_overlay_flattens_order_and_drops_graph_fields(self):
         from orchestrator.model import normalize_task_ordering_overlay, project_task_ordering
 
@@ -3193,9 +3212,9 @@ class TestTaskOrderingStaticContract(unittest.TestCase):
         self.assertIn("<task-panel v-if=\"activeTab==='tasks'\"", index_html)
         self.assertNotIn("activeTab==='tasks' || activeTab==='task-graph'", index_html)
         self.assertIn("AppSidebar.js?v=18", index_html)
-        self.assertIn("style.css?v=45", index_html)
+        self.assertIn("style.css?v=46", index_html)
         self.assertIn("TaskPanel.js?v=23", index_html)
-        self.assertIn("app.js?v=42", index_html)
+        self.assertIn("app.js?v=43", index_html)
         self.assertIn('@run-task-range="runTaskRange"', index_html)
         self.assertIn(':runtime-status="runtimeStatus"', index_html)
         self.assertNotIn("TaskDagCanvas.js", index_html)

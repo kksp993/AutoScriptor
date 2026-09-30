@@ -53,6 +53,7 @@ def FTT_battle_one_round():
 
 @register_task(
     description="领取梵天塔每日 5 张度牒并扫荡梵天塔。",
+    reschedule="daily",
 )
 def fanTianTa(
     battle_times=1,

@@ -1,13 +1,11 @@
 """Conventions every built-in task script has to keep.
 
 A task's cfg path *is* its source path: `tasks/每日任务/村庄/宠物培养.py` registers
-as `每日任务/村庄/宠物培养`. Nothing translates anything, so the file name and
-`_order.txt` are the only two places naming a task, and these checks keep them
-honest:
+as `每日任务/村庄/宠物培养`. Nothing translates anything and no order file names
+anything, so the file name is the only place naming a task, and these checks keep
+it honest:
 
-- a typo in an `_order.txt` name (`xianbao_destory`) dropped a file out of the
-  listed order without any error;
-- an unlisted file sorts last regardless of where it was authored;
+- the stem becomes the cfg key, so it has to be the Chinese display name;
 - a non-ASCII parameter name reaches the persisted `params` keys and the form.
 
 A file whose name starts with `_` is a helper module: imported with its folder but
@@ -33,12 +31,12 @@ INFRASTRUCTURE = {
     "battle_task_params.py",
     "task_params.py",
     "task_register.py",
-    "task_registry.py",
+    "task_schedule.py",
     "task_state.py",
     "time.py",
 }
 
-SECTION_ROOT = ("每日任务", "每周任务", "活动任务", "一般任务")
+SECTION_ROOT = ("每日任务", "每周任务", "其他任务")
 
 
 def is_helper(path: Path) -> bool:
@@ -64,19 +62,6 @@ def helper_paths() -> list[Path]:
         and path.name not in INFRASTRUCTURE
         and is_helper(path)
     )
-
-
-def child_names(folder: Path) -> set[str]:
-    """Names an `_order.txt` in this folder may refer to."""
-    return {
-        path.stem if path.is_file() else path.name
-        for path in folder.iterdir()
-        if path.name != "__init__.py"
-        and (
-            (path.suffix == ".py" and not is_helper(path))
-            or (path.is_dir() and not path.name.startswith("__"))
-        )
-    }
 
 
 def registration_of(path: Path):
@@ -106,6 +91,63 @@ def string_keyword(call: ast.Call | None, name: str):
 def derived_cfg_path(path: Path) -> str:
     """The cfg path registration will produce: the source path, verbatim."""
     return "/".join(path.relative_to(TASK_ROOT).with_suffix("").parts)
+
+
+def decorator_flag(call: ast.Call | None, name: str) -> bool:
+    """装饰器里 ``name=True`` 的布尔声明；缺省或非字面量都算未声明。"""
+    if call is None:
+        return False
+    for keyword in call.keywords:
+        if keyword.arg == name and isinstance(keyword.value, ast.Constant):
+            return keyword.value.value is True
+    return False
+
+
+def box_returning_functions(tree: ast.AST) -> set[str]:
+    """同文件里注解为 ``-> Box`` 的函数：它们返回的是裸区域，不是识别目标。"""
+    return {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+        and isinstance(node.returns, ast.Name)
+        and node.returns.id == "Box"
+    }
+
+
+def is_bare_region(node: ast.AST, box_helpers: set[str]) -> bool:
+    """``Box(...)``、``x.margin(...)``、以及本文件的 ``-> Box`` 助手都产出裸区域。"""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if getattr(func, "id", None) == "Box" or getattr(func, "attr", None) == "margin":
+        return True
+    return getattr(func, "id", None) in box_helpers
+
+
+# 识别函数：第一个参数必须是 T()/I()/B() 产出的目标，不能是裸区域。
+RECOGNIZER_FUNCTIONS = (
+    "click",
+    "click_all",
+    "long_click",
+    "locate",
+    "match",
+    "ui_T",
+    "wait_for_appear",
+    "wait_for_disappear",
+)
+
+# 已下架的任务：源码与注册元数据保留，但不写 cfg、不出现在任务列表和调度里。
+# 上架和下架都要同时改源码和这份名单，避免任务悄悄消失或悄悄复活。
+SHELVED_TASKS = {
+    "每日任务/天庭/地狱混沌",
+    "每日任务/天庭/天庭混沌",
+    "每日任务/村庄/仙气消耗",
+    "每日任务/村庄/联盟悬赏",
+    "每日任务/村庄/取经",
+    "每日任务/村庄/宠物培养",
+    "每日任务/村庄/强化装备",
+    "每日任务/村庄/竞技场",
+}
 
 
 class TestTaskRegistration(unittest.TestCase):
@@ -188,43 +230,72 @@ class TestTaskSourceHygiene(unittest.TestCase):
                 self.assertNotIn("traceback", text)
 
 
-class TestOrderSeeds(unittest.TestCase):
-    """`_order.txt` is the import/registration seed; every entry must resolve."""
+class TestImportOrder(unittest.TestCase):
+    """Import order is derived from source paths; no order file names anything."""
 
-    def test_entries_name_existing_files_and_folders(self):
-        for order_file in sorted(TASK_ROOT.rglob("_order.txt")):
-            folder = order_file.parent
-            present = child_names(folder)
-            if folder == TASK_ROOT:
-                present |= {name for name in INFRASTRUCTURE if name != "__init__.py"}
-            listed = [
-                line.strip()
-                for line in order_file.read_text(encoding="utf-8-sig").splitlines()
-                if line.strip() and not line.strip().startswith("#")
-            ]
-            stale = [name for name in listed if name not in present]
-            with self.subTest(seed=order_file.relative_to(TASK_ROOT).as_posix()):
-                self.assertEqual(stale, [], f"{order_file} names entries that do not exist")
+    def test_no_order_seed_files(self):
+        leftovers = sorted(
+            path.relative_to(TASK_ROOT).as_posix()
+            for path in TASK_ROOT.rglob("_order.txt")
+        )
+        self.assertEqual(leftovers, [], "task order comes from source paths")
 
-    def test_task_files_are_listed(self):
-        """An unlisted file sorts last instead of into its authored position."""
-        for order_file in sorted(TASK_ROOT.rglob("_order.txt")):
-            folder = order_file.parent
-            listed = {
-                line.strip()
-                for line in order_file.read_text(encoding="utf-8-sig").splitlines()
-                if line.strip() and not line.strip().startswith("#")
-            }
-            present = child_names(folder)
-            if folder == TASK_ROOT:
-                present |= {name for name in INFRASTRUCTURE if name != "__init__.py"}
-            unlisted = sorted(
-                name
-                for name in present
-                if name not in listed and (folder / f"{name}.py").is_file()
-            )
-            with self.subTest(seed=order_file.relative_to(TASK_ROOT).as_posix()):
-                self.assertEqual(unlisted, [], f"{order_file} does not list every task file")
+    def test_import_order_is_the_sorted_source_path(self):
+        """`sort_py_files` orders by the source path, so it needs no seed file."""
+        from orchestrator.catalog import gather_py_files, sort_py_files
+
+        ordered = sort_py_files(gather_py_files())
+        keys = [path.relative_to(TASK_ROOT).with_suffix("").parts for path in ordered]
+        self.assertEqual(keys, sorted(keys))
+        self.assertEqual(sorted(ordered), sorted(gather_py_files()))
+
+
+class TestRecognitionTargets(unittest.TestCase):
+    """识别函数的第一个参数必须是 T()/I()/B() 产出的目标，不能是裸区域。
+
+    真实事故：``click(portrait(Box(...)))`` 里 ``portrait()`` 返回 ``Box``（namedtuple），
+    ``locate()`` 把它当成「多目标元组」逐元素解析，直到识别阶段才抛
+    ``ValueError: Unsupported target type: <class 'int'>`` —— 第一个元素是坐标数字。
+    框架层现在也会在调用点拦下（见 test_core_api_timeout_validation），这里在源码层再
+    过一遍，让这类写法停在提交前。
+    """
+
+    def test_no_bare_region_is_used_as_a_recognition_target(self):
+        offenders: list[str] = []
+        for path in task_script_paths() + helper_paths():
+            tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+            box_helpers = box_returning_functions(tree)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call) or not node.args:
+                    continue
+                name = getattr(node.func, "id", None)
+                if name not in RECOGNIZER_FUNCTIONS:
+                    continue
+                if is_bare_region(node.args[0], box_helpers):
+                    relative = path.relative_to(ROOT).as_posix()
+                    offenders.append(f"{relative}:{node.lineno} {name}({ast.unparse(node.args[0])[:60]})")
+
+        self.assertEqual(
+            offenders,
+            [],
+            "这些调用把裸 Box 当识别目标了，要包成 B(...)：\n  " + "\n  ".join(offenders),
+        )
+
+
+class TestShelvedTasks(unittest.TestCase):
+    """下架名单和源码里的 deprecated 声明必须一致，防止任务悄悄上下架。"""
+
+    def test_shelf_list_matches_the_decorators(self):
+        declared = set()
+        for path in task_script_paths():
+            call, _fn = registration_of(path)[0]
+            if decorator_flag(call, "deprecated"):
+                declared.add(derived_cfg_path(path))
+        self.assertEqual(
+            sorted(declared),
+            sorted(SHELVED_TASKS),
+            "源码里 deprecated=True 的任务必须和 SHELVED_TASKS 完全一致",
+        )
 
 
 if __name__ == "__main__":

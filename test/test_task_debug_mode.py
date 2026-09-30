@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from AutoScriptor.utils.app_config import cfg
-from tasks.task_registry import task_registry
+from tasks.task_register import task_registry
 
 
 class TestTaskDebugMode(unittest.TestCase):
@@ -28,21 +28,20 @@ class TestTaskDebugMode(unittest.TestCase):
             "emulator": {"post_execution": "close_game_only"},
             "ocr": {"use_gpu": False},
             "game": {"character_name": "测试角色"},
+            # cfg["tasks"] 是以 id 为键的平表；这里任务没有改名，所以 id 就是显示路径。
             "tasks": {
-                "测试": {
-                    "任务": {
-                        "on": True,
-                        "next_exec_time": 0,
-                        "params": {},
-                    }
-                }
+                "任务": {
+                    "on": True,
+                    "next_exec_time": 0,
+                    "params": {},
+                },
             },
         }
 
         def boom():
             raise RuntimeError("debug boom")
 
-        task_registry.register("测试/任务", boom, order=1, debug_mode=debug_mode)
+        task_registry.register("测试/任务", boom, debug=debug_mode)
 
     def test_task_manager_debug_failure_does_not_recover_app(self):
         from orchestrator import task_manager as tm_mod

@@ -7,6 +7,7 @@ from ZmxyOL.character.hero import h
 
 @register_task(
     description="完成本命空间每日流程，领取任务奖励，合成本命法宝。",
+    reschedule="daily",
 )
 def task(clear_all=False, lianbao=False):
     ensure_in(HAS_SHEZHI)

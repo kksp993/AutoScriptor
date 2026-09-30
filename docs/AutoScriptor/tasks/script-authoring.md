@@ -4,15 +4,15 @@
 
 独立脚本可直接 `init()`。操作配置游戏以外的 App 时用 `init(launch_app=False)`，并通过 `launch_app()`、`close_app()`、`go_home()` 操作当前设备。竖屏脚本可调用 `setFrameSize(MUMU_SIZE_720_1280)`，随后统一使用 `Box(...).margin()`；共享 WebUI/调度进程中的任务更适合继续为每个区域显式传入 `frame_size`，避免改变其他任务的默认裁剪尺寸。
 
-任务之间共享的代码放在同一目录下的下划线开头文件里（例如 `tasks/活动任务/_活动流程.py`），用完整包路径导入：
-`from tasks.活动任务._活动流程 import run_activity`。下划线前缀表示它是模块而不是任务，注册表不会为它生成任务项。
+任务之间共享的代码放在同一目录下的下划线开头文件里（例如 `tasks/其他任务/活动脚本/活动任务/_活动流程.py`），用完整包路径导入：
+`from tasks.其他任务.活动脚本.活动任务._活动流程 import run_activity`。下划线前缀表示它是模块而不是任务，注册表不会为它生成任务项。
 
 ## 注册位置
 
 | 类型 | 目录 | 路径规则 |
 |------|------|----------|
-| 内置任务 | `tasks/` | 路径就是它在 `tasks/` 下的源码路径，不写 `path_cn`：目录名和文件名都是中文 cfg 键 |
-| 自定义任务 | `data/custom_task/` | 必须写 `@register_task(path_cn="...")`，文件名不受项目命名约定约束 |
+| 内置任务 | `tasks/` | 显示路径就是它在 `tasks/` 下的源码路径：目录名和文件名都是中文路径段 |
+| 自定义任务 | `data/custom_task/` | 显示路径 = `自定义任务/` + 它在 `custom_task/` 下的相对路径 |
 
 ```python
 from tasks.task_register import register_task   # 或 from ZmxyOL import *
@@ -24,28 +24,33 @@ def 每日签到(count: int = 1):
         click(T("开始"), if_exist=True)
 ```
 
-内置任务的 cfg 路径完全由源码位置决定，而且逐段同名，中间没有任何映射表：
+内置任务的显示路径完全由源码位置决定，而且逐段同名，中间没有任何映射表：
 
 ```text
 tasks/每日任务/村庄/宠物培养.py   →  每日任务/村庄/宠物培养
       分类    分组   文件名            逐段相同
 ```
 
-- **分类与分组目录**：目录名直接用中文，逐段成为 cfg 的中间层级，例如 `每日任务`、`村庄`。新建目录只要名字是中文，就会原样进入任务树，不需要再登记到任何表里。
-- **任务名**：文件名去掉 `.py` 就是 cfg 键，所以文件名要写中文显示名，例如 `宠物培养.py` 而不是 `pet_upgrade.py`。
+- **分类与分组目录**：目录名直接用中文，逐段成为任务的显示路径层级，例如 `每日任务`、`村庄`。新建目录只要名字是中文，就会原样进入 WebUI 任务树，不需要再登记到任何表里。
+- **任务名**：文件名去掉 `.py` 就是路径最后一段，所以文件名要写中文显示名，例如 `宠物培养.py` 而不是 `pet_upgrade.py`。
 
-自定义任务必须显式给路径：
+目录与文件名共同决定**显示路径**，而文件名单独决定两件事：任务身份 `id`（未显式声明时取文件名去掉 `.py`），以及 WebUI 里的任务名。用户配置以 `id` 为键存储，所以**换目录只改显示位置**；只有重命名文件才需要钉住 `id`，见 [排序与路径身份](#排序与路径身份)。
+
+自定义任务的形态和内置任务完全一样：
 
 ```python
-@register_task(path_cn="自定义任务/示例/hello", description="示例任务")
+@register_task(description="示例任务")
 def task(count: int = 1):
     for _ in range(count):
         click(T("开始"), if_exist=True)
 ```
 
-`custom_task` 下未提供 `path_cn` 会注册失败。首段推荐写 `自定义任务`；如果省略首段，例如 `path_cn="背包清空/进阶仙宝"`，后端会自动归一为 `自定义任务/背包清空/进阶仙宝`，以便 WebUI 自定义任务页加载。若旧版本已经把配置写在省略根节点的路径下，注册时会迁移到归一后的路径并清理空旧分支。自定义脚本不能通过 `path_cn` 创建新的顶级任务页。内置脚本写了 `path_cn` 会覆盖源码路径，只在目录结构与树形不一致时才需要；需要跟随项目维护的内置流程应放在 `tasks/`，不要只放在用户 `data/custom_task/`。
+自定义任务没有路径参数：它被放在哪，它的路径就是什么。上面这段代码保存到
+`data/custom_task/示例/hello.py`，就注册为 `自定义任务/示例/hello`。所以自定义任务页里的
+「脚本名称」既是列表里的名字，也是它落在哪个子目录。需要跟随项目维护的内置流程应放在 `tasks/`，
+不要只放在用户 `data/custom_task/`。
 
-WebUI Editor 的“保存脚本”接口 `/api/editor/save-custom-task` 也必须生成同样形态的自定义任务文件：写入 `data/custom_task/`，使用 UTF-8，并带有 `@register_task(path_cn="自定义任务/...")`。保存弹窗提供 `文件名称`（默认 `.py` 后缀）、`脚本名称`（默认前缀为 `自定义任务/`，用户填写后续路径）、`description`、`task_docs` 和参数设置；参数字段包括字段名称、字段类型、字段解释，字段类型支持 `Enum(单选)` 和 `Enum(多选)`，enum 选项使用 `["普通","困难"]` 这类 JSON 数组填写。
+WebUI Editor 的“保存脚本”接口 `/api/editor/save-custom-task` 也生成同样形态的自定义任务文件：按「脚本名称」在 `data/custom_task/` 下建好子目录，写入 UTF-8 Python 文件，装饰器只带 `description`，补充说明写成函数 docstring。保存弹窗只有 `脚本名称` 一个命名入口（默认前缀 `自定义任务/`，最后一段就是文件名与任务身份）、`description`、`task_docs` 和参数设置；参数字段包括字段名称、字段类型、字段解释，字段类型支持 `Enum(单选)` 和 `Enum(多选)`，enum 选项使用 `["普通","困难"]` 这类 JSON 数组填写。
 
 Editor 操作录制区的“工具 > 导航到...”按 `ZmxyOL.nav.envs` 的环境和位置层级展示导航目标。点击环境或位置会在当前代码目标中插入 `ensure_in("目标名称")`；位置名可包含 `天庭#1` 等索引后缀。
 
@@ -53,40 +58,74 @@ Editor 操作录制区的“定位 > 区域识别 > 匹配目标（match）”�
 
 图片编辑器顶部的“生成对象”会将当前选区生成的 `B/T/I` 目标插入录制区或函数编辑窗口的当前光标/选区。“判断存在/判断不在”同样在光标处生成；“操作 > 点击 > 直到出现/直到消失”先生成带空 `ui_T()` / `ui_F()` 的 `until=lambda:` 条件并将光标放在括号内，可重新框选条件目标后点击“生成对象”补入。“下一步直到”使用当前目标生成 `click(B(0,0), until=lambda: ui_T(...))`。
 
-编辑器保存裸片段时会按表单生成 `@register_task(path_cn="自定义任务/...", description=..., task_doc=...)`，并把参数设置转换为函数签名、本地 `enum.Enum` 类和默认值；如果传入的是完整自定义任务文件，文件内的 `@register_task` 必须显式提供 `path_cn`，已有装饰器元数据由文件自身负责。只落盘未注册的 Python 片段不会出现在 WebUI 任务树中。
+编辑器保存裸片段时会按表单生成 `@register_task(description=...)` 加函数 docstring（补充说明正文），并把参数设置转换为函数签名、本地 `enum.Enum` 类和默认值；路径由文件写入位置决定。如果传入的是完整自定义任务文件，它自己的装饰器元数据由文件负责。只落盘未注册的 Python 片段不会出现在 WebUI 任务树中。
 
-自定义任务导入失败会记录到 WebUI 公开配置的 `custom_task_load_errors`，并在本轮加载中跳过 stale 任务叶子清理和 `cfg.save_config()`。修复脚本语法或导入错误后重新加载即可恢复；不要因为任务临时消失就手动清空 `自定义任务` 配置分支。
+自定义任务导入失败会记录到 WebUI 公开配置的 `custom_task_load_errors`，并在本轮加载中跳过 stale 任务条目清理和 `cfg.save_config()`。修复脚本语法或导入错误后重新加载即可恢复；不要因为任务临时消失就手动清空 `自定义任务` 配置分支。
 
-例如兑换码礼品兑换是内置一般任务，注册路径为 `一般任务/活动/兑换豪礼礼品兑换`，源码位于 `tasks/一般任务/活动/兑换豪礼礼品兑换.py`。
+例如兑换码礼品兑换是内置任务，显示路径为 `其他任务/活动脚本/兑换豪礼礼品兑换`，源码位于 `tasks/其他任务/活动脚本/兑换豪礼礼品兑换.py`。
 
 ## 排序与路径身份
 
-WebUI 的“任务列表”使用全局 `task_ordering` 覆盖层保存用户拖拽得到的可嵌套总顺序；任务脚本不要把用户显示顺序写进源码目录或账号 JSON。排序身份仍是规范化 slash 任务路径，例如 `每日任务/村庄/宠物培养`。
+一个任务有两个字符串，别混：
 
-- `_order.txt` 只作为内置源码导入/注册 seed，保留历史稳定性；不是用户拖拽排序的持久化位置。
-- `items` 是当前持久化的用户分组顺序，支持任务节点和嵌套分组；`user_order` 是后端由 `items` 展平生成的兼容投影和旧数据导入 seed。有效顺序先递归展开 `items`，再回退到当前任务树顺序、运行时注册顺序和路径字典序。
+| 名字 | 是什么 | 谁在用 |
+|------|--------|--------|
+| `id` | 身份。默认取任务名（文件名去掉 `.py`），可在 `@register_task(id=...)` 里显式指定 | `cfg["tasks"]` 的键、`task_ordering` 的键 |
+| `path` | 显示位置，逐段中文，例如 `每日任务/村庄/宠物培养` | WebUI 树、执行顺序、参数标签 |
+
+所以**换目录免费**：目录随便挪，`id` 不变，用户配置、拖拽顺序和运行状态都跟着走，UI 里换个分组而已。只有重命名**文件**才改变默认身份，这时把 `id` 钉在旧任务名上。
+
+```python
+# 文件从 每日任务/村庄/宠物培养.py 改名为 每日任务/村庄/灵宠培养.py 后：
+@register_task(id="宠物培养")
+def task():
+    ...
+```
+
+不写 `id=` 就是「新任务」，从默认配置开始，旧条目会被加载末尾的 prune 清掉。`id` 必须唯一；两个任务声明同一个 `id` 会在注册时直接报错。
+
+用户拖拽顺序存在全局 `task_ordering` 覆盖层，**同样以 `id` 为键**；任务脚本不要把用户显示顺序写进源码目录或账号 JSON。
+
+- 默认顺序来自注册顺序，也就是源码路径排序；没有 per-task 的顺序参数。用户拖拽排序存在 `task_ordering`，与源码顺序无关。
+- `items` 是当前持久化的用户分组顺序，支持任务节点和嵌套分组；`user_order` 是后端由 `items` 展平生成的兼容投影和旧数据导入 seed。有效顺序先把存储里的 `id` 键换成显示路径，再递归展开 `items`，最后回退到当前注册顺序和路径字典序。
 - 旧版 `hard_edges`、`layout`、`group_order` 会被后端规范化忽略，不再表达偏序关系或画布布局。
-- 改名任务（含重命名文件或换目录）要加 `@register_task(legacy_path_cn="旧路径")` 声明前身：注册时把旧路径上的用户配置（开关、参数、`next_exec_time`）搬到当前路径并删除旧节点。这是唯一的改名通道。
-- 只改文件位置而不声明前身，等同于删除旧路径并新增新路径；旧排序路径会在 WebUI 诊断中显示为 stale，用户可拖拽后重新保存。
+- 只在改名且没钉 `id` 时，旧排序键才在 WebUI 诊断中显示为 stale；用户可拖拽后重新保存。
 
 ## register_task 元数据
 
-| 参数　　　　　　　　　　　　| 说明　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
-| -----------------------------| ----------------------------------------------------------------------------------------------------------------|
-| `default_offset_hours`　　　| 成功后按当前时间 + N 小时调度　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
-| `beta`　　　　　　　　　　　| WebUI 显示实验标记　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
-| `task_doc`　　　　　　　　　| WebUI 补充说明正文；不传时取函数 docstring 首段　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
-| `description`　　　　　　　 | WebUI 一句话简介；不传时生成占位，内置脚本不再使用集中默认描述表　　　　　　　　　　　　　　　　　　　　　　　 |
-| `debug_mode` / `debug=True` | 调试直跑：跳过自动登录/失败恢复/本轮 post_execution　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
-| `deprecated`　　　　　　　　| 弃用隐藏字段；`True` 时源码保留并记录注册元数据，但不写入 `cfg["tasks"]`、不出现在 WebUI/可见任务列表/调度列表；已存在的叶子由加载末尾的 prune 清理 |
-| `path_cn`　　　　　　　　　 | `data/custom_task` 必填中文路径并归一到 `自定义任务/...`；内置任务不需要，写了会覆盖源码路径 |
-| `legacy_path_cn` | 任务改名/重组前的 cfg 路径；注册时把该路径上的用户配置搬到当前路径并删除旧节点 |
-| `sched_window_hours`　　　　| 本地可执行窗口 `[start, end)`　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
-| `allowed_weekdays`　　　　　| 允许星期，`1=周一 ... 7=周日`　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
+作者的声明只有五个字段，其余都属于用户数据或运行时数据：
 
-其他关键字会写入任务叶节点配置，可作为任务默认配置持久化，例如 `last_buy_time`、`sched_window_hours`、`allowed_weekdays`、`next_exec_offset_hours`。运行时元数据如 `fn/order/param_meta/debug_mode/task_doc_flow/description/deprecated` 存在 `TaskRegistry`，不会写入 JSON；其中 `deprecated=True` 的任务连配置叶节点也不会写入，旧叶子由加载末尾的 prune 统一清掉。
+| 参数 | 类型与取值 | 说明 |
+|------|-----------|------|
+| `id` | str | 任务身份，`cfg["tasks"]` 和 `task_ordering` 的键。不传时取任务名（文件名去掉 `.py`）；换目录不用写，重命名文件时写 `id="旧任务名"` 就能保住用户配置、拖拽顺序和运行状态 |
+| `reschedule` | `None` / `"daily"` / `"weekly"` / int / dict | 下次什么时候再来，取值见下节。不写 = 一次性。用户在 WebUI 里可以覆盖 |
+| `debug` | bool | 调试直跑的默认值：跳过自动登录、失败恢复和本轮 post_execution。用户可以在 WebUI 里覆盖 |
+| `description` | str | 一句话简介；不传时取函数 docstring 首行 |
+| `deprecated` | bool | 系统属性。源码和注册元数据保留，但不写 cfg、不出现在 WebUI 和调度列表；已存在的旧条目由加载末尾的 prune 清理 |
 
-`debug_mode=True` 是判断任务是否处于调试态的唯一来源：跨角色登录、任务前重启、失败恢复、本轮重试与 post_execution 都以它为准，录屏和运行期抓帧也由它开启。`cfg["app"]` 里没有 debug 开关，任务是否放在 `data/custom_task/` 下也不影响判定。
+**长说明就是函数 docstring**，没有对应参数。其余 `key=value` 只用于任务私有数据（例如
+`last_buy_time`），原样写进 cfg 条目；官方字段名写错会直接 `TypeError`，不会静默留在用户配置里。
+
+`debug` 的生效值 = `cfg` 里用户设的值（有就用）→ 作者声明的默认值。判据只有这一处，
+跨角色登录、任务前重启、失败恢复、本轮重试与 post_execution 都以它为准，录屏和运行期抓帧也由它开启。
+`cfg["app"]` 里没有 debug 开关，任务是否放在 `data/custom_task/` 下也不影响判定。
+
+## reschedule：唯一的调度字段
+
+```python
+@register_task()                                   # 不写 = 一次性：执行成功后关闭 on
+@register_task(reschedule="daily")                 # 下一个 05:00（当天 5 点前算今天）
+@register_task(reschedule="weekly")                # 下周一 05:00
+@register_task(reschedule=10)                      # 10 小时后
+@register_task(reschedule={"mode": "daily", "window": (10, 22), "weekdays": [5, 6, 7]})
+```
+
+- `window` 是本地时间可执行时段 `[start, end)`；到点但不在时段内会推迟到时段起点。
+- `weekdays` 用 `1=周一 … 7=周日`；到点但不在允许日会推迟到下一个允许日的 05:00。
+- 非法写法（拼错的 mode、越界的 window、空 weekdays）在注册时直接报错。
+
+生效值同样是「用户在 cfg 里覆盖 → 作者声明 → 一次性」，由 `tasks/task_schedule.py` 的
+`normalize_reschedule()` 归一，调度侧只认这一个字段，不再看任务目录名。
 
 内置任务一旦使用 `@register_task` 就会进入 WebUI 和调度器候选集，除非显式声明 `deprecated=True`。`【未完成】`、`【bug】` 等只是 `description` 文案，不会隐藏任务；只有 `deprecated=True` 会隐藏且不入 cfg。不要把仍会 `raise Stop here`、打印调试表格、或只作为活动占位的脚本长期注册；这类实验应先放在未注册代码、本地 `data/custom_task/`，或直接删除。
 
@@ -146,7 +185,7 @@ def task(
     for level, row in plan.items():
         ...
 ```
-WebUI 保存任务时会剥离运行时字段，只保存用户配置。活动任务不会因为位于 `活动任务/` 目录外的额外框架字段而默认每日调度；需要窗口、星期或 offset 时，在脚本的 `@register_task(...)` 中显式声明。
+WebUI 保存任务时会剥离运行时字段，只保存用户配置。调度只由 `reschedule` 决定——作者在 `@register_task(...)` 里声明默认值，用户在 WebUI 里可以覆盖；任务位于哪个目录不影响它的调度。
 
 ## Sleep 与取消
 
@@ -196,11 +235,11 @@ progress = get_task_status("progress")
 | 临时 UI 未出现、网络波动 | 抛 `TaskRequireReTry` 或普通异常，让 retry 处理 |
 | 需要人工介入、材料不足、账号状态不满足 | 抛 `RequestHumanTakeover` |
 | 自身能力不足但有可观测进度 | 写 `progress`，让执行层在 retry 耗尽后转人工接管 |
-| debug 现场验证 | `@register_task(debug_mode=True)` |
+| debug 现场验证 | `@register_task(debug=True)` |
 
 普通失败没有未完成进度时不会自动变红，只会按 retry 和连续错误计数处理。
 
-任务文件不保留 `if __name__ == "__main__"` 直跑尾巴，也不要在文件底部包一层 `try/except`、`traceback.print_exc()`、`bg.stop()`、`exit(0)`。现场验证走 WebUI 直接执行或 `debug_mode` 元数据，让同一套调度、日志和停止语义接管。
+任务文件不保留 `if __name__ == "__main__"` 直跑尾巴，也不要在文件底部包一层 `try/except`、`traceback.print_exc()`、`bg.stop()`、`exit(0)`。现场验证走 WebUI 直接执行或 `debug` 设置，让同一套调度、日志和停止语义接管。
 
 ## 战斗任务
 

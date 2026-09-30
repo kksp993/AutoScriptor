@@ -7,8 +7,8 @@
 - Source Electron configures Chromium render mode before `app.whenReady()`. `AUTOSCRIPTOR_ELECTRON_RENDER_MODE` supports `software` (default, hardware acceleration disabled plus GPU composition/raster/zero-copy switches), `d3d11` (GPU kept with ANGLE D3D11), and `default` (no Electron render switches for comparison). The shell logs the render mode and GPU feature status; browser access to `http://127.0.0.1:5000` is unchanged.
 - OCR 在进程启动时冻结 `ocr.use_gpu`、普通模型和数字模型。全局 OCR、线程局部 OCR
   和数字 OCR 都使用该快照；保存新配置不会热切换已加载或稍后创建的 Paddle 引擎。
-  `GET /api/ocr-status` 通过 `configured_*`、`runtime_*`、`engine_*` 和
-  `restart_required` 暴露三层状态，变更设备或模型后必须重启进程。
+  `GET /api/device/diagnostics` 的 OCR 段通过 `configured_*`、`runtime_*`、`engine_*`
+  和 `restart_required` 暴露三层状态，变更设备或模型后必须重启进程。
 - Paddle/PaddleOCR 的 Python 运行时导入和 OCR 模型构造都在 OCR 后台线程执行。
   模型文件命中本地缓存仍需完成每个新进程的运行时导入和模型构造；启动日志分别记录
   运行时导入、模型阶段和总耗时，`Model files already exist` 表示模型文件缓存已命中。
@@ -47,7 +47,7 @@
 5. 通过测试点击确认模拟器响应。
 6. 按 `run_in_background` 隐藏窗口。
 
-`debug_mode` 只跳过调度器的自动登录、任务前重启和常规失败恢复，不跳过设备会话的基本就绪检查。重启设备的任务应先调用 `runtime_ctx.shutdown()` 释放旧 NemuIpc 和运行态引用，再重启 MuMu 并通过 `runtime_ctx.refresh()` 建立新会话。
+任务级 `debug` 只跳过调度器的自动登录、任务前重启和常规失败恢复，不跳过设备会话的基本就绪检查。重启设备的任务应先调用 `runtime_ctx.shutdown()` 释放旧 NemuIpc 和运行态引用，再重启 MuMu 并通过 `runtime_ctx.refresh()` 建立新会话。
 
 `LoginClient.HZ4399` 表示 4399 游戏盒而不是游戏客户端。它提交游戏盒账号密码后直接结束登录状态机，不等待游戏角色选择页的“进入游戏”，也不选择服务器或角色；`LoginClient.H4399` 等游戏客户端仍按原流程进入角色选择页。
 
@@ -102,10 +102,10 @@ Editor 自定义代码执行由 `/api/editor/execute-code` 拥有路由内执行
 - 职业脚本：`data/character/`。
 - 日志与错误归档：`logs/`。
 - 配置/账号保存只使用同目录临时文件加原子替换；默认不强制 `fsync`，避免低内存、杀毒扫描或慢盘把小 JSON 写入拖成秒级阻塞。需要严格刷盘时设置 `AUTOSCRIPTOR_STRICT_FSYNC=1`。
-- 纯全局配置保存（如基础配置、deploy、notify、update、remote_access）只写 `data/config.json`，不重写当前账号 JSON。任务、状态、账号、角色变更才写 `accounts/*.json`。
+- 纯全局配置保存（如基础配置、deploy、notify、update）只写 `data/config.json`，不重写当前账号 JSON。任务、状态、账号、角色变更才写 `accounts/*.json`。
 - 若 Windows ACL 允许写入但拒绝替换/删除（`WinError 5`），保存层直接失败并交给 WebUI 返回包含 `dataRoot/config_path/accounts_dir` 的错误诊断，不再直接覆写目标文件。
 - 当前角色的 `tasks` / `status` / `game_profession` 被展开到运行态 `cfg`。
-- 全局任务排序覆盖层 `task_ordering` 存在 `data/config.json`，当前保存用户拖拽得到的可嵌套总顺序 `items`；`user_order` 是展平后的兼容投影。它不写入账号 JSON，也不改变 `cfg["tasks"]` 的树形目录。
+- 全局任务排序覆盖层 `task_ordering` 存在 `data/config.json`，当前保存用户拖拽得到的可嵌套总顺序 `items`，**以任务 `id` 为键**；`user_order` 是展平后的兼容投影。它不写入账号 JSON，也不改变 `cfg["tasks"]`（后者同样以 `id` 为键的平表）。
 - 写 JSON 使用同目录临时文件加 `os.replace()`。
 - `WebUILifecycleService` 负责配置副作用顺序：修改内存、保存、按场景选择配置同步/轻量 reload/完整 reload、刷新 order map、唤醒调度、递增 `config_version`。新增账号完成写入和切换后，投影刷新失败会沿 API 返回错误，不再把不完整生命周期上报为成功。
 
@@ -140,7 +140,7 @@ WebUI reload 分三类：
 
 自定义任务导入失败会记录到公开配置的 `custom_task_load_errors`。本轮自定义任务存在导入错误时，任务加载会跳过 stale 自定义任务配置清理和本轮 `cfg.save_config()`，避免把临时坏脚本误判为已删除任务并持久化清空用户配置。
 
-stale 叶子清理还要求注册表非空。空注册表表示本轮注册没有落到读它的那份注册表上，而不是用户的配置树过期；在这种状态下清理会删掉整棵树。清理同时把 deprecated 任务计入"注册确实跑过"的证据，因为它们虽然不写配置叶子，却正是要清掉的那类残留。
+stale 条目清理还要求注册表非空。空注册表表示本轮注册没有落到读它的那份注册表上，而不是用户的配置过期；在这种状态下清理会删掉整张表。清理同时把 deprecated 任务计入"注册确实跑过"的证据，因为它们虽然不写配置条目，却正是要清掉的那类残留。反向的 `catalog.normalize_task_table()` 也有同样的守卫：非空输入绝不写出空表。
 
 保存任务、切换账号/角色、账号解锁、更新账号凭据和普通配置导入只保存或同步配置并刷新投影/order/config_version，不重建职业脚本和任务注册表。
 
@@ -161,11 +161,11 @@ stale 叶子清理还要求注册表非空。空注册表表示本轮注册没�
 
 | 保留 | 原因 |
 |------|------|
-| `tasks.task_registry` | 注册表单例。重新导入会造出第二个空注册表，而任务管理器、目录和清理逻辑仍读第一个——任务解析不到，清理还会把整棵树删掉。 |
-| `tasks.task_params` / `task_register` / `task_state` / `time` | 编写期基础设施，不携带每轮状态；`task_params` 按类身份识别 `TableParam` 默认值，替换它会让表格参数不再被识别。 |
+| `tasks.task_register` | 注册表单例。重新导入会造出第二个空注册表，而任务管理器、目录和清理逻辑仍读第一个——任务解析不到，清理还会把整张表删掉。 |
+| `tasks.task_params` / `task_state` / `time` | 编写期基础设施，不携带每轮状态；`task_params` 按类身份识别 `TableParam` 默认值，替换它会让表格参数不再被识别。 |
 | `ZmxyOL.*` | 拥有跨边界类型（`TableParam`、职业表）。重新导入会让类型身份分裂：任务签名里的表格默认值判不出类型，进而以原始对象写进 `cfg`。职业脚本由 `reload_character_modules()` 单独处理。 |
 
-`orchestrator/catalog.py` 的 `TASK_MODULES_KEPT_ON_RELOAD` 是保留清单，`is_reloadable_task_module()` 是唯一判据；`test/test_task_registry/test_task_reload_contract.py` 钉住这两侧。
+`orchestrator/catalog.py` 的 `TASK_MODULES_KEPT_ON_RELOAD` 是保留清单，`is_reloadable_task_module()` 是唯一判据；`test/test_task_register/test_task_reload_contract.py` 钉住这两侧。
 
 ## 性能边界
 

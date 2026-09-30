@@ -844,7 +844,7 @@ async def proxy_page(request: Request, url: str = Query(..., description="要代
 # 页面只要一个目标账号/角色和一串兑换码；其余（切账号、切角色、加载任务、
 # 起一轮直接执行）都是编排层的事。这里只做校验、冷却和解锁令牌的签发。
 
-GIFT_REDEEM_TASK_PATH = "一般任务/活动/兑换豪礼礼品兑换"
+GIFT_REDEEM_TASK_PATH = "其他任务/活动脚本/兑换豪礼礼品兑换"
 
 MAX_REDEEM_CODES_PER_REQUEST = 30
 
@@ -934,7 +934,7 @@ async def redeem_gift_codes(request: Request):
 
         orchestrator.tasks.switch_character(server, character, reason="redeem code select character")
 
-        from tasks.task_registry import task_registry
+        from tasks.task_register import task_registry
 
         if not task_registry.has_task(GIFT_REDEEM_TASK_PATH):
             orchestrator.tasks.reload_all(reason="reload redeem task")

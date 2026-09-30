@@ -12,8 +12,6 @@ from contextlib import contextmanager
 from typing import Any, List, Tuple
 from threading import Event, RLock
 
-import dpath
-from dpath.exceptions import PathNotFound
 from AutoScriptor.utils.cancel import TaskCancelled, bind_cancel_event
 from AutoScriptor.logging.logger import logger
 
@@ -21,7 +19,7 @@ from AutoScriptor.core.background import bg
 from AutoScriptor.errors import TaskRequireReTry
 from AutoScriptor.utils.cancel import cancellable_sleep as sleep
 from AutoScriptor.utils.app_config import cfg
-from tasks.task_registry import task_registry
+from tasks.task_register import task_registry
 from AutoScriptor.logging.logger import set_current_task
 from tasks.task_state import (
     clear_task_status,
@@ -31,15 +29,14 @@ from tasks.task_state import (
     set_current_task_path,
 )
 from AutoScriptor.core.runtime_context import runtime_ctx
+from AutoScriptor.core.control import clear_action_history
 from AutoScriptor.logging.tracer import set_run_capture
 from AutoScriptor.logging.task_video_recorder import new_task_video_recorder
 from orchestrator.model import (
-    CATEGORY_NEXT_DATE,
-    NextDate,
-    calc_next_exec_ts,
     clamp_to_sched_window,
     is_task_debug_mode,
-    parse_sched_window_hours,
+    next_exec_ts_for_spec,
+    resolve_reschedule,
 )
 
 
@@ -212,6 +209,7 @@ class TaskManager:
                 # 排障材料，只在这里决定，控制层无权猜。判据是任务注册时的
                 # debug_mode，与任务在哪个目录无关。
                 set_run_capture(debug_run)
+                clear_action_history()
                 task_video = new_task_video_recorder(task, debug_run)
                 fn(**kwargs)
                 if self._task_progress_incomplete(task):
@@ -297,10 +295,21 @@ class TaskManager:
 
     # ── 任务准备 ──
 
+    @staticmethod
+    def _task_entry(task_path: str) -> dict | None:
+        """该任务的用户配置条目；未注册或没有配置时为 None。
+
+        ``cfg["tasks"]`` 以 id 为键，所以这里做一次路径到身份的换算，调用方继续用显示路径。
+        """
+        task_data = cfg["tasks"].get(task_registry.id_of(task_path))
+        return task_data if isinstance(task_data, dict) else None
+
     def _prepare_task(self, task: str, *, param_override: dict[str, Any] | None = None):
         """读取任务函数和参数快照（锁内）。"""
         with self._cfg_lock:
-            task_data = dpath.get(cfg["tasks"], task)
+            task_data = self._task_entry(task)
+            if task_data is None:
+                raise KeyError(f"任务没有配置条目: {task}")
             logger.info(f"▶️  正在执行: {task}")
             fn = task_registry.get_fn(task)
             if fn is None:
@@ -336,11 +345,8 @@ class TaskManager:
 
     def _clear_human_takeover_state(self, task: str) -> None:
         """任务成功或用户重新激活后，清掉人工接管冻结标记。"""
-        try:
-            task_data = dpath.get(cfg["tasks"], task)
-        except PathNotFound:
-            return
-        if not isinstance(task_data, dict):
+        task_data = self._task_entry(task)
+        if task_data is None:
             return
         for key in ("human_takeover", "human_takeover_error", "human_takeover_at"):
             task_data.pop(key, None)
@@ -367,42 +373,37 @@ class TaskManager:
         人工接管不是普通异常：WebUI 显示红色未完成，调度器会等到
         next_exec_time 到期后自动重试；任务后续成功会清除该标记。
         """
-        task_data = dpath.get(cfg["tasks"], task)
+        task_data = self._task_entry(task)
+        if task_data is None:
+            raise KeyError(f"任务没有配置条目: {task}")
         task_data["human_takeover"] = True
         task_data["human_takeover_error"] = _human_takeover_message(exc)
         task_data["human_takeover_at"] = datetime.datetime.now().timestamp()
         self._update_next_exec_time(task)
 
-    def _update_next_exec_time(self, task: str, next_date: NextDate = None, offset_hours: int = 0):
-        """更新任务的 next_exec_time / on 状态。"""
+    def _update_next_exec_time(self, task: str):
+        """执行成功后写入下次执行时间；一次性任务直接关闭。
+
+        调度规则来自任务的 ``reschedule``:用户覆盖优先，其次作者声明，都没有就是一次性。
+        窗口约束在这里夹一次；星期约束留给到期判定，因为它还要处理"到点了但不在允许日"
+        这种推迟，而不是只在执行后算一次。
+        """
         now = datetime.datetime.now()
-        task_data = dpath.get(cfg["tasks"], task)
+        task_data = self._task_entry(task)
+        if task_data is None:
+            raise KeyError(f"任务没有配置条目: {task}")
 
-        # 优先级：显式参数 > 任务自定义 offset > 类别规则
-        if next_date or offset_hours:
-            ts = calc_next_exec_ts(now, next_date, offset_hours)
-        elif (custom := task_data.get("next_exec_offset_hours")) is not None:
-            ts = (now + datetime.timedelta(hours=int(custom))).timestamp()
+        spec = resolve_reschedule(task, task_data)
+        ts = next_exec_ts_for_spec(now, spec)
+        if ts is None:
+            task_data["on"] = False   # 一次性任务执行完就关闭
         else:
-            ts = self._calc_category_ts(task, now)
-
-        if ts is not None:
-            sw = parse_sched_window_hours(task_data)
-            if sw is not None:
-                ts = clamp_to_sched_window(ts, sw[0], sw[1])
-            dpath.set(cfg["tasks"], task + "/next_exec_time", ts)
+            if spec["window"] is not None:
+                ts = clamp_to_sched_window(ts, *spec["window"])
+            task_data["next_exec_time"] = ts
             human = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M')
             logger.info(f"    - 下次执行: {human}")
         cfg.save_config()
-
-    def _calc_category_ts(self, task: str, now: datetime.datetime) -> float | None:
-        """根据任务类别前缀计算下次执行时间。"""
-        for prefix, next_date in CATEGORY_NEXT_DATE.items():
-            if task.startswith(prefix):
-                return calc_next_exec_ts(now, next_date)
-        if task.startswith("一般任务"):
-            dpath.set(cfg["tasks"], task + "/on", False)
-        return None
 
     # ── 错误恢复 ──
 

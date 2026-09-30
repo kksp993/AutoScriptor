@@ -1,8 +1,4 @@
-"""Notification channels: the onepush YAML sink and the QQ / OneBot sink.
-
-One module because the settings page configures "where results get sent" as a
-whole; the two channels differ in transport, not in what the caller wants.
-"""
+"""Notification channel: the QQ / OneBot sink for per-character run results."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
@@ -12,41 +8,11 @@ from backend.core.qq_bot import local_installation_status, local_notification_se
 from backend.webui.api_context import guard_runtime_idle
 from backend.webui.api_response import api_error, api_ok
 from orchestrator import orchestrator
-from orchestrator.delivery import CharacterReport, handle_notify, qq_notifier
+from orchestrator.delivery import CharacterReport, qq_notifier
 
 
 router = APIRouter(tags=["notifications"])
 
-
-# ── 通用推送（onepush YAML）──
-
-
-@router.post("/api/notify/test")
-async def notify_test(request: Request):
-    data = await request.json()
-    config_yaml = data.get("config_yaml", "") if isinstance(data, dict) else ""
-    delivered = await run_in_threadpool(
-        handle_notify, config_yaml,
-        title="AutoScriptor 测试",
-        content="通知推送测试成功",
-    )
-    if not delivered:
-        return api_error(502, "推送未成功，请检查 provider 配置", code="notify_delivery_failed")
-    return api_ok(message="推送已发送")
-
-
-@router.post("/api/notify/save")
-async def notify_save(request: Request):
-    busy_response = guard_runtime_idle("save notify settings")
-    if busy_response is not None:
-        return busy_response
-    data = await request.json()
-    version = await run_in_threadpool(
-        orchestrator.tasks.save_notify_settings,
-        data.get("enabled", False),
-        data.get("config_yaml", "provider: null"),
-    )
-    return api_ok(status="ok", config_version=version)
 
 
 # ── QQ / OneBot ──

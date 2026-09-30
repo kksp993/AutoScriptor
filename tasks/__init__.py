@@ -24,8 +24,9 @@ from tasks.battle_task_params import (
     DEFAULT_JJC_BATTLE_FLOW as DEFAULT_JJC_BATTLE_FLOW,
     get_battle_profile as get_battle_profile,
 )
+# 注册入口和注册表同出一处：表就是 task_register 里的那一个实例。
 from tasks.task_register import register_task as register_task
-from tasks.task_registry import task_registry as task_registry
+from tasks.task_register import task_registry as task_registry
 from tasks.task_state import (
     clear_task_status as clear_task_status,
     get_task_status as get_task_status,

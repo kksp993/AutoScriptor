@@ -1,6 +1,7 @@
 """Task error archive helpers for source runtime."""
 from __future__ import annotations
 
+import os
 import sys
 import traceback
 from datetime import datetime
@@ -17,6 +18,7 @@ _DEFAULT_CONTEXT_CONFIG = {
     "bg_active_callbacks": True,
     "bg_signals": True,
     "bg_event_history": True,
+    "action_history": True,
     "recognition_trace": True,
     "python_version": True,
     "timestamp": True,
@@ -148,6 +150,17 @@ def collect_default_context(config: Optional[Dict[str, bool]] = None) -> Dict[st
         except Exception as exc:
             context["bg_event_history"] = f"failed: {exc}"
 
+    if merged.get("action_history"):
+        try:
+            from AutoScriptor.core.control import get_action_history
+
+            history = get_action_history()
+            context["action_history"] = (
+                "\n    " + "\n    ".join(history) if history else "(empty)"
+            )
+        except Exception as exc:
+            context["action_history"] = f"failed: {exc}"
+
     if merged.get("recognition_trace"):
         try:
             from AutoScriptor.logging.recognition_trace import (
@@ -194,17 +207,30 @@ def _current_log_file() -> Optional[Path]:
     return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
-def _recent_log_lines(limit: int = 100) -> list[str]:
+def _recent_log_lines(limit: int = 100) -> tuple[Optional[Path], list[str]]:
+    """活动日志文件的尾部若干行，连同文件名一起返回。
+
+    从文件尾读固定窗口，而不是 ``readlines()`` 全读：日志只增不减，
+    归档不该为了 100 行把几 MB 拉进内存。
+    """
+    log_file = _current_log_file()
+    if not log_file:
+        return None, []
     try:
-        log_file = _current_log_file()
-        if not log_file:
-            return []
-        with log_file.open("r", encoding="utf-8", errors="ignore") as handle:
-            lines = handle.readlines()
-        return lines[-limit:]
+        with log_file.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            total_bytes = handle.tell()
+            window = min(total_bytes, max(limit * 400, 64 * 1024))
+            handle.seek(total_bytes - window)
+            data = handle.read()
     except (OSError, ValueError) as exc:
         logger.warning("read recent log failed: %s", exc)
-        return []
+        return log_file, []
+
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    if window < total_bytes and lines:
+        lines = lines[1:]   # 首行可能被截断，丢掉
+    return log_file, lines[-limit:]
 
 
 def _write_error_log(
@@ -214,7 +240,7 @@ def _write_error_log(
     exc: Exception,
     extra_context: Optional[Dict[str, Any]],
 ) -> None:
-    recent_lines = _recent_log_lines()
+    log_path, recent_lines = _recent_log_lines()
     context = collect_default_context()
     if extra_context:
         context.update(extra_context)
@@ -222,9 +248,11 @@ def _write_error_log(
     with (archive_dir / "error.log").open("w", encoding="utf-8") as handle:
         if recent_lines:
             handle.write("=" * 80 + "\n")
-            handle.write("Recent log lines:\n")
+            # 写清来源和条数，省得再满仓库找日志、也避免把节选当全量。
+            handle.write(f"Recent log lines (tail {len(recent_lines)} of {log_path}):\n")
             handle.write("=" * 80 + "\n")
-            handle.writelines(recent_lines)
+            for line in recent_lines:
+                handle.write(line if line.endswith("\n") else line + "\n")
             handle.write("\n")
 
         handle.write("=" * 80 + "\n")

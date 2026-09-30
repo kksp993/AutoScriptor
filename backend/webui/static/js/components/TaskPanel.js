@@ -718,7 +718,6 @@ const TaskPanel = {
                   <div class="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-400 min-w-0">
                     <span class="truncate">{{ taskStatusLabel(match.row.item) }}</span>
                     <span v-if="match.row.item.custom" class="task-custom-tag">自定义</span>
-                    <span v-if="match.row.item.beta" class="task-beta-tag">Beta</span>
                   </div>
                 </button>
               </div>
@@ -804,7 +803,6 @@ const TaskPanel = {
                   {{ node.row.key }}
                 </button>
                 <span v-if="node.row.item.custom" class="task-custom-tag">自定义</span>
-                <span v-if="node.row.item.beta" class="task-beta-tag">Beta</span>
                 <span v-for="chip in formatParamChips(node.row.item.params)" :key="node.row.path + ':' + chip"
                       class="inline-flex items-center px-2 py-0.5 rounded bg-gray-200 text-gray-600 text-xs whitespace-nowrap shrink-0">{{ chip }}</span>
               </div>

@@ -18,6 +18,7 @@ import os
 import textwrap
 import traceback
 import types
+from pathlib import Path
 from threading import Lock
 from typing import Callable
 
@@ -531,23 +532,22 @@ def _decorator_ref_is_register_task(expr: ast.expr) -> bool:
     return False
 
 
-def _register_task_decorator_info(tree: ast.AST) -> tuple[bool, bool]:
-    has_register_task = False
-    missing_path_cn = False
+def _register_task_decorator_info(tree: ast.AST) -> bool:
+    """Whether the snippet already registers a task itself.
+
+    路径不写在装饰器里：自定义任务的显示路径由文件在 ``custom_task/`` 下的位置决定，
+    所以这里只需要判断「是不是完整任务文件」，不再检查 ``path_cn``。
+    """
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         for decorator in node.decorator_list:
             if isinstance(decorator, ast.Call):
-                if not _decorator_ref_is_register_task(decorator.func):
-                    continue
-                has_register_task = True
-                if not any(keyword.arg == "path_cn" for keyword in decorator.keywords):
-                    missing_path_cn = True
+                if _decorator_ref_is_register_task(decorator.func):
+                    return True
             elif _decorator_ref_is_register_task(decorator):
-                has_register_task = True
-                missing_path_cn = True
-    return has_register_task, missing_path_cn
+                return True
+    return False
 
 
 def _editor_enum_class_source(class_name: str, enum_options: list[str]) -> str:
@@ -604,7 +604,6 @@ def _build_wrapped_custom_task_source(name: str, code: str, metadata: dict | Non
     task_doc = str(metadata.get("task_doc") or metadata.get("task_docs") or "").strip()
     params = _normalize_editor_param_specs(metadata.get("params"))
     final_task_doc = _editor_task_doc_with_param_descriptions(task_doc, params)
-    register_kwargs = dict(path_cn=task_path, description=description, task_doc=final_task_doc)
 
     signature, enum_sources = _editor_task_signature(params)
     body = textwrap.indent(code.rstrip() or "pass", "    ")
@@ -617,14 +616,16 @@ def _build_wrapped_custom_task_source(name: str, code: str, metadata: dict | Non
     ]
     if enum_sources:
         imports.insert(0, "import enum")
-    decorator = (
-        "@register_task(\n"
-        f"    path_cn={register_kwargs['path_cn']!r},\n"
-        f"    description={register_kwargs['description']!r},\n"
-        f"    task_doc={register_kwargs['task_doc']!r},\n"
-        ")"
-    )
-    sections = ["\n".join(imports), *enum_sources, f"{decorator}\n{signature}{body}"]
+    # 装饰器里没有路径：自定义任务的显示路径由文件在 custom_task/ 下的位置决定。
+    decorator = "@register_task(\n" f"    description={description!r},\n" ")"
+    # 长说明回到函数 docstring，也就是它本该在的地方。
+    docstring = ""
+    if final_task_doc:
+        escaped = final_task_doc.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
+        if escaped.endswith('"'):
+            escaped += " "
+        docstring = f'    """{escaped}"""\n'
+    sections = ["\n".join(imports), *enum_sources, f"{decorator}\n{signature}{docstring}{body}"]
     return "\n\n".join(sections).rstrip() + "\n", task_path
 
 
@@ -635,10 +636,8 @@ def _prepare_editor_custom_task_source(name: str, code: str, metadata: dict | No
     if len(code) > _MAX_SNIPPET_LEN:
         raise ValueError(f"代码过长（上限 {_MAX_SNIPPET_LEN} 字符）")
     tree = ast.parse(code)
-    has_register_task, missing_path_cn = _register_task_decorator_info(tree)
-    if has_register_task:
-        if missing_path_cn:
-            raise ValueError('data/custom_task 下的 @register_task 必须显式传入 path_cn="自定义任务/..."')
+    if _register_task_decorator_info(tree):
+        # 完整任务文件自己负责声明内容；路径仍然由它被写到哪里决定。
         return code.rstrip() + "\n", False, None
     source, task_path = _build_wrapped_custom_task_source(name, code, metadata)
     ast.parse(source)
@@ -1526,8 +1525,18 @@ async def editor_save_custom_task(request: Request):
         root = get_custom_task_dir()
         root.mkdir(parents=True, exist_ok=True)
         root_resolved = root.resolve()
-        target_path = (root / filename).resolve()
-        if target_path.parent != root_resolved:
+        # 显示路径决定文件位置：自定义任务/<目录...>/<名字>.py。
+        # 位置就是身份，所以「脚本名称」既是列表里的名字，也是它落在哪。
+        script_path = task_path or f"自定义任务/{os.path.splitext(filename)[0]}"
+        path_parts = [part for part in script_path.split("/") if part][1:]
+        if not path_parts:
+            return api_error(400, "脚本名称不能为空", code="invalid_filename")
+        target_directory = (root / Path(*path_parts[:-1])).resolve() if len(path_parts) > 1 else root_resolved
+        if target_directory != root_resolved and root_resolved not in target_directory.parents:
+            return api_error(400, "脚本路径非法", code="invalid_filename")
+        target_directory.mkdir(parents=True, exist_ok=True)
+        target_path = (target_directory / f"{path_parts[-1]}.py").resolve()
+        if target_path.parent != target_directory:
             return api_error(400, "脚本文件名非法", code="invalid_filename")
         compile(source, str(target_path), "exec")
 

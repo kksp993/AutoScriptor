@@ -4,15 +4,13 @@
 the user's ``data/custom_task/``) into ``cfg["tasks"]`` and the runtime
 ``TaskRegistry``. It is the only place that knows the on-disk layout of tasks.
 
-The result is one Chinese-named tree, and ``cfg["tasks"]`` mirrors the registered
-task set: registration writes each leaf (carrying a renamed task's saved config
-onto its current path itself, see ``tasks.task_register``), the prune pass drops
-leaves no task claims, and sorting puts branches in registration order. There is
-no separate rename pass and no key translation pass -- a config path is only ever
-what registration declared it to be.
+``cfg["tasks"]`` is a flat table keyed by task id and mirrors the registered task
+set: registration writes each entry, the prune pass drops entries no task claims.
+The Chinese tree the WebUI shows is a projection built from the display paths, so
+storage never depends on it.
 
-Distinct from ``tasks/task_registry.py``: that one stores runtime metadata for
-already-imported tasks, this one decides which tasks get imported at all.
+Registration (``tasks/task_register.py``) stores runtime metadata for
+already-imported tasks; this module decides which tasks get imported at all.
 """
 from __future__ import annotations
 
@@ -25,7 +23,7 @@ import sys
 from AutoScriptor.logging.logger import logger
 from AutoScriptor.utils.app_config import cfg
 from ZmxyOL.accounts import get_custom_task_dir
-from tasks.task_registry import task_registry
+from tasks.task_register import LEGACY_TASK_FIELDS, task_registry
 
 from orchestrator.model import TaskTree
 
@@ -47,14 +45,13 @@ _loaded = False
 # merely *supports* those scripts has to survive, because re-importing it would
 # replace objects other modules already hold:
 #
-# - ``task_registry`` owns the process-wide registry singleton. A second import
+# - ``task_register`` owns the process-wide registry singleton. A second import
 #   builds a second, empty registry while the task manager and this module keep
 #   reading the first one -- no task resolves and the prune pass sees nothing.
-# - ``task_params`` / ``task_register`` / ``task_state`` / ``time`` are the
-#   authoring plumbing. They hold no per-load state, and
-#   ``task_params`` compares parameter defaults against ``TableParam`` by class
-#   identity, so replacing it (or the game module that defines the class) makes
-#   every table default unrecognizable.
+# - ``task_params`` / ``task_state`` / ``time`` are the authoring plumbing. They
+#   hold no per-load state, and ``task_params`` compares parameter defaults
+#   against ``TableParam`` by class identity, so replacing it (or the game module
+#   that defines the class) makes every table default unrecognizable.
 #
 # ``tasks`` itself and ``tasks.battle_task_params`` are deliberately absent: the
 # package init re-exports the flow enum, and that enum aggregates ``@flow``
@@ -63,7 +60,6 @@ _loaded = False
 TASK_MODULES_KEPT_ON_RELOAD = frozenset({
     "tasks.task_params",
     "tasks.task_register",
-    "tasks.task_registry",
     "tasks.task_state",
     "tasks.time",
 })
@@ -78,65 +74,44 @@ def is_reloadable_task_module(module_name: str) -> bool:
     return module_name.startswith("tasks.") and module_name not in TASK_MODULES_KEPT_ON_RELOAD
 
 
-# ── Discovery and import order ──
+# ── Config shape normalization ──
 
-def get_min_order(node, path_prefix: str = ""):
-    """Smallest registration order found below a task tree node."""
-    if isinstance(node, dict):
-        if "on" in node:
-            return task_registry.get_order(path_prefix)
-        orders = []
-        for key, value in node.items():
-            if isinstance(value, dict):
-                child_path = f"{path_prefix}/{key}" if path_prefix else key
-                orders.append(get_min_order(value, child_path))
-        return min(orders) if orders else float("inf")
-    return float("inf")
-
-
-def sort_tasks(node, path_prefix: str = "") -> None:
-    """Reorder a task config tree to match runtime registration order."""
-    for key, child in list(node.items()):
-        if isinstance(child, dict) and "on" not in child:
-            child_path = f"{path_prefix}/{key}" if path_prefix else key
-            sort_tasks(child, child_path)
-    sorted_items = sorted(
-        node.items(),
-        key=lambda item: get_min_order(
-            item[1],
-            f"{path_prefix}/{item[0]}" if path_prefix else item[0],
-        ),
+def _looks_nested(task_table: dict) -> bool:
+    """True when the table is still the old nested tree rather than a flat one."""
+    if not task_table:
+        return False
+    return any(
+        isinstance(value, dict) and "on" not in value
+        for value in task_table.values()
     )
-    node.clear()
-    node.update(sorted_items)
 
 
-def get_custom_order_key(path: pathlib.Path):
-    """Nested sort key built from the ``_order.txt`` seeds along the path."""
-    try:
-        relative_parts = path.relative_to(PACKAGE_PATH).parts
-    except ValueError:
-        return (float("inf"), str(path))
+def normalize_task_table() -> bool:
+    """Flatten a nested ``cfg["tasks"]`` into the flat, id-keyed table.
 
-    order_key_list = []
-    current_lookup_dir = PACKAGE_PATH
+    The old shape nested each leaf under its path segments; the flat shape keys
+    each entry directly by task id. The leaf bodies and the strings they are
+    keyed by are unchanged -- ``每日任务/村庄/宠物培养`` is the key either way --
+    so this rewrites the container only and moves no user value.
 
-    for index, part_name in enumerate(relative_parts):
-        order_file = current_lookup_dir / "_order.txt"
-        order_index = float("inf")
-        is_last_part = index == len(relative_parts) - 1
-        name_to_check = path.stem if is_last_part and path.is_file() else part_name
+    Returns True when it rewrote the table. Refuses to write an empty result for
+    a non-empty input: an unclassifiable tree must not silently become "no tasks".
+    """
+    task_table = cfg["tasks"]
+    if not isinstance(task_table, dict) or not _looks_nested(task_table):
+        return False
+    flat: dict[str, dict] = {}
+    for path_parts, leaf in TaskTree.collect_all_leaves(task_table):
+        flat["/".join(path_parts)] = leaf
+    if task_table and not flat:
+        logger.error("cfg['tasks'] 既不是平表也提不出任务叶节点，保留原样以免清空用户配置")
+        return False
+    cfg["tasks"] = flat
+    logger.info("任务配置已从嵌套树归一为平表: %d 个任务", len(flat))
+    return True
 
-        if order_file.is_file():
-            with open(order_file, "r", encoding="utf-8") as handle:
-                order_list = [line.strip() for line in handle.readlines()]
-            if name_to_check in order_list:
-                order_index = order_list.index(name_to_check)
 
-        order_key_list.append((order_index, name_to_check))
-        current_lookup_dir = current_lookup_dir / part_name
-
-    return tuple(order_key_list)
+# ── Discovery and import order ──
 
 
 def gather_py_files() -> list[pathlib.Path]:
@@ -145,9 +120,16 @@ def gather_py_files() -> list[pathlib.Path]:
 
 
 def sort_py_files(py_files: list[pathlib.Path]) -> list[pathlib.Path]:
-    """Sort sources by their ``_order.txt`` seed."""
-    py_files.sort(key=get_custom_order_key)
-    return py_files
+    """Deterministic import order, derived from each source's path under ``tasks/``.
+
+    Import order is the default task order: registration numbers tasks in the
+    order they are imported, and the WebUI tree and execution order fall back to
+    that number. Changing position is the user's job, through ``task_ordering``.
+    """
+    return sorted(
+        py_files,
+        key=lambda path: path.relative_to(PACKAGE_PATH).with_suffix("").parts,
+    )
 
 
 def import_modules(py_files) -> None:
@@ -202,42 +184,163 @@ def load_custom_task_modules() -> list[str]:
 
 
 def prune_stale_tasks() -> bool:
-    """Drop config leaves whose task no longer registers that path.
+    """Drop config entries whose id no registered task claims.
 
-    ``cfg["tasks"]`` mirrors the registered task set -- registration writes the
-    Chinese-named tree and moves any renamed task's saved config onto its current
-    path itself -- so a leaf with no task behind it is data the user cannot act
-    on. Skipped when custom-task imports failed: an import error usually means
-    the task exists but could not load, and deleting its config would lose user
-    state.
+    ``cfg["tasks"]`` mirrors the registered task set, so an entry with no task
+    behind it is data the user cannot act on. Skipped when custom-task imports
+    failed: an import error usually means the task exists but could not load, and
+    deleting its config would lose user state.
 
     Also skipped when the registry came back empty. An empty registry never
-    means "the user's tree is stale"; it means registration did not run against
-    the registry this function reads. Pruning there would delete every leaf --
-    the whole saved tree -- so the guard is the difference between a bug and
+    means "the user's tasks are stale"; it means registration did not run against
+    the registry this function reads. Pruning there would delete every entry --
+    the whole saved table -- so the guard is the difference between a bug and
     data loss.
     """
     if _last_custom_load_errors:
         logger.warning("custom_task: 本轮导入存在错误，跳过 stale 配置清理以保护用户配置")
         return False
     # include_deprecated: a task that only registers as deprecated still proves
-    # registration ran, and its config leaf is exactly what the prune should drop.
+    # registration ran, and its config entry is exactly what the prune should drop.
     if not task_registry.all_paths(include_deprecated=True):
         logger.error("任务注册表为空，跳过 stale 配置清理以保护用户配置")
         return False
-    tasks = cfg["tasks"]
-    if not isinstance(tasks, dict):
+    task_table = cfg["tasks"]
+    if not isinstance(task_table, dict):
         return False
-    TaskTree.prune_leaves_not_in_registry(tasks, "", task_registry.has_task)
-    return True
+    claimed = set(task_registry.all_ids())
+    stale = [task_id for task_id in task_table if task_id not in claimed]
+    if stale:
+        for task_id in stale:
+            del task_table[task_id]
+        logger.info("已清理 %d 个无任务认领的任务配置: %s", len(stale), stale)
+    return bool(stale)
+
+
+# ── Identity reconcile ──
+
+def ensure_task_entries(task_table: dict) -> list[str]:
+    """把表里缺的任务条目补齐，不重载任务模块。
+
+    注册只在「那个角色是当前角色」时写那张表，所以刚新增的账号、刚建的角色、或者手改过
+    账号文件之后，表里可能还没有这些条目——WebUI 就会显示成空任务树，看起来像「必须重启
+    才能加载」。这里就地把缺的补上，默认值与首次注册一致：关闭、下次执行时间为 0、
+    参数取签名默认值。
+
+    只动传入的表，不读全局 cfg，这样调用方给哪张表就补哪张表。返回补上的任务名。
+    """
+    from tasks.task_params import hydrate_params
+
+    if not isinstance(task_table, dict):
+        return []
+    added: list[str] = []
+    for path, entry in task_registry.items():
+        task_id = str(entry.get("id") or "").strip() or path.rsplit("/", 1)[-1]
+        existing = task_table.get(task_id)
+        if isinstance(existing, dict) and "on" in existing:
+            continue
+        task_table[task_id] = {
+            "on": False,
+            "next_exec_time": 0,
+            "params": hydrate_params(task_registry.get_param_specs(path), {}),
+        }
+        added.append(task_id)
+    if added:
+        logger.info("已为当前角色补齐 %d 个任务条目: %s", len(added), added[:5])
+    return added
+
+def _retarget_stored_ordering(moved: dict[str, str]) -> bool:
+    """把存盘排序里的旧键换成任务名键。"""
+    overlay = cfg._config.get("task_ordering")
+    if not isinstance(overlay, dict) or not moved:
+        return False
+    changed = False
+
+    def rewrite(items) -> None:
+        nonlocal changed
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            if isinstance(item.get("items"), list):
+                rewrite(item["items"])
+                continue
+            key = item.get("id")
+            if isinstance(key, str) and key in moved:
+                item["id"] = moved[key]
+                changed = True
+
+    if isinstance(overlay.get("items"), list):
+        rewrite(overlay["items"])
+    user_order = overlay.get("user_order")
+    if isinstance(user_order, list):
+        rewritten = [moved.get(value, value) if isinstance(value, str) else value for value in user_order]
+        if rewritten != user_order:
+            overlay["user_order"] = rewritten
+            changed = True
+    return changed
+
+
+def reconcile_task_identities() -> bool:
+    """把以显示路径为键的旧配置并到任务名键上。
+
+    身份是任务名，位置是它现在待在哪个目录。任务换目录之后，旧条目仍挂在旧路径上，
+    而注册已经按任务名写下了默认条目；这里把旧的用户数据盖回去，键归到任务名，
+    拖拽顺序一起跟过去。任务再移动就不需要任何手工处理。
+
+    候选旧键必须同时满足：没有任何任务认领它、是路径形态（含 ``/``）、末段等于任务名。
+    候选不唯一时不动它并报警——宁可让用户看见，也不猜哪一条才是这个任务的。
+    deprecated 任务不参与，它们本来就不写配置。
+    """
+    from tasks.task_params import hydrate_params
+
+    task_table = cfg["tasks"]
+    if not isinstance(task_table, dict):
+        return False
+    claimed = set(task_registry.all_ids())
+    adopted: dict[str, str] = {}
+
+    for path, entry in task_registry.items():
+        task_id = str(entry.get("id") or "").strip()
+        if not task_id or task_id == path:
+            continue
+        candidates = [
+            key
+            for key in task_table
+            if key not in claimed and "/" in key and key.rsplit("/", 1)[-1] == task_id
+        ]
+        if len(candidates) > 1:
+            logger.warning("任务 %s 的旧配置有多个候选键，跳过以便人工确认: %s", task_id, candidates)
+            continue
+        if not candidates:
+            continue
+
+        old_entry = task_table.pop(candidates[0])
+        target = task_table.setdefault(task_id, {})
+        for key, value in (old_entry or {}).items():
+            if key in LEGACY_TASK_FIELDS:
+                continue
+            target[key] = value
+        # 参数按当前签名重新水合：旧值保留，新增的默认行、列补上。
+        saved_params = target.get("params")
+        target["params"] = hydrate_params(
+            task_registry.get_param_specs(path),
+            saved_params if isinstance(saved_params, dict) else {},
+        )
+        adopted[candidates[0]] = task_id
+
+    ordering_changed = _retarget_stored_ordering(adopted)
+    if adopted:
+        logger.info("任务配置已按任务名归一: %s", adopted)
+    return bool(adopted) or ordering_changed
 
 
 # ── Startup assembly ──
 #
-# One pass in this order: import (registration writes the tree) -> prune (drop
-# leaves nothing claims) -> sort (registration order). Guarded on purpose: running
-# it twice would re-import every task module and re-sort an already-sorted config,
-# so callers go through these two functions rather than the raw helpers above.
+# One pass in this order: normalize (older nested shape -> flat table) -> import
+# (registration writes entries) -> reconcile (path keys -> task-name keys) ->
+# prune (drop entries nothing claims). Guarded on purpose: running it twice would
+# re-import every task module, so callers go through these two functions rather
+# than the raw helpers above.
 
 def load_tasks() -> None:
     """Discover, import and assemble every task module under ``tasks/``."""
@@ -245,11 +348,14 @@ def load_tasks() -> None:
     if _loaded:
         return
     _loaded = True
+    # Registration writes straight into the flat table, so the shape has to be
+    # right before the first decorator runs.
+    normalize_task_table()
     sorted_files = sort_py_files(gather_py_files())
     import_modules(sorted_files)
     load_custom_task_modules()
+    reconcile_task_identities()
     prune_stale_tasks()
-    sort_tasks(cfg["tasks"])
     if has_custom_task_load_errors():
         logger.warning("任务加载存在自定义任务导入错误，跳过本轮配置保存")
         return

@@ -1,7 +1,7 @@
 """通用配置（data/config.json）读写层。
 
 只负责通用配置段：app / ocr / emulator / scheduler / deploy / notify / update /
-remote_access / task_ordering / accounts / news，以及同目录临时文件 + 原子替换的持久化。
+task_ordering / accounts / news，以及同目录临时文件 + 原子替换的持久化。
 
 ``_GLOBAL_KEYS`` 决定哪些顶层段会被写回，因此模板里存在的段必须同时登记在这里，
 否则用户设置会在下一次保存时被静默丢弃。
@@ -27,8 +27,13 @@ from AutoScriptor.utils.json_io import write_json_atomic
 
 _GLOBAL_KEYS = (
     "app", "ocr", "emulator", "scheduler", "deploy", "notify",
-    "update", "remote_access", "task_ordering", "accounts", "news",
+    "update", "task_ordering", "accounts", "news",
 )
+
+# 曾经属于全局配置、现在已经没有功能的段。加载时直接丢弃：保存路径只写
+# ``_GLOBAL_KEYS``，所以文件里不会再有它们，但旧 config.json 会一直带着，
+# 留在内存里只会让 WebUI 公开配置多出一个空壳段。
+_RETIRED_GLOBAL_KEYS = ("remote_access",)
 
 
 # The atomic writer lives in a module with no import-time side effects, so a
@@ -208,6 +213,8 @@ class ConfigManager:
             with open(self.config_path, "r", encoding="utf-8-sig") as f:
                 self.global_cfg = json.load(f)
             self._merge_global_defaults()
+        for retired_key in _RETIRED_GLOBAL_KEYS:
+            self.global_cfg.pop(retired_key, None)
         self.global_cfg.setdefault("tasks", {})
         self.global_cfg.setdefault("status", {})
         self.global_cfg.setdefault("game", {})

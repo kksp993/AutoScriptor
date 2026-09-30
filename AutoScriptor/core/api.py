@@ -255,6 +255,21 @@ def _validate_timeout(timeout, caller: str) -> None:
         )
 
 
+def _validate_target(target, caller: str) -> None:
+    """裸 Box 不是识别目标：Box 是 namedtuple，会被当成多目标元组逐元素解析。
+
+    真实事故：任务里的 ``portrait()`` 返回裸 Box，``click(portrait(Box(...)))``
+    直到识别阶段才报 ``Unsupported target type: <class 'int'>``（第一个元素是坐标数字）。
+    在入口拦下，错误就直接出现在调用点。
+    """
+    if isinstance(target, Box):
+        raise TypeError(
+            f"{caller} 的 target 收到裸 Box({target})：Box 是 namedtuple，会被当成多目标"
+            "元组逐元素解析。要点击/识别一块区域请用 B(...) 包一层：B(Box(...)) 或"
+            " B(x, y, w, h)；只要文本或图片时用 T(...)/I(...)。"
+        )
+
+
 def _validate_swipe_duration(duration_s: float, caller: str) -> None:
     if isinstance(duration_s, bool) or not isinstance(duration_s, (int, float)):
         raise TypeError(
@@ -516,7 +531,11 @@ def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=No
         elif isinstance(target, BoxTarget):
             return target.box, target.box, target.color
         else:
-            raise ValueError(f"Unsupported target type: {type(target)}")
+            raise ValueError(
+                f"Unsupported target type: {type(target)}"
+                "；识别目标只能是 T()/I()/B() 的返回值（裸 Box 是 namedtuple，"
+                "会被当成多目标元组逐元素解析）"
+            )
 
     boxes: list[list[Box] | None] = [None] * len(target)
     frame_source = "injected" if screenshot is not None else "live"
@@ -574,6 +593,7 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
         assure_stable: 是否保证稳定,如果为True，则每次定位都会保证稳定，直到找到目标或超时
     """
     _validate_timeout(timeout, "locate")
+    _validate_target(target, "locate")
     check_cancel_raise()
     first_attempt = True
     _stable_retry = False
@@ -745,6 +765,7 @@ def click(
         # 点击直到条件满足
         click(T("确定"), until=lambda: ui_F(T("确定")))
     """
+    _validate_target(target, "click")
     check_cancel_raise()
     click_interval = 0 if interval is None else interval
     until_interval = 0.5 if interval is None else interval
@@ -1005,7 +1026,7 @@ def _normalize_replay_event(event):
 
     同时接受三种来源，让生成的任务常量与工具侧事件流共用同一个回放器：
     紧凑五元组 ``(t_ms, op, finger, nx, ny)``、dict（JSON 导出）、以及带同名
-    字段的对象（``scripts/mmor_to_fast_replay.py`` 的 ``Event``，其归一化坐标
+    字段的对象（外部 ``mumuinner`` 项目 ``mmor_to_fast_replay.py`` 的 ``Event``，其归一化坐标
     字段名为 ``x``/``y``）。``up`` 事件没有坐标，缺省按 0 处理。
     """
     if isinstance(event, dict):
@@ -1061,7 +1082,7 @@ def _validate_replay_finger(finger_id, op: str, index: int) -> int:
         raise ValueError(
             f"replay 事件 #{index} 的手指编号 {finger_id} 超出 IPC 支持范围 "
             f"[{REPLAY_MIN_FINGER_ID}, {REPLAY_MAX_FINGER_ID}]；录制槽位号需先"
-            f"重映射为手指编号（见 mmor_to_fast_replay.py 的 FingerPool）"
+            f"重映射为手指编号（见外部 mumuinner 项目 mmor_to_fast_replay.py 的 FingerPool）"
         )
     return finger_id
 
@@ -1106,7 +1127,7 @@ def replay(
     0.5s 时重新锚定并告警。IPC 交付本身约 0.2ms，所以事件间的时间差就是你
     给的时间差，不要为相邻事件再叠加人为 sleep 凑时序。
 
-    ``.mmor`` 的解析不属于核心：用 ``scripts/mmor_to_fast_replay.py`` 把录制
+    ``.mmor`` 的解析不属于本仓库：用外部 ``mumuinner`` 项目的 ``mmor_to_fast_replay.py`` 把录制
     转成事件流（含槽位→手指重映射），本函数只负责回放。
 
     Args:

@@ -52,7 +52,7 @@ WebUI 后端是 FastAPI；静态前端位于 `backend/webui/static/`，源码 El
 | ----------------------------------| -------------------------------------------------------------------------------------------------------|
 | `POST /api/config`　　　　　　　 | 保存 `app/emulator/ocr`，可包含 `scheduler`　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
 | `POST /api/config/sync`　　　　　| 要求 runtime idle；同步所有配置并刷新 order map/log level/config_version；不清 `bg`，不重载任务注册表 |
-| `POST /api/tasks`　　　　　　　　| 保存任务树，后端剥离运行时字段并刷新任务投影/order/config_version；不重载任务注册表　　　　　　　　　 |
+| `POST /api/tasks`　　　　　　　　| 保存任务树，后端按叶子 `id` 拼回平表、剥离运行时字段并刷新任务投影/order/config_version；不重载任务注册表 |
 | `POST /api/tasks/reload`　　　　 | 轻量 reload：要求 runtime idle，清 `bg`，刷新任务更新标记、任务投影、order map 和公开配置　　　　　　 |
 | `POST /api/tasks/reload-all`　　 | 完整 reload：要求 runtime idle，同步配置、重载职业脚本和任务注册表、刷新 UI map 缓存，并清 `bg`　　　 |
 | `GET /api/task-ordering`　　　　 | 读取全局任务总顺序投影：`overlay.items`、展平 `overlay.user_order`、`effective_order`、`order_map` 和诊断 |
@@ -60,29 +60,29 @@ WebUI 后端是 FastAPI；静态前端位于 `backend/webui/static/`，源码 El
 | `POST /api/task-ordering/layout` | 旧版图布局兼容 no-op；前端不再调用，不保存画布坐标，也不影响执行语义　　　　　　　　　　　　　　　　 |
 | `GET /api/config/export`　　　　 | 导出可迁移配置　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
 | `POST /api/config/import`　　　　| 导入允许的配置段，剥离 deploy 密码/证书等敏感字段　　　　　　　　　　　　　　　　　　　　　　　　　　 |
-| `GET/POST /api/deploy`　　　　　 | 读取/保存 deploy、notify、update、remote_access　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
+| `GET/POST /api/deploy`　　　　　 | 读取/保存 deploy 段：WebUI 访问密码、日志级别、主题等　　　　　　　　　　　　　　　　　　　　　　　　 |
 
 `POST /api/config` 保存时只会把空的、`YOUR_` 占位的或 `:0` 结尾的 `emulator.adb_addr` 规范化为 MuMu 默认地址：`127.0.0.1:16384 + index*32`；其他地址原样保留，因此局域网/远程 ADB 地址（如 `192.168.1.50:16416`、`localhost:5555`）不会被改写。设置页允许直接编辑该字段，并在前端校验 `主机:端口`（端口为 1-65535 的纯数字且不以 `0` 开头）；非法值只显示字段级错误并暂停自动保存，不发请求，避免写坏配置。保存失败必须返回标准 `api_error` JSON，并附带 `data_root/config_path/accounts_dir/current_account` 诊断字段；前端不能只显示“未知错误”。保存层只使用同目录临时文件加 `os.replace` 原子替换；`PermissionError/WinError 5` 等替换失败必须作为保存失败暴露出来，不再降级为直接覆写目标文件。
 
 设置页保存采用防抖自动保存（约 0.5 秒）：`filteredConfig` 深度 watcher 先按 `app/emulator/ocr/scheduler` 快照比对，并只在 `config_version` 未变化（即非服务端刷新）且快照与基线不同时才发出 `settings-change`。保存成功后服务端刷新只更新基线，不能再次触发保存，否则会形成保存回环。请求在途期间的改动由回调按快照差补发一次，保证界面与 `data/config.json` 收敛。执行中（runtime busy）字段禁用且暂停自动保存。
   
-保存任务时必须通过 `TaskTreeService.strip_runtime_fields()`，不能持久化 `fn/order/param_meta/param_keys/beta/custom/debug_mode/task_description/task_doc_flow/_due/progress/progress_display` 等运行时字段。
+保存任务时必须通过 `TaskTreeService.flatten_payload_tasks()`：它按每个叶子的 `id` 把 WebUI 树拼回 `cfg["tasks"]` 平表，并剥离投影字段。名单只有一份：`ZmxyOL.accounts.account_store.INJECTED_TASK_FIELDS`（`param_meta`、`param_keys`、`custom`、`debug_effective`、`reschedule_effective`、`task_description`、`task_doc_flow`、`fn`、`id`、`progress`、`progress_display`、`_due`）。读取方向由 `build_task_tree()` 负责，它按显示路径现拼树并给每个叶子写回 `id`。
 
-任务显示和执行顺序由全局 `task_ordering` 覆盖层控制，存放在 `data/config.json`，不写入账号 JSON，也不改变 `cfg["tasks"]` 的目录结构：
+任务显示和执行顺序由全局 `task_ordering` 覆盖层控制，存放在 `data/config.json`，不写入账号 JSON，也不改变 `cfg["tasks"]` 的平表键。存储以任务 `id` 为键，而 `id` 就是任务名（文件名去掉 `.py`）：
 
 ```json
 {
   "schema_version": 1,
   "items": [
-    {"type": "task", "path": "每日任务/村庄/宠物培养"},
+    {"type": "task", "id": "每日任务/村庄/宠物培养"},
     {
       "type": "group",
       "id": "group-example",
       "name": "日常组合",
       "expanded": true,
       "items": [
-        {"type": "task", "path": "每日任务/村庄/领取奖励"},
-        {"type": "task", "path": "每日任务/村庄/宠物训练"}
+        {"type": "task", "id": "每日任务/村庄/领取奖励"},
+        {"type": "task", "id": "每日任务/村庄/宠物训练"}
       ]
     }
   ],
@@ -90,7 +90,7 @@ WebUI 后端是 FastAPI；静态前端位于 `backend/webui/static/`，源码 El
 }
 ```
 
-有效顺序通过确定性总排序计算：先递归展开 `items`，再回退到当前任务树顺序、运行时注册顺序和路径字典序。`user_order` 是展平后的兼容投影；旧版 `hard_edges`、`layout`、`group_order` 输入会被规范化忽略，不再表达偏序规则或画布布局；保存排序不再进行循环图检查。
+`GET /api/task-ordering` 返回的投影和 WebUI payload 里，同一个 `id` 会被换成当前显示路径（`retarget_ordering_overlay()` 是唯一的换键点），所以前端始终按路径工作。有效顺序通过确定性总排序计算：先把存储里的 `id` 键换成显示路径，再递归展开 `items`，最后回退到当前注册顺序和路径字典序。`user_order` 是展平后的兼容投影；旧版 `hard_edges`、`layout`、`group_order` 输入会被规范化忽略，不再表达偏序规则或画布布局；保存排序不再进行循环图检查。
 
 任务树和排序覆盖层是两个独立持久化域。`POST /api/tasks` 保存当前角色任务树，成功后可返回完整公开配置；`POST /api/task-ordering` 只返回 `config_version`、`projection`、`generations` 和轻量 `runtime` 状态。前端应用排序响应时只能更新 `task_ordering`、`task_ordering_projection` 及对应版本，不得替换 `configData.tasks`。
 
@@ -138,14 +138,13 @@ QQ API 遵守主站认证，不属于 `/api/deploy` 豁免面。公开配置/导
 | `GET /api/device/diagnostics?screenshot=false` | 默认不截图，不初始化 OCR/UI Map；附带只读 MuMu 路径发现建议 |
 | `GET /api/device/discover?probe_adb=true` | 只读发现 MuMu 安装目录、MuMuManager、adb.exe 和可用 ADB 设备，不写配置 |
 | `POST /api/device/discover/apply` | 运行空闲时应用已确认的发现结果到 `emulator` 全局配置并刷新 `config_version` |
-| `GET /api/ocr-status` | 读取 Paddle/OCR 状态；探测异常返回 500，不合成 `false/0/unknown` |
 | `GET /api/editor/navigation-options` | 不需要设备会话；返回已注册的环境及其位置名称，供 Editor“工具 > 导航到...”生成 `ensure_in(...)` 代码 |
 | `/api/editor/ingest-image`、`ocr`、`color`、`save`、`store-template`、`locate-image` | 使用缓存截图/导入图，不启动模拟器 |
 | `/api/editor/screenshot`、无缓存 `locate`、`remote/click`、`remote/swipe`、真实 `execute-code`、无缓存 `preview-extract` | 需要 `runtime_ctx.ensure_device_session()` |
 | `POST /api/editor/execute-code/stop` | Editor 自定义代码执行中的终止入口；前端“终止执行”按钮只发送该请求，不再调用语法校验 |
 | `POST /api/editor/save-custom-task` | Editor 保存脚本入口；不需要设备会话，接收保存表单和编辑器合并后的代码内容，写入 `data/custom_task` 并注册为 `自定义任务/...` |
 
-`GET /api/ocr-status` 将配置意图、进程快照和实际引擎分开返回：
+`GET /api/device/diagnostics` 的 OCR 段将配置意图、进程快照和实际引擎分开返回：
 
 - `configured_use_gpu`、`configured_model`、`configured_digit_model`：当前配置值；
 - `runtime_use_gpu`、`runtime_model`、`runtime_digit_model`：进程启动时冻结的值；
@@ -169,7 +168,6 @@ MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和�
 
 ```json
 {
-  "filename": "custom_task.py",
   "task_path": "自定义任务/示例/操作设置",
   "description": "一句话描述",
   "task_doc": "补充说明正文",
@@ -182,7 +180,7 @@ MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和�
 }
 ```
 
-后端必须分别校验 `filename` 和 `task_path`，并对文件名做安全归一化，禁止路径穿越；旧 `name` 字段只作为兼容 fallback。保存产物是 UTF-8 Python 文件，位于 `data/custom_task/`，同目录临时文件写入后通过 `os.replace` 原子替换。裸片段会被包装为 `@register_task(path_cn="自定义任务/<name>", description=..., task_doc=...)`；`params` 会生成函数签名、字段说明，以及本地 `enum.Enum` 类型默认值，`enum` 表示单选，`enum_multi` 表示多选选项列表。完整自定义任务文件可以自行设置 `path_cn`，例如 `自定义任务/<name>`，但必须显式传入该参数；完整文件内已有元数据时由文件自身负责，不再把 `param_meta/task_doc_flow` 等运行期元数据写进配置。所有 `data/custom_task` 注册都会在后端归一到 `自定义任务/...` 根，前端自定义任务页只读取这个根；例如完整文件写 `path_cn="背包清空/进阶仙宝"` 时，WebUI 中显示为 `自定义任务/背包清空/进阶仙宝`，旧错误路径下的配置会迁移到归一后的路径。语法、模板生成、写入或完整重载失败必须返回结构化错误，不能静默成功；保存成功后通过 lifecycle service 触发完整 reload 并返回 `config_version`。
+后端以 `task_path` 决定文件位置：`自定义任务/<目录...>/<名字>.py`，要做安全归一化并禁止路径穿越（旧 `filename`、`name` 字段只作为兼容 fallback）。保存产物是 UTF-8 Python 文件，位于 `data/custom_task/`，同目录临时文件写入后通过 `os.replace` 原子替换。裸片段会被包装为 `@register_task(description=...)` 加函数 docstring；`params` 会生成函数签名、字段说明，以及本地 `enum.Enum` 类型默认值，`enum` 表示单选，`enum_multi` 表示多选选项列表。完整自定义任务文件自己负责装饰器元数据，不再写 `param_meta/task_doc_flow` 等运行期字段。脚本路径不在装饰器里：后端按 `task_path` 在 `custom_task/` 下建好子目录并把文件写进去，显示路径因此是 `自定义任务/` 加该相对路径，例如保存到 `custom_task/背包清空/进阶仙宝.py` 就注册为 `自定义任务/背包清空/进阶仙宝`。语法、模板生成、写入或完整重载失败必须返回结构化错误，不能静默成功；保存成功后通过 lifecycle service 触发完整 reload 并返回 `config_version`。
 
 ## 源码更新
 
@@ -194,14 +192,12 @@ MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和�
 
 更新页只保留源码 Git 通道。非 Git 工作区或非源码运行环境必须显示为 disabled，不要引导用户执行不可用更新。检查目标固定为远端 `main` 分支；若本地相对 `origin/main` 既领先又落后，状态为 failed 并提示用户手动处理分叉。本地领先不是“已更新”，必须显示为 `ahead`，表示远端没有可拉取提交但本地含额外提交。Git stderr、timeout、启动失败必须进入 `last_error`，不能改写成空输出或泛化错误。更新器不安装 Python/npm 依赖；依赖文件变化后用户单独运行 `scripts\install.bat`。
 
-## 错误归档、资讯、远程访问
+## 错误归档与资讯
 
 | 接口 | 说明 |
 |------|------|
 | `/api/error-archives*` | 列表、详情、文件读取、批量删除、zip 导入 |
 | `/api/news/*` | 4399 资讯、礼包码、代理页面 |
-| `GET/POST /api/remote-access` | 远程访问配置和状态 |
-| `POST /api/notify/test` / `POST /api/notify/save` | 通知测试与保存；保存要求 runtime idle |
 
 错误归档路径必须经过安全文件名校验，zip 导入解压到新目录，不覆盖任意路径。
 
@@ -210,7 +206,7 @@ MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和�
 - 打开资讯页、WebUI 登录成功后停留在资讯页、或再次点击资讯入口时，前端都应调用 `/api/news/posts?force=1` 立即拉取远端列表，不等 30 分钟缓存。
 - `/api/news/gift_codes?refresh=1` 只从官方公告近 10 天、最多 15 个帖子增量查找兑换码；记录已查帖子 ID 和仍有效兑换码，后续只查新增帖子。
 - `/api/news/gift_codes/page` 是兑换码弹窗的内嵌页，只读取运行时 `logs/zmxy_redeem_codes.json`；表格列为序号、兑换码、到期时间、来源链接、操作，支持 Shift 连续选择和批量兑换。
-- `/api/news/redeem_targets` 只返回账号名和 `服务器:角色名` 选择项；`POST /api/news/gift_codes/redeem` 需要 credential unlock 或安全密码，接受 `redeem_code` 或 `redeem_codes`，先切到所选账号/角色并强制自动登录，再按顺序以临时 `redeem_code` 参数执行内置一般任务 `一般任务/活动/兑换豪礼礼品兑换`。
+- `/api/news/redeem_targets` 只返回账号名和 `服务器:角色名` 选择项；`POST /api/news/gift_codes/redeem` 需要 credential unlock 或安全密码，接受 `redeem_code` 或 `redeem_codes`，先切到所选账号/角色并强制自动登录，再按顺序以临时 `redeem_code` 参数执行内置任务 `其他任务/活动脚本/兑换豪礼礼品兑换`。
 - `/api/news/proxy` 遇到 4399 登录墙时会使用可用资讯通行证重试一次；缓存通行证失效时应重登后再拉取正文。
 - `news.account = "85rwm3janyyc"` 与 `news.password = "123456"` 是唯一允许明文模板保留的公开资讯通行证，仅用于 4399 news/forum/gift-code 代理。
 - 旧配置若没有 `news` 段，资讯代理按该公开通行证兜底；显式配置其他 `news.*` 时按敏感凭据处理。

@@ -1,5 +1,6 @@
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
+from datetime import datetime
 from functools import wraps
 from typing import Callable
 from AutoScriptor.logging.logger import logger
@@ -12,6 +13,23 @@ from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import (
 from AutoScriptor.recognition.locate import locate_on_screen
 from AutoScriptor.core.box import Box
 from AutoScriptor.logging.tracer import capture_run_frame
+
+# 输入动作的完整历史。日志里的重复点击有节流（见 _log_action），历史没有：
+# 排障要能回答「这一步到底点没点」，而日志少一行不等于没执行。
+# 只收离散动作（点击/滑动/长按）；finger_* 是实时循环里的高频事件，收进来会把缓冲冲掉。
+# 也刻意不收 input_text：它会带上输入的账号密码，归档不该存这种明文。
+_ACTION_HISTORY_LIMIT = 120
+_action_history: deque[str] = deque(maxlen=_ACTION_HISTORY_LIMIT)
+
+
+def get_action_history() -> list[str]:
+    """最近输入动作，最早在前；错误归档会整段带走。"""
+    return list(_action_history)
+
+
+def clear_action_history() -> None:
+    """每轮任务开始时清空，归档里只留这一轮的操作序列。"""
+    _action_history.clear()
 
 class BaseMumuControl:
     def screenshot(self):
@@ -115,6 +133,7 @@ class MixControl(BaseMumuControl):
         self.mode="nemu"
         self._nemu_input_failed = False
         self._last_action_log = defaultdict(float)
+        self._action_suppressed = defaultdict(int)
         self._action_log_interval = 1.0
         self._last_resolution_warning_at = 0.0
         self._last_resolution_warning_size: tuple[int, int] | None = None
@@ -140,11 +159,20 @@ class MixControl(BaseMumuControl):
     def _log_action(self, action: str, detail: str) -> None:
         msg = f"【{self.mode}】{action}: {detail}"
         logger.debug(msg)
+        # 历史不节流：日志少一行只说明被合并，不说明没执行。
+        _action_history.append(f"{datetime.now().strftime('%H:%M:%S.%f')[:-3]} {msg}")
         now = time.monotonic()
         key = (self.mode, action)
         if now - self._last_action_log[key] >= self._action_log_interval:
+            suppressed = self._action_suppressed[key]
+            self._action_suppressed[key] = 0
             self._last_action_log[key] = now
+            if suppressed:
+                # 不写清楚少了多少条，读日志的人会把「没记录」当成「没执行」。
+                msg = f"{msg}（另有 {suppressed} 次同类操作未逐条记录）"
             logger.info(msg)
+        else:
+            self._action_suppressed[key] += 1
 
     def switch_to_mumu(self)->None:
         logger.info("切换到mumu")
