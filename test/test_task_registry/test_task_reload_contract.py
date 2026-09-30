@@ -31,7 +31,7 @@ class TestReloadBoundary(unittest.TestCase):
         for name in (
             "tasks",
             "tasks.battle_task_params",
-            "tasks.daily_task.village.jjc_task",
+            "tasks.每日任务.村庄.竞技场",
             "tasks._ct_abc123",
         ):
             with self.subTest(module=name):
@@ -46,7 +46,6 @@ class TestReloadBoundary(unittest.TestCase):
             "tasks.task_params",
             "tasks.task_register",
             "tasks.task_state",
-            "tasks.translations",
             "tasks.time",
         ):
             with self.subTest(module=name):

@@ -16,7 +16,6 @@ class TestRegisterTaskMetadata(unittest.TestCase):
         skip_files = {
             "battle_task_params.py",
             "task_register.py",
-            "translations.py",
         }
         registered = []
         for path in TASK_ROOT.rglob("*.py"):

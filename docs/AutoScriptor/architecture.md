@@ -85,7 +85,7 @@ backend -> orchestrator -> tasks -> ZmxyOL -> AutoScriptor
 | 保留 | 原因 |
 |------|------|
 | `tasks.task_registry` | 注册表单例。重新导入会造出第二个空注册表，而任务管理器、任务目录和 stale 清理仍读第一个。 |
-| `tasks.task_params` / `task_register` / `task_state` / `translations` / `time` | 编写期基础设施，不携带每轮状态；`task_params` 按类身份识别 `TableParam` 默认值。 |
+| `tasks.task_params` / `task_register` / `task_state` / `time` | 编写期基础设施，不携带每轮状态；`task_params` 按类身份识别 `TableParam` 默认值。 |
 | `ZmxyOL.*` | 拥有跨边界类型（`TableParam`、职业表）；职业脚本由 `reload_character_modules()` 单独刷新。`ZmxyOL.drop_cached_exports()` 清掉包级惰性再导出。 |
 
 保留清单在 `orchestrator/catalog.py`（`TASK_MODULES_KEPT_ON_RELOAD`、`is_reloadable_task_module()`），`test/test_task_registry/test_task_reload_contract.py` 钉住它。stale 叶子清理在注册表为空时拒绝执行：那表示注册没落到读它的注册表上，而不是用户配置过期。详见 [运行生命周期](runtime/lifecycle.md#重载保留哪些模块)。

@@ -8,7 +8,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SKILLS_PATH = PROJECT_ROOT / "skills.txt"
 DEFAULT_OUTPUT_PATH = PROJECT_ROOT / "仙术持有情况.xlsx"
 
@@ -364,6 +364,3 @@ def skills_to_excel(
     )
     return resolved_output_path
 
-
-if __name__ == "__main__":
-    skills_to_excel()

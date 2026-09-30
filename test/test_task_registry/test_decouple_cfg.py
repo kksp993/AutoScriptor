@@ -87,7 +87,7 @@ class TestCfgNodeShape(unittest.TestCase):
                 pass
 
             fake_file = os.path.join(
-                os.path.dirname(__file__), "..", "..", "tasks", "daily_task", "village", "no_translation_task.py"
+                os.path.dirname(__file__), "..", "..", "tasks", "每日任务", "村庄", "无映射任务.py"
             )
             with patch("inspect.getfile", return_value=fake_file):
                 task_register_mod.register_task(
@@ -114,7 +114,7 @@ class TestCfgNodeShape(unittest.TestCase):
                 pass
 
             fake_file = os.path.join(
-                os.path.dirname(__file__), "..", "..", "tasks", "daily_task", "village", "仙盟建设.py"
+                os.path.dirname(__file__), "..", "..", "tasks", "每日任务", "村庄", "仙盟建设.py"
             )
             with patch("inspect.getfile", return_value=fake_file):
                 task_register_mod.register_task(fn, path_cn="每日任务/村庄/仙盟建设", deprecated=True, description="旧任务")
@@ -148,7 +148,7 @@ class TestCfgNodeShape(unittest.TestCase):
             # path_cn states the current path explicitly, so this pins the rename
             # contract itself rather than depending on how a source filename maps.
             fake_file = os.path.join(
-                os.path.dirname(__file__), "..", "..", "tasks", "daily_task", "hgwj", "renamed_task.py"
+                os.path.dirname(__file__), "..", "..", "tasks", "每日任务", "荒古万界", "改名任务.py"
             )
             with patch("inspect.getfile", return_value=fake_file):
                 task_register_mod.register_task(
@@ -222,7 +222,7 @@ class TestCfgNodeShape(unittest.TestCase):
             pass
 
         fake_file = os.path.join(
-            os.path.dirname(__file__), "..", "..", "tasks", "daily_task", "hgwj", "遗境副本.py"
+            os.path.dirname(__file__), "..", "..", "tasks", "每日任务", "荒古万界", "遗境副本.py"
         )
         old_counter = task_register_mod.registration_counter
         try:

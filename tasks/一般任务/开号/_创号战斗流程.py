@@ -1,7 +1,7 @@
 """创号脚本专用的临时战斗流程。
 
-本文件不会在 AutoScriptor 启动时自动加载。创号入口脚本需要显式调用
-``register_account_battle_flow()``，流程才会在当前进程中生效。
+这些流程只在创号时使用，不进入常驻职业文件。需要先调用
+``register_account_battle_flow()`` 注册，之后的 ``battle_loop`` 才能按名字取到。
 """
 from __future__ import annotations
 

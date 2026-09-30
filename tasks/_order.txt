@@ -1,11 +1,10 @@
-daily_task
-weekly_task
-event_task
-normal_task
+每日任务
+每周任务
+活动任务
+一般任务
 battle_task_params
 time
 task_params
 task_register
 task_registry
 task_state
-translations

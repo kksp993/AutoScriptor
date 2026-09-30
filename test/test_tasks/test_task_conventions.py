@@ -1,17 +1,18 @@
 """Conventions every built-in task script has to keep.
 
-A task's cfg path is derived from its source path: directory segments are
-translated (`daily_task` -> `每日任务`, `village` -> `村庄`) and the file stem is
-used as-is, which is why the stem is the Chinese display name. That leaves the
-file name and `_order.txt` as the only two places naming a task, and these checks
-keep them honest:
+A task's cfg path *is* its source path: `tasks/每日任务/村庄/宠物培养.py` registers
+as `每日任务/村庄/宠物培养`. Nothing translates anything, so the file name and
+`_order.txt` are the only two places naming a task, and these checks keep them
+honest:
 
 - a typo in an `_order.txt` name (`xianbao_destory`) dropped a file out of the
   listed order without any error;
 - an unlisted file sorts last regardless of where it was authored;
 - a non-ASCII parameter name reaches the persisted `params` keys and the form.
 
-The checks read the source, so a new task is covered the moment it is added.
+A file whose name starts with `_` is a helper module: imported with its folder but
+registering no task. The checks read the source, so a new task is covered the
+moment it is added.
 """
 from __future__ import annotations
 
@@ -22,9 +23,6 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-
-from tasks.translations import normalize_cfg_key
-
 
 ROOT = Path(__file__).resolve().parents[2]
 TASK_ROOT = ROOT / "tasks"
@@ -38,18 +36,47 @@ INFRASTRUCTURE = {
     "task_registry.py",
     "task_state.py",
     "time.py",
-    "translations.py",
 }
 
 SECTION_ROOT = ("每日任务", "每周任务", "活动任务", "一般任务")
+
+
+def is_helper(path: Path) -> bool:
+    """An underscore-prefixed module is shared code, not a task."""
+    return path.stem.startswith("_")
 
 
 def task_script_paths() -> list[Path]:
     return sorted(
         path
         for path in TASK_ROOT.rglob("*.py")
-        if "__pycache__" not in path.parts and path.name not in INFRASTRUCTURE
+        if "__pycache__" not in path.parts
+        and path.name not in INFRASTRUCTURE
+        and not is_helper(path)
     )
+
+
+def helper_paths() -> list[Path]:
+    return sorted(
+        path
+        for path in TASK_ROOT.rglob("*.py")
+        if "__pycache__" not in path.parts
+        and path.name not in INFRASTRUCTURE
+        and is_helper(path)
+    )
+
+
+def child_names(folder: Path) -> set[str]:
+    """Names an `_order.txt` in this folder may refer to."""
+    return {
+        path.stem if path.is_file() else path.name
+        for path in folder.iterdir()
+        if path.name != "__init__.py"
+        and (
+            (path.suffix == ".py" and not is_helper(path))
+            or (path.is_dir() and not path.name.startswith("__"))
+        )
+    }
 
 
 def registration_of(path: Path):
@@ -77,11 +104,8 @@ def string_keyword(call: ast.Call | None, name: str):
 
 
 def derived_cfg_path(path: Path) -> str:
-    """The cfg path registration will produce for this source file."""
-    return "/".join(
-        normalize_cfg_key(part)
-        for part in path.relative_to(TASK_ROOT).with_suffix("").parts
-    )
+    """The cfg path registration will produce: the source path, verbatim."""
+    return "/".join(path.relative_to(TASK_ROOT).with_suffix("").parts)
 
 
 class TestTaskRegistration(unittest.TestCase):
@@ -123,6 +147,16 @@ class TestTaskRegistration(unittest.TestCase):
                 )
             seen[path_cn] = path
 
+    def test_helpers_register_nothing(self):
+        """A helper module exists to be imported, not to add a task."""
+        for path in helper_paths():
+            with self.subTest(module=path.name):
+                self.assertNotIn(
+                    "register_task(",
+                    path.read_text(encoding="utf-8-sig"),
+                    f"{path} is underscore-prefixed, so it must not register a task",
+                )
+
 
 class TestTaskSourceHygiene(unittest.TestCase):
     def test_filename_is_the_chinese_display_name(self):
@@ -157,29 +191,12 @@ class TestTaskSourceHygiene(unittest.TestCase):
 class TestOrderSeeds(unittest.TestCase):
     """`_order.txt` is the import/registration seed; every entry must resolve."""
 
-    @staticmethod
-    def _resolvable_names(folder: Path) -> set[str]:
-        """Names an `_order.txt` entry may refer to, at this folder's level.
-
-        The `tasks/` root seed lists the support modules themselves, while every
-        deeper seed lists only task files and subfolders.
-        """
-        is_root = folder == TASK_ROOT
-        return {
-            path.stem if path.is_file() else path.name
-            for path in folder.iterdir()
-            if (
-                path.suffix == ".py"
-                and path.name != "__init__.py"
-                and (is_root or path.name not in INFRASTRUCTURE)
-            )
-            or (path.is_dir() and not path.name.startswith("__"))
-        }
-
     def test_entries_name_existing_files_and_folders(self):
         for order_file in sorted(TASK_ROOT.rglob("_order.txt")):
             folder = order_file.parent
-            present = self._resolvable_names(folder)
+            present = child_names(folder)
+            if folder == TASK_ROOT:
+                present |= {name for name in INFRASTRUCTURE if name != "__init__.py"}
             listed = [
                 line.strip()
                 for line in order_file.read_text(encoding="utf-8-sig").splitlines()
@@ -193,19 +210,18 @@ class TestOrderSeeds(unittest.TestCase):
         """An unlisted file sorts last instead of into its authored position."""
         for order_file in sorted(TASK_ROOT.rglob("_order.txt")):
             folder = order_file.parent
-            is_root = folder == TASK_ROOT
             listed = {
                 line.strip()
                 for line in order_file.read_text(encoding="utf-8-sig").splitlines()
                 if line.strip() and not line.strip().startswith("#")
             }
+            present = child_names(folder)
+            if folder == TASK_ROOT:
+                present |= {name for name in INFRASTRUCTURE if name != "__init__.py"}
             unlisted = sorted(
-                path.stem
-                for path in folder.iterdir()
-                if path.suffix == ".py"
-                and path.name != "__init__.py"
-                and (is_root or path.name not in INFRASTRUCTURE)
-                and path.stem not in listed
+                name
+                for name in present
+                if name not in listed and (folder / f"{name}.py").is_file()
             )
             with self.subTest(seed=order_file.relative_to(TASK_ROOT).as_posix()):
                 self.assertEqual(unlisted, [], f"{order_file} does not list every task file")

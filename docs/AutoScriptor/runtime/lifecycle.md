@@ -162,7 +162,7 @@ stale 叶子清理还要求注册表非空。空注册表表示本轮注册没�
 | 保留 | 原因 |
 |------|------|
 | `tasks.task_registry` | 注册表单例。重新导入会造出第二个空注册表，而任务管理器、目录和清理逻辑仍读第一个——任务解析不到，清理还会把整棵树删掉。 |
-| `tasks.task_params` / `task_register` / `task_state` / `translations` / `time` | 编写期基础设施，不携带每轮状态；`task_params` 按类身份识别 `TableParam` 默认值，替换它会让表格参数不再被识别。 |
+| `tasks.task_params` / `task_register` / `task_state` / `time` | 编写期基础设施，不携带每轮状态；`task_params` 按类身份识别 `TableParam` 默认值，替换它会让表格参数不再被识别。 |
 | `ZmxyOL.*` | 拥有跨边界类型（`TableParam`、职业表）。重新导入会让类型身份分裂：任务签名里的表格默认值判不出类型，进而以原始对象写进 `cfg`。职业脚本由 `reload_character_modules()` 单独处理。 |
 
 `orchestrator/catalog.py` 的 `TASK_MODULES_KEPT_ON_RELOAD` 是保留清单，`is_reloadable_task_module()` 是唯一判据；`test/test_task_registry/test_task_reload_contract.py` 钉住这两侧。

@@ -26,7 +26,7 @@ from AutoScriptor import *
 from ZmxyOL import *
 from ZmxyOL.battle.tasks import TASK_TABLE
 from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
-from 创号战斗脚本1 import *
+from tasks.一般任务.开号._创号战斗流程 import *
 
 # 没改键位之前的设置
 
@@ -539,61 +539,3 @@ def equipment_juexing():
     click(B(681,215,172,154), delay=1, until=lambda: ui_T(T("升", box=Box(689,222,141,93).margin())))
     click(T("升", box=Box(689,222,141,93).margin()), delay=1, until=lambda: ui_T(T("法术灼烧", box=Box(392,80,127,34).margin())))
     click(T("法术灼烧", box=Box(392,80,127,34).margin()), delay=1)
-
-
-
-if __name__ == "__main__":
-    register_account_battle_flow()
-    init()
-
-    server_name = "十周年3服"
-    username = "可莉一"
-    supervisor_server_name = "兽神峰"
-    supervisor_username = "可莉不知道哦"
-
-    # logger.info("创号脚本开始执行")
-    # init_role(username)    
-    # logger.info("开始新手教程九重天")
-    # start_newbie_tutorial() 
-    # logger.info("开始打造兵器")
-    # make_weapon()
-    # logger.info("返回开始界面")
-    # xiangui(server_name, username)
-    # logger.info("开始称号系统")
-    # chenghao(server_name, username)
-    logger.info("赠送500人气")
-    # renqi(server_name, username, supervisor_server_name, supervisor_username)
-    logger.info("已经装备好称号")
-    logger.info("开始天宫道1")
-    # tiangongdao1()
-    logger.info("合成教程")
-    # hecheng()
-    logger.info("漫长的任务关卡")
-    # xinshoumubiao()
-    logger.info("学习位移技能")
-    # learnskills()
-    # while ui_F(T("业力之道", box=Box(595,96,137,25).margin()),timeout=2):
-    #     renwu() # 从天宫道到凌霄宝殿
-    # yeli()
-    
-    # update_equipment()  # 应该从背包换
-
-    # while ui_F(T("业力之道", box=Box(595,96,137,25).margin()),timeout=2):
-    #     flag = renwu("突破土行孙") # 土行孙之前
-    #     if not flag: break
-    # click(B(1203,18,51,40), until=lambda: ui_T(T("经典任务", box=Box(266,403,168,45).margin())))
-    # click(B(1204,21,47,42), until=lambda: ui_T(T("云中子", box=Box(696,261,75,28).margin())))
-    # longgong1(45)
-    # lingwu()
-    # longgong1(50)
-    # benmingshen()
-    # huodong()
-    # eat_drug("三倍")
-    # longgong1(70, ensure_drug=True)
-    # ensure_in("登录");sleep(4)
-    # login(server_name=server_name, character_name=username)
-    # equipment_juexing()
-    # longgong1(75, ensure_drug=True)
-    # renwu_special()
-    huodong()
-    longgong1(85, ensure_drug=True)

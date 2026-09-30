@@ -7,13 +7,13 @@ from AutoScriptor.utils.app_config import cfg
 from tasks.task_registry import task_registry
 from AutoScriptor.logging.logger import logger
 from ZmxyOL.battle.table_param import TableParam
-from tasks.translations import normalize_cfg_key
 from tasks.task_params import describe_signature, hydrate_params
 from ZmxyOL.nav.api import locate_region
 
 # 在模块顶端添加全局计数器
 registration_counter = 0
-_CUSTOM_TASK_ROOT_KEY = normalize_cfg_key("custom_task")
+# 自定义任务的 cfg 根节点。custom_task 下的脚本自己写 path_cn，省略根时补上它。
+_CUSTOM_TASK_ROOT_KEY = "自定义任务"
 
 
 def _find_cfg_leaf(root: dict, keys: list[str]) -> tuple[dict | None, dict | None]:
@@ -100,8 +100,8 @@ def register_task(
       - cfg["tasks"]（用户配置，持久化到 JSON）：on、next_exec_time、params、next_exec_offset_hours 等
       - TaskRegistry（运行时数据，不持久化）：fn、order、param_meta、param_keys、beta、custom、doc_flow、description、debug_mode、deprecated
 
-    内置任务的 cfg 路径由源码路径推导：目录名逐段翻译（daily_task → 每日任务、
-    village → 村庄），文件名就是中文显示名，所以内置脚本不写 path_cn。
+    内置任务的 cfg 路径就是它在 ``tasks/`` 下的源码路径：目录和文件名都用中文，
+    例如 ``tasks/每日任务/村庄/宠物培养.py`` 注册为 ``每日任务/村庄/宠物培养``。
 
     支持以下可选参数（仅对指定任务生效）：
       - default_offset_hours (int): 任务执行后延迟 N 小时再调度
@@ -115,7 +115,7 @@ def register_task(
       - path_cn (str): **仅 custom_task 目录下脚本必填**，因为自定义脚本的文件名不受项目命名约定约束。
         斜杠分隔的 cfg 任务路径（中文键），custom_task 脚本最终都会归一到「自定义任务」根节点；
         省略首段时会自动补齐。示例：path_cn="自定义任务/示例/hello_custom"
-        内置任务写了 path_cn 会覆盖推导结果，只在目录结构与树形不一致时才需要。
+        内置任务写了 path_cn 会覆盖源码路径，只在目录结构与树形不一致时才需要。
       - legacy_path_cn (str): 可选。任务改名/重组前使用的 cfg 路径。注册时会把该路径上已保存的
         用户配置（开关、参数、next_exec_time）搬到当前路径并删除旧节点，避免用户状态丢失；
         这是任务改名的唯一表述方式，加载流程里没有别的迁移通道。
@@ -190,7 +190,7 @@ def register_task(
 
     raw_cn = path_cn.strip() if isinstance(path_cn, str) else ""
 
-    # 路径解析。源码树只提供默认值，path_cn 是唯一的显式声明入口；
+    # 路径解析。内置任务用源码路径，自定义任务用 path_cn；
     # legacy_keys 记录「这个任务以前在哪」，由 _migrate_cfg_leaf 在写入叶子前搬配置。
     legacy_keys = None
     if is_custom:
@@ -199,7 +199,7 @@ def register_task(
                 "custom_task 下的任务必须传入 path_cn，例如 "
                 '@register_task(path_cn="自定义任务/示例/hello_custom")'
             )
-        keys = [normalize_cfg_key(p) for p in raw_cn.split("/") if p.strip()]
+        keys = [p.strip() for p in raw_cn.split("/") if p.strip()]
         if not keys:
             raise ValueError(f"path_cn 解析后为空: {path_cn!r}")
         if keys[0] != _CUSTOM_TASK_ROOT_KEY:
@@ -207,15 +207,12 @@ def register_task(
             legacy_keys = list(keys)
             keys.insert(0, _CUSTOM_TASK_ROOT_KEY)
     elif raw_cn:
-        keys = [normalize_cfg_key(p) for p in raw_cn.split("/") if p.strip()]
+        keys = [p.strip() for p in raw_cn.split("/") if p.strip()]
         if not keys:
             raise ValueError(f"path_cn 解析后为空: {path_cn!r}")
-    else:
-        # 目录名逐段翻成中文分类/分组，文件名本身已是中文显示名
-        keys = [normalize_cfg_key(key) for key in keys]
 
     if legacy_path_cn:
-        legacy_keys = [normalize_cfg_key(p) for p in str(legacy_path_cn).split("/") if p.strip()]
+        legacy_keys = [p.strip() for p in str(legacy_path_cn).split("/") if p.strip()]
 
     last_key = keys[-1]
     task_path = "/".join(keys)

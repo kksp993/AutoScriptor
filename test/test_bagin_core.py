@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from data.custom_task.bagin_core import StaticBaginEnv, solve
+from tasks.一般任务.背包清空._符牌求解 import StaticBaginEnv, solve
 
 
 def _run(counts, *, rewards=None, remaining=None, merge_value=10):
@@ -66,3 +66,18 @@ def test_bagin_replans_after_merge_rewards():
 
     assert _count_ops(trajectory, "merge") == 9
     assert env.merge_count == {"a": 3, "b": 3, "c": 3}
+
+
+def test_bagin_quota_accepts_a_mapping_keyed_by_user():
+    """merge_remaining 既可以是与 users 对齐的列表，也可以是用户名到配额的映射。
+
+    映射形态此前把值包成了 ``{user: 配额}``，额度比较会拿 dict 去比数字；这里断言
+    初始化后的额度就是整数，且每个用户只用到自己的配额。
+    """
+    trajectory, env = _run({"a": [5, 5, 5], "b": [5, 5, 5]}, remaining={"a": 1, "b": 4})
+
+    fresh = StaticBaginEnv({"a": [5, 5, 5], "b": [5, 5, 5]}, {}, {"a": 1, "b": 4})
+    assert fresh.merge_remaining == {"a": 1, "b": 4}
+
+    assert _count_ops(trajectory, "merge") == 5
+    assert env.merge_count == {"a": 1, "b": 4}

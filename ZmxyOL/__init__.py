@@ -131,7 +131,7 @@ def _package_init_is_running() -> bool:
     instead lets it pick up whatever is already resolved.
 
     Only package initializers count. A leaf module that is mid-import (for
-    example ``tasks/daily_task/hgwj/遗境副本.py``) must still see the full
+    example ``tasks/每日任务/荒古万界/遗境副本.py``) must still see the full
     export list, because those modules rely on ``from ZmxyOL import *`` to pick
     up names such as ``DEFAULT_BATTLE_FLOW``.
     """
