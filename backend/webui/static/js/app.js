@@ -1283,7 +1283,23 @@ const app = createApp({
         openAccountDialog();
         return;
       }
+      if (command === '__credentials__') {
+        openAccountCredentialsDialog();
+        return;
+      }
       switchAccount(command);
+    }
+
+    /**
+     * 打开「修改账号密码」：改的是**当前账号**的游戏登录凭据。
+     *
+     * 对话框和提交逻辑一直在，但以前没有任何入口把它打开，等于用户永远改不了
+     * 游戏密码（游戏那边改了密码之后就只能重建账号）。入口补在账号下拉里。
+     */
+    function openAccountCredentialsDialog() {
+      if (!ensureIdle('执行中不能修改账号密码，请先终止当前任务')) return;
+      Object.assign(addForm, { account: '', password: '', security_key: '' });
+      addDialogVisible.value = true;
     }
 
     function requireFields(fields) {

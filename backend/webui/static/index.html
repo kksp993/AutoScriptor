@@ -110,6 +110,9 @@
                 <el-dropdown-item divided :command="'__new__'" :disabled="executionBusy">
                   <i class="fa fa-plus" style="margin-right:6px"></i>新建账号
                 </el-dropdown-item>
+                <el-dropdown-item :command="'__credentials__'" :disabled="executionBusy">
+                  <i class="fa fa-key" style="margin-right:6px"></i>修改账号密码
+                </el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -552,6 +555,6 @@
   <script src="/static/js/components/ErrorArchivesPanel.js?v=4"></script>
   <script src="/static/js/core/api.js?v=1"></script>
   <script src="/static/js/stores/runtimeStore.js?v=1"></script>
-  <script src="/static/js/app.js?v=43"></script>
+  <script src="/static/js/app.js?v=44"></script>
 </body>
 </html>

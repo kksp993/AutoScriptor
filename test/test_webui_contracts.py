@@ -1578,6 +1578,29 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertIn("<diagnostics-panel embedded", settings)
         self.assertIn("DiagnosticsPanel.js", index)
 
+    def test_account_credentials_dialog_has_a_reachable_trigger(self):
+        """「修改账号密码」必须真的能打开。
+
+        它曾经是死代码：对话框、提交逻辑、后端 `/api/account` 都齐全，却没有任何地方
+        把 `addDialogVisible` 置为 true —— 于是用户永远改不了游戏密码，游戏那边改了
+        密码就只能重建账号。规则里那条「不要留一个没有触发点的面板」说的就是这种情况。
+        """
+        app = (ROOT / "backend/webui/static/js/app.js").read_text(encoding="utf-8")
+        index = (ROOT / "backend/webui/static/index.html").read_text(encoding="utf-8")
+
+        # 面板与提交路径
+        self.assertIn("const addDialogVisible = ref(false);", app)
+        self.assertIn('v-model="addDialogVisible"', index)
+        self.assertIn("async function submitAddAccount", app)
+        # 入口
+        self.assertIn("function openAccountCredentialsDialog", app)
+        self.assertIn("addDialogVisible.value = true;", app)
+        self.assertIn("'__credentials__'", app)
+        self.assertIn("'__credentials__'", index)
+        self.assertIn("修改账号密码", index)
+        # 入口挂在账号下拉的命令分发上，点了要能落到这个分支。
+        self.assertIn("handleAccountCommand", index)
+
     def test_diagnostics_screenshot_probe_is_explicit(self):
         content = (ROOT / "backend/webui/static/js/components/DiagnosticsPanel.js").read_text(encoding="utf-8")
 
@@ -1875,14 +1898,19 @@ class TestWebUIServerRouteContract(unittest.TestCase):
                 self.assertIn(marker, main)
         self.assertLess(
             main.index("createMainWindow();"),
-            main.index("killStalePort5000();", main.index("createMainWindow();")),
+            main.index("killStaleWebUiPort();", main.index("createMainWindow();")),
         )
         self.assertLess(
             main.index("configureElectronRendering();"),
             main.index("app.whenReady().then("),
         )
         self.assertNotIn("chcp", main)
-        self.assertIn("Port 5000 cleanup failed", main)
+        self.assertIn("WebUI port cleanup failed", main)
+        # 端口可配置：外壳先挑好再通过环境变量交给后端，两边必须用同一个。
+        self.assertIn("const PORT_ENV = 'AUTOSCRIPTOR_PORT';", main)
+        self.assertIn("const webuiPort = pickWebUiPort();", main)
+        self.assertIn("[PORT_ENV]: String(webuiPort),", main)
+        self.assertNotIn("http://127.0.0.1:5000", main)
         self.assertIn("statusTextMap", loading)
         self.assertIn("'backend-spawned': 'Python 进程已启动，正在导入依赖...'", loading)
         self.assertIn("def _boot_log", gui)
@@ -3214,7 +3242,7 @@ class TestTaskOrderingStaticContract(unittest.TestCase):
         self.assertIn("AppSidebar.js?v=18", index_html)
         self.assertIn("style.css?v=46", index_html)
         self.assertIn("TaskPanel.js?v=23", index_html)
-        self.assertIn("app.js?v=43", index_html)
+        self.assertIn("app.js?v=44", index_html)
         self.assertIn('@run-task-range="runTaskRange"', index_html)
         self.assertIn(':runtime-status="runtimeStatus"', index_html)
         self.assertNotIn("TaskDagCanvas.js", index_html)

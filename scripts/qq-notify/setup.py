@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import socket
 import sys
@@ -75,9 +76,10 @@ def config_path() -> Path:
 
 def autoscriptor_is_running() -> bool:
     """Whether the WebUI owns data/config.json right now."""
+    port = int(os.environ.get("AUTOSCRIPTOR_PORT") or 5000)
     with socket.socket() as probe:
         probe.settimeout(0.5)
-        return probe.connect_ex(("127.0.0.1", 5000)) == 0
+        return probe.connect_ex(("127.0.0.1", port)) == 0
 
 
 def write_notify_settings(endpoint: str, token: str, target_type: str, target_id: str) -> Path:

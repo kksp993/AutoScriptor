@@ -32,7 +32,7 @@ Component convention:
 - Keep the loading window visible before slow backend checks, and keep startup phase logs useful for first-run diagnosis.
 - Configure source Electron render mode before `app.whenReady()`. `AUTOSCRIPTOR_ELECTRON_RENDER_MODE` defaults to `software` to disable the fragile Windows GPU/Chromium paths; use `d3d11` to keep GPU with ANGLE D3D11, or `default` to compare the unmodified Electron behavior.
 - Do not change the Windows console code page from Electron. Encoding is handled by Python UTF-8 flags/env.
-- Port `5000` cleanup failures must be logged to startup logs and loading UI; do not hide them behind silent fallback.
+- The WebUI port is configurable (`AUTOSCRIPTOR_PORT`, default `5000`). The Electron shell resolves it first — shifting to the next free port when the preferred one is taken — and hands the same value to Python, so both sides agree; standalone WebUI does the same shift itself and prints the address. Port cleanup failures must be logged to startup logs and loading UI; do not hide them behind silent fallback.
 
 ## Version Coupling
 
@@ -62,7 +62,7 @@ Component convention:
 
 If you started WebUI or Electron during a task, close them before finishing or explicitly remind the user.
 
-PowerShell port cleanup for default backend port:
+PowerShell port cleanup (substitute the port the shell actually resolved; the default is `5000`):
 
 ```powershell
 $pids = (Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue).OwningProcess | Select-Object -Unique

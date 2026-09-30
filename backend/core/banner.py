@@ -44,8 +44,11 @@ def _render_center_line(content: str, inner_width: int, color_prefix: str = "", 
     suffix = RESET if prefix else ""
     return f"║{' ' * left}{prefix}{raw}{suffix}{' ' * right}║"
 
-def _print_banner(small_banner: bool = False, banner_only: bool = False):
-    """打印商业化风格的启动横幅，自动适配终端宽度。"""
+def _print_banner(small_banner: bool = False, banner_only: bool = False, port: int = 5000):
+    """打印商业化风格的启动横幅，自动适配终端宽度。
+
+    ``port`` 是实际监听的端口：被占用时会顺延，横幅必须显示真正能打开的地址。
+    """
     cols = shutil.get_terminal_size(fallback=(100, 24)).columns
     inner = max(72, min(cols - 4, 120))
     top = f"╔{'═' * inner}╗"
@@ -79,7 +82,7 @@ $$/   $$/  $$$$$$/     $$$$/   $$$$$$/   $$$$$$/   $$$$$$$/ $$/       $$/ $$$$$$
     print(_render_center_line("ZmxyOL - WebUI", inner, CYAN, True))
     print(_render_center_line(f"Version {_get_app_version()}   |   Author: Kksp993", inner, WHITE, False))
     print(_render_center_line("Repo: https://github.com/kksp993/AutoScriptor", inner, DIM, False))
-    print(_render_center_line("Click to open: http://127.0.0.1:5000   (Ctrl+Click)", inner, YELLOW, True))
+    print(_render_center_line(f"Click to open: http://127.0.0.1:{port}   (Ctrl+Click)", inner, YELLOW, True))
     print(f"{MAGENTA}{bottom}{RESET}")
     print()
 

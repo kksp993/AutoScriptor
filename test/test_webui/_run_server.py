@@ -19,12 +19,23 @@ import uvicorn
 
 
 def main() -> int:
+    from backend.webui.port import read_configured_port, resolve_listening_port
     from backend.webui.server import app
+
+    # 冒烟测试用 AUTOSCRIPTOR_TEST_PORT 指定端口；这里把它并到真实契约上，
+    # 让测试跑的就是用户会用到的同一套解析逻辑。
+    if not os.environ.get("AUTOSCRIPTOR_PORT") and os.environ.get("AUTOSCRIPTOR_TEST_PORT"):
+        os.environ["AUTOSCRIPTOR_PORT"] = os.environ["AUTOSCRIPTOR_TEST_PORT"]
+
+    port, notice = resolve_listening_port(read_configured_port())
+    if notice:
+        print(notice, flush=True)
+    print(f"test server on http://127.0.0.1:{port}", flush=True)
 
     uvicorn.run(
         app,
         host="127.0.0.1",
-        port=int(os.environ["AUTOSCRIPTOR_TEST_PORT"]),
+        port=port,
         log_level=os.environ.get("AUTOSCRIPTOR_TEST_UVICORN_LOG", "warning"),
     )
     return 0

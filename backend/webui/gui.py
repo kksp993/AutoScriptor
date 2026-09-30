@@ -58,7 +58,28 @@ parser.add_argument(
     action="store_true",
     help="Running inside Electron shell; suppress browser auto-open",
 )
+parser.add_argument(
+    "--port",
+    type=int,
+    default=None,
+    help="WebUI 监听端口；不传时用 AUTOSCRIPTOR_PORT，再退回 5000",
+)
 args, _ = parser.parse_known_args()
+
+if args.port is not None:
+    if not 1 <= args.port <= 65535:
+        parser.error(f"--port 必须在 1-65535 之间，收到 {args.port}")
+    # 写进环境变量后子进程会自动继承，父进程和 worker 就用同一个端口。
+    os.environ["AUTOSCRIPTOR_PORT"] = str(args.port)
+
+# 端口非法在这里就说清楚：留到 uvicorn 只会甩一段 traceback 给用户。
+try:
+    from backend.webui.port import read_configured_port
+
+    _CONFIGURED_PORT = read_configured_port()
+except ValueError as _port_error:
+    print(f"[错误] {_port_error}", file=sys.stderr, flush=True)
+    raise SystemExit(2) from None
 
 if args.electron:
     import webbrowser as _webbrowser

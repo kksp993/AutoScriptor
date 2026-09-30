@@ -28,6 +28,13 @@ from backend.webui.api_context import (
     persistence_error_message,
 )
 from backend.webui.api_response import api_error
+from backend.webui.port import (
+    DEFAULT_PORT,
+    PORT_ENV,
+    port_is_free,
+    read_configured_port,
+    resolve_listening_port,
+)
 from backend.webui.log_stream import (
     apply_log_level,
     broadcast_loop,
@@ -390,6 +397,8 @@ async def favicon_png():
 
 # ── 入口 ──
 
+
+
 _server = None
 _shutdown_done = False
 
@@ -403,26 +412,33 @@ def run_webui(restart_event=None):
     global _server
     import uvicorn
 
+    electron_mode = bool(
+        os.environ.get("AUTOSCRIPTOR_ELECTRON")
+        or os.environ.get("AUTOSCRIPTOR_ELECTRON_PIPE")
+    )
+    port, port_notice = resolve_listening_port(
+        read_configured_port(), allow_shift=not electron_mode
+    )
+    if port_notice:
+        logger.warning(port_notice)
+
     apply_log_level()
-    _print_banner()
+    _print_banner(port=port)
 
     # 仅传递重启事件；更新检查改为手动触发（点击「检查更新」）
     from backend.core.updater import updater as _updater
     if restart_event is not None:
         _updater.set_restart_event(restart_event)
 
-    webbrowser.open("http://127.0.0.1:5000")
+    if not electron_mode:
+        webbrowser.open(f"http://127.0.0.1:{port}")
 
     # Allow Electron to request info-level logs so it can detect startup completion
     log_level = os.environ.get('UVICORN_LOG_LEVEL', 'warning')
     ssl_key = cfg.get("deploy.ssl_key")
     ssl_cert = cfg.get("deploy.ssl_cert")
-    electron_mode = bool(
-        os.environ.get("AUTOSCRIPTOR_ELECTRON")
-        or os.environ.get("AUTOSCRIPTOR_ELECTRON_PIPE")
-    )
     config = uvicorn.Config(
-        app, host="127.0.0.1", port=5000, log_level=log_level,
+        app, host="127.0.0.1", port=port, log_level=log_level,
         access_log=not electron_mode,
         ssl_keyfile=ssl_key if ssl_key else None,
         ssl_certfile=ssl_cert if ssl_cert else None,
