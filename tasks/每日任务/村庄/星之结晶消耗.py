@@ -5,7 +5,7 @@ from AutoScriptor import *
 
 @register_task(
     description="购买灵力滴液和灵力真酿",
-    task_doc="用星之结晶兑换灵力滴液与灵力真酿（每日约 100 星之结晶）。",
+    reschedule="daily",
 )
 def task(buy_spirit_liquid=True, buy_spirit_brew=True):
     """在兑换豪礼页购买灵力滴液、灵力真酿。"""

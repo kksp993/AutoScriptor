@@ -7,10 +7,10 @@
 | 位置 | 职责 |
 |------|------|
 | [`data/character/hero.py`](../../../data/character/hero.py) | 运行态 `Hero` 基类、`battle_loop` 外壳、职业注册表、`@flow`、`battle_plan` 接入 |
-| [`data/character/liuli.py`](../../../data/character/liuli.py) | 示例职业脚本；通过 `profession = "琉离"` 注册 |
+| `data/character/<职业>.py` | 用户职业脚本；在文件里写 `profession = "<游戏职业>"` 完成注册。可注册的职业名见 `ZmxyOL/character/profession.py` 的 `GAME_PROFESSIONS` |
 | [`ZmxyOL/character/hero.py`](../../../ZmxyOL/character/hero.py) | 兼容入口，加载 `data/character/hero.py` |
 | [`ZmxyOL/character/plan.py`](../../../ZmxyOL/character/plan.py) | `BattlePlan` DSL：`first`、`at`、`every`、`combo` |
-| [`tasks/battle_task_params.py`](../../../tasks/battle_task_params.py) | 聚合职业与 flow，生成 `HeroProfession`、`BattleFlowName` |
+| [`tasks/battle_task_params.py`](../../../tasks/battle_task_params.py) | 聚合 Hero `@flow` 注册，生成 `BattleFlowName` |
 | [`tasks/task_register.py`](../../../tasks/task_register.py) | 任务执行前加载当前职业，并注入 WebUI 选择的 `battle_flow` |
 
 ## 生命周期

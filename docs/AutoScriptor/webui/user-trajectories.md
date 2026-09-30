@@ -16,14 +16,23 @@
 3. 弹窗关闭，任务仍为启用。
 4. 刷新页面后状态仍为启用。
 5. `next_exec_time=0` 时显示为待执行。
-6. 保存后的账号 JSON 不包含 `fn/order/param_meta/param_keys/beta/custom/debug_mode/task_description/task_doc_flow/_due/progress/progress_display` 等运行时字段。
+6. 保存后的账号 JSON 不包含 `fn/param_meta/param_keys/custom/task_description/task_doc_flow/_due/progress/progress_display/id` 等投影字段（`id` 由 `cfg["tasks"]` 的键本身表达）；用户自己的 `debug` 和 `reschedule` 会保留。
+
+## 任务调度与调试编辑
+
+1. 打开一个内置任务（例如 `每日任务/村庄/战令领取`），弹窗的「调度」默认显示作者声明的生效值（该任务是「每隔 N 小时」），不是「一次性」。
+2. 把「调度」改成「每天 05:00」并保存；账号 JSON 的该任务条目出现 `reschedule="daily"`。
+3. 重新打开弹窗，仍显示「每天 05:00」，说明用户覆盖已生效。
+4. 把「调度」改回「一次性」并保存；该条目的 `reschedule` 键消失，弹窗重新显示作者声明的生效值。
+5. 打开「调试直跑」并保存；该条目出现 `debug=true`，调度的自动登录与失败恢复跳过。
+6. 任务弹窗里没有 `debug_effective` / `reschedule_effective` 落盘：它们只出现在公开配置投影里。
 
 ## 未注册任务隐藏
 
-1. 在账号 JSON 中保留一个已经不存在的任务叶子。
+1. 在账号 JSON 中保留一个已经不存在的任务条目（键不匹配任何已注册任务的 `id`）。
 2. 启动 WebUI 并刷新。
-3. 该叶子不会显示在任务树或总览汇总中。
-4. 保存任务后不会把未注册叶子重新写回。
+3. 该条目不会显示在任务树或总览汇总中。
+4. 保存任务后不会把未注册条目重新写回。
 
 ## 手动刷新任务列表
 
@@ -82,7 +91,7 @@
 
 ## Debug 任务直跑
 
-1. 任务使用 `@register_task(debug_mode=True)`。
+1. 任务声明 `@register_task(debug=True)`，或在 WebUI 里把该任务的 debug 打开。
 2. 从当前游戏画面直接运行。
 3. 不强制回登录页重新登录。
 4. 失败后不关闭/重启游戏。
@@ -148,4 +157,4 @@
 2. 礼包码弹窗加载 `/api/news/gift_codes/page`。
 3. 刷新兑换码只查官方公告近 10 天、最多 15 个帖子，并跳过已检查帖子。
 4. 批量兑换需要 credential unlock 或安全密码。
-5. 兑换时先切换到目标账号/角色，再执行内置任务 `一般任务/活动/兑换豪礼礼品兑换`。
+5. 兑换时先切换到目标账号/角色，再执行内置任务 `其他任务/活动脚本/兑换豪礼礼品兑换`。

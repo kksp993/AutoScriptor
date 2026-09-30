@@ -4,9 +4,10 @@ from AutoScriptor import *
 
 @register_task(
     description="执行极北一键碾压。",
-    task_doc="【bug】注意不会消耗祝福，如果有需求不要开启。",
+    reschedule="daily",
 )
 def task():
+    """【bug】注意不会消耗祝福，如果有需求不要开启。"""
     ensure_in("极北",-1)
     click(B(40,400,40,40))
     wait_for_appear(I("一键碾压-月"))

@@ -3,6 +3,7 @@ from AutoScriptor import *
 
 @register_task(
     description="领取极光天诏任务奖励。",
+    reschedule="daily",
 )
 def task():
     ensure_in("极北村庄")

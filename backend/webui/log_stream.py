@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import os
+from logging.handlers import RotatingFileHandler
 from queue import Empty, Full, Queue
 from typing import Any, Set
 
@@ -77,8 +78,12 @@ _PLAIN_FORMAT = logging.Formatter(
     datefmt="%H:%M:%S",
 )
 
-_FILE_HANDLER = logging.FileHandler(
-    os.path.join(str(get_logs_root()), 'webui.log'), encoding='utf-8'
+# 日志只增不减，而错误归档每次都要回读尾部；给它一个上限，避免无限增长。
+_FILE_HANDLER = RotatingFileHandler(
+    os.path.join(str(get_logs_root()), 'webui.log'),
+    maxBytes=8 * 1024 * 1024,
+    backupCount=3,
+    encoding='utf-8',
 )
 _FILE_HANDLER.setLevel(logging.INFO)
 _FILE_HANDLER.setFormatter(_PLAIN_FORMAT)

@@ -281,10 +281,7 @@ const EditorPanel = {
 <el-dialog v-model="saveScriptDialogVisible" title="保存脚本" width="min(760px, calc(100vw - 32px))" append-to-body>
   <el-form label-position="top" class="space-y-3" @submit.prevent>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-      <el-form-item label="文件名称">
-        <el-input v-model="saveScriptForm.filename" placeholder="custom_task.py" />
-      </el-form-item>
-      <el-form-item label="脚本名称">
+        <el-form-item label="脚本名称">
         <el-input v-model="saveScriptForm.taskPathTail" placeholder="示例/操作设置">
           <template #prepend>自定义任务/</template>
         </el-input>
@@ -434,7 +431,6 @@ const EditorPanel = {
     const saveScriptLoading = ref(false);
     const saveScriptDialogVisible = ref(false);
     const saveScriptForm = ref({
-      filename: 'custom_task.py',
       taskPathTail: '',
       description: '',
       taskDoc: '',
@@ -555,12 +551,13 @@ const EditorPanel = {
     });
 
     // ── API helpers ──
-    async function apiGet(url) { return (await fetch('/api/editor' + url)).json(); }
+    // 走统一的 WebUIApi：它负责 /api 前缀、cookie、_timestamp 和错误归一，
+    // 这里只把响应体交回给调用方（编辑器各接口的既有形状保持不变）。
+    async function apiGet(url) {
+      return (await window.WebUIApi.request('GET', '/editor' + url)).data;
+    }
     async function apiPost(url, body) {
-      return (await fetch('/api/editor' + url, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })).json();
+      return (await window.WebUIApi.request('POST', '/editor' + url, body)).data;
     }
 
     function apiErrorMessage(data, fallback) {
@@ -632,14 +629,6 @@ const EditorPanel = {
         ta.focus();
         ta.setSelectionRange(pos, pos);
       });
-    }
-
-    function recordedTextareaElement() {
-      return codeTextareaElement({ input: recordedCodeInput });
-    }
-
-    function focusRecordedCodeAt(pos) {
-      focusCodeTargetAt({ input: recordedCodeInput }, pos);
     }
 
     function findInsertionMarker(value) {
@@ -1706,13 +1695,6 @@ const EditorPanel = {
       return sections.join('\n\n');
     }
 
-    function normalizeSaveScriptFilename(raw) {
-      let filename = String(raw || '').trim() || 'custom_task.py';
-      filename = filename.replace(/[\\/:*?"<>|]+/g, '_');
-      if (!filename.toLowerCase().endsWith('.py')) filename += '.py';
-      return filename;
-    }
-
     function normalizeSaveScriptTaskPath() {
       const tail = String(saveScriptForm.value.taskPathTail || '').trim().replace(/^自定义任务[\\/]+/, '');
       if (!tail) {
@@ -1780,7 +1762,6 @@ const EditorPanel = {
         ElementPlus.ElMessage.warning('请先输入要保存的脚本内容');
         return;
       }
-      saveScriptForm.value.filename = normalizeSaveScriptFilename(saveScriptForm.value.filename);
       saveScriptDialogVisible.value = true;
     }
 
@@ -1790,13 +1771,13 @@ const EditorPanel = {
         ElementPlus.ElMessage.warning('请先输入要保存的脚本内容');
         return;
       }
-      const filename = normalizeSaveScriptFilename(saveScriptForm.value.filename);
       const taskPath = normalizeSaveScriptTaskPath();
       if (!taskPath) return;
       const params = buildSaveScriptParamPayload();
       if (params === null) return;
 
-      saveScriptForm.value.filename = filename;
+      // 文件名由脚本名称的最后一段决定：位置就是身份，没有第二个命名入口。
+      const filename = `${taskPath.split('/').pop()}.py`;
       saveScriptLoading.value = true;
       try {
         const form = saveScriptForm.value;

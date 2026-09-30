@@ -27,10 +27,7 @@
         "theme": "dark",
         "password": null,
         "ssl_key": null,
-        "ssl_cert": null,
-        "language": "zh-CN",
-        "cdn": false,
-        "timezone_offset": null
+        "ssl_cert": null
     },
     "notify": {
         "enabled": false,
@@ -43,23 +40,10 @@
             "access_token": ""
         }
     },
-    "update": {
-        "auto_check": true,
-        "check_interval_minutes": 30,
-        "auto_restart_time": null
-    },
-    "remote_access": {
-        "enabled": false,
-        "ssh_server": null,
-        "ssh_user": null,
-        "ssh_executable": "ssh"
-    },
+    "update": {},
     "task_ordering": {
         "schema_version": 1,
-        "user_order": [],
-        "hard_edges": [],
-        "layout": {},
-        "group_order": []
+        "user_order": []
     },
     "accounts": {
         "dir": ""

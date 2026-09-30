@@ -79,12 +79,14 @@ def locate_region(cnt = 0, check_only = False) -> tuple[str, str]:
     loc_names = list(mm.locs.keys())
     idx = check_loc_idx(loc_names)
 
-    if check_only: return "当前位置未知, 请自行判断下一步并尝试再次调用，请先根据当前的图像一步步关闭窗口，直至没有返回或关闭，再调用本工具"
     if idx >= 0:
         loc_name = loc_names[idx]
         logger.debug("定位命中位置: %s", loc_name)
         loc = mm.locs[loc_name]
         return mm.set_region(loc.envs[0].name, loc.name)
+    # 「未知」必须放在判定之后：否则第 1.4 步明明认出来了也报未知，
+    # 错误归档会拿到一条假阴性。
+    if check_only: return "当前位置未知"
     if cnt % 2 == 0:
         try_close_via_x()
     if cnt > 10:

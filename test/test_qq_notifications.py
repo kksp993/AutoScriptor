@@ -214,11 +214,6 @@ class TestQQSettingsLifecycle(unittest.TestCase):
         self.assertEqual(self.config._config, previous)
         self.version.assert_not_called()
 
-    def test_legacy_deploy_does_not_erase_or_override_qq(self):
-        self.lifecycle.save_qq_settings({"target_id": "12345", "access_token": "test-token"})
-        self.lifecycle.save_deploy_sections({"notify": {"enabled": True, "qq": {"access_token": "wrong"}}})
-        self.assertEqual(self.config.get("notify.qq.access_token"), "test-token")
-
     def test_import_public_config_keeps_existing_token(self):
         self.lifecycle.save_qq_settings({"target_id": "12345", "access_token": "test-token"})
         public_settings = self.lifecycle.prepare_qq_settings({}).public_dict()

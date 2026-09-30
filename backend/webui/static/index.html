@@ -59,7 +59,7 @@
       .stat-label { @apply text-sm text-gray-500 mt-1.5; }
     }
   </style>
-  <link rel="stylesheet" href="/static/css/style.css?v=45" />
+  <link rel="stylesheet" href="/static/css/style.css?v=46" />
 </head>
 <body class="app-body overflow-hidden" style="height:100vh;">
   <div id="app" class="flex h-screen overflow-hidden">
@@ -167,6 +167,18 @@
       <!-- 内容区 -->
       <main class="flex-1 overflow-hidden p-5 flex flex-col min-h-0">
 
+        <!-- 自定义任务脚本导入失败：后端已把它们列出来，这里必须让人看见 -->
+        <el-alert v-if="customTaskLoadErrors.length"
+                  type="error"
+                  :closable="false"
+                  show-icon
+                  class="mb-3 flex-shrink-0"
+                  title="自定义任务脚本导入失败，这些任务本轮未加载">
+          <div v-for="err in customTaskLoadErrors" :key="err.path" class="text-xs font-mono break-all">
+            {{ err.path }}: {{ err.error }}
+          </div>
+        </el-alert>
+
         <news-panel v-if="activeTab==='news'" :refresh-key="newsRefreshKey"></news-panel>
 
         <overview-panel v-if="activeTab==='overview'"
@@ -213,7 +225,8 @@
         <settings-panel v-if="activeTab==='settings'"
           :filtered-config="filteredConfig"
           :execution-busy="executionBusy"
-          @settings-change="saveSettings"></settings-panel>
+          @settings-change="saveSettings"
+          @deploy-saved="refreshAfterDeploy"></settings-panel>
 
         <about-panel v-if="activeTab==='about'"></about-panel>
 
@@ -259,7 +272,6 @@
           <p v-if="editTaskData.task_doc_flow" class="text-xs text-gray-500 leading-relaxed whitespace-pre-wrap">{{ editTaskData.task_doc_flow }}</p>
         </div>
         <p v-if="editTaskData.custom" class="task-doc-custom-line mb-3">*自定义任务：任意 Python 与主程序同进程运行；请仅使用可信来源脚本，风险自负。</p>
-        <p v-if="editTaskData.beta" class="task-doc-beta-line mb-3">*该任务为 Beta 实验功能：自动化流程、界面识别或参数含义可能随版本快速调整，不保证与当前游戏完全一致；请谨慎启用并及时反馈问题。</p>
         <p v-if="editTaskPath" class="text-xs text-gray-400 font-mono break-all mb-3">路径：{{ editTaskPath }}</p>
         <el-form :model="editTaskData" label-width="100px" :disabled="executionBusy">
           <el-form-item label="任务状态">
@@ -272,6 +284,28 @@
             </span>
           </el-form-item>
           <el-form-item label="启用状态"><el-switch v-model="editTaskData.on"></el-switch></el-form-item>
+          <el-form-item label="调度">
+            <div class="flex items-center gap-2 flex-wrap">
+              <el-select :model-value="editTaskRescheduleMode"
+                         @change="setEditTaskRescheduleMode"
+                         style="width:190px">
+                <el-option v-for="(label, value) in rescheduleModeLabels"
+                           :key="value" :label="label" :value="value"></el-option>
+              </el-select>
+              <el-input-number v-if="editTaskRescheduleMode==='offset'"
+                               :model-value="editTaskRescheduleHours"
+                               @change="setEditTaskRescheduleHours"
+                               :min="1" controls-position="right" style="width:130px"></el-input-number>
+              <span v-if="editTaskData.reschedule_effective"
+                    class="text-xs text-gray-400">
+                生效：{{ rescheduleModeLabels[editTaskData.reschedule_effective.mode] || editTaskData.reschedule_effective.mode }}
+              </span>
+            </div>
+          </el-form-item>
+          <el-form-item label="调试直跑">
+            <el-switch :model-value="editTaskDebug" @change="setEditTaskDebug"></el-switch>
+            <span class="text-xs text-gray-400 ml-2">跳过自动登录与失败恢复，保留现场</span>
+          </el-form-item>
           <template v-for="(val, key) in editTaskData.params" :key="key">
             <el-form-item v-if="key !== 'profession' && isTableParam(key)" :label="paramLabel(key)" label-width="80px">
               <el-table :data="getTableRows(key)" border size="small" style="width:100%" class="table-param-editor">
@@ -506,7 +540,7 @@
   <script src="/static/js/components/Overview.js?v=19"></script>
   <script src="/static/js/components/SchedulerPanel.js?v=15"></script>
   <script src="/static/js/components/TaskPanel.js?v=23"></script>
-  <script src="/static/js/components/Settings.js?v=11"></script>
+  <script src="/static/js/components/Settings.js?v=12"></script>
   <script src="/static/js/components/NotificationsPanel.js?v=2"></script>
   <script src="/static/js/components/AboutPanel.js?v=1"></script>
   <script src="/static/js/components/UpdatePanel.js?v=1"></script>
@@ -516,9 +550,8 @@
 <script src="/static/js/components/editor/EditorPanel.js?v=36"></script>
   <script src="/static/js/components/DiagnosticsPanel.js?v=3"></script>
   <script src="/static/js/components/ErrorArchivesPanel.js?v=4"></script>
-  <script src="/static/js/task_help_docs.js?v=1"></script>
   <script src="/static/js/core/api.js?v=1"></script>
   <script src="/static/js/stores/runtimeStore.js?v=1"></script>
-  <script src="/static/js/app.js?v=42"></script>
+  <script src="/static/js/app.js?v=43"></script>
 </body>
 </html>

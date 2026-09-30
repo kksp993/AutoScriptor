@@ -76,17 +76,16 @@ const UpdatePanel = {
     await this.loadSourceStatus();
   },
   methods: {
-    async readJson(res) {
-      const data = await res.json().catch(() => ({}));
+    async readJson(url, method = 'GET', options) {
+      const res = await window.WebUIApi.request(method, url, null, options);
       if (!res.ok) {
-        throw new Error(data.message || data.error || data.last_error || `HTTP ${res.status}`);
+        throw new Error(window.WebUIApi.errorMessage(res.data, `HTTP ${res.status}`));
       }
-      return data;
+      return res.data;
     },
     async loadSourceStatus() {
       try {
-        const res = await fetch('/api/update/status');
-        this.sourceStatus = await this.readJson(res);
+        this.sourceStatus = await this.readJson('/update/status');
       } catch (e) {
         this.sourceStatus = {
           ...this.sourceStatus,
@@ -99,8 +98,7 @@ const UpdatePanel = {
     async checkSourceUpdate() {
       this.checkingSource = true;
       try {
-        const res = await fetch('/api/update/check', { method: 'POST' });
-        const data = await this.readJson(res);
+        const data = await this.readJson('/update/check', 'POST');
         this.sourceStatus = data;
         const remoteBranch = data.remote_branch || 'main';
         const aheadCount = Number(data.ahead_count || 0);
@@ -133,8 +131,7 @@ const UpdatePanel = {
       }
       this.updatingSource = true;
       try {
-        const res = await fetch('/api/update/run', { method: 'POST' });
-        const data = await this.readJson(res);
+        const data = await this.readJson('/update/run', 'POST');
         const wasUpdatingFromRemote = this.sourceStatus.has_update === true;
         this.sourceStatus = data;
         const remoteBranch = data.remote_branch || 'main';
@@ -167,7 +164,9 @@ const UpdatePanel = {
       const poll = setInterval(async () => {
         attempts += 1;
         try {
-          const res = await fetch('/api/update/status', { signal: AbortSignal.timeout(3000) });
+          const res = await window.WebUIApi.request('GET', '/update/status', null, {
+            signal: AbortSignal.timeout(3000),
+          });
           if (res.ok) {
             clearInterval(poll);
             ElementPlus.ElMessage.success('后端已恢复');

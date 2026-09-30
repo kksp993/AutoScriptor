@@ -16,9 +16,10 @@ class Method(Enum):
 
 @register_task(
     description="按配置完成极北村庄点券消费。",
-    task_doc="【谨慎】会按配置购买指定点券道具。",
+    reschedule="daily",
 )
 def task(method:Method=Method.YAOSHI):
+    """【谨慎】会按配置购买指定点券道具。"""
     if method == Method.YAOSHI:
         ensure_in("极北村庄")
         click(I("导航-寻宝"))

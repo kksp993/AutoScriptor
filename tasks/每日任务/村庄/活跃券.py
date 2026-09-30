@@ -11,9 +11,10 @@ def buy_item(item_name: str):
 
 @register_task(
     description="通过荣耀商店购置并使用活跃福利券。",
-    task_doc="通过荣耀商店购置活跃券。【bug】活跃券使用可能有异常，建议自行确认是否使用成功。",
+    reschedule="daily",
 )
 def task():
+    """通过荣耀商店购置活跃券。【bug】活跃券使用可能有异常，建议自行确认是否使用成功。"""
     logger.info("====活跃券====")
     ensure_in(["村庄"])
     click(I("导航-菜单")); sleep(1)

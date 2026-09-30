@@ -51,6 +51,7 @@ def bingku_battle():
 
 @register_task(
     description="完成幽冥冰窟每周流程。",
+    reschedule="weekly",
 )
 def task(
     Bingku_WuQi=WuQi.风虎之怒,

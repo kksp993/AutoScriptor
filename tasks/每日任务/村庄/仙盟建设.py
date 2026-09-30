@@ -4,9 +4,10 @@ from AutoScriptor.logging.logger import logger
 
 @register_task(
     description="完成仙盟建设并领取每日任务奖励。",
-    task_doc="完成仙盟建设+每日任务【仙盟建设1】。",
+    reschedule="daily",
 )
 def daily_alliance_task():
+    """完成仙盟建设+每日任务【仙盟建设1】。"""
     logger.info("====仙盟贡献====")
     ensure_in("仙盟")
     sleep(1)

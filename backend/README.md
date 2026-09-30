@@ -12,7 +12,6 @@ backend/
 │   ├── banner.py             启动横幅
 │   ├── updater.py            源码 Git 更新通道
 │   ├── single_instance.py    单实例锁
-│   ├── remote_access.py      远程访问入口
 │   └── qq_bot.py             本机 QQ 机器人安装与启动
 └── webui/      WebUI 服务
     ├── server.py             应用壳：日志、鉴权中间件、静态挂载、进程生命周期
@@ -26,8 +25,8 @@ backend/
     │   ├── overview.py       总览与运行快照
     │   ├── accounts.py       账号、角色、调度队列、凭据解锁
     │   ├── news.py           4399 资讯抓取、代理、兑换码执行入口
-    │   ├── ops.py            设备/OCR 探测、更新、远程访问、部署、导入导出、错误归档
-    │   ├── notifications.py  onepush 与 QQ 通知渠道
+    │   ├── ops.py            设备/OCR 探测、更新、部署设置、导入导出、错误归档
+    │   ├── notifications.py  QQ / OneBot 通知渠道
     │   ├── editor.py         图片编辑器后端
     │   └── news_4399_session.py
     ├── static/               Vue 页面与静态资源

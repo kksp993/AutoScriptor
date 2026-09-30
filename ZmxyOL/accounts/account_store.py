@@ -23,6 +23,24 @@ from ZmxyOL.accounts.crypto.config_manager import ConfigManager as CryptoConfigM
 from ZmxyOL.character.profession import DEFAULT_GAME_PROFESSION, normalize_game_profession
 
 
+# WebUI 投影字段：只存在于 API 返回里，不落盘。orchestrator 的剥离名单直接取这一份，
+# 免得读侧和写侧各维护一张表、慢慢漂移。放在本层是因为保存路径要用它，而本层在最下面。
+INJECTED_TASK_FIELDS = (
+    "param_meta",
+    "param_keys",
+    "custom",
+    "debug_effective",
+    "reschedule_effective",
+    "task_description",
+    "task_doc_flow",
+    "fn",
+    "id",
+    "progress",
+    "progress_display",
+    "_due",
+)
+
+
 _DECRYPT_ERRORS = getattr(
     CryptoConfigManager,
     "DECRYPT_ERRORS",
@@ -90,6 +108,15 @@ def _assert_no_testing_tasks_in_account(root: dict[str, Any]) -> None:
         )
 
 
+def default_dispatch_queue(server: str, character_name: str) -> list[dict[str, str]]:
+    """账号的初始跨角色调度队列：先放这一个角色。
+
+    调度器只跑队列里的角色，所以账号文档必须带 ``dispatch_queue``。初始只放
+    一个角色是最小可用默认值；要多角色参与调度的用户在总览页自己加。
+    """
+    return [{"server": server, "name": character_name}]
+
+
 class Character:
     __slots__ = ("server", "name", "_data")
 
@@ -116,10 +143,7 @@ class Character:
     @staticmethod
     def clean_tasks_inplace(data: Any) -> None:
         if isinstance(data, dict):
-            for key in (
-                "fn", "order", "param_meta", "param_keys", "beta", "custom", "debug_mode",
-                "task_description", "task_doc_flow", "_due",
-            ):
+            for key in INJECTED_TASK_FIELDS:
                 data.pop(key, None)
             for v in data.values():
                 Character.clean_tasks_inplace(v)
@@ -191,6 +215,26 @@ class Account:
     def get_active_character(self) -> Character | None:
         ac = self.active_info
         return self.characters.get((ac.get("server", ""), ac.get("name", "")))
+
+    def ensure_dispatch_queue(self) -> bool:
+        """账号文档必须带 ``dispatch_queue``，调度器才有角色可跑。
+
+        只在缺键时用当前角色补齐；用户把队列清空成 ``[]`` 之后不再自动填回。
+        账号还没有任何角色时保持缺键，等它有角色后下一次加载再补。
+        返回是否改动了文档（调用方据此决定要不要落盘）。
+        """
+        if "dispatch_queue" in self.root:
+            return False
+        active = self.active_info
+        server = str(active.get("server") or "").strip()
+        name = str(active.get("name") or "").strip()
+        if (server, name) not in self.characters:
+            fallback = next(iter(self.characters), None)
+            if fallback is None:
+                return False
+            server, name = fallback
+        self.root["dispatch_queue"] = default_dispatch_queue(server, name)
+        return True
 
     def prepare_for_save(self, flat: dict[str, Any] | None) -> None:
         ch = self.get_active_character()
@@ -288,6 +332,7 @@ class AccountStore:
                     }
                 }
             },
+            "dispatch_queue": default_dispatch_queue("默认服务器", char_name),
         }
 
     def load_account(self, name: str, pwd: str, global_cfg: dict[str, Any], writer) -> None:
@@ -301,6 +346,9 @@ class AccountStore:
             data = json.load(f)
         self.current_acc = Account(name, data)
         self.current_acc.decrypt_credentials(pwd)
+        if self.current_acc.ensure_dispatch_queue():
+            writer(path, self.current_acc.to_persist_dict())
+            logger.info("已为账号 %s 补齐默认跨角色调度队列", name)
 
     def save_account_file(self, global_cfg: dict[str, Any], writer) -> None:
         if not self.current_acc:
@@ -429,6 +477,7 @@ class AccountStore:
                     }
                 }
             },
+            "dispatch_queue": default_dispatch_queue(server, character_name),
         }
         writer(path, account_data)
         logger.info("已创建账号: %s", name)

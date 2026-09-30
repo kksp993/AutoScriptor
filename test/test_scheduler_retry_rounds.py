@@ -361,6 +361,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
 
     def test_exhausted_scheduled_task_does_not_force_zero_wait_spin(self):
         from orchestrator.scheduler import CHECK_INTERVAL, Scheduler
+        from tasks.task_register import task_registry
 
         cfg._config["tasks"] = {"A": {"on": True, "next_exec_time": 0}}
         sched = Scheduler()
@@ -368,7 +369,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
 
         with patch.object(cfg, "active_character", return_value={"server": "s1", "name": "c1"}):
             with patch.object(sched, "_iter_characters_schedule_order", return_value=iter([("s1", "c1")])):
-                with patch("tasks.task_registry.has_task", return_value=True):
+                with patch.object(task_registry, "has_task", return_value=True):
                     self.assertEqual(sched._collect_active_times(), [])
                     self.assertEqual(sched._get_wait_interval(), CHECK_INTERVAL)
 

@@ -2,6 +2,7 @@ from ZmxyOL import *
 from AutoScriptor import *
 @register_task(
     description="执行极北冰窟扫荡。",
+    reschedule="daily",
 )
 def bingkuTanXian():
     ensure_in("极北",-1)

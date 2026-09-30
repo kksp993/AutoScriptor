@@ -4,6 +4,7 @@ from AutoScriptor import *
 
 @register_task(
     description="执行荣耀之战每周流程。",
+    reschedule="weekly",
 )
 def task(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,

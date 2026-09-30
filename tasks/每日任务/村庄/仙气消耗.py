@@ -3,10 +3,11 @@ from AutoScriptor import *
 
 @register_task(
     description="找小龙女消耗仙气。",
-    task_doc="【弃用】该任务保留旧仙气消耗流程。",
     deprecated=True,
+    reschedule="daily",
 )
 def task():
+    """【弃用】该任务保留旧仙气消耗流程。"""
     ensure_in("仙盟")
     ensure_in("村庄")
     click(I("村庄-小仙女"),offset=(0,60))

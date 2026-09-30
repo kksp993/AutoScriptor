@@ -4,25 +4,27 @@ Read this when changing task registration, scheduling, runtime context, or OCR/b
 
 ## TaskRegistry And Task Config
 
-- Runtime task data lives in `tasks.task_registry.task_registry`.
-- User task config lives in `cfg["tasks"]`; task status/progress lives under `cfg["status"]["tasks"]`.
-- Link both by slash path, for example `每日任务/村庄/宠物培养`.
-- Do not store or read `fn`, `order`, `param_meta`, `param_keys`, `beta`, `custom`, `debug_mode`, `task_description`, `task_doc_flow`, `_due`, or `progress_display` from persisted `cfg["tasks"]`.
+- Runtime task data lives in `tasks.task_register.task_registry`, keyed by display path.
+- User task config lives in `cfg["tasks"]` keyed by task **id**; task status/progress lives under `cfg["status"]["tasks"]` keyed by display path.
+- Two names per task, never conflated: `id` is the identity (keys `cfg["tasks"]` and `task_ordering`, survives rename), `path` is the display location (tree, execution order, parameter labels), for example `每日任务/村庄/宠物培养`. `id` is the task name (the file stem), so moving a task between folders keeps identity; only a file rename needs `@register_task(id=...)` to pin it. Registering a duplicate id must fail loudly.
+- The two key spaces meet only in `retarget_ordering_overlay()`; do not add a second translation point.
+- `cfg["tasks"]` is a flat table, not a nested tree. `TaskTreeService.build_task_tree()` builds the WebUI tree from display paths and `flatten_payload_tasks()` flattens it back on save; `catalog.normalize_task_table()` rewrites a legacy nested table at load, before the first `@register_task` runs.
+- Do not store or read `fn`, `param_meta`, `param_keys`, `custom`, `task_description`, `task_doc_flow`, `_due`, `id`, or `progress_display` from persisted `cfg["tasks"]`; the injected list lives in `ZmxyOL.accounts.account_store.INJECTED_TASK_FIELDS`. `debug` and `reschedule` are user data and must persist.
 - Parameter specs (`tasks/task_params.py`) are the single definition behind the JSON default, the WebUI form description, and execution decoding; `param_meta` is computed from them at projection time and never persisted.
-- Leaf detection is `TaskTree.is_leaf(node)` or `'on' in node`.
+- `TaskTree.is_leaf(node)` / `'on' in node` still identifies a task entry body; it is what the tree builder and payload flattener agree on.
 - `Scheduler._collect_due` must filter with `task_registry.has_task(path)`.
-- `TaskTreeService.inject_public_task_fields()` hides unregistered leaf tasks in WebUI projections.
+- `TaskTreeService.inject_public_task_fields()` hides unregistered tasks in WebUI projections.
 - Test task function replacement should use `task_registry.set_fn(path, fn)` or registry helpers, not cfg mutation.
 
 ## Reload Boundary
 
 - A task reload re-imports task scripts and rebuilds `tasks` plus `tasks.battle_task_params` (the flow enum aggregates character-script `@flow` registrations).
-- It keeps `tasks.task_registry` (the registry singleton readers already hold) and the authoring plumbing (`task_params`, `task_register`, `task_state`, `time`). `orchestrator/catalog.py` holds the list.
+- It keeps `tasks.task_register` (the registry singleton readers already hold) and the authoring plumbing (`task_params`, `task_state`, `time`). `orchestrator/catalog.py` holds the list.
 - `ZmxyOL` is not purged: it owns cross-boundary types such as `TableParam`, and character scripts are refreshed by `reload_character_modules()`. `ZmxyOL.drop_cached_exports()` clears lazily bound re-exports so a star-import serves the post-reload enum.
-- The stale-leaf prune refuses to run on an empty registry: that state means registration did not reach the registry being read, and pruning there deletes every leaf.
+- The stale-entry prune refuses to run on an empty registry: that state means registration did not reach the registry being read, and pruning there deletes every entry. `normalize_task_table()` never writes an empty table for a non-empty input.
 - Reload path clears and rebuilds the registry; check `force_reload_tasks()` before changing reload semantics.
-- `tasks/**/_order.txt` is an explicit source ordering input; task loading should not rewrite those files during normal startup.
-- Custom task scripts live in `data/custom_task/` and must use explicit `path_cn`.
+- Built-in task order is the registration order, which is the sorted source path under `tasks/`; there is no per-task order parameter and no order file. The user's drag order lives in `task_ordering`, keyed by task id.
+- Custom task scripts live in `data/custom_task/`; their display path is their location there under the `自定义任务` root, so there is no path parameter.
 - Runtime battle character scripts live in `data/character/`; old YAML profiles are not the active battle-flow path.
 - MuMu adapter attributes and task-authoring helpers may be reached dynamically through `BaseMumuControl.__getattr__`, `from AutoScriptor import *`, or user scripts; static no-call evidence alone is not deletion proof.
 
@@ -30,7 +32,7 @@ Useful docs:
 
 - `docs/AutoScriptor/architecture.md`
 - `docs/AutoScriptor/tasks/script-authoring.md`
-- `test/test_task_registry/`
+- `test/test_task_register/`
 
 ## Runtime Context
 

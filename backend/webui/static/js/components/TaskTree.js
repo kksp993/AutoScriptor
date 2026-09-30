@@ -93,7 +93,6 @@ const TaskTreeTaskRow = {
           @click.stop="openTaskEditor">
       <span class="font-medium text-sm text-dark truncate">{{ taskKey }}</span>
       <span v-if="item.custom" class="task-custom-tag">自定义</span>
-      <span v-if="item.beta" class="task-beta-tag">Beta</span>
     </span>
     <div class="relative flex-1 min-w-0 flex items-center min-h-[1.5rem]">
       <div ref="measureWrap" class="absolute left-0 top-0 z-[-1] flex items-center gap-2 opacity-0 pointer-events-none whitespace-nowrap" aria-hidden="true">

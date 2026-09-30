@@ -59,6 +59,7 @@ _DEFAULT_BATTLE_CONFIG = TableParam(
 
 @register_task(
     description="根据配置挑战极寒深渊副本。",
+    reschedule="daily",
 )
 def task(
     lingqi_priority: tuple[LingQi, ...] = _DEFAULT_LINGQI_PRIORITY,
@@ -79,8 +80,19 @@ def task(
         return nandu.value
 
     def _after_no_remains():
-        click(B(1200, 30, 30, 30))
-        wait_for_appear(T("回家", box=Box(29, 656, 77, 54).margin()))
+        """剩余次数为 0：退出关卡预览/副本界面，回到极寒深渊地图。
+
+        预览界面刚弹出时有一段入场时间，这时点 X 会被吃掉（实测点完界面还在），
+        所以点完必须确认「回家」已出现，没出现就再点；都不行才抛超时交给 retry。
+        """
+        home = T("回家", box=Box(29, 656, 77, 54).margin())
+        if ui_T(home, timeout=1):
+            return
+        for _ in range(4):
+            click(B(1200, 30, 30, 30))
+            if ui_T(home, timeout=2):
+                return
+        wait_for_appear(home)
 
     def _run_battle(name: str, is_lingyu: bool):
         row = battle_config[name]

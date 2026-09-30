@@ -33,9 +33,11 @@ LINGPAI_MAP = {
 
 @register_task(
     description="完成联盟悬赏任务。",
-    task_doc="【未完成】联盟悬赏流程仍未完整验证。",
+    deprecated=True,
+    reschedule="daily",
 )
 def lianmengxuanshang():
+    """【未完成】发布悬赏流程尚未验证，暂时下架，不参与调度。"""
     ensure_in("联盟", 1)
     click(T("联盟悬赏"),offset=(-50,0))
     wait_for_appear(T("下一页"))

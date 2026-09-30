@@ -52,47 +52,14 @@ async def update_run_api():
     return {"success": ok, **updater.get_status()}
 
 
-@router.get("/api/remote-access")
-async def remote_access_status_api():
-    from backend.core.remote_access import RemoteAccess
-    return RemoteAccess.get_status()
-
-
-@router.post("/api/remote-access")
-async def remote_access_toggle_api(request: Request):
-    data = await request.json()
-    from backend.core.remote_access import RemoteAccess
-    if data.get("enabled"):
-        if not cfg._config.get("deploy", {}).get("password"):
-            return api_error(
-                403,
-                "开启远程访问前请先设置 WebUI 访问密码",
-                code="deploy_password_required",
-            )
-        RemoteAccess.start(
-            local_port=5000,
-            ssh_server=cfg.get("remote_access.ssh_server", ""),
-            ssh_user=cfg.get("remote_access.ssh_user", ""),
-            ssh_executable=cfg.get("remote_access.ssh_executable", "ssh"),
-        )
-    else:
-        RemoteAccess.stop()
-    return RemoteAccess.get_status()
-
-
 @router.get("/api/deploy")
 async def deploy_get_api():
     deploy_copy = dict(cfg._config.get("deploy", {}))
     has_pwd = bool(deploy_copy.get("password"))
     deploy_copy["password"] = ""
-    notify_copy = dict(cfg._config.get("notify", {}))
-    notify_copy.pop("qq", None)
     return {
         "deploy": deploy_copy,
         "password_protected": has_pwd,
-        "notify": notify_copy,
-        "update": cfg._config.get("update", {}),
-        "remote_access": cfg._config.get("remote_access", {}),
     }
 
 
@@ -102,25 +69,25 @@ async def deploy_save_api(request: Request):
     if busy is not None:
         return busy
     data = await request.json()
-    for section in ("deploy", "notify", "update", "remote_access"):
-        if section in data:
-            if section == "deploy":
-                incoming = data["deploy"]
-                incoming_pwd = incoming.get("password")
-                existing_pwd = cfg._config.get("deploy", {}).get("password")
-                current_pwd = incoming.pop("current_password", None)
+    # 只处理 deploy 段：notify 走 QQ 接口，update 走 /api/update/*。
+    incoming = data.get("deploy")
+    if not isinstance(incoming, dict):
+        return api_error(400, "invalid deploy payload", code="invalid_payload")
+    incoming_pwd = incoming.get("password")
+    existing_pwd = cfg._config.get("deploy", {}).get("password")
+    current_pwd = incoming.pop("current_password", None)
 
-                if incoming_pwd is None and existing_pwd:
-                    if not current_pwd or not verify_deploy_password(current_pwd, existing_pwd):
-                        return JSONResponse(status_code=403, content={"error": "清除密码需要验证当前密码"})
-                    incoming["password"] = None
-                elif incoming_pwd == "":
-                    incoming["password"] = existing_pwd
-                elif incoming_pwd:
-                    if existing_pwd:
-                        if not current_pwd or not verify_deploy_password(current_pwd, existing_pwd):
-                            return JSONResponse(status_code=403, content={"error": "修改密码需要验证当前密码"})
-                    incoming["password"] = hash_deploy_password(incoming_pwd)
+    if incoming_pwd is None and existing_pwd:
+        if not current_pwd or not verify_deploy_password(current_pwd, existing_pwd):
+            return JSONResponse(status_code=403, content={"error": "清除密码需要验证当前密码"})
+        incoming["password"] = None
+    elif incoming_pwd == "":
+        incoming["password"] = existing_pwd
+    elif incoming_pwd:
+        if existing_pwd:
+            if not current_pwd or not verify_deploy_password(current_pwd, existing_pwd):
+                return JSONResponse(status_code=403, content={"error": "修改密码需要验证当前密码"})
+        incoming["password"] = hash_deploy_password(incoming_pwd)
     return api_ok(status="ok", config_version=orchestrator.tasks.save_deploy_sections(data))
 
 
@@ -213,37 +180,6 @@ async def error_archives_import_api(file: UploadFile = File(...)):
     except Exception as e:
         logger.exception("error-archives import failed")
         return JSONResponse(status_code=500, content={"error": str(e)})
-
-
-@router.get("/api/ocr-status")
-async def ocr_status_api():
-    try:
-        import paddle
-        from AutoScriptor.recognition.ocr_rec import get_ocr_runtime_status
-
-        runtime_status = get_ocr_runtime_status()
-        compiled_with_cuda = paddle.device.is_compiled_with_cuda()
-        gpu_count = paddle.device.cuda.device_count()
-        current_device = paddle.get_device()
-        return {
-            "paddle_version": paddle.__version__,
-            "cfg_use_gpu": runtime_status["configured_use_gpu"],
-            "configured_use_gpu": runtime_status["configured_use_gpu"],
-            "runtime_use_gpu": runtime_status["runtime_use_gpu"],
-            "engine_use_gpu": runtime_status["engine_use_gpu"],
-            "compiled_with_cuda": compiled_with_cuda,
-            "gpu_count": gpu_count,
-            "current_device": current_device,
-            "engine_device": runtime_status["engine_device"],
-            "engine_ready": runtime_status["engine_ready"],
-            "restart_required": runtime_status["restart_required"],
-            "initialization_error": runtime_status["initialization_error"],
-            "configured_model": runtime_status["configured_model"],
-            "runtime_model": runtime_status["runtime_model"],
-        }
-    except Exception as e:
-        logger.error("ocr_status error: %s", e)
-        return api_error(500, str(e), code="ocr_status_failed")
 
 
 @router.get("/api/device/diagnostics")

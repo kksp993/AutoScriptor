@@ -444,7 +444,6 @@ const OverviewPanel = {
                       <div class="flex-1 min-w-0 flex items-center gap-1">
                         <span class="ov-dispatch-task-name ov-dispatch-task-name--cell flex-1 min-w-0">{{ t.name }}</span>
                         <span v-if="t.custom" class="task-custom-tag flex-shrink-0">自定义</span>
-                        <span v-if="t.beta" class="task-beta-tag flex-shrink-0">Beta</span>
                       </div>
                       <i class="fa fa-info-circle ov-task-help-chev text-gray-400" title="任务简介"></i>
                     </div>

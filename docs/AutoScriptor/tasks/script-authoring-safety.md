@@ -53,7 +53,7 @@ class LiuLi(Hero):
 ## 调试直跑
 
 ```python
-@register_task(debug_mode=True)
+@register_task(debug=True)
 def task():
     ...
 ```

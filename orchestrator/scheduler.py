@@ -35,8 +35,7 @@ from orchestrator.model import (
     is_task_debug_mode,
     iter_dispatch_characters,
     next_display_timestamp_from_times,
-    parse_allowed_weekdays,
-    parse_sched_window_hours,
+    resolve_reschedule,
     sort_paths_by_task_ordering,
 )
 
@@ -294,7 +293,7 @@ class Scheduler:
     def _collect_active_times(self) -> list[float]:
         """收集当前账号下所有角色的 on=True 任务的「有效」下次执行时间（含 sched_window 等）。"""
         from AutoScriptor.utils.app_config import cfg
-        from tasks.task_registry import task_registry
+        from tasks.task_register import task_registry
 
         if not self._retry_exhausted_tasks:
             return collect_active_times_from_all_characters(cfg, dispatch_only=True)
@@ -305,28 +304,26 @@ class Scheduler:
         active_key = (active.get("server", ""), active.get("name", ""))
         chars = cfg._account_data.get("characters", {}) or {}
 
-        def _walk(node: dict, prefix: str, char_key: tuple[str, str]) -> None:
-            for key, val in node.items():
-                if not isinstance(val, dict):
+        def _collect_from_table(task_table: dict, char_key: tuple[str, str]) -> None:
+            for task_id, val in (task_table or {}).items():
+                if not isinstance(val, dict) or not val.get("on"):
                     continue
-                path = f"{prefix}/{key}" if prefix else key
-                if "on" in val:
-                    if (
-                        val.get("on")
-                        and task_registry.has_task(path)
-                        and not self._is_retry_exhausted(char_key, path)
-                    ):
-                        result.append(calc_effective_next_time(val, now_ts))
-                else:
-                    _walk(val, path, char_key)
+                path = task_registry.get_path(task_id)
+                if not path:
+                    continue
+                if not task_registry.has_task(path):
+                    continue
+                if self._is_retry_exhausted(char_key, path):
+                    continue
+                result.append(calc_effective_next_time(val, now_ts, resolve_reschedule(path, val)))
 
         for server, name in self._iter_characters_schedule_order():
             char_key = (server, name)
             if char_key == active_key:
-                tasks_tree = cfg._config.get("tasks", {}) or {}
+                task_table = cfg._config.get("tasks", {}) or {}
             else:
-                tasks_tree = chars.get(server, {}).get(name, {}).get("tasks", {}) or {}
-            _walk(tasks_tree, "", char_key)
+                task_table = chars.get(server, {}).get(name, {}).get("tasks", {}) or {}
+            _collect_from_table(task_table, char_key)
         return result
 
     def _get_wait_interval(self) -> float:
@@ -397,54 +394,59 @@ class Scheduler:
 
     # ── 到期任务收集 ──
 
-    def _collect_due(self, node: dict, prefix: str, now_ts: float) -> list[str]:
-        from tasks.task_registry import task_registry
+    def _collect_due(self, task_table: dict, now_ts: float) -> list[str]:
+        """Paths of the enabled tasks in one flat cfg table that are due now.
+
+        A schedule-window or weekday deferral is written straight into the entry's
+        ``next_exec_time``, so the entry is the same dict the pipeline later runs.
+        """
+        from tasks.task_register import task_registry
         from AutoScriptor.utils.app_config import cfg
         import datetime as _dt
 
         tasks = []
-        for key, val in node.items():
-            if not isinstance(val, dict):
+        for task_id, val in (task_table or {}).items():
+            if not isinstance(val, dict) or "on" not in val:
                 continue
-            path = f"{prefix}/{key}" if prefix else key
-            if "on" in val:
-                if (
-                    val.get("on")
-                    and not is_human_takeover_blocked(val, now_ts)
-                    and now_ts >= val.get("next_exec_time", 0)
-                    and task_registry.has_task(path)
-                ):
-                    sw = parse_sched_window_hours(val)
-                    if sw is not None:
-                        deferred = clamp_to_sched_window(now_ts, sw[0], sw[1])
-                        if deferred > now_ts:
-                            val["next_exec_time"] = deferred
-                            logger.info(
-                                "📅 任务 %s 不在开放时段 [%02d:00,%02d:00)，已推迟至 %s",
-                                path, sw[0], sw[1],
-                                _dt.datetime.fromtimestamp(deferred).strftime("%Y-%m-%d %H:%M"),
-                            )
-                            cfg.save_config()
-                            self._tasks_updated.set()
-                            continue
-                    aw = parse_allowed_weekdays(val)
-                    if aw is not None:
-                        now_dt = _dt.datetime.fromtimestamp(now_ts)
-                        wd = now_dt.weekday() + 1
-                        if wd not in set(aw):
-                            deferred = calc_next_allowed_weekday_ts(now_dt, aw)
-                            val["next_exec_time"] = deferred
-                            logger.info(
-                                "📅 任务 %s 仅允许星期 %s（当前周%d），已推迟至 %s",
-                                path, aw, wd,
-                                _dt.datetime.fromtimestamp(deferred).strftime("%Y-%m-%d %H:%M"),
-                            )
-                            cfg.save_config()
-                            self._tasks_updated.set()
-                            continue
-                    tasks.append(path)
-            else:
-                tasks.extend(self._collect_due(val, path, now_ts))
+            path = task_registry.get_path(task_id)
+            if not path:
+                continue
+            if not (
+                val.get("on")
+                and not is_human_takeover_blocked(val, now_ts)
+                and now_ts >= val.get("next_exec_time", 0)
+                and task_registry.has_task(path)
+            ):
+                continue
+            spec = resolve_reschedule(path, val)
+            if spec["window"] is not None:
+                deferred = clamp_to_sched_window(now_ts, *spec["window"])
+                if deferred > now_ts:
+                    val["next_exec_time"] = deferred
+                    logger.info(
+                        "📅 任务 %s 不在开放时段 [%02d:00,%02d:00)，已推迟至 %s",
+                        path, spec["window"][0], spec["window"][1],
+                        _dt.datetime.fromtimestamp(deferred).strftime("%Y-%m-%d %H:%M"),
+                    )
+                    cfg.save_config()
+                    self._tasks_updated.set()
+                    continue
+            allowed_weekdays = spec["weekdays"]
+            if allowed_weekdays is not None:
+                now_dt = _dt.datetime.fromtimestamp(now_ts)
+                wd = now_dt.weekday() + 1
+                if wd not in set(allowed_weekdays):
+                    deferred = calc_next_allowed_weekday_ts(now_dt, allowed_weekdays)
+                    val["next_exec_time"] = deferred
+                    logger.info(
+                        "📅 任务 %s 仅允许星期 %s（当前周%d），已推迟至 %s",
+                        path, allowed_weekdays, wd,
+                        _dt.datetime.fromtimestamp(deferred).strftime("%Y-%m-%d %H:%M"),
+                    )
+                    cfg.save_config()
+                    self._tasks_updated.set()
+                    continue
+            tasks.append(path)
         return tasks
 
     def _sort_due_paths(self, due_paths: list[str]) -> list[str]:
@@ -489,7 +491,7 @@ class Scheduler:
             ac = cfg.active_character()
             cur = (ac.get("server", ""), ac.get("name", ""))
             if (server, name) == cur:
-                due = self._collect_due(cfg.get("tasks") or {}, "", time.time())
+                due = self._collect_due(cfg.get("tasks") or {}, time.time())
             else:
                 try:
                     self._switch_active_character(server, name)
@@ -498,7 +500,7 @@ class Scheduler:
                     continue
                 switched = True
                 self.invalidate_login()
-                due = self._collect_due(cfg.get("tasks") or {}, "", time.time())
+                due = self._collect_due(cfg.get("tasks") or {}, time.time())
             due = self._filter_retry_available((server, name), due)
             due = self._sort_due_paths(due)
             if due:
@@ -631,12 +633,9 @@ class Scheduler:
             return execute([task_key], **kwargs)
 
         def _task_is_human_takeover_blocked(task_key: str) -> bool:
-            import dpath
+            from tasks.task_register import task_registry
 
-            try:
-                node = dpath.get(cfg["tasks"], task_key)
-            except Exception:
-                return False
+            node = cfg["tasks"].get(task_registry.id_of(task_key))
             return isinstance(node, dict) and is_human_takeover_blocked(node, time.time())
 
         try:
@@ -880,9 +879,10 @@ class Scheduler:
     def task_call(self, task_path: str):
         """将指定任务设为立即执行（next_exec_time=now, on=True），下一轮自动拾取。"""
         from AutoScriptor.utils.app_config import cfg
-        import dpath
+        from tasks.task_register import task_registry
+
         try:
-            node = dpath.get(cfg._config, f"tasks/{task_path.replace('/', '/')}")
+            node = cfg["tasks"].get(task_registry.id_of(task_path))
             if isinstance(node, dict) and "on" in node:
                 node["on"] = True
                 for field in ("human_takeover", "human_takeover_error", "human_takeover_at"):

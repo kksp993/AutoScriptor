@@ -4,9 +4,10 @@ from AutoScriptor import *
 
 @register_task(
     description="自动进行两个遗迹的仙宝挖掘。",
-    task_doc="必须解锁仙宝挖掘，会自动进行两个地的挖掘。",
+    reschedule="daily",
 )
 def daily_fxiang_task():
+    """必须解锁仙宝挖掘，会自动进行两个地的挖掘。"""
     ensure_in("法相")
     sleep(2)
     click(T("法宝"))

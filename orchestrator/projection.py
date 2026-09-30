@@ -21,11 +21,13 @@ import dpath
 from dpath.exceptions import PathNotFound
 
 from AutoScriptor.utils.app_config import cfg
+from ZmxyOL.accounts.account_store import INJECTED_TASK_FIELDS
 from ZmxyOL.character.profession import GAME_PROFESSIONS, normalize_game_profession
 from orchestrator.model import (
     collect_task_paths,
     normalize_task_ordering_overlay,
     project_task_ordering,
+    retarget_ordering_overlay,
     summarize_ordering_generations,
 )
 
@@ -36,30 +38,97 @@ MUMU_ADB_PORT_STEP = 32
 
 
 class TaskTreeService:
-    RUNTIME_TASK_FIELDS = (
-        "param_meta",
-        "param_keys",
-        "beta",
-        "custom",
-        "debug_mode",
-        "task_description",
-        "task_doc_flow",
-        "fn",
-        "order",
-        "progress",
-        "progress_display",
-        "_due",
-    )
+    # 读写两侧共用一张名单：account_store 保存时删它，投影和保存接口读它。
+    RUNTIME_TASK_FIELDS = INJECTED_TASK_FIELDS
 
-    def task_ordering_projection(self, task_tree: dict | None = None):
-        """Return the current global task-ordering projection for a task tree."""
-        source_tree = task_tree if isinstance(task_tree, dict) else cfg._config.get("tasks", {})
-        return project_task_ordering(source_tree or {}, cfg._config.get("task_ordering", {}))
+    def task_table(self) -> dict:
+        """The flat, id-keyed user config table for the current character."""
+        table = cfg._config.get("tasks")
+        return table if isinstance(table, dict) else {}
 
-    def task_ordering_projection_with_overlay(self, raw_overlay: dict[str, Any], task_tree: dict | None = None):
-        """Return a projection for a candidate overlay without mutating cfg."""
-        source_tree = task_tree if isinstance(task_tree, dict) else cfg._config.get("tasks", {})
-        return project_task_ordering(source_tree or {}, raw_overlay)
+    def build_task_tree(self, task_table: dict | None = None) -> dict:
+        """Lay the flat table out as the tree the WebUI renders.
+
+        Grouping comes from each task's display path, so it follows the source
+        layout and nothing else -- re-grouping a task never touches user data.
+        Each leaf carries ``id`` because that is what the save path keys by: the
+        tree is a view, the table is storage.
+        """
+        from tasks.task_register import task_registry
+
+        table = self.task_table() if task_table is None else task_table
+        tree: dict = {}
+        for task_id, leaf in (table or {}).items():
+            if not isinstance(leaf, dict):
+                continue
+            path = task_registry.get_path(task_id)
+            if not path:
+                continue
+            parts = [part for part in path.split("/") if part]
+            if not parts:
+                continue
+            node = tree
+            blocked = False
+            for part in parts[:-1]:
+                child = node.get(part)
+                if child is None:
+                    child = node[part] = {}
+                elif not isinstance(child, dict) or "on" in child:
+                    # A task file and a folder claim the same name. Only one can be
+                    # shown, so the task loses and the naming clash is reported.
+                    logger.error("任务路径与已有任务同名，无法显示: %s", path)
+                    blocked = True
+                    break
+                node = child
+            if blocked:
+                continue
+            existing = node.get(parts[-1])
+            if isinstance(existing, dict) and "on" not in existing:
+                logger.error("任务路径与已有分组同名，无法显示: %s", path)
+                continue
+            node[parts[-1]] = {**leaf, "id": task_id}
+        return tree
+
+    def flatten_payload_tasks(self, task_tree: dict) -> dict[str, dict]:
+        """Turn the WebUI's path-keyed tree back into the flat, id-keyed table.
+
+        The leaf body is stored as sent, minus the wire-only runtime fields. A leaf
+        with no ``id`` has never been registered, so its display path is the only
+        identity it can have.
+        """
+        from orchestrator.model import TaskTree
+
+        flat: dict[str, dict] = {}
+        for parts, leaf in TaskTree.collect_all_leaves(task_tree or {}):
+            cleaned = deepcopy(leaf)
+            task_id = str(cleaned.pop("id", "") or "").strip() or "/".join(parts)
+            for field in self.RUNTIME_TASK_FIELDS:
+                cleaned.pop(field, None)
+            flat[task_id] = cleaned
+        return flat
+
+    def ordering_overlay_in_paths(self, raw_overlay: dict | None = None) -> dict:
+        """The stored overlay (id-keyed) re-expressed for the projection and WebUI."""
+        from tasks.task_register import task_registry
+
+        stored = cfg._config.get("task_ordering", {}) if raw_overlay is None else raw_overlay
+        return retarget_ordering_overlay(stored, task_registry.id_to_path_map(), "path")
+
+    def ordering_overlay_in_ids(self, path_overlay: dict) -> dict:
+        """A path-keyed overlay from the WebUI re-expressed for storage."""
+        from tasks.task_register import task_registry
+
+        return retarget_ordering_overlay(path_overlay, task_registry.path_to_id_map(), "id")
+
+    def task_ordering_projection(self, task_table: dict | None = None):
+        """Return the current global task-ordering projection for a task table."""
+        source = self.task_table() if task_table is None else (task_table or {})
+        return project_task_ordering(source, self.ordering_overlay_in_paths())
+
+    def task_ordering_projection_with_overlay(self, raw_overlay: dict[str, Any], task_table: dict | None = None):
+        """Return a projection for a candidate path-keyed overlay without mutating cfg."""
+        source = self.task_table() if task_table is None else (task_table or {})
+        return project_task_ordering(source, raw_overlay)
 
     def read_order_map(self) -> dict[str, int]:
         return self.task_ordering_projection().order_map
@@ -73,16 +142,17 @@ class TaskTreeService:
         order_map = self.read_order_map()
         return sorted(paths, key=lambda path: order_map.get(path, float("inf")))
 
-    def ordered_paths(self, data: dict, prefix: str = "") -> list[str]:
+    def ordered_paths(self, task_table: dict | None = None, prefix: str = "") -> list[str]:
         if prefix:
-            return collect_task_paths(data or {}, prefix)
-        return self.task_ordering_projection(data or {}).effective_order
+            return collect_task_paths(task_table or {}, prefix)
+        return self.task_ordering_projection(task_table).effective_order
 
     def apply_effective_order_to_tree(self, tasks: dict) -> Any:
         """Reorder a public task tree by effective order without changing shape."""
         from orchestrator.model import TaskTree
 
-        projection = self.task_ordering_projection(tasks)
+        # The order map is path-keyed, so it comes from the table, not the view.
+        projection = self.task_ordering_projection()
         order_map = projection.order_map
 
         def minimum_order(node: dict, path: str) -> int | float:
@@ -138,8 +208,12 @@ class TaskTreeService:
                 dpath.delete(config_data, pattern)
             except PathNotFound:
                 pass
-        tasks = config_data.get("tasks")
-        if isinstance(tasks, dict):
+        task_table = config_data.get("tasks")
+        if isinstance(task_table, dict):
+            # Storage is the flat table; the WebUI gets the tree its paths imply,
+            # with an ``id`` on every leaf so a save can find its way back.
+            tasks = self.build_task_tree(task_table)
+            config_data["tasks"] = tasks
             self.inject_public_task_fields(tasks)
             ordering_projection = self.apply_effective_order_to_tree(tasks)
             config_data["task_ordering_projection"] = ordering_projection.to_public_dict()
@@ -161,8 +235,8 @@ class TaskTreeService:
         return config_data
 
     def inject_public_task_fields(self, node: dict, prefix: str = "") -> None:
-        from tasks.task_registry import task_registry
-        from orchestrator.model import TaskTree, is_task_due
+        from tasks.task_register import task_registry
+        from orchestrator.model import TaskTree
 
         now_ts = time.time()
         for key, val in list(node.items()):
@@ -173,45 +247,53 @@ class TaskTreeService:
                 if not task_registry.has_task(path):
                     del node[key]
                     continue
-                meta = task_registry.get_param_meta(path)
-                if meta:
-                    val["param_meta"] = meta
-                else:
-                    val.pop("param_meta", None)
-                pkeys = task_registry.get_param_keys(path)
-                if pkeys:
-                    val["param_keys"] = pkeys
-                else:
-                    val.pop("param_keys", None)
-                if task_registry.get_beta(path):
-                    val["beta"] = True
-                else:
-                    val.pop("beta", None)
-                if task_registry.get_custom(path):
-                    val["custom"] = True
-                else:
-                    val.pop("custom", None)
-                if task_registry.get_debug_mode(path):
-                    val["debug_mode"] = True
-                else:
-                    val.pop("debug_mode", None)
-                val["task_description"] = task_registry.get_description(path)
-                val["task_doc_flow"] = task_registry.get_doc_flow(path)
-                task_status = ((cfg._config.get("status") or {}).get("tasks") or {}).get(path, {})
-                progress = task_status.get("progress") if isinstance(task_status, dict) else None
-                if progress is not None:
-                    from tasks.task_state import progress_label
-
-                    val["progress"] = progress
-                    val["progress_display"] = progress_label(progress) or str(progress)
-                else:
-                    val.pop("progress", None)
-                    val.pop("progress_display", None)
-                val["_due"] = is_task_due(val, path, now_ts)
+                self.inject_public_task_leaf(val, path, now_ts)
             else:
                 self.inject_public_task_fields(val, path)
                 if not val:
                     del node[key]
+
+    def inject_public_task_leaf(self, leaf: dict, path: str, now_ts: float | None = None) -> None:
+        """Add the runtime-derived fields one WebUI leaf carries.
+
+        Everything here is computed from the registry and cfg, never stored: the
+        leaf on disk holds user config only, and this is what makes it renderable.
+        """
+        from tasks.task_register import task_registry
+        from orchestrator.model import is_task_debug_mode, is_task_due, resolve_reschedule
+
+        if now_ts is None:
+            now_ts = time.time()
+        meta = task_registry.get_param_meta(path)
+        if meta:
+            leaf["param_meta"] = meta
+        else:
+            leaf.pop("param_meta", None)
+        pkeys = task_registry.get_param_keys(path)
+        if pkeys:
+            leaf["param_keys"] = pkeys
+        else:
+            leaf.pop("param_keys", None)
+        if task_registry.get_custom(path):
+            leaf["custom"] = True
+        else:
+            leaf.pop("custom", None)
+        # 生效值单独投影：cfg 里存的仍是用户覆盖值，作者改默认不会被这次投影固化。
+        leaf["debug_effective"] = is_task_debug_mode(path)
+        leaf["reschedule_effective"] = resolve_reschedule(path, leaf)
+        leaf["task_description"] = task_registry.get_description(path)
+        leaf["task_doc_flow"] = task_registry.get_doc_flow(path)
+        task_status = ((cfg._config.get("status") or {}).get("tasks") or {}).get(path, {})
+        progress = task_status.get("progress") if isinstance(task_status, dict) else None
+        if progress is not None:
+            from tasks.task_state import progress_label
+
+            leaf["progress"] = progress
+            leaf["progress_display"] = progress_label(progress) or str(progress)
+        else:
+            leaf.pop("progress", None)
+            leaf.pop("progress_display", None)
+        leaf["_due"] = is_task_due(leaf, path, now_ts)
 
     def strip_runtime_fields(self, node: dict) -> dict:
         cleaned = deepcopy(node)
@@ -232,37 +314,26 @@ class TaskTreeService:
             else:
                 self.strip_runtime_fields_inplace(val)
 
-    def collect_task_reset_paths(self, old_node: dict, new_node: dict, prefix: str = "") -> list[str]:
-        from orchestrator.model import TaskTree
+    def collect_task_reset_paths(self, old_table: dict, new_table: dict) -> list[str]:
+        """Paths of the tasks the save just re-enabled or revived from an error.
+
+        Both tables are flat and id-keyed, so this is one pass and the comparison
+        is against the same task even when its display path moved.
+        """
+        from tasks.task_register import task_registry
 
         paths: list[str] = []
-        for key, new_val in (new_node or {}).items():
-            if not isinstance(new_val, dict):
+        for task_id, new_leaf in (new_table or {}).items():
+            if not isinstance(new_leaf, dict):
                 continue
-            path = f"{prefix}/{key}" if prefix else key
-            old_val = (old_node or {}).get(key) if isinstance(old_node, dict) else None
-            if TaskTree.is_leaf(new_val):
-                if not isinstance(old_val, dict):
-                    old_val = {}
-                was_on = bool(old_val.get("on"))
-                now_on = bool(new_val.get("on"))
-                if not now_on:
-                    continue
-                had_error = bool(
-                    old_val.get("human_takeover")
-                    or old_val.get("human_takeover_error")
-                    or old_val.get("error")
-                )
-                cleared_error = had_error and not (
-                    new_val.get("human_takeover")
-                    or new_val.get("human_takeover_error")
-                    or new_val.get("error")
-                )
-                if not was_on or cleared_error:
-                    paths.append(path)
-            else:
-                old_sub = old_val if isinstance(old_val, dict) else {}
-                paths.extend(self.collect_task_reset_paths(old_sub, new_val, path))
+            old_leaf = (old_table or {}).get(task_id)
+            if not isinstance(old_leaf, dict):
+                old_leaf = {}
+            if not self.task_leaf_needs_reset(old_leaf, new_leaf):
+                continue
+            path = task_registry.get_path(task_id)
+            if path:
+                paths.append(path)
         return paths
 
     @staticmethod
@@ -285,45 +356,33 @@ class TaskTreeService:
         return not was_on or cleared_error
 
     def get_character_task_public(self, server: str, char_name: str, task_path: str) -> dict | None:
-        from tasks.task_registry import task_registry
-        from orchestrator.model import TaskTree
+        from tasks.task_register import task_registry
 
         path = (task_path or "").strip().replace("\\", "/")
         if not path or not task_registry.has_task(path):
             return None
-        tree = self._character_tasks_tree(server, char_name)
-        if not tree:
+        task_id = task_registry.id_of(path)
+        leaf = self._character_task_table(server, char_name).get(task_id)
+        if not isinstance(leaf, dict) or "on" not in leaf:
             return None
-        try:
-            node = dpath.get(tree, path)
-        except PathNotFound:
-            return None
-        if not isinstance(node, dict) or not TaskTree.is_leaf(node):
-            return None
-        mini: dict = {}
-        dpath.new(mini, path, deepcopy(node))
-        self.inject_public_task_fields(mini)
-        try:
-            return dpath.get(mini, path)
-        except PathNotFound:
-            return None
+        public_leaf = {**deepcopy(leaf), "id": task_id}
+        self.inject_public_task_leaf(public_leaf, path)
+        return public_leaf
 
-    def apply_character_task_leaf(self, tree: dict, task_path: str, task_data: dict) -> dict:
-        from orchestrator.model import TaskTree
+    def apply_character_task_leaf(self, task_table: dict, task_path: str, task_data: dict) -> dict:
+        from tasks.task_register import task_registry
 
         path = (task_path or "").strip().replace("\\", "/")
-        try:
-            old_leaf = dpath.get(tree, path)
-        except PathNotFound as e:
-            raise KeyError(f"任务路径不存在: {path}") from e
-        if not isinstance(old_leaf, dict) or not TaskTree.is_leaf(old_leaf):
+        task_id = task_registry.id_of(path)
+        old_leaf = task_table.get(task_id)
+        if not isinstance(old_leaf, dict) or "on" not in old_leaf:
             raise ValueError(f"无效任务路径: {path}")
         cleaned = deepcopy(task_data)
         if isinstance(cleaned, dict):
             for field in self.RUNTIME_TASK_FIELDS:
                 cleaned.pop(field, None)
         next_leaf = {**old_leaf, **cleaned}
-        dpath.set(tree, path, next_leaf)
+        task_table[task_id] = next_leaf
         return next_leaf
 
     def characters_summary(self) -> dict:
@@ -389,44 +448,44 @@ class TaskTreeService:
             return "error"
         return "pending" if is_task_due(node, path, now_ts) else "scheduled"
 
-    def flatten_tasks(self, node: dict, now_ts: float, prefix: str = "") -> list:
-        from tasks.task_registry import task_registry
+    def flatten_tasks(self, task_table: dict, now_ts: float) -> list:
+        """One row per registered task in a flat cfg table, with its display path."""
+        from tasks.task_register import task_registry
+        from orchestrator.model import is_task_debug_mode
 
         result = []
-        for key, val in (node or {}).items():
-            if not isinstance(val, dict):
+        for task_id, val in (task_table or {}).items():
+            if not isinstance(val, dict) or "on" not in val or "next_exec_time" not in val:
                 continue
-            path = f"{prefix}/{key}" if prefix else key
-            if "on" in val and "next_exec_time" in val:
-                if not task_registry.has_task(path):
-                    continue
-                row = {
-                    "path": path,
-                    "name": key,
-                    "status": self.task_leaf_status(val, path, now_ts),
-                    "beta": task_registry.get_beta(path),
-                    "debug_mode": task_registry.get_debug_mode(path),
-                    "task_description": task_registry.get_description(path),
-                    "task_doc_flow": task_registry.get_doc_flow(path),
-                }
-                task_status = ((cfg._config.get("status") or {}).get("tasks") or {}).get(path, {})
-                progress = task_status.get("progress") if isinstance(task_status, dict) else None
-                if progress is not None:
-                    from tasks.task_state import progress_label
+            path = task_registry.get_path(task_id)
+            if not path or not task_registry.has_task(path):
+                continue
+            row = {
+                "id": task_id,
+                "path": path,
+                "name": path.split("/")[-1],
+                "status": self.task_leaf_status(val, path, now_ts),
+                "debug": is_task_debug_mode(path),
+                "task_description": task_registry.get_description(path),
+                "task_doc_flow": task_registry.get_doc_flow(path),
+            }
+            task_status = ((cfg._config.get("status") or {}).get("tasks") or {}).get(path, {})
+            progress = task_status.get("progress") if isinstance(task_status, dict) else None
+            if progress is not None:
+                from tasks.task_state import progress_label
 
-                    row["progress"] = progress
-                    row["progress_display"] = progress_label(progress) or str(progress)
-                if val.get("human_takeover_error"):
-                    row["human_takeover_error"] = val.get("human_takeover_error")
-                    row["human_takeover_at"] = val.get("human_takeover_at")
-                if task_registry.get_custom(path):
-                    row["custom"] = True
-                result.append(row)
-            else:
-                result.extend(self.flatten_tasks(val, now_ts, path))
+                row["progress"] = progress
+                row["progress_display"] = progress_label(progress) or str(progress)
+            if val.get("human_takeover_error"):
+                row["human_takeover_error"] = val.get("human_takeover_error")
+                row["human_takeover_at"] = val.get("human_takeover_at")
+            if task_registry.get_custom(path):
+                row["custom"] = True
+            result.append(row)
         return result
 
-    def _character_tasks_tree(self, server: str, char_name: str) -> dict:
+    def _character_task_table(self, server: str, char_name: str) -> dict:
+        """The flat task table of any character, current one included."""
         ac = cfg.active_character()
         if server == ac.get("server", "") and char_name == ac.get("name", ""):
             return cfg._config.get("tasks", {})
@@ -437,7 +496,7 @@ class TaskTreeService:
         total = pending = scheduled = error = disabled = 0
         for srv, srv_chars in chars.items():
             for char_name in srv_chars.keys():
-                flat = self.flatten_tasks(self._character_tasks_tree(srv, char_name), now_ts)
+                flat = self.flatten_tasks(self._character_task_table(srv, char_name), now_ts)
                 for t in flat:
                     total += 1
                     st = t["status"]
@@ -461,7 +520,7 @@ class TaskTreeService:
 
     def overall_next_execution_all_characters(self) -> float | None:
         from orchestrator.model import (
-            collect_active_times_from_tasks_tree,
+            collect_active_times_from_task_table,
             next_display_timestamp_from_times,
         )
 
@@ -469,15 +528,15 @@ class TaskTreeService:
         candidates: list[float] = []
         for srv, srv_chars in chars.items():
             for char_name in srv_chars.keys():
-                tasks_tree = self._character_tasks_tree(srv, char_name)
-                nxt = next_display_timestamp_from_times(collect_active_times_from_tasks_tree(tasks_tree))
+                task_table = self._character_task_table(srv, char_name)
+                nxt = next_display_timestamp_from_times(collect_active_times_from_task_table(task_table))
                 if nxt is not None:
                     candidates.append(nxt)
         return min(candidates) if candidates else None
 
     def all_characters_tasks_summary(self) -> dict:
         from orchestrator.model import (
-            collect_active_times_from_tasks_tree,
+            collect_active_times_from_task_table,
             next_display_timestamp_from_times,
         )
 
@@ -487,13 +546,13 @@ class TaskTreeService:
         for srv, srv_chars in chars.items():
             srv_result = {}
             for char_name in srv_chars.keys():
-                tasks_tree = self._character_tasks_tree(srv, char_name)
-                flat = self.flatten_tasks(tasks_tree, now_ts)
+                task_table = self._character_task_table(srv, char_name)
+                flat = self.flatten_tasks(task_table, now_ts)
                 counts = {"total": 0, "pending": 0, "scheduled": 0, "error": 0, "disabled": 0}
                 for t in flat:
                     counts["total"] += 1
                     counts[t["status"]] += 1
-                next_exec = next_display_timestamp_from_times(collect_active_times_from_tasks_tree(tasks_tree))
+                next_exec = next_display_timestamp_from_times(collect_active_times_from_task_table(task_table))
                 srv_result[char_name] = {**counts, "tasks_flat": flat, "next_execution": next_exec}
             result[srv] = srv_result
         return result
@@ -530,7 +589,6 @@ class WebUILifecycleService:
         "deploy",
         "notify",
         "update",
-        "remote_access",
         "task_ordering",
     )
 
@@ -631,7 +689,8 @@ class WebUILifecycleService:
 
     def save_tasks(self, tasks: dict[str, Any]) -> int:
         with self.config_operation():
-            cleaned = self.task_tree_service.strip_runtime_fields(tasks)
+            # The WebUI sends the tree it was shown; storage is the flat table.
+            cleaned = self.task_tree_service.flatten_payload_tasks(tasks)
             old_tasks = deepcopy(self.cfg._config.get("tasks", {}))
             reset_paths = self.task_tree_service.collect_task_reset_paths(old_tasks, cleaned)
             self.cfg._config["tasks"] = cleaned
@@ -658,7 +717,8 @@ class WebUILifecycleService:
             if projection.task_paths != candidate_projection.task_paths:
                 raise ValueError("task tree changed while saving ordering")
 
-            self.cfg._config["task_ordering"] = next_overlay
+            # 落盘时换成 id 键：顺序跟身份走，任务改名后拖拽结果不会丢。
+            self.cfg._config["task_ordering"] = self.task_tree_service.ordering_overlay_in_ids(next_overlay)
             self._save_global_config()
             self.scheduler.wake()
             return self._refresh_task_projection("save task ordering")
@@ -668,13 +728,19 @@ class WebUILifecycleService:
         with self.config_operation():
             if not isinstance(raw_layout, dict):
                 raise ValueError("invalid task ordering layout payload")
-            current_overlay = normalize_task_ordering_overlay(self.cfg._config.get("task_ordering", {}))
+            # Nothing to save: just re-normalize the stored overlay in its own key
+            # space (id), which is what round-tripping through the path view does.
+            current_overlay = self.task_tree_service.ordering_overlay_in_ids(
+                normalize_task_ordering_overlay(self.task_tree_service.ordering_overlay_in_paths())
+            )
             self.cfg._config["task_ordering"] = current_overlay
             self._save_global_config()
             return self.mark_config_changed("save task ordering layout")
 
     def save_character_task(self, server: str, character: str, task_path: str, task_data: dict[str, Any]) -> int:
         with self.config_operation():
+            from tasks.task_register import task_registry
+
             server = (server or "").strip()
             character = (character or "").strip()
             task_path = (task_path or "").strip().replace("\\", "/")
@@ -685,22 +751,20 @@ class WebUILifecycleService:
                 raise KeyError(f"角色 '{server}/{character}' 不存在")
 
             char_node = chars[server][character]
-            tree = deepcopy(char_node.get("tasks") or {})
-            old_leaf = deepcopy(dpath.get(tree, task_path))
-            self.task_tree_service.apply_character_task_leaf(tree, task_path, task_data)
-            cleaned_tree = self.task_tree_service.strip_runtime_fields(tree)
-            new_leaf = dpath.get(cleaned_tree, task_path)
+            task_table = deepcopy(char_node.get("tasks") or {})
+            task_id = task_registry.id_of(task_path)
+            old_leaf = deepcopy(task_table.get(task_id))
+            new_leaf = self.task_tree_service.apply_character_task_leaf(task_table, task_path, task_data)
             reset_paths = [task_path] if self.task_tree_service.task_leaf_needs_reset(old_leaf, new_leaf) else []
             if reset_paths:
                 for key in ("human_takeover", "human_takeover_error", "human_takeover_at", "error"):
                     new_leaf.pop(key, None)
                 new_leaf["next_exec_time"] = 0
-                dpath.set(cleaned_tree, task_path, new_leaf)
 
-            char_node["tasks"] = cleaned_tree
+            char_node["tasks"] = task_table
             ac = self.cfg.active_character()
             if ac.get("server") == server and ac.get("name") == character:
-                self.cfg._config["tasks"] = cleaned_tree
+                self.cfg._config["tasks"] = task_table
                 if reset_paths:
                     from tasks.task_state import clear_task_status
 
@@ -717,6 +781,21 @@ class WebUILifecycleService:
             self.scheduler.wake()
             return self._refresh_task_projection("save character task")
 
+    def _ensure_current_character_entries(self) -> None:
+        """切换之后，当前角色的任务表必须认领每一个已注册任务。
+
+        注册只在「那个角色是当前角色」时写配置，所以新增账号、新建角色、切到历史空角色
+        之后，表可能还没有这些条目，WebUI 会显示成空任务树。这里就地补齐，省掉一次
+        任务模块重载，也省掉用户手动重启。
+
+        调用方必须已经持有 config_transaction。
+        """
+        from orchestrator.catalog import ensure_task_entries
+
+        task_table = self.cfg._config.get("tasks")
+        if isinstance(task_table, dict) and ensure_task_entries(task_table):
+            self.cfg._save_account_file()
+
     def switch_character(
         self,
         server: str,
@@ -727,6 +806,7 @@ class WebUILifecycleService:
     ) -> int:
         with self.task_manager.config_transaction():
             self.cfg.switch_character(server, character)
+            self._ensure_current_character_entries()
         if invalidate_login:
             self.scheduler.invalidate_login()
         return self._refresh_task_projection(reason)
@@ -734,6 +814,7 @@ class WebUILifecycleService:
     def switch_account(self, name: str, security_key: str) -> int:
         with self.task_manager.config_transaction():
             self.cfg.switch_account(name, security_key)
+            self._ensure_current_character_entries()
         self.scheduler.invalidate_login()
         return self._refresh_task_projection("switch account")
 
@@ -762,6 +843,7 @@ class WebUILifecycleService:
         with self.task_manager.config_transaction():
             self.cfg.add_account(name, account, password, server, character_name, security_key)
             self.cfg.switch_account(name, security_key)
+            self._ensure_current_character_entries()
         self.scheduler.invalidate_login()
         return self._refresh_task_projection("add account")
 
@@ -774,7 +856,7 @@ class WebUILifecycleService:
         with self.task_manager.config_transaction():
             self.cfg.add_character(server, character)
             self.cfg.switch_character(server, character)
-            self.task_manager.reload_tasks()
+            self._ensure_current_character_entries()
         self.scheduler.invalidate_login()
         return self._refresh_task_projection("add character")
 
@@ -835,13 +917,6 @@ class WebUILifecycleService:
         self._apply_log_level()
         return self.mark_config_changed("import config")
 
-    def save_notify_settings(self, enabled: bool, config_yaml: str) -> int:
-        with self.task_manager.config_transaction():
-            self.cfg["notify.enabled"] = enabled
-            self.cfg["notify.config_yaml"] = config_yaml
-            self._save_global_config()
-        return self.mark_config_changed("save notify settings")
-
     def prepare_qq_settings(self, payload: dict, *, require_target: bool = False):
         from orchestrator.delivery import QQSettings
 
@@ -870,17 +945,15 @@ class WebUILifecycleService:
             return self.mark_config_changed("save QQ notifications")
 
     def save_deploy_sections(self, data: dict[str, Any]) -> int:
+        """保存 deploy 段：WebUI 访问密码、日志级别、主题等。
+
+        notify 走 QQ 接口，update 走 /api/update/*，所以这里只认 deploy。
+        """
+        deploy = data.get("deploy")
+        if not isinstance(deploy, dict):
+            raise ValueError("missing deploy section")
         with self.task_manager.config_transaction():
-            for section in ("deploy", "notify", "update", "remote_access"):
-                if section in data:
-                    value = deepcopy(data[section])
-                    if section == "notify":
-                        # QQ settings have their own authenticated write-only token surface.
-                        value.pop("qq", None)
-                        existing_qq = self.cfg.get("notify.qq")
-                        if existing_qq is not None:
-                            value["qq"] = deepcopy(existing_qq)
-                    self.cfg._config[section] = value
+            self.cfg._config["deploy"] = deepcopy(deploy)
             self._save_global_config()
         self._apply_log_level()
         return self.mark_config_changed("save deploy settings")

@@ -21,52 +21,54 @@ def _build_overview_payload(now_ts: float | None = None) -> dict:
         calc_effective_next_time,
         is_human_takeover_blocked,
         is_task_due,
+        resolve_reschedule,
     )
+    from tasks.task_register import task_registry
 
     now_ts = now_ts or _time.time()
     total = enabled = pending = scheduled = error = disabled = 0
     upcoming = []
 
-    def _walk(node, prefix=''):
+    def _walk(task_table):
+        """Count and list the current character's tasks; the table is flat and id-keyed."""
         nonlocal total, enabled, pending, scheduled, error, disabled
-        for key, val in node.items():
-            if not isinstance(val, dict):
+        for task_id, val in (task_table or {}).items():
+            if not isinstance(val, dict) or 'on' not in val or 'next_exec_time' not in val:
                 continue
-            path = f"{prefix}/{key}" if prefix else key
-            if 'on' in val and 'next_exec_time' in val:
-                total += 1
-                if not val.get('on'):
-                    disabled += 1
-                else:
-                    enabled += 1
-                    blocked = is_human_takeover_blocked(val, now_ts) or bool(val.get("error"))
-                    due = False if blocked else is_task_due(val, path, now_ts)
-                    if blocked:
-                        error += 1
-                    elif due:
-                        pending += 1
-                    else:
-                        scheduled += 1
-                    status = 'error' if blocked else ('pending' if due else 'scheduled')
-                    task_status = ((cfg._config.get("status") or {}).get("tasks") or {}).get(path, {})
-                    progress = task_status.get("progress") if isinstance(task_status, dict) else None
-                    progress_display = None
-                    if progress is not None:
-                        from tasks.task_state import progress_label
-
-                        progress_display = progress_label(progress) or str(progress)
-                    upcoming.append({
-                        'path': path,
-                        'on': True,
-                        'next_exec_time': calc_effective_next_time(val, now_ts),
-                        'status': status,
-                        'progress': progress,
-                        'progress_display': progress_display,
-                        'human_takeover_error': val.get('human_takeover_error'),
-                        'human_takeover_at': val.get('human_takeover_at'),
-                    })
+            path = task_registry.get_path(task_id)
+            if not path:
+                continue
+            total += 1
+            if not val.get('on'):
+                disabled += 1
+                continue
+            enabled += 1
+            blocked = is_human_takeover_blocked(val, now_ts) or bool(val.get("error"))
+            due = False if blocked else is_task_due(val, path, now_ts)
+            if blocked:
+                error += 1
+            elif due:
+                pending += 1
             else:
-                _walk(val, path)
+                scheduled += 1
+            status = 'error' if blocked else ('pending' if due else 'scheduled')
+            task_status = ((cfg._config.get("status") or {}).get("tasks") or {}).get(path, {})
+            progress = task_status.get("progress") if isinstance(task_status, dict) else None
+            progress_display = None
+            if progress is not None:
+                from tasks.task_state import progress_label
+
+                progress_display = progress_label(progress) or str(progress)
+            upcoming.append({
+                'path': path,
+                'on': True,
+                'next_exec_time': calc_effective_next_time(val, now_ts, resolve_reschedule(path, val)),
+                'status': status,
+                'progress': progress,
+                'progress_display': progress_display,
+                'human_takeover_error': val.get('human_takeover_error'),
+                'human_takeover_at': val.get('human_takeover_at'),
+            })
 
     _walk(cfg._config.get('tasks', {}))
     order = {'pending': 0, 'error': 1, 'scheduled': 2}

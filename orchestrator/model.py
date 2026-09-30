@@ -330,27 +330,87 @@ def normalize_task_ordering_overlay(raw_overlay: Any) -> dict[str, Any]:
     }
 
 
+def retarget_ordering_overlay(
+    raw_overlay: Any,
+    key_map: dict[str, str],
+    leaf_key: str,
+) -> dict[str, Any]:
+    """Rewrite every ordering leaf key through ``key_map``, dropping unmapped ones.
+
+    ``task_ordering`` is stored keyed by task id, so rename keeps the user's
+    order; the projection and the WebUI speak display paths. This is the one
+    place those two key spaces meet. A leaf is read from whichever field it
+    carries, so an overlay written before ids existed still loads as long as its
+    ``path`` equals the id -- true for every task that never moved.
+
+    ``leaf_key`` names the field to write: ``"path"`` when handing the overlay to
+    the projection, ``"id"`` when putting it back into storage. The surrounding
+    shape (groups, ``expanded``, ``schema_version``) passes through untouched so
+    ``normalize_task_ordering_overlay`` still does the deduping and unwrapping.
+    """
+    overlay = raw_overlay if isinstance(raw_overlay, dict) else {}
+
+    def retarget_item(item: Any) -> dict[str, Any] | None:
+        if not isinstance(item, dict):
+            return None
+        if item.get("type") == "group" or isinstance(item.get("items"), list):
+            children = [
+                child
+                for child in (retarget_item(raw) for raw in (item.get("items") or []))
+                if child
+            ]
+            if not children:
+                return None
+            return {**item, "items": children}
+        source = normalize_task_path(item.get("id") or item.get("path") or item.get("task_path"))
+        target = key_map.get(source)
+        return {"type": "task", leaf_key: target} if target else None
+
+    raw_items = overlay.get("items")
+    if isinstance(raw_items, list):
+        return {
+            **overlay,
+            "items": [item for item in (retarget_item(raw) for raw in raw_items) if item],
+        }
+    return {
+        **overlay,
+        "user_order": [
+            target
+            for target in (
+                key_map.get(normalize_task_path(value))
+                for value in (overlay.get("user_order") or [])
+            )
+            if target
+        ],
+    }
+
+
 def collect_task_paths(task_tree: dict[str, Any], prefix: str = "") -> list[str]:
-    """Collect leaf task paths from a cfg task tree, in tree order."""
+    """Display paths of the tasks in one flat cfg table, in registration order.
+
+    The table is keyed by task id, so the paths come from the registry. Ordering
+    by the registry's registration sequence is what makes the default order equal
+    the import order, which is the contract the WebUI and the scheduler both
+    fall back to.
+    """
+    from tasks.task_register import task_registry
+
     paths: list[str] = []
-    if not isinstance(task_tree, dict):
-        return paths
-    for key, value in task_tree.items():
-        if not isinstance(value, dict):
+    for task_id in task_tree or {}:
+        path = task_registry.get_path(task_id)
+        if not path:
             continue
-        path = f"{prefix}/{key}" if prefix else str(key)
-        if TaskTree.is_leaf(value):
-            paths.append(path)
-        else:
-            paths.extend(collect_task_paths(value, path))
-    return paths
+        if prefix and path != prefix and not path.startswith(prefix + "/"):
+            continue
+        paths.append(path)
+    return sorted(paths, key=lambda path: (task_registry.get_sequence(path), path))
 
 
-def _legacy_registry_order(path: str) -> int | float:
+def _registry_sequence(path: str) -> int | float:
     try:
-        from tasks.task_registry import task_registry
+        from tasks.task_register import task_registry
 
-        return task_registry.get_order(path)
+        return task_registry.get_sequence(path)
     except Exception:
         return float("inf")
 
@@ -397,7 +457,7 @@ def project_task_ordering(task_tree: dict[str, Any], raw_overlay: Any) -> TaskOr
         return (
             user_index.get(path, len(user_index)),
             legacy_index.get(path, float("inf")),
-            _legacy_registry_order(path),
+            _registry_sequence(path),
             path,
         )
 
@@ -417,8 +477,18 @@ def sort_paths_by_task_ordering(
     task_tree: dict[str, Any],
     raw_overlay: Any,
 ) -> list[str]:
-    """Sort an arbitrary path list by the current effective order."""
-    projection = project_task_ordering(task_tree, raw_overlay)
+    """Sort an arbitrary path list by the current effective order.
+
+    ``raw_overlay`` is the stored overlay, which is keyed by task id; the
+    projection speaks display paths, so it is retargeted here -- this is the
+    entry point the scheduler uses, and it never has a path-keyed overlay.
+    """
+    from tasks.task_register import task_registry
+
+    projection = project_task_ordering(
+        task_tree,
+        retarget_ordering_overlay(raw_overlay, task_registry.id_to_path_map(), "path"),
+    )
     return sorted(
         [normalize_task_path(path) for path in paths if normalize_task_path(path)],
         key=lambda path: (projection.order_map.get(path, float("inf")), path),
@@ -436,61 +506,63 @@ def summarize_ordering_generations(projection: TaskOrderingProjection) -> list[l
 #  Timing rules
 # ═══════════════════════════════════════════════════════════════════════
 
-class NextDate(enum.Enum):
-    past = "past"
-    today = "today"
-    tomorrow = "tomorrow"
-    next_week = "next_week"
+def resolve_reschedule(task_path: str, entry: dict | None) -> dict:
+    """该任务当前生效的调度规则，已归一为 ``mode/hours/window/weekdays``。
+
+    用户覆盖优先：cfg 里有 ``reschedule`` 就用它；没有才用作者声明的默认值；
+    两者都没有就是一次性。所以同一个字段既让作者定默认，也让用户改。
+    """
+    from tasks.task_register import task_registry
+    from tasks.task_schedule import normalize_reschedule
+
+    if isinstance(entry, dict) and "reschedule" in entry:
+        raw = entry["reschedule"]
+    else:
+        raw = task_registry.get_reschedule_default(task_path)
+    return normalize_reschedule(raw)
 
 
-# Task category prefix -> the day its next run lands on.
-CATEGORY_NEXT_DATE = {
-    "每日任务": NextDate.tomorrow,
-    "活动任务": NextDate.tomorrow,
-    "每周任务": NextDate.next_week,
-    "自定义任务": NextDate.tomorrow,
+def is_task_debug_mode(task_path: str) -> bool:
+    """任务当前是否处于调试直跑模式。
+
+    ``debug`` 是用户属性：cfg 里有就用用户的，没有才回落到作者声明的默认值。
+    """
+    from tasks.task_register import task_registry
+    from AutoScriptor.utils.app_config import cfg
+
+    entry = (cfg._config.get("tasks") or {}).get(task_registry.id_of(task_path))
+    if isinstance(entry, dict) and "debug" in entry:
+        return bool(entry["debug"])
+    return task_registry.get_debug_default(task_path)
+
+
+# 周期型规则 -> 下一个执行日。当天 5 点前算今天，5 点后算下一轮。
+def _next_daily_day(now: datetime.datetime) -> datetime.date:
+    return (now + datetime.timedelta(days=1 if now.hour >= 5 else 0)).date()
+
+
+def _next_weekly_day(now: datetime.datetime) -> datetime.date:
+    days = (7 - now.weekday()) % 7 or 7
+    return (now + datetime.timedelta(days=days if now.hour >= 5 else 0)).date()
+
+
+_PERIODIC_NEXT_DAY = {
+    "daily": _next_daily_day,
+    "weekly": _next_weekly_day,
 }
 
 
-def calc_next_exec_ts(
-    now: datetime.datetime,
-    next_date: NextDate = NextDate.today,
-    offset_hours: int = 0,
-) -> float:
-    """Resolve the next execution timestamp for a category rule."""
-    if next_date == NextDate.past:
-        return 0
-    if next_date == NextDate.tomorrow:
-        next_day = (now + datetime.timedelta(days=1 if now.hour >= 5 else 0)).date()
-    elif next_date == NextDate.next_week:
-        days = (7 - now.weekday()) % 7 or 7
-        next_day = (now + datetime.timedelta(days=days if now.hour >= 5 else 0)).date()
-    else:
-        next_day = (now + datetime.timedelta(hours=offset_hours)).date()
-    target_time = datetime.time(5, 0) if offset_hours == 0 else datetime.time(0, 0)
-    return datetime.datetime.combine(next_day, target_time).timestamp()
-
-
-def parse_sched_window_hours(task_data: dict) -> tuple[int, int] | None:
-    """Parse ``sched_window_hours`` as local-time ``[start_h, end_h)``."""
-    window = task_data.get("sched_window_hours")
-    if window is None or len(window) != 2:
+def next_exec_ts_for_spec(now: datetime.datetime, spec: dict) -> float | None:
+    """按调度规则算出执行后的下一个时间点。一次性任务返回 None，表示不排下一次。"""
+    mode = spec["mode"]
+    if mode == "once":
         return None
-    try:
-        return int(window[0]), int(window[1])
-    except (TypeError, ValueError):
-        return None
-
-
-def parse_allowed_weekdays(task_data: dict) -> list[int] | None:
-    """Parse ``allowed_weekdays``, matching ``cfg['weekday']`` (1=Mon … 7=Sun)."""
-    weekdays = task_data.get("allowed_weekdays")
-    if weekdays is None or not isinstance(weekdays, list) or not weekdays:
-        return None
-    try:
-        return [int(value) for value in weekdays]
-    except (TypeError, ValueError):
-        return None
+    if mode == "offset":
+        return (now + datetime.timedelta(hours=int(spec["hours"]))).timestamp()
+    next_day_of = _PERIODIC_NEXT_DAY.get(mode)
+    if next_day_of is None:
+        raise ValueError(f"调度模式没有对应的时间规则: {mode!r}")
+    return datetime.datetime.combine(next_day_of(now), datetime.time(5, 0)).timestamp()
 
 
 def calc_next_allowed_weekday_ts(now: datetime.datetime, allowed: list[int]) -> float:
@@ -535,7 +607,7 @@ def is_human_takeover_blocked(val: dict, now_ts: float | None = None) -> bool:
 
 def is_task_due(val: dict, path: str, now_ts: float) -> bool:
     """Whether a task leaf qualifies for collection right now. No side effects."""
-    from tasks.task_registry import task_registry
+    from tasks.task_register import task_registry
 
     if not val.get("on"):
         return False
@@ -545,40 +617,26 @@ def is_task_due(val: dict, path: str, now_ts: float) -> bool:
         return False
     if now_ts < val.get("next_exec_time", 0):
         return False
-    schedule_window = parse_sched_window_hours(val)
-    if schedule_window is not None:
-        if clamp_to_sched_window(now_ts, *schedule_window) > now_ts:
+    spec = resolve_reschedule(path, val)
+    if spec["window"] is not None:
+        if clamp_to_sched_window(now_ts, *spec["window"]) > now_ts:
             return False
-    allowed_weekdays = parse_allowed_weekdays(val)
-    if allowed_weekdays is not None:
+    if spec["weekdays"] is not None:
         weekday = datetime.datetime.fromtimestamp(now_ts).weekday() + 1
-        if weekday not in set(allowed_weekdays):
+        if weekday not in set(spec["weekdays"]):
             return False
     return True
 
 
-def is_task_debug_mode(task_path: str) -> bool:
-    """Whether the task itself was registered with ``debug_mode=True``.
-
-    Registration is the only source. The app-level switch and the saved-leaf
-    fallback used to answer the same question differently, which is why a run
-    could look debug to one layer and normal to another.
-    """
-    from tasks.task_registry import task_registry
-
-    return task_registry.get_debug_mode(task_path)
-
-
-def calc_effective_next_time(val: dict, now_ts: float) -> float:
+def calc_effective_next_time(val: dict, now_ts: float, spec: dict) -> float:
     """The next execution time as displayed, after window and weekday clamps."""
     nxt = float(val.get("next_exec_time", 0) or 0)
-    schedule_window = parse_sched_window_hours(val)
     effective = (
-        clamp_to_sched_window(max(nxt, now_ts), *schedule_window)
-        if schedule_window
+        clamp_to_sched_window(max(nxt, now_ts), *spec["window"])
+        if spec["window"]
         else (nxt or now_ts)
     )
-    allowed_weekdays = parse_allowed_weekdays(val)
+    allowed_weekdays = spec["weekdays"]
     if allowed_weekdays is not None:
         now_dt = datetime.datetime.fromtimestamp(now_ts)
         weekday = now_dt.weekday() + 1
@@ -591,25 +649,19 @@ def calc_effective_next_time(val: dict, now_ts: float) -> float:
     return effective
 
 
-def collect_active_times_from_tasks_tree(tasks: dict) -> list[float]:
-    """Effective next-run times for enabled, registered tasks in one tree."""
-    from tasks.task_registry import task_registry
+def collect_active_times_from_task_table(task_table: dict) -> list[float]:
+    """Effective next-run times for the enabled, registered tasks in one table."""
+    from tasks.task_register import task_registry
 
     now_ts = datetime.datetime.now().timestamp()
     result: list[float] = []
-
-    def _walk(node: dict, prefix: str = "") -> None:
-        for key, val in node.items():
-            if not isinstance(val, dict):
-                continue
-            path = f"{prefix}/{key}" if prefix else key
-            if "on" in val:
-                if val.get("on") and task_registry.has_task(path):
-                    result.append(calc_effective_next_time(val, now_ts))
-            else:
-                _walk(val, path)
-
-    _walk(tasks or {})
+    for task_id, val in (task_table or {}).items():
+        if not isinstance(val, dict) or not val.get("on"):
+            continue
+        path = task_registry.get_path(task_id) or ""
+        if not task_registry.has_task(path):
+            continue
+        result.append(calc_effective_next_time(val, now_ts, resolve_reschedule(path, val)))
     return result
 
 
@@ -650,10 +702,10 @@ def collect_active_times_from_all_characters(
         ]
     for server, char_name in char_keys:
         if server == active_server and char_name == active_name:
-            tasks_tree = cfg_obj._config.get("tasks", {})
+            task_table = cfg_obj._config.get("tasks", {})
         else:
-            tasks_tree = chars.get(server, {}).get(char_name, {}).get("tasks", {}) or {}
-        result.extend(collect_active_times_from_tasks_tree(tasks_tree))
+            task_table = chars.get(server, {}).get(char_name, {}).get("tasks", {}) or {}
+        result.extend(collect_active_times_from_task_table(task_table))
     return result
 
 

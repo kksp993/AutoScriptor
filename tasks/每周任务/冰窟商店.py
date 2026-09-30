@@ -16,6 +16,7 @@ def buy(item):
 
 @register_task(
     description="处理冰窟商店每周兑换。",
+    reschedule="weekly",
 )
 def task():
     switch_base("mumu")

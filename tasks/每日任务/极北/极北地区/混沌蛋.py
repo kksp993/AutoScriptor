@@ -4,9 +4,10 @@ from AutoScriptor.logging.logger import logger
 # """
 @register_task(
     description="扫荡极北混沌蛋。",
-    task_doc="目前只能扫 170w 的蛋。",
+    reschedule="daily",
 )
 def scan_chaos_egg():
+    """目前只能扫 170w 的蛋。"""
     ensure_in("极北")
     logger.info("====混沌蛋_lv_170====")
     for _ in range(3):
