@@ -3063,11 +3063,7 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
         self.assertNotIn("<th>类型</th>", route)
         projection = (ROOT / "orchestrator/projection.py").read_text(encoding="utf-8")
         self.assertIn('"label": f"{server}:{character}"', projection)
-        redeem_task = (ROOT / "tasks/normal_task/huodong/兑换豪礼礼品兑换.py").read_text(
-            encoding="utf-8",
-            errors="ignore",
-        )
-        translations = (ROOT / "tasks/translations.py").read_text(
+        redeem_task = (ROOT / "tasks/一般任务/活动/兑换豪礼礼品兑换.py").read_text(
             encoding="utf-8",
             errors="ignore",
         )
@@ -3075,7 +3071,8 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
         self.assertIn('GIFT_REDEEM_TASK_PATH = "一般任务/活动/兑换豪礼礼品兑换"', server)
         self.assertIn("未找到兑换码任务，请确认一般任务已加载", server)
         self.assertFalse((ROOT / "tasks/_manifest.py").exists())
-        self.assertIn("'一般任务': 'normal_task'", translations)
+        # the cfg path IS the source path now; no translation table exists
+        self.assertFalse((ROOT / "tasks" / "translations.py").exists())
         self.assertIn("def task(redeem_code: str | list[str] = \"1111\")", redeem_task)
         self.assertFalse((ROOT / "data/custom_task/zmxy_activity_redeem.py").exists())
         self.assertIn('task_runs = [', server)

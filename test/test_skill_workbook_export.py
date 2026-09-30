@@ -7,9 +7,7 @@ from openpyxl import load_workbook
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-EXPORT_MODULE_PATH = (
-    PROJECT_ROOT / "test" / "scripts" / "工具" / "生成仙术持有表.py"
-)
+EXPORT_MODULE_PATH = PROJECT_ROOT / "tasks" / "一般任务" / "_仙术表.py"
 
 
 def load_export_module():

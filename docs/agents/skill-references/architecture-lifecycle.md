@@ -17,7 +17,7 @@ Read this when changing task registration, scheduling, runtime context, or OCR/b
 ## Reload Boundary
 
 - A task reload re-imports task scripts and rebuilds `tasks` plus `tasks.battle_task_params` (the flow enum aggregates character-script `@flow` registrations).
-- It keeps `tasks.task_registry` (the registry singleton readers already hold) and the authoring plumbing (`task_params`, `task_register`, `task_state`, `translations`, `time`). `orchestrator/catalog.py` holds the list.
+- It keeps `tasks.task_registry` (the registry singleton readers already hold) and the authoring plumbing (`task_params`, `task_register`, `task_state`, `time`). `orchestrator/catalog.py` holds the list.
 - `ZmxyOL` is not purged: it owns cross-boundary types such as `TableParam`, and character scripts are refreshed by `reload_character_modules()`. `ZmxyOL.drop_cached_exports()` clears lazily bound re-exports so a star-import serves the post-reload enum.
 - The stale-leaf prune refuses to run on an empty registry: that state means registration did not reach the registry being read, and pruning there deletes every leaf.
 - Reload path clears and rebuilds the registry; check `force_reload_tasks()` before changing reload semantics.

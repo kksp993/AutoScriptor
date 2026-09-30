@@ -50,8 +50,8 @@ _loaded = False
 # - ``task_registry`` owns the process-wide registry singleton. A second import
 #   builds a second, empty registry while the task manager and this module keep
 #   reading the first one -- no task resolves and the prune pass sees nothing.
-# - ``task_params`` / ``task_register`` / ``task_state`` / ``translations`` /
-#   ``time`` are the authoring plumbing. They hold no per-load state, and
+# - ``task_params`` / ``task_register`` / ``task_state`` / ``time`` are the
+#   authoring plumbing. They hold no per-load state, and
 #   ``task_params`` compares parameter defaults against ``TableParam`` by class
 #   identity, so replacing it (or the game module that defines the class) makes
 #   every table default unrecognizable.
@@ -66,7 +66,6 @@ TASK_MODULES_KEPT_ON_RELOAD = frozenset({
     "tasks.task_registry",
     "tasks.task_state",
     "tasks.time",
-    "tasks.translations",
 })
 
 
