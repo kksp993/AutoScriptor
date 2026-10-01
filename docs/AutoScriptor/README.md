@@ -24,6 +24,7 @@
 | 任务编写 | [tasks/script-authoring.md](tasks/script-authoring.md) |
 | 任务安全 | [tasks/script-authoring-safety.md](tasks/script-authoring-safety.md) |
 | 任务列表交互与排序持久化 | [tasks/task-ordering-graph-plan.md](tasks/task-ordering-graph-plan.md) |
+| 安装位写脚本（两个 wheel） | [operations/library-packages.md](operations/library-packages.md) |
 | OCR 模型实验 | [reference/ocr-model-experiment.md](reference/ocr-model-experiment.md) |
 | 识别质量维护 | [reference/API.md](reference/API.md)、[operations/log-archiver.md](operations/log-archiver.md)、`scripts/audit_ui_assets.py`、`scripts/run_recognition_baselines.py` |
 | 战斗流程 | [tasks/battle-flows.md](tasks/battle-flows.md) |
