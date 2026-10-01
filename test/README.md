@@ -20,6 +20,7 @@
 | 位置 | 覆盖内容 |
 | --- | --- |
 | `test_webui_contracts.py` | WebUI 契约总表：API 路由存在性、前端源码断言、配置模板契约 |
+| `test_wheel_packaging.py` | 两个 import wheel 的构建、内容、`RECORD` 哈希与安装位导入 |
 | `test_webui/` | WebUI 域细分用例：`test_overview_projection.py`、`test_deploy_settings.py`、`test_server_smoke.py` |
 | `test_accounts/` | 账号域：`test_dispatch_queue_defaults.py` |
 | `test_task_register/` | 任务注册、reload 保留清单、cfg 解耦 |
@@ -31,6 +32,8 @@
 - `test_webui/test_server_smoke.py` 会**真的起一个 WebUI 子进程**（临时数据目录 +
   随机空闲端口），把全部无参 GET 端点打一遍，用来抓「只在运行期暴露」的缺陷。
   默认参与全量测试，约 5 秒；不想跑时设 `AUTOSCRIPTOR_SKIP_SERVER_SMOKE=1`。
+- `test_wheel_packaging.py` 会**真的构建两个 wheel 并把它们摊成安装树**，再起一个子进程
+  从仓库外导入。默认参与全量测试，约 8 秒；不想跑时设 `AUTOSCRIPTOR_SKIP_WHEEL_PROBE=1`。
 - 需要模拟器/OCR 的测试（`test_nemu_ipc_*.py`、`test_ocr_*.py` 等）只做离线断言，
   真机验证走 `docs/agents/online-screenshot-test.md` 的流程。
 

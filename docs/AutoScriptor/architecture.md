@@ -28,7 +28,7 @@ webui.bat / scripts\run.bat webui
 | 游戏业务 | `ZmxyOL/` | 账号（`accounts/`，含 `crypto`）、角色（`character/`）、导航、战斗、参数表 |
 | 用户数据 | `data/` | 配置、账号、职业脚本、自定义任务 |
 | 运行产物 | `logs/` | 日志、错误归档、截图、礼包码缓存 |
-| 维护脚本 | `scripts/` | 安装、运行、更新和少量当前主线需要的维护脚本 |
+| 维护脚本 | `scripts/` | 安装、运行、更新、构建 import wheel 和少量当前主线需要的维护脚本 |
 
 编排层内部再分七个模块，各回答一个问题，依赖单向：
 
@@ -49,6 +49,12 @@ backend -> orchestrator -> tasks -> ZmxyOL -> AutoScriptor
 ```
 
 后端只通过 `orchestrator.orchestrator` 调用编排层，装配在 `orchestrator/facade.py` 完成一次。
+
+同一条依赖链还落成两个可安装发行体，供「不拿源码写脚本」的场景使用：`autoscriptor` 只含
+`AutoScriptor/`，`zmxyol` 含 `ZmxyOL/` 与 `tasks/` 并依赖前者。`tasks/` 跟着 `ZmxyOL/`
+走是因为两者互相 import（`ZmxyOL` 重导出 `tasks.register_task`，`tasks/task_register.py`
+又 `from ZmxyOL import *`），拆开就是一对循环依赖。构建与边界见
+[两个可安装 wheel](operations/library-packages.md)。
 
 ## 数据边界
 
@@ -118,7 +124,8 @@ backend -> orchestrator -> tasks -> ZmxyOL -> AutoScriptor
 
 当前主线不包含这些面：
 
-- 发布包、安装器、wheelhouse、本地打包验收脚本。
+- 安装器、wheelhouse、发布包验收流程。两个 import wheel 是开发产物，见
+  [两个可安装 wheel](operations/library-packages.md)。
 - 旧 CLI 菜单。
 - Canvas/Drawflow 脚本画布。
 - Socket.IO 日志通道。
