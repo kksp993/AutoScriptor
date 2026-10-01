@@ -21,6 +21,7 @@ import dpath
 from dpath.exceptions import PathNotFound
 
 from AutoScriptor.utils.app_config import cfg
+from AutoScriptor.utils.mumu_discovery import default_mumu_adb_addr, is_placeholder_adb_addr
 from ZmxyOL.accounts.account_store import INJECTED_TASK_FIELDS
 from ZmxyOL.character.profession import GAME_PROFESSIONS, normalize_game_profession
 from orchestrator.model import (
@@ -32,9 +33,6 @@ from orchestrator.model import (
 )
 
 logger = logging.getLogger(__name__)
-
-MUMU_ADB_BASE_PORT = 16384
-MUMU_ADB_PORT_STEP = 32
 
 
 class TaskTreeService:
@@ -561,20 +559,10 @@ class TaskTreeService:
 task_tree_service = TaskTreeService()
 
 
-def default_mumu_adb_addr(index: Any) -> str:
-    try:
-        n = int(index)
-    except (TypeError, ValueError):
-        n = 0
-    if n < 0:
-        n = 0
-    return f"127.0.0.1:{MUMU_ADB_BASE_PORT + n * MUMU_ADB_PORT_STEP}"
-
-
 def normalize_emulator_config(emulator: dict[str, Any]) -> dict[str, Any]:
+    """把没有信息量的 ADB 地址补成实例号对应的默认值；手填的地址一律不动。"""
     data = deepcopy(emulator)
-    adb_addr = str(data.get("adb_addr", "") or "").strip()
-    if not adb_addr or adb_addr.startswith("YOUR_") or adb_addr.endswith(":0"):
+    if is_placeholder_adb_addr(data.get("adb_addr")):
         data["adb_addr"] = default_mumu_adb_addr(data.get("index", 0))
     return data
 
