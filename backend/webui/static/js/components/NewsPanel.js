@@ -18,6 +18,7 @@ const NewsPanel = {
       giftDialogVisible: false,
       giftIframeKey: 0,
       giftLoading: true,
+      giftRefreshOnLoad: false,
       giftFrameSrc: NEWS_GIFT_CODES_PAGE_URL,
     };
   },
@@ -75,27 +76,38 @@ const NewsPanel = {
       return dateStr;
     },
     async refreshGiftCodes() {
-      this.giftLoading = true;
       try {
         const res = await window.WebUIApi.request('GET', '/news/gift_codes?refresh=1');
         const data = res.data;
         if (!res.ok) throw new Error(window.WebUIApi.errorMessage(data, '刷新失败'));
         if (data.error) throw new Error(data.error);
+        // 采集完成才换 key：iframe 重载出新表格，遮罩留给那一次 onload 收。
         this.giftIframeKey += 1;
       } catch (e) {
-        ElementPlus.ElMessage.error('兑换码刷新失败: ' + (e.message || e));
-      } finally {
+        // 失败时不会重载，必须自己收掉遮罩，否则界面永远停在「正在刷新」。
         this.giftLoading = false;
+        ElementPlus.ElMessage.error('兑换码刷新失败: ' + (e.message || e));
       }
     },
     openGiftCodes() {
+      // 打开就进刷新态：先用遮罩压住 iframe，等它对上一次采集的旧表格加载完成
+      // 再触发刷新，别把盘上的旧数据先展示给用户。
+      this.giftLoading = true;
+      this.giftRefreshOnLoad = true;
       this.giftDialogVisible = true;
-      this.refreshGiftCodes();
     },
     refreshGiftFrame() {
+      this.giftLoading = true;
       this.refreshGiftCodes();
     },
     onGiftFrameLoad() {
+      if (this.giftRefreshOnLoad) {
+        // 这一次加载的必然是旧数据，不能解除遮罩，转去刷新；
+        // 刷新成功会换 key 重载，后面那次 load 才代表新内容。
+        this.giftRefreshOnLoad = false;
+        this.refreshGiftFrame();
+        return;
+      }
       this.giftLoading = false;
     },
   },
@@ -233,7 +245,7 @@ const NewsPanel = {
       <div class="news-gift-frame-wrap">
         <div v-if="giftLoading" class="news-gift-frame-loading">
           <i class="fa fa-spinner fa-spin"></i>
-          <span>加载中...</span>
+          <span>正在刷新兑换码...</span>
         </div>
         <iframe
           :key="giftIframeKey"

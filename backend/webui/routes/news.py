@@ -778,7 +778,11 @@ def get_gift_codes_page():
         "renderChecked();"
         "</script></body></html>"
     )
-    return HTMLResponse("".join(parts))
+    # 这张表必须每次重建 iframe 都拿到盘上的当前内容；命中浏览器缓存就等于没刷新。
+    return HTMLResponse(
+        "".join(parts),
+        headers={"Cache-Control": "no-store, must-revalidate"},
+    )
 
 
 @router.get("/proxy", response_class=HTMLResponse)
