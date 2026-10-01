@@ -1193,8 +1193,10 @@ html.light .bg-white {
   justify-content: center;
   gap: 8px;
   color: #64748b;
-  background: rgba(248, 250, 252, 0.82);
-  pointer-events: none;
+  /* 不透明到底：刷新期间压住的是上一次采集的旧表格，不能让它露出来被读或被点。 */
+  background: #f8fafc;
+  pointer-events: auto;
+  cursor: progress;
 }
 
 /* ── 总览页面：登录 + 仪表盘 ── */

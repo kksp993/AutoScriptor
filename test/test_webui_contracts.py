@@ -31,6 +31,11 @@ def route_module_names() -> list[str]:
 
 
 def import_task_tree_service_for_test():
+    # The stub parents below are bare ModuleType objects with no __path__, so a
+    # leaf import can only be satisfied from sys.modules. mumu_discovery is pure
+    # stdlib, so hand the real module over instead of faking it.
+    from AutoScriptor.utils import mumu_discovery as real_mumu_discovery
+
     autoscriptor = types.ModuleType("AutoScriptor")
     utils = types.ModuleType("AutoScriptor.utils")
 
@@ -52,6 +57,7 @@ def import_task_tree_service_for_test():
         "AutoScriptor": autoscriptor,
         "AutoScriptor.utils": utils,
         "AutoScriptor.utils.app_config": app_config,
+        "AutoScriptor.utils.mumu_discovery": real_mumu_discovery,
         "ZmxyOL.character.profession": game_profession,
     }):
         sys.modules.pop("orchestrator.projection", None)
@@ -1623,7 +1629,7 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertIn("restart_required: '需要重启'", component)
         self.assertIn("grid-template-columns: minmax(0, 112px) minmax(0, 1fr)", style)
         self.assertIn("overflow-wrap: anywhere", style)
-        self.assertIn("style.css?v=46", index)
+        self.assertIn("style.css?v=47", index)
         self.assertIn("DiagnosticsPanel.js?v=3", index)
 
 
@@ -3053,6 +3059,42 @@ class TestZmxyRedeemCollectorContract(unittest.TestCase):
         self.assertNotIn("5054399.com", index)
         self.assertNotIn("openGiftExternal", panel)
 
+    def test_gift_dialog_refreshes_on_frame_load_and_hides_stale_rows(self):
+        """刷新必须由 iframe 的 onload 驱动，且刷新结束前不展示上一次的表格。
+
+        抓过的真实事故：dialog 打开和 refresh 并行触发，iframe 先把盘上旧表格渲染出来，
+        onGiftFrameLoad 又把遮罩关掉，于是采集跑完之前用户就能读到并点选过期兑换码。
+        """
+        panel = (ROOT / "backend/webui/static/js/components/NewsPanel.js").read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+        style = (ROOT / "backend/webui/static/css/style.css").read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+        news_route = route_module("news")
+
+        # iframe 加载完成是刷新触发点，且只消费一次，避免刷新导致的重载再触发刷新。
+        self.assertIn('@load="onGiftFrameLoad"', panel)
+        self.assertIn("if (this.giftRefreshOnLoad) {", panel)
+        self.assertIn("this.giftRefreshOnLoad = true;", panel)
+        self.assertIn("this.giftRefreshOnLoad = false;", panel)
+        self.assertIn("this.refreshGiftFrame();", panel)
+        # 打开即进刷新态；刷新成功换 key 重载，失败自己收遮罩，两条路都不能卡在刷新中。
+        self.assertIn("this.giftLoading = true;\n      this.giftRefreshOnLoad = true;", panel)
+        self.assertIn("this.giftIframeKey += 1;", panel)
+        self.assertNotIn("finally {\n        this.giftLoading = false;", panel)
+
+        # 遮罩要真的盖住并拦住旧表格：透明度和 pointer-events 缺一不可。
+        loading_block = style.split(".news-gift-frame-loading {")[1].split("}")[0]
+        self.assertIn("pointer-events: auto", loading_block)
+        self.assertNotIn("pointer-events: none", loading_block)
+        self.assertNotIn("rgba(248, 250, 252, 0.82)", loading_block)
+
+        # 页面本身禁缓存，否则重建 iframe 可能命中浏览器缓存里的旧 HTML。
+        self.assertIn('"Cache-Control": "no-store, must-revalidate"', news_route)
+
     def test_gift_codes_page_supports_direct_redeem_flow(self):
         route = (ROOT / "backend/webui/routes/news.py").read_text(
             encoding="utf-8",
@@ -3240,7 +3282,7 @@ class TestTaskOrderingStaticContract(unittest.TestCase):
         self.assertIn("<task-panel v-if=\"activeTab==='tasks'\"", index_html)
         self.assertNotIn("activeTab==='tasks' || activeTab==='task-graph'", index_html)
         self.assertIn("AppSidebar.js?v=18", index_html)
-        self.assertIn("style.css?v=46", index_html)
+        self.assertIn("style.css?v=47", index_html)
         self.assertIn("TaskPanel.js?v=23", index_html)
         self.assertIn("app.js?v=44", index_html)
         self.assertIn('@run-task-range="runTaskRange"', index_html)
