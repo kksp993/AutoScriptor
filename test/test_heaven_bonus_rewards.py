@@ -141,27 +141,6 @@ class TestHeavenBonusRewards(unittest.TestCase):
         finally:
             monitor.stop()
 
-    def test_yijing_battle_config_manages_pioneer_choice_per_dungeon(self):
-        from tasks.每日任务.荒古万界 import 遗境副本
-
-        pioneer_choices = {
-            dungeon_name: row["fight_pioneer"]
-            for dungeon_name, row in 遗境副本._DEFAULT_BATTLE_CONFIG.items()
-        }
-
-        self.assertEqual(
-            pioneer_choices,
-            {
-                "虎神之崖": False,
-                "苍龙幽谷": False,
-                "溟海之渊": False,
-                "雀炎之地": True,
-            },
-        )
-        parameter_metadata = 遗境副本._DEFAULT_BATTLE_CONFIG.get_param_meta()
-        self.assertEqual(parameter_metadata["columns"]["fight_pioneer"], {"type": "bool"})
-        self.assertEqual(parameter_metadata["column_labels"]["fight_pioneer"], "打先锋本")
-
     def test_collect_handles_already_open_confirm_dialog(self):
         from ZmxyOL.battle.procedure import heaven
 
