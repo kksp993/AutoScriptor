@@ -40,7 +40,12 @@ ITEM_TABLE = {
         "武器": {"bag_class": BAG.SHIZHUANG, "item_name": "冰神之殇"},
         "衣服": {"bag_class": BAG.SHIZHUANG, "item_name": "冰神甲胄"},
         "翅膀": {"bag_class": BAG.SHIZHUANG, "item_name": "冰神翼"},
-    }
+    },
+    "鬼牌":{
+        "武器": {"bag_class": BAG.SHIZHUANG, "item_name": "鬼牌魔杖"},
+        "衣服": {"bag_class": BAG.SHIZHUANG, "item_name": "王牌礼装"},
+        "翅膀": {"bag_class": BAG.SHIZHUANG, "item_name": "诡术披风"},
+    },
 }
 
 class WuQi(str, enum.Enum):
@@ -49,19 +54,20 @@ class WuQi(str, enum.Enum):
     星轨裁决 = "星轨裁决"
     仲夏裁决 = "仲夏裁决"
     冰神之殇 = "冰神之殇"
+    鬼牌魔杖 = "鬼牌魔杖"
 
 class YiFu(str, enum.Enum):
     风虎潮流 = "风虎潮流"
     影蛇灵袍 = "影蛇灵袍"
     天律华装 = "天律华装"
     冰神甲胄 = "冰神甲胄"
-
+    王牌礼装 = "王牌礼装"
 class ChiBang(str, enum.Enum):
     风虎背饰 = "风虎背饰"
     影蛇风翼 = "影蛇风翼"
     命定光轮 = "命定光轮"
     冰神翼 = "冰神翼"
-
+    诡术披风 = "诡术披风"
 
 def check_quality(item_name: str):
     pass
