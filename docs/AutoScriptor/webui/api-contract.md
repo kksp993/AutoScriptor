@@ -162,7 +162,7 @@ Editor `execute-code` 的受限命名空间直接提供运行时全局角色对�
 
 `GET /api/editor/navigation-options` 只读取 `ZmxyOL.nav.envs` 已注册到 `mm` 的名称，不执行导航、识别或设备初始化。响应按注册顺序返回 `items: [{"name": "村庄", "locations": ["法相", "背包"]}]`；环境自身的同名根位置不重复列入 `locations`。导入或注册异常返回 `500 editor_navigation_options_failed`，前端不得把失败伪装成空菜单。
 
-MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和常见安装目录，并从安装目录推导 `mumu_folder`、`emu_path`、`adb_path`，可选探测已连接 ADB 设备。运行热路径仍依赖已持久化配置，不能在任务执行时临时扫盘。
+MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和常见安装目录，并从安装目录推导 `mumu_folder`、`emu_path`、`adb_path`，可选探测已连接 ADB 设备。探测到设备后 `index` 按真实实例号落定，`adb_addr` 只在两种情况下跟随设备：值本身没信息量（空、`YOUR_` 占位、`:0` 结尾），或它恰好等于 `default_mumu_adb_addr(原 index)`——后者只是实例号的镜像，跟着新的实例号走才不会两个字段各说一个实例。手填地址（局域网主机、自定义端口、`localhost` 写法）与推导结果永不相等，照旧保留。`mumu_discovery` 是端口推导的唯一出处（`MUMU_ADB_BASE_PORT`/`MUMU_ADB_PORT_STEP`、`default_mumu_adb_addr`、`is_derived_adb_addr`），`orchestrator.projection` 从中导入而不是各存一份。运行热路径仍依赖已持久化配置，不能在任务执行时临时扫盘。
 
 `POST /api/editor/save-custom-task` 请求体约定：
 
@@ -205,7 +205,8 @@ MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和�
 
 - 打开资讯页、WebUI 登录成功后停留在资讯页、或再次点击资讯入口时，前端都应调用 `/api/news/posts?force=1` 立即拉取远端列表，不等 30 分钟缓存。
 - `/api/news/gift_codes?refresh=1` 只从官方公告近 10 天、最多 15 个帖子增量查找兑换码；记录已查帖子 ID 和仍有效兑换码，后续只查新增帖子。
-- `/api/news/gift_codes/page` 是兑换码弹窗的内嵌页，只读取运行时 `logs/zmxy_redeem_codes.json`；表格列为序号、兑换码、到期时间、来源链接、操作，支持 Shift 连续选择和批量兑换。
+- `/api/news/gift_codes/page` 是兑换码弹窗的内嵌页，只读取运行时 `logs/zmxy_redeem_codes.json`；表格列为序号、兑换码、到期时间、来源链接、操作，支持 Shift 连续选择和批量兑换。响应带 `Cache-Control: no-store`：重建 iframe 必须拿到盘上当前内容，命中浏览器缓存等于没刷新。
+- 兑换码刷新由 iframe 的 load 事件驱动，而不是和打开弹窗并行：弹窗打开即进刷新态，`giftLoading` 遮罩全程压住 iframe（不透明且拦点击），等那次加载完成才发 `/api/news/gift_codes?refresh=1`，采集成功后换 key 重载 iframe，由重载的 load 收掉遮罩。刷新失败自己收遮罩并提示。任何情况下都不能先把上一次采集的表格展示出来让人读或点——那是过期兑换码。
 - `/api/news/redeem_targets` 只返回账号名和 `服务器:角色名` 选择项；`POST /api/news/gift_codes/redeem` 需要 credential unlock 或安全密码，接受 `redeem_code` 或 `redeem_codes`，先切到所选账号/角色并强制自动登录，再按顺序以临时 `redeem_code` 参数执行内置任务 `其他任务/活动脚本/兑换豪礼礼品兑换`。
 - `/api/news/proxy` 遇到 4399 登录墙时会使用可用资讯通行证重试一次；缓存通行证失效时应重登后再拉取正文。
 - `news.account = "85rwm3janyyc"` 与 `news.password = "123456"` 是唯一允许明文模板保留的公开资讯通行证，仅用于 4399 news/forum/gift-code 代理。
