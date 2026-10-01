@@ -24,6 +24,26 @@ const NotificationsPanel = {
     this.loadSettings(true);
     this.loadLocalBot();
   },
+  computed: {
+    /** Whether the saved connection already points at the local robot. */
+    localBotReady() {
+      const bot = this.localBot;
+      return !!(bot && bot.installed && bot.running && bot.token_matches && bot.endpoint_matches);
+    },
+    /** Installed and running, but the saved address/token are not this robot's. */
+    needsLocalSync() {
+      const bot = this.localBot;
+      return !!(bot && bot.installed && bot.running && (!bot.token_matches || !bot.endpoint_matches));
+    },
+    endpointIsLoopback() {
+      return /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(String(this.form.endpoint || '').trim());
+    },
+    tokenPlaceholder() {
+      if (this.tokenSet && !this.tokenCleared) return '已保存，留空即可';
+      if (this.localBot && this.localBot.installed && this.endpointIsLoopback) return '本机机器人会自动带上，不用填';
+      return '与机器人 HTTP 服务的 token 一致';
+    },
+  },
   methods: {
     async loadLocalBot() {
       this.localError = '';
@@ -109,6 +129,9 @@ const NotificationsPanel = {
         deliveryError = error.message;
       } finally {
         await this.loadSettings();
+        // A failed test is exactly when the running state matters, so refresh it
+        // rather than leaving whatever the page loaded with.
+        await this.loadLocalBot();
         if (deliveryError) this.error = deliveryError;
         this.testing = false;
       }
@@ -136,13 +159,35 @@ const NotificationsPanel = {
     <div class="settings-card-head"><h3>本机机器人</h3></div>
     <p v-if="localError" class="text-sm text-red-600">{{ localError }}</p>
     <template v-if="localBot && localBot.installed">
-      <p class="text-sm text-gray-600">NapCat {{ localBot.version }} 已安装（不代表已登录）。地址和令牌由安装程序准备，无需复制。</p>
-      <p class="text-sm text-gray-600 mt-2">运行 <code>scripts\\run.bat qq</code>，保持机器人窗口开启，在本机登录页扫码登录。</p>
+      <p class="text-sm text-gray-600">NapCat {{ localBot.version }} 已安装（不代表已登录）。</p>
+
+      <!-- 三态说清"还要不要做事"：本机机器人的令牌是安装时自动生成的，
+           用户不可能知道也不需要知道它是什么，所以这里必须给出结论而不是一个输入框。 -->
+      <p v-if="localBotReady" class="text-sm text-emerald-700 mt-2">
+        <i class="fa fa-check-circle"></i>
+        已连接：地址和令牌都用本机机器人的，不需要你填写或查找。
+      </p>
+      <p v-else-if="!localBot.running" class="text-sm text-amber-700 mt-2">
+        <i class="fa fa-exclamation-triangle"></i>
+        机器人当前没有运行，通知发不出去。
+      </p>
+      <p v-else class="text-sm text-amber-700 mt-2">
+        <i class="fa fa-exclamation-triangle"></i>
+        通知配置还没指向本机机器人，点下面的按钮一键同步即可。
+      </p>
+
+      <p v-if="!localBot.running" class="text-sm text-gray-600 mt-1">
+        启动：双击 <code>scripts\\qq-notify\\2-start.cmd</code>（后台运行，可关窗口）。停止用 <code>3-stop.cmd</code>。
+      </p>
+      <p class="text-sm text-gray-600 mt-1">首次登录需要扫码：在本机登录页完成登录后，机器人会记住账号，之后启动无需再扫。</p>
       <div class="flex gap-2 mt-3">
-        <el-button :disabled="executionBusy || saving || testing || loading || !loaded" @click="useLocalBot">使用本机配置</el-button>
+        <el-button :type="needsLocalSync ? 'primary' : ''"
+          :disabled="executionBusy || saving || testing || loading || !loaded" @click="useLocalBot">
+          {{ needsLocalSync ? '一键同步本机地址和令牌' : '使用本机配置' }}
+        </el-button>
         <a :href="localBot.login_url" target="_blank" rel="noopener noreferrer" class="text-blue-600">本机登录页（请在运行机器打开）</a>
       </div>
-      <p class="text-xs text-gray-500 mt-2">使用本机配置会替换已保存的地址和令牌，并重新加载表单；接收号码和推送开关保留服务器已保存值。</p>
+      <p class="text-xs text-gray-500 mt-2">会替换已保存的地址和令牌并重新加载表单；接收号码和推送开关保留服务器已保存值。</p>
     </template>
     <p v-else-if="localBot" class="text-sm text-gray-600">尚未安装。运行 <code>scripts\\install.bat qq</code> 即可安装并自动生成本机 HTTP 配置。也可继续使用已有的外部 OneBot 服务。</p>
     <el-button text @click="loadLocalBot">重新检测安装</el-button>
@@ -157,7 +202,10 @@ const NotificationsPanel = {
         </el-form-item>
         <el-form-item label="机器人 HTTP 地址">
           <el-input v-model="form.endpoint" placeholder="http://127.0.0.1:3000"></el-input>
-          <p class="text-xs text-gray-500 mt-1">填写 NapCat / OneBot 的正向 HTTP 服务地址，不是 WebUI 地址。</p>
+          <p v-if="endpointIsLoopback" class="text-xs text-gray-500 mt-1">
+            本机机器人地址。不是 WebUI 的 6099，两者不同。
+          </p>
+          <p v-else class="text-xs text-gray-500 mt-1">填写 NapCat / OneBot 的正向 HTTP 服务地址，不是 WebUI 地址。</p>
         </el-form-item>
         <el-form-item label="接收对象">
           <div class="flex gap-2 w-full">
@@ -169,9 +217,14 @@ const NotificationsPanel = {
               aria-label="接收号码" inputmode="numeric" maxlength="20"></el-input>
           </div>
         </el-form-item>
-        <el-form-item label="访问令牌（选填）">
+        <el-form-item :label="localBotReady ? '访问令牌（已自动配置）' : '访问令牌（选填）'">
           <el-input v-model="token" type="password" show-password autocomplete="new-password"
-            :placeholder="tokenSet && !tokenCleared ? '已保存，留空保留原令牌' : '与机器人 HTTP 服务的 token 一致'"></el-input>
+            :placeholder="tokenPlaceholder"></el-input>
+          <!-- 令牌是安装时生成的 64 位随机串，用户不可能知道它。本机机器人已经对齐时
+               必须明说"不用管"，否则这个输入框本身就在暗示要去找一个东西填进来。 -->
+          <p v-if="localBotReady" class="text-xs text-emerald-700 mt-1">
+            <i class="fa fa-check"></i> 已与机器人一致，留空即可，不需要查找或修改。
+          </p>
           <el-button v-if="tokenSet && !tokenCleared" text size="small" @click="clearToken">清除已保存令牌</el-button>
           <span v-if="tokenCleared" class="text-xs text-amber-600 mt-1">保存后清除原令牌；输入新令牌可替换。</span>
         </el-form-item>
@@ -198,8 +251,11 @@ const NotificationsPanel = {
       <details class="mt-5 text-sm text-gray-600">
         <summary class="cursor-pointer font-medium">首次连接怎么做？</summary>
         <ol class="mt-2 space-y-2 list-decimal pl-5">
-          <li>安装时选装 QQ 机器人，或运行 scripts\\install.bat qq；再运行 scripts\\run.bat qq 并扫码登录。</li>
-          <li>点击“使用本机配置”自动保存地址和令牌，再填写好友 QQ 号或机器人已加入的群号。已有外部服务也可手动填写。</li>
+          <li>安装时选装 QQ 机器人，或运行 scripts\\install.bat qq；再双击 scripts\\qq-notify\\2-start.cmd 启动。</li>
+          <li>首次登录在本机登录页扫码；登录一次后机器人会记住账号，之后启动无需再扫。</li>
+          <li>点“一键同步本机地址和令牌”。<strong>令牌是安装时自动生成的，不用你查找或填写</strong>——
+              只有接外部已有的 OneBot 服务时才需要手工填它。</li>
+          <li>填写接收者的好友 QQ 号，或机器人已加入的群号。</li>
           <li>发送测试消息，确认 QQ 收到后开启自动推送并保存。</li>
         </ol>
         <p class="mt-2">安装是可选的，不代登录 QQ。第三方机器人存在账号风控风险，建议使用专用小号。本机服务只监听回环地址；远程服务应使用 HTTPS 和令牌，WebUI 应启用访问密码。</p>

@@ -105,7 +105,7 @@ Reload 边界：所有 reload 类操作都会清 `bg`；纯配置同步 `POST /a
 | `GET /api/notify/qq` | 返回 `settings`、示例 `preview`、最近 20 条 `history`，令牌仅返回 `token_set` |
 | `POST /api/notify/qq` | runtime idle 时保存 `notify.qq` 全局配置，返回 `config_version` |
 | `POST /api/notify/qq/test` | 使用请求中的草稿发送明确标注的测试消息；不保存、不操作设备，失败返回 `502 notify_delivery_failed` |
-| `GET /api/notify/qq/local` | 检测受管 NapCat 安装，返回 `installed/version/login_url`，不返回 HTTP/管理令牌；不探测或宣称登录成功 |
+| `GET /api/notify/qq/local` | 检测受管 NapCat 安装，返回 `installed/version/running/login_url`，装了还带 `token_matches`/`endpoint_matches`，不返回 HTTP/管理令牌。`running` 是**进程存活**（pid 文件活着，或配置的 HTTP 端口有 `node.exe` 在监听），不宣称登录成功也不代表能发出去；端口被别的程序占着时按未运行处理。两个 `*_matches` 是「存下来的连接参数是否还等于这台机器人的」——只有这一层能回答：机器人模块不读 cfg，用户也无法比对两个 64 位随机串。读了配置解析失败时一律报 `false`，宁可让用户点一次同步，也不猜「大概是对的」 |
 | `POST /api/notify/qq/local` | runtime idle 时从受管安装读取 HTTP 地址和令牌，通过原有全局保存事务写入 `notify.qq`；不接受路径/地址参数，保留已保存目标与开关 |
 
 参数只有 `enabled`、`endpoint`、`target_type`（`private/group`）、字符串 `target_id` 和可选 `access_token`。

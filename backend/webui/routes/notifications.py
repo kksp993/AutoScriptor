@@ -67,9 +67,26 @@ async def qq_test_settings(request: Request):
 @router.get("/api/notify/qq/local")
 def qq_get_local_bot():
     try:
-        return api_ok(**local_installation_status())
+        status = local_installation_status()
     except (OSError, ValueError):
         return api_error(500, "本机机器人安装文件缺失或配置损坏，请检查安装目录", code="local_bot_invalid")
+    if status.get("installed"):
+        # "Is the saved token still the right one?" is a question only this layer
+        # can answer: the bot module deliberately does not read cfg, and the user
+        # cannot compare two 64-character strings. Answering it here is what lets
+        # the page say "nothing to do" instead of leaving a token box that implies
+        # otherwise.
+        try:
+            saved = orchestrator.tasks.prepare_qq_settings({})
+            connection = local_notification_settings()
+            status["token_matches"] = bool(saved.access_token) and saved.access_token == connection["access_token"]
+            status["endpoint_matches"] = saved.endpoint == connection["endpoint"]
+        except (ValueError, OSError):
+            # Unreadable or invalid stored settings; the page falls back to showing
+            # the plain install status rather than claiming anything about the token.
+            status["token_matches"] = False
+            status["endpoint_matches"] = False
+    return api_ok(**status)
 
 
 @router.post("/api/notify/qq/local")

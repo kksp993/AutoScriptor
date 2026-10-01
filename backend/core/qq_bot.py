@@ -144,7 +144,12 @@ def _bot_log(root: Path) -> Path:
 
 
 def running_bot_pid(root: Path | None = None) -> int | None:
-    """PID of the bot started by us, or ``None`` if it is not alive."""
+    """PID recorded in the pid file, or ``None`` if that process is gone.
+
+    Only covers the detached path (``launch_bot``). The console path used to
+    leave no record at all, so use :func:`bot_process_pid` when the question is
+    "is a bot serving this installation".
+    """
     root = root or BOT_ROOT
     path = _pid_file(root)
     if not path.is_file():
@@ -165,6 +170,86 @@ def running_bot_pid(root: Path | None = None) -> int | None:
         return None
     ctypes.windll.kernel32.CloseHandle(handle)
     return pid
+
+
+def _listening_pid(port: int) -> int | None:
+    """PID listening on ``127.0.0.1:<port>``, or ``None``.
+
+    Parses ``netstat`` rather than importing ``psutil``: that package is only
+    present as somebody else's dependency, and a bot that cannot be stopped when
+    a transitive requirement moves is worse than a slightly ugly parse.
+    """
+    try:
+        completed = subprocess.run(
+            ["netstat", "-ano", "-p", "TCP"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    suffix = f":{port}"
+    for line in (completed.stdout or "").splitlines():
+        parts = line.split()
+        # TCP  127.0.0.1:3000  0.0.0.0:0  LISTENING  30836
+        if len(parts) < 5 or parts[0].upper() != "TCP" or parts[3].upper() != "LISTENING":
+            continue
+        if not parts[1].endswith(suffix):
+            continue
+        if not parts[4].isdigit():
+            continue
+        return int(parts[4])
+    return None
+
+
+def _is_our_node_process(pid: int) -> bool:
+    """Whether ``pid`` is a ``node.exe``.
+
+    The bot is always ``<root>/node.exe``, so anything else holding our port is
+    somebody else's program and must not be terminated on our behalf.
+    """
+    try:
+        completed = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "node.exe" in (completed.stdout or "").lower()
+
+
+def listening_bot_pid(root: Path | None = None) -> int | None:
+    """PID holding the bot's HTTP port, however the bot was started.
+
+    The pid file is not enough on its own: a bot started from the console had no
+    record, and a detached one leaves a stale file once the machine reboots. The
+    listener is the fact both paths share.
+    """
+    settings = load_local_settings(root)
+    if settings is None:
+        return None
+    pid = _listening_pid(settings["http_port"])
+    if pid is None or not _is_our_node_process(pid):
+        return None
+    return pid
+
+
+def bot_process_pid(root: Path | None = None) -> int | None:
+    """PID of the bot serving this installation, or ``None``.
+
+    Covers both start paths: the recorded pid first, then whoever holds the port.
+    """
+    return running_bot_pid(root) or listening_bot_pid(root)
+
+
+def bot_is_running(root: Path | None = None) -> bool:
+    """Whether the bot process is up.
+
+    Process liveness only. This says nothing about whether QQ is logged in, and
+    must not be presented as if it did: NapCat answers its own port before any
+    account is through the QR flow.
+    """
+    return bot_process_pid(root) is not None
 
 
 def launch_bot(
@@ -213,9 +298,15 @@ def launch_bot(
 
 
 def stop_bot(root: Path | None = None) -> bool:
-    """Terminate the bot we started. Returns whether anything was stopped."""
+    """Terminate the bot serving this installation. Returns whether it stopped.
+
+    Both start paths and the orphan case are covered. Relying on the pid file
+    alone made this a silent no-op for a console-started bot: it reported "not
+    running", left the port held, and every later start failed with "端口被占用"
+    -- a loop the user cannot get out of.
+    """
     root = root or BOT_ROOT
-    pid = running_bot_pid(root)
+    pid = bot_process_pid(root)
     if pid is None:
         return False
     # /T so the QQ runtime child process goes with it; /F because the bot has no
@@ -237,12 +328,20 @@ def local_notification_settings(root: Path | None = None) -> dict:
 
 
 def local_installation_status(root: Path | None = None) -> dict:
+    """What the WebUI may show about the managed install.
+
+    ``running`` is process liveness only -- whether a bot is serving the
+    configured port. It deliberately says nothing about the QQ login, because
+    NapCat answers that port before anyone is through the QR flow, and claiming
+    "logged in" from it would be a guess. Never includes either token.
+    """
     settings = load_local_settings(root)
     if settings is None:
         return {"installed": False}
     return {
         "installed": True,
         "version": settings["version"],
+        "running": bot_is_running(root),
         "login_url": f"http://127.0.0.1:{settings['web_port']}",
     }
 
@@ -411,7 +510,17 @@ def start_bot(root: Path | None = None) -> int:
         command = [str(root / "node.exe"), str(root / "index.js")]
         if account:
             command += ["-q", account]
-        return subprocess.call(command, cwd=root, env=environment)
+        # Popen rather than call: this window has to keep running anyway, and
+        # recording the child pid is what makes "stop" able to find the bot this
+        # path started. Without it, stop reported "not running" while the port
+        # stayed held, and every later start failed as occupied.
+        process = subprocess.Popen(command, cwd=root, env=environment)  # noqa: S603
+        _pid_file(root).write_text(str(process.pid), encoding="ascii")
+        try:
+            return process.wait()
+        finally:
+            # The child is gone, so the record would only mislead the next caller.
+            _pid_file(root).unlink(missing_ok=True)
 
 
 def main() -> int:
