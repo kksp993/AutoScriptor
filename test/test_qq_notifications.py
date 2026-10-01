@@ -3,6 +3,8 @@ import asyncio
 from contextlib import nullcontext
 from copy import deepcopy
 import json
+from pathlib import Path
+import tempfile
 from threading import Event
 import unittest
 from unittest.mock import Mock, patch
@@ -10,6 +12,7 @@ from unittest.mock import Mock, patch
 import requests
 from starlette.requests import Request
 
+from backend.core import qq_bot
 from orchestrator.delivery import CharacterReports
 from orchestrator.delivery import DeliveryError, QQNotifier, QQSettings, send_message
 from orchestrator.projection import WebUILifecycleService
@@ -118,6 +121,42 @@ class TestQQTransport(unittest.TestCase):
         self.assertEqual(post.call_count, 1)
         self.assertEqual(notifier.history()[0], result)
 
+    def test_loopback_failure_names_the_robot_instead_of_certificates(self):
+        """本机地址连不上只有一个原因：机器人没开。
+
+        真实事故的报错是「无法连接 QQ 接口，请检查地址、证书和机器人服务」——
+        用户照这句话去查证书和地址，而真正要做的事是启动机器人。
+        """
+        settings = QQSettings.parse({
+            "enabled": True, "target_id": "12345",
+            "endpoint": "http://127.0.0.1:3000", "access_token": "test-only-token",
+        })
+        with patch("orchestrator.delivery.requests.post",
+                   side_effect=requests.ConnectionError("connection refused")):
+            with self.assertRaises(DeliveryError) as raised:
+                send_message(settings, "test")
+
+        message = str(raised.exception)
+        self.assertIn("机器人没有在运行", message)
+        self.assertIn("2-start.cmd", message)
+        self.assertNotIn("证书", message)
+        self.assertNotIn("test-only-token", message)
+
+    def test_remote_failure_keeps_the_general_diagnosis(self):
+        """远端地址失败的原因确实可能有很多，不假装知道是哪一种。"""
+        settings = QQSettings.parse({
+            "enabled": True, "target_id": "12345",
+            "endpoint": "https://bot.example.com", "access_token": "test-only-token",
+        })
+        with patch("orchestrator.delivery.requests.post",
+                   side_effect=requests.ConnectionError("connection refused")):
+            with self.assertRaises(DeliveryError) as raised:
+                send_message(settings, "test")
+
+        message = str(raised.exception)
+        self.assertIn("无法连接 QQ 接口", message)
+        self.assertNotIn("机器人没有在运行", message)
+
     def test_background_delivery_does_not_wait_for_network(self):
         notifier = QQNotifier()
         started, release = Event(), Event()
@@ -185,7 +224,14 @@ class MemoryConfig:
         current[parts[-1]] = value
 
 
-class TestQQSettingsLifecycle(unittest.TestCase):
+class NotificationEndpointMixin:
+    """Drive the real notification route handlers against a test-owned service.
+
+    The router reaches the orchestrator directly instead of taking injected
+    collaborators, so a test supplies its own service by swapping
+    ``orchestrator.tasks`` and stubbing only the execution guard.
+    """
+
     def setUp(self):
         self.config = MemoryConfig()
         self.manager = Mock()
@@ -195,6 +241,32 @@ class TestQQSettingsLifecycle(unittest.TestCase):
             self.config, self.manager, Mock(), Mock(), self.version,
         )
 
+    def _notification_endpoint(self, path, method, busy=None):
+        guard = (lambda action: busy) if busy is not None else (lambda action: None)
+        patches = [
+            patch.object(orchestrator, "tasks", self.lifecycle),
+            patch("backend.webui.routes.notifications.guard_runtime_idle", guard),
+        ]
+        return next(
+            route.endpoint
+            for route in notifications_router.routes
+            if route.path == path and method in route.methods
+        ), patches
+
+    def call_endpoint(self, path, method, payload=None, busy=None):
+        endpoint, patches = self._notification_endpoint(path, method, busy)
+        with patches[0], patches[1]:
+            if method == "GET":
+                return endpoint()
+            body = json.dumps(payload).encode("utf-8")
+
+            async def receive():
+                return {"type": "http.request", "body": body, "more_body": False}
+
+            return asyncio.run(endpoint(Request({"type": "http", "method": method, "path": path}, receive)))
+
+
+class TestQQSettingsLifecycle(NotificationEndpointMixin, unittest.TestCase):
     def test_save_only_global_config_and_preserve_or_clear_token(self):
         self.lifecycle.save_qq_settings({"target_id": "12345", "access_token": "test-token"})
         self.lifecycle.save_qq_settings({"enabled": True})
@@ -220,36 +292,6 @@ class TestQQSettingsLifecycle(unittest.TestCase):
         self.lifecycle.import_config({"notify": {"qq": public_settings}})
         self.assertEqual(self.config.get("notify.qq.access_token"), "test-token")
         self.assertNotIn("token_set", self.config.get("notify.qq"))
-
-    def _notification_endpoint(self, path, method, busy=None):
-        """Locate a notification endpoint and bind it to this test's service.
-
-        The router reaches the orchestrator directly instead of taking injected
-        collaborators, so a test supplies its own service by swapping
-        ``orchestrator.tasks`` and stubbing only the execution guard.
-        """
-        guard = (lambda action: busy) if busy is not None else (lambda action: None)
-        patches = [
-            patch.object(orchestrator, "tasks", self.lifecycle),
-            patch("backend.webui.routes.notifications.guard_runtime_idle", guard),
-        ]
-        return next(
-            route.endpoint
-            for route in notifications_router.routes
-            if route.path == path and method in route.methods
-        ), patches
-
-    def call_endpoint(self, path, method, payload=None, busy=None):
-        endpoint, patches = self._notification_endpoint(path, method, busy)
-        with patches[0], patches[1]:
-            if method == "GET":
-                return endpoint()
-            body = json.dumps(payload).encode("utf-8")
-
-            async def receive():
-                return {"type": "http.request", "body": body, "more_body": False}
-
-            return asyncio.run(endpoint(Request({"type": "http", "method": method, "path": path}, receive)))
 
     def test_read_hides_token_and_test_does_not_save(self):
         self.lifecycle.save_qq_settings({"target_id": "12345", "access_token": "test-token"})
@@ -299,6 +341,112 @@ class TestQQSettingsLifecycle(unittest.TestCase):
         with patch("backend.webui.routes.notifications.local_installation_status", side_effect=OSError):
             response = self.call_endpoint("/api/notify/qq/local", "GET")
         self.assertEqual(response.status_code, 500)
+
+
+class TestLocalBotMatchReporting(NotificationEndpointMixin, unittest.TestCase):
+    """界面必须替用户判断"令牌还要不要动"。
+
+    真实反馈：「token 要登陆是吧？你的 token 能自己获取吗？不要我来找，我是用户
+    真不知道 token」。令牌是安装时生成的 64 位随机串，用户不可能知道它是什么，
+    所以界面给出的必须是一个结论，而不是一个暗示"去找点东西填进来"的输入框。
+    """
+
+    LOCAL = {"endpoint": "http://127.0.0.1:3010", "access_token": "a" * 64}
+
+    def read_local_status(self, saved=None):
+        if saved is not None:
+            self.lifecycle.save_qq_settings(saved)
+        installed = {
+            "installed": True, "version": "v4.18.9",
+            "running": True, "login_url": "http://127.0.0.1:6100",
+        }
+        with patch("backend.webui.routes.notifications.local_installation_status", return_value=dict(installed)), \
+                patch("backend.webui.routes.notifications.local_notification_settings",
+                      return_value=dict(self.LOCAL)):
+            return self.call_endpoint("/api/notify/qq/local", "GET")
+
+    def test_a_matching_pair_is_reported_as_ready(self):
+        """安装时自动写好的那份配置，界面要能认出来并说"不用管"。"""
+        response = self.read_local_status({"target_id": "12345", **self.LOCAL})
+
+        self.assertTrue(response["token_matches"], "安装生成的令牌应当被认成一致")
+        self.assertTrue(response["endpoint_matches"])
+        self.assertTrue(response["running"])
+
+    def test_a_stale_token_is_reported_as_mismatched(self):
+        """重装机器人会换令牌；旧的必须被判为"还没同步"，否则发送会一直 401。"""
+        response = self.read_local_status({
+            "target_id": "12345",
+            "endpoint": self.LOCAL["endpoint"],
+            "access_token": "b" * 64,
+        })
+
+        self.assertFalse(response["token_matches"])
+        self.assertTrue(response["endpoint_matches"], "地址没变，只有令牌过期")
+
+    def test_never_configured_is_not_a_match(self):
+        """从没配过时不能靠"两边都空"蒙成一致——空令牌发不出去。"""
+        response = self.read_local_status({"target_id": "12345"})
+
+        self.assertFalse(response["token_matches"])
+
+    def test_a_different_address_is_reported(self):
+        response = self.read_local_status({
+            "target_id": "12345",
+            "endpoint": "http://127.0.0.1:9999",
+            "access_token": self.LOCAL["access_token"],
+        })
+
+        self.assertFalse(response["endpoint_matches"])
+
+    def test_unreadable_stored_settings_do_not_claim_a_match(self):
+        """读不出配置时不能猜"大概是对的"——宁可让用户点一次同步。"""
+        self.config._config["notify"]["qq"] = {"target_id": "not-a-number"}
+
+        response = self.read_local_status()
+
+        self.assertFalse(response["token_matches"])
+        self.assertFalse(response["endpoint_matches"])
+
+    def test_neither_token_is_ever_echoed(self):
+        response = self.read_local_status(self.LOCAL)
+        self.assertNotIn(self.LOCAL["access_token"], json.dumps(response))
+
+
+class TestNotificationsPanelWording(unittest.TestCase):
+    """界面必须替用户说出「令牌不用你管」。
+
+    真实反馈：「token 要登陆是吧？你的 token 能自己获取吗？不要我来找，我是用户真不
+    知道 token」。令牌是安装时自动生成的 64 位随机串，用户不可能知道它；只要页面还
+    摆着一个中性的输入框又不给结论，用户就会以为必须自己去找一个填进来。
+    """
+
+    def setUp(self):
+        root = Path(__file__).resolve().parents[1]
+        self.panel = (root / "backend/webui/static/js/components/NotificationsPanel.js").read_text(
+            encoding="utf-8", errors="ignore",
+        )
+
+    def test_the_ready_state_states_there_is_nothing_to_do(self):
+        self.assertIn("不需要你填写或查找", self.panel)
+
+    def test_the_token_field_renames_itself_when_it_is_already_configured(self):
+        self.assertIn("访问令牌（已自动配置）", self.panel)
+
+    def test_the_placeholder_tells_a_loopback_user_not_to_fill_it(self):
+        self.assertIn("本机机器人会自动带上，不用填", self.panel)
+
+    def test_the_help_text_says_the_token_is_generated_not_found(self):
+        self.assertIn("令牌是安装时自动生成的，不用你查找或填写", self.panel)
+
+    def test_the_sync_button_says_what_it_does_when_out_of_sync(self):
+        self.assertIn("一键同步本机地址和令牌", self.panel)
+
+    def test_readiness_depends_on_the_backend_comparison_not_a_guess(self):
+        """就绪判断必须用后端给的比对结果，不能在页面上猜。"""
+        for signal in ("token_matches", "endpoint_matches", "localBotReady"):
+            with self.subTest(signal=signal):
+                self.assertIn(signal, self.panel)
 
 
 if __name__ == "__main__":

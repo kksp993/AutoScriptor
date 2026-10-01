@@ -88,13 +88,29 @@ class TestLocalBotInstall(unittest.TestCase):
 
     def test_start_uses_upstream_single_process_mode(self):
         self.prepare_runtime()
+        observed = {}
+        process = Mock()
+        process.pid = 4321
+
+        def wait():
+            # ``stop_bot`` reads this file while the bot runs, so capture it at
+            # that moment: the file is removed once the process is gone.
+            observed["recorded_pid"] = qq_bot._pid_file(self.root).read_text(encoding="ascii")
+            return 0
+
+        process.wait.side_effect = wait
         with patch.object(qq_bot, "lock_bot", return_value=nullcontext()), \
                 patch.object(qq_bot.socket, "socket"), \
-                patch.object(qq_bot.subprocess, "call", return_value=0) as launch:
+                patch.object(qq_bot.subprocess, "Popen", return_value=process) as launch:
             self.assertEqual(qq_bot.start_bot(self.root), 0)
         self.assertEqual(launch.call_args.kwargs["env"]["NAPCAT_DISABLE_MULTI_PROCESS"], "1")
         self.assertEqual(launch.call_args.kwargs["cwd"], self.root)
         self.assertNotIn("--no-sandbox", launch.call_args.args[0])
+        # The console path must record its child, or "stop" cannot find it later.
+        self.assertEqual(observed["recorded_pid"], "4321")
+        # And it must clear the record once the child is gone, so the next caller
+        # is not misled by a dead pid.
+        self.assertFalse(qq_bot._pid_file(self.root).exists())
 
     def test_native_runtime_failure_is_not_accepted(self):
         with patch.object(qq_bot.subprocess, "run", return_value=Mock(
@@ -119,6 +135,85 @@ class TestLocalBotInstall(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 qq_bot.publish_runtime(staging, self.root)
         wait.assert_not_called()
+
+
+class TestLocalBotProcess(unittest.TestCase):
+    """找得到、停得掉、说得清 —— 这三件事一起坏过一次。
+
+    真实事故：`stop_bot` 只认 pid 文件，而控制台启动路径根本不写它。于是 stop
+    打印「not running」并返回成功，机器人仍在跑、端口仍被占，之后每次启动都报
+    「端口 3000 被占用，机器人可能已在运行」——用户永远起不来，也没有任何提示
+    告诉他真正发生了什么。
+    """
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.directory = Path(temporary.name)
+        self.root = self.directory / "robot"
+        for filename in qq_bot.REQUIRED_FILES:
+            path = self.root / filename
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        qq_bot.prepare_configuration(self.root, 3010, 6100)
+
+    def test_listening_pid_reads_the_pid_column_of_a_listener(self):
+        output = "\n".join([
+            "  TCP    127.0.0.1:3010         0.0.0.0:0              LISTENING       4242",
+            # Same prefix, different port: must not match.
+            "  TCP    127.0.0.1:30100        0.0.0.0:0              LISTENING       9999",
+            # Our port, but not a listener.
+            "  TCP    192.168.1.5:3010       10.0.0.1:51000         ESTABLISHED     1111",
+            "garbage",
+        ])
+        with patch.object(qq_bot.subprocess, "run", return_value=Mock(returncode=0, stdout=output)):
+            self.assertEqual(qq_bot._listening_pid(3010), 4242)
+
+    def test_listening_pid_is_none_when_netstat_fails(self):
+        with patch.object(qq_bot.subprocess, "run", side_effect=OSError("no netstat")):
+            self.assertIsNone(qq_bot._listening_pid(3010))
+        with patch.object(qq_bot.subprocess, "run", return_value=Mock(returncode=1, stdout="")):
+            self.assertIsNone(qq_bot._listening_pid(3010))
+
+    def test_stop_finds_a_bot_the_pid_file_never_recorded(self):
+        """The port is the fact both start paths share; the pid file is not."""
+        with patch.object(qq_bot, "_listening_pid", return_value=7777), \
+                patch.object(qq_bot, "_is_our_node_process", return_value=True), \
+                patch.object(qq_bot.subprocess, "run") as taskkill:
+            self.assertTrue(qq_bot.stop_bot(self.root))
+        taskkill.assert_called_once()
+        self.assertEqual(list(taskkill.call_args.args[0][:3]), ["taskkill", "/PID", "7777"])
+
+    def test_stop_leaves_another_program_holding_the_port_alone(self):
+        """Only a node.exe may be terminated on our behalf."""
+        with patch.object(qq_bot, "_listening_pid", return_value=7777), \
+                patch.object(qq_bot, "_is_our_node_process", return_value=False), \
+                patch.object(qq_bot.subprocess, "run") as taskkill:
+            self.assertFalse(qq_bot.stop_bot(self.root))
+        taskkill.assert_not_called()
+
+    def test_stop_is_a_noop_when_nothing_is_running(self):
+        with patch.object(qq_bot, "_listening_pid", return_value=None), \
+                patch.object(qq_bot.subprocess, "run") as taskkill:
+            self.assertFalse(qq_bot.stop_bot(self.root))
+        taskkill.assert_not_called()
+
+    def test_status_reports_whether_the_bot_is_running(self):
+        with patch.object(qq_bot, "_listening_pid", return_value=None):
+            self.assertFalse(qq_bot.local_installation_status(self.root)["running"])
+        with patch.object(qq_bot, "_listening_pid", return_value=1234), \
+                patch.object(qq_bot, "_is_our_node_process", return_value=True):
+            self.assertTrue(qq_bot.local_installation_status(self.root)["running"])
+
+    def test_status_still_hides_both_tokens(self):
+        """``running`` is a new public field; the no-credential rule still holds."""
+        with patch.object(qq_bot, "_listening_pid", return_value=1234), \
+                patch.object(qq_bot, "_is_our_node_process", return_value=True):
+            public = json.dumps(qq_bot.local_installation_status(self.root))
+        server_token = qq_bot.read_document(self.root / "napcat/config/onebot11.json")
+        webui_token = qq_bot.read_document(self.root / "napcat/config/webui.json")
+        self.assertNotIn(server_token["network"]["httpServers"][0]["token"], public)
+        self.assertNotIn(webui_token["token"], public)
 
 
 if __name__ == "__main__":

@@ -12,7 +12,9 @@
 WebUI 侧栏 **QQ 通知** 是独立页面，不需要填写 YAML。
 
 1. 在 `scripts\install.bat` 安装末尾选装 QQ 机器人，或执行 `scripts\install.bat qq`。
-   执行 `scripts\run.bat qq` 启动后在本机登录页面扫码，保持该窗口开启。
+   双击 `scripts\qq-notify\2-start.cmd` 启动（后台运行，可关窗口）；首次在本机登录页面扫码，
+   登录一次后机器人记住账号，之后启动无需再扫。想看着窗口跑用 `scripts\run.bat qq`。
+   侧栏页面会直接显示机器人**在不在运行**，没在跑时给出启动命令。
    页面“使用本机配置”会自动保存地址和令牌；已有外部 OneBot 服务可跳过安装并手动填写。
 2. 填写 HTTP 地址（默认 `http://127.0.0.1:3000`，以实际机器人配置为准）。
 3. 选择 QQ 好友或 QQ 群，填写接收号码。
@@ -38,10 +40,17 @@ WebUI 侧栏 **QQ 通知** 是独立页面，不需要填写 YAML。
 - 安装不直接改 `data/config.json`，避免与运行中的 cfg 冲突。页面“使用本机配置”通过现有 lifecycle
   全局保存事务完成连接配置交接，保留已保存的接收号码/自动推送开关；表单未保存草稿会被重新加载。
   不会凭空填写接收号码或开启自动推送。该按钮要求 runtime idle。
-- `GET /api/notify/qq/local` 只返回 installed/version/login_url，不返回任何令牌，安装存在不等于已登录。
+- `GET /api/notify/qq/local` 返回 installed/version/running/login_url，不返回任何令牌。
+  `running` 只表示**进程在不在**（pid 文件活着，或配置的 HTTP 端口有 `node.exe` 在监听），
+  既不代表已登录、也不代表能发出去；安装存在更不等于已登录。
   `POST /api/notify/qq/local` 不接受外部地址或路径，只读取受管目录并保存通知连接参数。
-- `run.bat qq` 用文件锁拒绝重复启动，启动前检查两个端口；端口被占用则失败，不杀其他进程。
-  当前为独立前台机器人进程，不安装 Windows 服务、不注册开机自启，也不随游戏任务起停。
+- 两条启动路径：`scripts\qq-notify\2-start.cmd`（后台、无窗口，日常用）与 `scripts\run.bat qq`
+  （前台窗口，关闭窗口即停）。两条都记录子进程 pid，`3-stop.cmd` / `qq_bot.py stop` 因此都停得掉。
+  停止不只是读 pid 文件：控制台路径过去不写它，导致 stop 谎报「not running」而端口一直被占，
+  之后每次启动都报「端口被占用」——一个用户出不去的死循环。现在找不到 pid 文件时改用端口定位，
+  并且只终止 `node.exe`（端口被别的程序占着时明确拒绝，不误杀）。
+  用文件锁拒绝重复启动，启动前检查两个端口。
+  当前为独立机器人进程，不安装 Windows 服务、不注册开机自启，也不随游戏任务起停。
 - 2026-09-09 实测首次启动失败：上游 v4.18.19 Node 包的 fork 分支传入 Electron 参数
   `--no-sandbox`，Node 以 code 9 退出。启动器使用上游支持的 `NAPCAT_DISABLE_MULTI_PROCESS=1`
   单进程入口，不改包内源码；机器人管理页的多进程重启功能不可用，需关闭后重新 `run.bat qq`。

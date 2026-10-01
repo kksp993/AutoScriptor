@@ -83,6 +83,26 @@ class DeliveryError(RuntimeError):
     """A safe error message which never includes credentials or response bodies."""
 
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+
+
+def _endpoint_is_loopback(endpoint: str) -> bool:
+    """Whether the endpoint points at this machine.
+
+    The distinction matters for the failure message: a loopback address that
+    refuses the connection means our own robot is not running -- something the
+    user can fix in one step -- while a remote address failing can be any of
+    address, certificate or service. Saying "check address/certificate/service"
+    for a robot that is simply switched off sends people looking in the wrong
+    place, which is exactly what happened here.
+    """
+    try:
+        hostname = urlsplit(endpoint).hostname or ""
+    except ValueError:
+        return False
+    return hostname.strip("[]").lower() in _LOOPBACK_HOSTS
+
+
 def send_message(settings: QQSettings, message: str) -> None:
     headers = {"Authorization": f"Bearer {settings.access_token}"} if settings.access_token else {}
     target_key = "group_id" if settings.target_type == "group" else "user_id"
@@ -101,6 +121,11 @@ def send_message(settings: QQSettings, message: str) -> None:
     except requests.Timeout:
         raise DeliveryError("QQ 接口超时；未自动重发，请先检查 QQ，避免重复通知") from None
     except requests.RequestException:
+        if _endpoint_is_loopback(settings.endpoint):
+            raise DeliveryError(
+                "本机 QQ 机器人没有在运行，通知发不出去。"
+                "运行 scripts\\qq-notify\\2-start.cmd 启动机器人后重试。"
+            ) from None
         raise DeliveryError("无法连接 QQ 接口，请检查地址、证书和机器人服务") from None
     try:
         if response.status_code != 200:
