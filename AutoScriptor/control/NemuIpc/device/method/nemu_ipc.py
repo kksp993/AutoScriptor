@@ -101,6 +101,14 @@ class NemuIpcError(Exception):
     pass
 
 
+class NemuIpcFrameStale(NemuIpcError):
+    """采集缓冲的尺寸已经过期，重采一次即可，不是故障。
+
+    分辨率在两次采集之间变了（切横竖屏、换 App）时抛出：抛之前缓冲区已经丢
+    掉，下一轮会重新探测分辨率并重建。日志按正常重采处理，不当作错误上报。
+    """
+
+
 class CaptureStd:
     """
     Capture stdout and stderr from both python and C library
@@ -257,10 +265,16 @@ def retry(func):
                     time.sleep(retry_sleep(_))
                     init()
                 return func(self, *args, **kwargs)
+            # Expected control flow: the frame was captured at a stale size and
+            # the buffer is already dropped, so just capture again.
+            except NemuIpcFrameStale as e:
+                logger.debug(f'NemuIpc recapture: {e}')
             # Can't handle
             # NemuIpcError
             except NemuIpcError as e:
-                logger.error(e)
+                # Still retrying, so this is not a failure yet. Only running out
+                # of retries is, and that is reported below.
+                logger.warning(f'NemuIpc error, retrying: {e}')
 
                 def init():
                     self.reconnect()
@@ -468,7 +482,7 @@ class NemuIpcImpl:
             # Display resolution changed underneath us; do not trust the frame
             # just written at the cached shape. Rebuild on the next retry.
             self._drop_capture_buffer()
-            raise NemuIpcError(
+            raise NemuIpcFrameStale(
                 f'display resolution changed to {captured_width}x{captured_height}'
             )
 
