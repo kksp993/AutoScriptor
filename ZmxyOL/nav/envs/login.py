@@ -1,6 +1,7 @@
 from AutoScriptor import *
 from ZmxyOL.nav.envs.floating_window import dismiss_floating_window
 import getpass
+import time
 from dataclasses import dataclass
 from enum import Enum
 from AutoScriptor.logging.logger import logger
@@ -210,9 +211,37 @@ def _handle_post_login_popups():
     wait_for_appear(T("进入游戏", box=Box(543,586,190,62).margin()), timeout=10)
 
 
+# 游戏盒登录界面的标记。任一仍在屏幕上，就说明这次登录还没真正完成。
+_GAMECENTER_LOGIN_MARKERS = (
+    T("账号密码登录"),
+    T("手机号登录"),
+    T("账号登录"),
+    T("已阅读并同意"),
+)
+
+
+def _wait_for_gamecenter_login(timeout: float = 20) -> None:
+    """等 4399 游戏盒登录界面消失；没消失就当场说清楚是谁没成。
+
+    点过「登录」不等于登录成功：账号密码错误、需要短信/图形验证、按钮没吃到
+    点击，界面都会原地不动。以前这里直接宣布完成，于是任务带着登录页往下跑，
+    三十秒后在一个毫不相干的步骤上报「找不到目标」，真实原因被埋掉。
+    """
+    deadline = time.time() + timeout
+    while not ui_F(_GAMECENTER_LOGIN_MARKERS):
+        if time.time() >= deadline:
+            raise RuntimeError(
+                f"4399 游戏盒登录未完成：已提交账号密码并点击登录，登录界面在 {timeout:g} 秒后仍然存在。"
+                "请确认账号密码正确，且该账号登录不需要短信或图形验证码。"
+            )
+        sleep(1)
+
+
 def _finish_account_login(ctx: LoginCtx):
     """按客户端结束账号登录；4399 游戏盒不进入游戏角色页。"""
     if ctx.login_client() == LoginClient.HZ4399:
+        # 必须等登录界面真的消失再算完成，不能拿「点击已发出」当「登录已成功」。
+        _wait_for_gamecenter_login()
         logger.info("4399游戏盒账号登录完成")
         ctx.done = True
         return
