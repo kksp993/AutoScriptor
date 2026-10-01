@@ -31,6 +31,37 @@ SKIP_ROOT_DIRS = {
 
 PATH_KEYS = ("mumu_folder", "emu_path", "adb_path")
 
+# MuMu 按实例号分配 ADB 端口：实例 0 是 16384，每多开一个加 32。
+MUMU_ADB_BASE_PORT = 16384
+MUMU_ADB_PORT_STEP = 32
+
+
+def default_mumu_adb_addr(index: Any) -> str:
+    """实例号对应的默认 ADB 地址。"""
+    try:
+        n = int(index)
+    except (TypeError, ValueError):
+        n = 0
+    if n < 0:
+        n = 0
+    return f"127.0.0.1:{MUMU_ADB_BASE_PORT + n * MUMU_ADB_PORT_STEP}"
+
+
+def is_placeholder_adb_addr(adb_addr: Any) -> bool:
+    """True 表示这不是一个真实地址：空值、模板占位或 ``:0`` 结尾的残值。"""
+    text = str(adb_addr or "").strip()
+    return not text or text.startswith("YOUR_") or text.endswith(":0")
+
+
+def is_derived_adb_addr(adb_addr: Any, index: Any) -> bool:
+    """True 表示该地址恰好是 ``index`` 推导出来的那一个。
+
+    这种地址本身不携带信息，只是实例号的镜像，所以可以跟着真正连上的设备走。
+    手填的地址（局域网主机、自定义端口、``localhost`` 写法）与推导结果永不相
+    等，因此会被完整保留。
+    """
+    return str(adb_addr or "").strip() == default_mumu_adb_addr(index)
+
 
 def _is_windows() -> bool:
     return os.name == "nt"
@@ -316,16 +347,22 @@ def discover_mumu_setup(emulator: dict[str, Any] | None = None, *, probe_adb: bo
 
     device = {"connected": False, "serial": "", "index": None, "detail": "未探测 ADB"}
     if probe_adb and _path_is_valid("adb_path", result_emulator.get("adb_path")):
+        configured_addr = str(result_emulator.get("adb_addr") or "").strip()
+        # 占位值没有信息量，镜像值只是实例号的另一份写法：两者都该跟着真实设备走。
+        # 手填的地址（局域网主机、自定义端口）不满足等值判断，保持原样。
+        addr_follows_device = is_placeholder_adb_addr(configured_addr) or is_derived_adb_addr(
+            configured_addr, result_emulator.get("index", 0)
+        )
         device = choose_adb_device(
             str(result_emulator.get("adb_path") or ""),
             str(result_emulator.get("emu_path") or ""),
-            str(result_emulator.get("adb_addr") or ""),
+            configured_addr,
         )
-        needs_addr = not str(result_emulator.get("adb_addr") or "").strip() or str(result_emulator.get("adb_addr") or "").startswith("YOUR_") or str(result_emulator.get("adb_addr") or "").endswith(":0")
-        if device.get("connected") and (needs_addr or device.get("serial") == result_emulator.get("adb_addr")):
-            result_emulator["adb_addr"] = device.get("serial") or result_emulator.get("adb_addr")
         if device.get("index") is not None:
             result_emulator["index"] = device["index"]
+        # 先落实例号再写地址：两者必须说同一个实例，否则配置自相矛盾。
+        if device.get("connected") and (addr_follows_device or device.get("serial") == configured_addr):
+            result_emulator["adb_addr"] = device.get("serial") or configured_addr
 
     path_status = {key: _path_is_valid(key, result_emulator.get(key)) for key in PATH_KEYS}
     after = {key: str(result_emulator.get(key, "") or "") for key in (*PATH_KEYS, "adb_addr")}

@@ -573,6 +573,72 @@ class TestMumuDiscovery(unittest.TestCase):
             self.assertEqual(report["emulator"]["emu_path"], str(manager))
             self.assertEqual(report["emulator"]["adb_path"], str(adb))
 
+    def _discovery_with_device(self, configured: dict, device: dict) -> dict:
+        """Run discovery against a stubbed ADB probe; paths are assumed valid."""
+        from AutoScriptor.utils.mumu_discovery import discover_mumu_setup
+
+        emulator = {
+            "mumu_folder": "C:/MuMu",
+            "emu_path": "C:/MuMu/nx_main/MuMuManager.exe",
+            "adb_path": "C:/MuMu/nx_main/adb.exe",
+            **configured,
+        }
+        with patch("AutoScriptor.utils.mumu_discovery.search_mumu_folders", return_value=[]), \
+                patch("AutoScriptor.utils.mumu_discovery._path_is_valid", return_value=True), \
+                patch("AutoScriptor.utils.mumu_discovery.choose_adb_device", return_value=device):
+            return discover_mumu_setup(emulator)
+
+    def test_derived_adb_addr_follows_the_connected_instance(self):
+        """实例号变了，镜像它的端口必须跟着变。
+
+        抓过的真实事故：模板给的是「实例 0 + 127.0.0.1:16384」，而正在运行的是
+        实例 1。自动定位只改了 index 没改端口，配置落盘成 index=1 配 16384，
+        两个字段各说一个实例，界面却显示「已连接」。
+        """
+        report = self._discovery_with_device(
+            {"index": 0, "adb_addr": "127.0.0.1:16384"},
+            {"connected": True, "serial": "127.0.0.1:16416", "index": 1, "detail": "已连接 MuMu 设备"},
+        )
+
+        self.assertEqual(report["emulator"]["index"], 1)
+        self.assertEqual(report["emulator"]["adb_addr"], "127.0.0.1:16416")
+        self.assertTrue(report["changed"])
+
+    def test_hand_typed_adb_addr_survives_discovery(self):
+        """手填的地址不是实例号的镜像，正在运行的实例不能把它改写掉。"""
+        for configured_addr in ("192.168.1.50:16416", "localhost:16416", "127.0.0.1:5555"):
+            with self.subTest(configured_addr=configured_addr):
+                report = self._discovery_with_device(
+                    {"index": 1, "adb_addr": configured_addr},
+                    {"connected": True, "serial": "127.0.0.1:16416", "index": 1, "detail": "已连接 ADB 设备"},
+                )
+
+                self.assertEqual(report["emulator"]["adb_addr"], configured_addr)
+
+    def test_placeholder_adb_addr_adopts_the_connected_serial(self):
+        """占位值没有信息量，直接采用真实设备的串号。"""
+        report = self._discovery_with_device(
+            {"index": 0, "adb_addr": "YOUR_ADB_ADDR, e.g.127.0.0.1:16384"},
+            {"connected": True, "serial": "127.0.0.1:16416", "index": 1, "detail": "已连接 MuMu 设备"},
+        )
+
+        self.assertEqual(report["emulator"]["adb_addr"], "127.0.0.1:16416")
+
+    def test_adb_addr_predicates_separate_mirrors_from_hand_typed_values(self):
+        from AutoScriptor.utils.mumu_discovery import is_derived_adb_addr, is_placeholder_adb_addr
+
+        self.assertTrue(is_derived_adb_addr("127.0.0.1:16384", 0))
+        self.assertTrue(is_derived_adb_addr("127.0.0.1:16416", 1))
+        # 手填的写法永不相等于推导结果，因此会被完整保留。
+        self.assertFalse(is_derived_adb_addr("192.168.1.50:16416", 1))
+        self.assertFalse(is_derived_adb_addr("localhost:16416", 1))
+        self.assertFalse(is_derived_adb_addr("127.0.0.1:5555", 1))
+
+        self.assertTrue(is_placeholder_adb_addr(""))
+        self.assertTrue(is_placeholder_adb_addr("   "))
+        self.assertTrue(is_placeholder_adb_addr("YOUR_ADB_ADDR, e.g.127.0.0.1:16384"))
+        self.assertFalse(is_placeholder_adb_addr("127.0.0.1:16416"))
+
     def test_discovery_subprocess_reads_replace_bad_bytes(self):
         from AutoScriptor.utils import mumu_discovery
 
