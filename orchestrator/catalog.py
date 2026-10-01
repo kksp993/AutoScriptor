@@ -74,6 +74,91 @@ def is_reloadable_task_module(module_name: str) -> bool:
     return module_name.startswith("tasks.") and module_name not in TASK_MODULES_KEPT_ON_RELOAD
 
 
+# Modules under ``ZmxyOL/`` that a reload must keep, because an object they own is
+# already held somewhere this reload does not touch:
+#
+# - ``table_param`` defines ``TableParam``, and ``tasks/task_params.py`` compares
+#   parameter defaults against it with ``isinstance``. A second copy of the class
+#   makes every stored table default unrecognizable.
+# - ``accounts`` / ``account_store`` own the account domain; the backend registered
+#   with AutoScriptor's generic layer when ``account_store`` was first imported, and
+#   ``orchestrator.projection`` holds ``INJECTED_TASK_FIELDS`` from it.
+# - ``profession`` owns ``GAME_PROFESSIONS``, held by ``projection`` and the
+#   overview route.
+# - ``character`` / ``hero`` own the ``Hero`` base, the profession registry and the
+#   ``h`` singleton. ``hero`` is reloaded *in place* by
+#   ``reload_character_modules()``; re-importing it would build a second registry
+#   and a second ``h`` while the running tasks still hold the first.
+# - ``character/plan`` defines ``BattlePlan``, which ``data/character/hero.py``
+#   binds at import time -- and that file is not re-executed by a reload.
+#
+# Everything else under ``ZmxyOL/`` -- navigation, battle procedures, the package
+# resolver -- is plain logic with no object held across the boundary, so it is
+# rebuilt. Both module-level side effects in that set are plain assignments
+# (``set_app_package_resolver``, ``register_context_provider``), so re-running them
+# is idempotent.
+ZMXYOL_MODULES_KEPT_ON_RELOAD = frozenset({
+    "ZmxyOL",
+    "ZmxyOL.accounts",
+    "ZmxyOL.accounts.account_store",
+    "ZmxyOL.accounts.crypto",
+    "ZmxyOL.accounts.crypto.config_manager",
+    "ZmxyOL.battle.table_param",
+    "ZmxyOL.character",
+    "ZmxyOL.character.hero",
+    "ZmxyOL.character.plan",
+    "ZmxyOL.character.profession",
+    "ZmxyOL.character.pros",
+})
+
+# Character scripts under ``data/character/`` are executed into
+# ``ZmxyOL.character.hero``. ``reload_character_modules()`` re-runs them, and their
+# module names are content hashes with no finder behind them, so a plain re-import
+# would raise instead of rebuilding.
+_ZMXYOL_CHARACTER_SCRIPT_PREFIX = "ZmxyOL.character._user_"
+
+
+def is_reloadable_game_layer_module(module_name: str) -> bool:
+    """True when a reload should re-import this game-layer module."""
+    if not module_name.startswith("ZmxyOL."):
+        return False
+    if module_name.startswith(_ZMXYOL_CHARACTER_SCRIPT_PREFIX):
+        return False
+    return module_name not in ZMXYOL_MODULES_KEPT_ON_RELOAD
+
+
+def is_reloadable_module(module_name: str) -> bool:
+    """True when a reload re-imports this module, task script or game layer."""
+    return is_reloadable_task_module(module_name) or is_reloadable_game_layer_module(module_name)
+
+
+def reload_game_layer_modules() -> list[str]:
+    """Rebuild the game-layer modules a reload may drop; return what was rebuilt.
+
+    Dropping them without rebuilding would leave the work to whichever import
+    happens to touch the module first, which can be a task halfway through a run.
+    Rebuilding here means a game-layer module that no longer imports fails the
+    reload instead of failing a task.
+
+    Sorted order is dependency order: a package name is a prefix of every module
+    under it, so parents are rebuilt before their children.
+    """
+    dropped = [name for name in sys.modules if is_reloadable_game_layer_module(name)]
+    for name in dropped:
+        sys.modules.pop(name, None)
+    for name in sorted(dropped):
+        try:
+            importlib.import_module(name)
+        except ModuleNotFoundError as error:
+            # A source file the user deleted is legitimately gone and nothing
+            # imports it any more. Anything else -- a broken import inside the
+            # module, a missing dependency -- has to surface.
+            if error.name != name:
+                raise
+            logger.debug("reload: %s 已不存在，跳过重建", name)
+    return dropped
+
+
 # ── Config shape normalization ──
 
 def _looks_nested(task_table: dict) -> bool:

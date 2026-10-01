@@ -184,10 +184,16 @@ def drop_cached_exports() -> None:
 
     ``__getattr__`` memoizes each export into ``globals()`` on first access, so a
     later ``from ZmxyOL import *`` reuses the bound object. A reload re-imports
-    ``tasks`` and ``tasks.battle_task_params`` -- the task authoring surface and
-    the flow enum -- and those names would otherwise keep serving the objects
-    from before the reload. Names whose owning module survived the reload resolve
-    back to the same object, so forgetting them is free.
+    ``tasks``, ``tasks.battle_task_params`` (the task authoring surface and the
+    flow enum) and the game-layer modules under this package, and those names
+    would otherwise keep serving the objects from before the reload. Names whose
+    owning module survived the reload resolve back to the same object, so
+    forgetting them is free.
     """
     for name in list(_EXPORTS):
+        globals().pop(name, None)
+    # Submodule attributes are memoized the same way, and they are exactly what a
+    # rebuilt package must not keep serving: once ``ZmxyOL.nav`` has been
+    # re-imported, the attribute has to point at the new module, not the old one.
+    for name in _SUBMODULES:
         globals().pop(name, None)

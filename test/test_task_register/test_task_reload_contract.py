@@ -17,6 +17,7 @@ import copy
 import os
 import sys
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -51,9 +52,190 @@ class TestReloadBoundary(unittest.TestCase):
                 self.assertFalse(catalog.is_reloadable_task_module(name))
 
     def test_unrelated_packages_are_not_touched(self):
-        for name in ("ZmxyOL", "ZmxyOL.battle.table_param", "orchestrator.catalog", "backend.webui.server"):
+        for name in ("orchestrator.catalog", "backend.webui.server", "AutoScriptor.core.api"):
             with self.subTest(module=name):
-                self.assertFalse(catalog.is_reloadable_task_module(name))
+                self.assertFalse(catalog.is_reloadable_module(name))
+
+
+class TestGameLayerReloadBoundary(unittest.TestCase):
+    """Which halves of ``ZmxyOL/`` a reload may rebuild.
+
+    Leaving the whole game layer out meant editing ``ZmxyOL/nav/envs/login.py``
+    needed a process restart, which is what the log line numbers gave away: the
+    running process still reported the pre-edit line for a function that had moved.
+    """
+
+    def test_plain_logic_is_rebuilt(self):
+        for name in (
+            "ZmxyOL.app_package_resolve",
+            "ZmxyOL.nav",
+            "ZmxyOL.nav.api",
+            "ZmxyOL.nav.envs.login",
+            "ZmxyOL.nav.map_manager",
+            "ZmxyOL.battle",
+            "ZmxyOL.battle.procedure.heaven",
+            "ZmxyOL.battle.utils",
+        ):
+            with self.subTest(module=name):
+                self.assertTrue(catalog.is_reloadable_module(name))
+
+    def test_cross_boundary_object_owners_survive(self):
+        # TableParam is compared by class identity in tasks/task_params.py, so a
+        # second copy of the class makes every stored table default unrecognizable.
+        # The rest are held by orchestrator/backend modules this reload never
+        # touches, or reload themselves in place.
+        for name in (
+            "ZmxyOL",
+            "ZmxyOL.accounts",
+            "ZmxyOL.accounts.account_store",
+            "ZmxyOL.battle.table_param",
+            "ZmxyOL.character",
+            "ZmxyOL.character.hero",
+            "ZmxyOL.character.plan",
+            "ZmxyOL.character.profession",
+        ):
+            with self.subTest(module=name):
+                self.assertFalse(catalog.is_reloadable_module(name), f"{name} 必须在保留清单里")
+
+    def test_character_scripts_are_left_to_their_own_reload(self):
+        """Their module names are content hashes with no finder behind them."""
+        self.assertFalse(catalog.is_reloadable_module("ZmxyOL.character._user_abc123"))
+
+
+class TestGameLayerReloadRebuild(unittest.TestCase):
+    """A real rebuild: logic modules must be swapped, boundary objects must not.
+
+    Runs the same call ``reload_tasks`` makes, against the real module tree. The
+    identity assertions are the point -- a rebuild that also replaced
+    ``TableParam`` or ``Hero`` would silently break task parameter defaults and
+    the character registry, which is exactly why the whole game layer used to be
+    excluded.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib
+
+        cls.importlib = importlib
+        # ``import ZmxyOL.nav.envs.login`` binds the *function*: the envs package
+        # re-exports ``login`` and shadows the submodule. import_module does not.
+        cls.login_before = importlib.import_module("ZmxyOL.nav.envs.login")
+        cls.nav_before = importlib.import_module("ZmxyOL.nav")
+        cls.table_param_before = importlib.import_module("ZmxyOL.battle.table_param")
+        cls.hero_before = importlib.import_module("ZmxyOL.character.hero")
+
+        cls.hero_class_before = cls.hero_before.Hero
+        cls.h_before = cls.hero_before.h
+
+        cls.rebuilt = catalog.reload_game_layer_modules()
+
+    def test_logic_modules_were_replaced(self):
+        login_after = self.importlib.import_module("ZmxyOL.nav.envs.login")
+        nav_after = self.importlib.import_module("ZmxyOL.nav")
+
+        self.assertIsNot(self.login_before, login_after, "登录模块应当被重建")
+        self.assertIsNot(self.nav_before, nav_after, "导航包应当被重建")
+        self.assertIn("ZmxyOL.nav.envs.login", self.rebuilt)
+
+    def test_table_param_identity_is_preserved(self):
+        """The invariant ``tasks/task_params.py`` depends on for isinstance."""
+        from tasks.task_params import TableParam as ConsumingTableParam
+
+        table_param_after = self.importlib.import_module("ZmxyOL.battle.table_param")
+
+        self.assertIs(self.table_param_before, table_param_after)
+        self.assertIs(ConsumingTableParam, table_param_after.TableParam)
+
+    def test_hero_registry_and_singleton_are_preserved(self):
+        """``hero`` reloads in place; a second copy would split the registry and h."""
+        hero_after = self.importlib.import_module("ZmxyOL.character.hero")
+
+        self.assertIs(self.hero_before, hero_after)
+        self.assertIs(hero_after.Hero, self.hero_class_before)
+        self.assertIs(hero_after.h, self.h_before)
+
+    def test_package_exports_resolve_to_the_rebuilt_modules(self):
+        """``drop_cached_exports`` has to clear submodule memoization too."""
+        import ZmxyOL
+
+        ZmxyOL.drop_cached_exports()
+
+        self.assertIsNot(ZmxyOL.nav, self.nav_before)
+        self.assertTrue(callable(ZmxyOL.login))
+        self.assertIsNotNone(ZmxyOL.mm)
+
+    def test_the_rebuilt_nav_layer_is_populated_and_usable(self):
+        """The envs decorators must re-register into the *new* singleton.
+
+        ``mm`` is created by ``map_manager`` and filled by ``nav/envs/*`` running
+        their decorators. Rebuilding both halves inside one reload has to leave a
+        manager that knows the same locations, otherwise navigation would come
+        back empty and every ``ensure_in`` would fail.
+        """
+        nav_after = self.importlib.import_module("ZmxyOL.nav")
+
+        self.assertTrue(nav_after.mm.envs, "重建后的 mm 应当重新装好环境表")
+        self.assertTrue(nav_after.mm.locs, "重建后的 mm 应当重新装好位置表")
+
+        # A rebuild starts from a clean manager: the believed region resets, so
+        # navigation re-locates instead of trusting a stale claim.
+        region = nav_after.mm.get_region()
+        self.assertIsInstance(region, tuple)
+        self.assertEqual(len(region), 2)
+
+
+class TestGameLayerIsWatched(unittest.TestCase):
+    """A reload nobody triggers is the same as no reload.
+
+    The watcher used to poll only ``data/`` -- config, account file, task and
+    character scripts. Adding the game layer to the reload without adding it here
+    would leave it working only for whoever remembers to press 刷新 by hand.
+    """
+
+    def test_game_layer_sources_are_polled(self):
+        from orchestrator.scheduler import game_layer_reload_paths
+
+        names = {Path(p).name for p in game_layer_reload_paths()}
+
+        self.assertIn("login.py", names)
+        self.assertIn("hero.py", names)
+        self.assertIn("ui_map.csv", names)
+
+    def test_the_reference_images_are_not_polled(self):
+        """385 png files would cost 23ms a cycle instead of 3ms, for nothing."""
+        from orchestrator.scheduler import game_layer_reload_paths
+
+        expensive = [p for p in game_layer_reload_paths() if not p.endswith((".py", ".csv"))]
+
+        self.assertEqual(expensive, [])
+
+    def test_saving_a_game_layer_source_wakes_the_watcher(self):
+        """Polling a file is only useful if a change in it is noticed.
+
+        Bumps the mtime instead of editing the file: that is what an editor save
+        looks like to the watcher, and it is restored afterwards.
+        """
+        import time
+
+        import orchestrator.scheduler as scheduler_module
+
+        login_source = Path(scheduler_module.__file__).resolve().parents[1] / "ZmxyOL" / "nav" / "envs" / "login.py"
+        self.assertTrue(login_source.is_file(), f"测试目标不存在: {login_source}")
+
+        watcher = scheduler_module.ConfigWatcher(
+            cfg.CONFIG_PATH,
+            extra_paths=scheduler_module.game_layer_reload_paths,
+        )
+        watcher.start_watching()
+        self.assertFalse(watcher.should_reload(), "刚建好基准就不该报告变更")
+
+        original_mtime = login_source.stat().st_mtime
+        try:
+            bumped = time.time() + 10
+            os.utime(login_source, (bumped, bumped))
+            self.assertTrue(watcher.should_reload(), "源码被保存后应当触发重载")
+        finally:
+            os.utime(login_source, (original_mtime, original_mtime))
 
 
 class TestPruneGuard(unittest.TestCase):

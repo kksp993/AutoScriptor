@@ -54,6 +54,27 @@ _STATE_LABELS = {"pending": "待运行", "running": "运行中", "error": "发�
 _STATE_COLORS = {"pending": "green", "running": "orange", "error": "red"}
 
 
+def game_layer_reload_paths() -> list[str]:
+    """Game-layer source files the config watcher polls.
+
+    The game layer takes part in a reload, so editing it has to trigger one the
+    same way editing a task script does -- otherwise the reload exists but never
+    runs, which is indistinguishable from not having it.
+
+    Only ``.py`` files and the UI map are listed. Polling the whole package would
+    also stat the 385 reference images on every cycle (23ms measured, against 3ms
+    for the sources), and those images never change while someone edits code.
+    """
+    import ZmxyOL
+
+    package_dir = Path(ZmxyOL.__file__).resolve().parent
+    paths = [str(py_file) for py_file in package_dir.rglob("*.py")]
+    ui_map = package_dir / "assets" / "config" / "ui_map.csv"
+    if ui_map.is_file():
+        paths.append(str(ui_map))
+    return paths
+
+
 class Scheduler:
     """后台调度器。daemon 线程 + Event.wait，cooperative cancellation。"""
 
@@ -358,6 +379,7 @@ class Scheduler:
             ]
             if cfg.current_account():
                 paths.append(cfg._account_path(cfg.current_account()))
+            paths.extend(game_layer_reload_paths())
             return paths
 
         def _runtime_persistence_paths() -> list[str]:

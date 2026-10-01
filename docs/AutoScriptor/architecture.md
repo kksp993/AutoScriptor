@@ -86,15 +86,19 @@ backend -> orchestrator -> tasks -> ZmxyOL -> AutoScriptor
 
 ## 任务重载边界
 
-任务重载重新导入任务脚本，让它们的 `@register_task` 再跑一遍，同时重建 `tasks` 包和 `tasks.battle_task_params`（流程枚举汇总职业脚本的 `@flow` 注册）。持有进程级对象的模块保持不动：
+任务重载重建两类模块：任务脚本（让 `@register_task` 再跑一遍，含 `tasks` 包和汇总 `@flow` 的 `tasks.battle_task_params`），以及游戏层的纯逻辑模块（`ZmxyOL/nav`、`ZmxyOL/battle` 的战斗流程、包名解析）。**判据是「有没有对象被别人拿着」**：持有跨边界对象的模块保留，其余重建。
 
 | 保留 | 原因 |
 |------|------|
 | `tasks.task_register` | 注册表单例。重新导入会造出第二个空注册表，而任务管理器、任务目录和 stale 清理仍读第一个。 |
 | `tasks.task_params` / `task_state` / `time` | 编写期基础设施，不携带每轮状态；`task_params` 按类身份识别 `TableParam` 默认值。 |
-| `ZmxyOL.*` | 拥有跨边界类型（`TableParam`、职业表）；职业脚本由 `reload_character_modules()` 单独刷新。`ZmxyOL.drop_cached_exports()` 清掉包级惰性再导出。 |
+| `ZmxyOL.battle.table_param` | 定义 `TableParam`；`tasks/task_params.py` 用 `isinstance` 判它，第二个副本会让所有已存表格默认值认不出来。 |
+| `ZmxyOL.accounts*` | 账号域，导入时向 AutoScriptor 注册过后端；`orchestrator.projection` 持有它的 `INJECTED_TASK_FIELDS`。 |
+| `ZmxyOL.character.profession` | `GAME_PROFESSIONS` 被 `projection` 和总览路由持有。 |
+| `ZmxyOL.character` / `hero` / `plan` | 持有 `Hero` 基类、职业注册表和 `h` 单例；`hero` 由 `reload_character_modules()` **就地**重载（重新执行职业脚本），重新导入会造出第二份注册表和第二个 `h`。`plan` 的 `BattlePlan` 被 `data/character/hero.py` 在导入时绑定，而该文件不重跑。 |
+| `ZmxyOL.character._user_*` | 职业脚本，模块名是内容哈希、没有 finder，由 `reload_character_modules()` 重跑。 |
 
-保留清单在 `orchestrator/catalog.py`（`TASK_MODULES_KEPT_ON_RELOAD`、`is_reloadable_task_module()`），`test/test_task_register/test_task_reload_contract.py` 钉住它。stale 叶子清理在注册表为空时拒绝执行：那表示注册没落到读它的注册表上，而不是用户配置过期。详见 [运行生命周期](runtime/lifecycle.md#重载保留哪些模块)。
+两份保留清单和 `is_reloadable_module()` / `reload_game_layer_modules()` 都在 `orchestrator/catalog.py`，`test/test_task_register/test_task_reload_contract.py` 钉住它们——其中一组用例真的跑一次重建，断言逻辑模块被换掉、而 `TableParam` 与 `Hero`/`h` 的身份不变。重建后的 `mm` 是干净实例（believed region 归零），导航会重新定位而不是沿用旧判断。stale 叶子清理在注册表为空时拒绝执行：那表示注册没落到读它的注册表上，而不是用户配置过期。详见 [运行生命周期](runtime/lifecycle.md#重载保留哪些模块)。
 
 ## 动态 API 边界
 

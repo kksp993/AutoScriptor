@@ -126,6 +126,9 @@ WebUI 公开配置必须剥离账号、密码、加密块、运行时任务字�
 - 当前账号文件
 - `data/custom_task/`
 - `data/character/`
+- `ZmxyOL/` 下的 `.py` 源码与 `assets/config/ui_map.csv`（`scheduler.game_layer_reload_paths()`）
+
+游戏层源码以前不在监听范围内，改它只能靠进程重启或手动点「刷新」；既然它现在参与重载，就必须像任务脚本一样能自动触发，否则「有重载机制但没人触发」和没有是一样的。这里只列源码和 UI map：把整棵树纳入监听会连带 stat 385 张参考图（实测 23ms/轮，只盯源码是 3ms），而那些图在改代码时不会变。
 
 如果未在执行任务，直接 `TaskManager.reload_tasks()`。如果正在执行，则先 `cfg.reload_preserving_decrypted_credentials()` 同步磁盘变更，设置 `_reload_deferred`，等任务安全边界再重建任务注册表和职业脚本。
 
@@ -151,22 +154,26 @@ stale 条目清理还要求注册表非空。空注册表表示本轮注册没�
 
 1. 保留已解密凭据重新加载配置。
 2. 丢弃任务脚本模块，让它们的 `@register_task` 重新执行。
-3. `reload_character_modules()` 重载职业脚本。
-4. `ZmxyOL.drop_cached_exports()` 让包级惰性再导出重新解析。
-5. `force_reload_tasks()` 清空并重建任务注册表。
-6. 最后 `bg.clear(clear_signals=True)` 清理残留监听。
+3. `reload_game_layer_modules()` 丢弃并立刻重建游戏层的纯逻辑模块（`ZmxyOL/nav`、战斗流程、包名解析）。立刻重建是为了让「模块导不进来」在重载时就报错，而不是拖到某个任务跑到一半；重建顺序按名字排序，父包必然排在子模块之前。
+4. `ZmxyOL.drop_cached_exports()` 让包级惰性再导出重新解析——也包括 `ZmxyOL.nav` 这类子模块属性，否则会继续把重载前的模块对象发出去。
+5. `reload_character_modules()` 重载职业脚本（对着刚重建好的游戏层）。
+6. `force_reload_tasks()` 清空并重建任务注册表。
+7. 最后 `bg.clear(clear_signals=True)` 清理残留监听。
 
 ### 重载保留哪些模块
 
-重载会重建任务脚本、`tasks` 包和 `tasks.battle_task_params`（流程枚举汇总职业脚本的 `@flow` 注册，所以要跟着重建），但保留持有进程级对象的模块：
+重载会重建任务脚本、`tasks` 包、`tasks.battle_task_params`（流程枚举汇总职业脚本的 `@flow` 注册，所以要跟着重建），以及游戏层里不持有跨边界对象的模块。判据是「有没有对象被别人拿着」——被拿着的保留，其余重建：
 
 | 保留 | 原因 |
 |------|------|
 | `tasks.task_register` | 注册表单例。重新导入会造出第二个空注册表，而任务管理器、目录和清理逻辑仍读第一个——任务解析不到，清理还会把整张表删掉。 |
 | `tasks.task_params` / `task_state` / `time` | 编写期基础设施，不携带每轮状态；`task_params` 按类身份识别 `TableParam` 默认值，替换它会让表格参数不再被识别。 |
-| `ZmxyOL.*` | 拥有跨边界类型（`TableParam`、职业表）。重新导入会让类型身份分裂：任务签名里的表格默认值判不出类型，进而以原始对象写进 `cfg`。职业脚本由 `reload_character_modules()` 单独处理。 |
+| `ZmxyOL.battle.table_param` | 定义 `TableParam`。重新导入会让类型身份分裂：任务签名里的表格默认值判不出类型，进而以原始对象写进 `cfg`。 |
+| `ZmxyOL.accounts*` | 账号域，导入时向 AutoScriptor 注册过后端；`orchestrator.projection` 持有它的 `INJECTED_TASK_FIELDS`。 |
+| `ZmxyOL.character.profession` | `GAME_PROFESSIONS` 被 `projection` 和总览路由持有。 |
+| `ZmxyOL.character` / `hero` / `plan` | 持有 `Hero` 基类、职业注册表和 `h` 单例。`hero` 由 `reload_character_modules()` **就地**重载，重新导入会造出第二份注册表和第二个 `h`；`plan` 的 `BattlePlan` 被不重跑的 `data/character/hero.py` 在导入时绑定。职业脚本（`ZmxyOL.character._user_*`）模块名是内容哈希、没有 finder，只能由 `reload_character_modules()` 重跑。 |
 
-`orchestrator/catalog.py` 的 `TASK_MODULES_KEPT_ON_RELOAD` 是保留清单，`is_reloadable_task_module()` 是唯一判据；`test/test_task_register/test_task_reload_contract.py` 钉住这两侧。
+`orchestrator/catalog.py` 的 `TASK_MODULES_KEPT_ON_RELOAD` 和 `ZMXYOL_MODULES_KEPT_ON_RELOAD` 是两份保留清单，`is_reloadable_module()` 是统一判据。重建后的 `mm` 是干净实例：believed region 归零，导航会重新定位而不是沿用旧判断。`test/test_task_register/test_task_reload_contract.py` 钉住这些，其中一组用例真的跑一次重建并断言 `TableParam`、`Hero`、`h` 的身份不变。
 
 ## 性能边界
 
