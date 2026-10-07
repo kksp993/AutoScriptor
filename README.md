@@ -33,16 +33,16 @@ cd AutoScriptor
 
 ## 主线入口
 
-| 场景 | 命令 |
-| --- | --- |
-| 安装全部依赖 | `.\scripts\install.bat` |
-| 只装工具链 | `.\scripts\install.bat tools` |
-| 只装 Python 依赖 | `.\scripts\install.bat python` |
-| 只装 Electron 依赖 | `.\scripts\install.bat electron` |
-| 源码 Electron | `.\scripts\run.bat electron` 或 `.\start.bat` |
-| 源码 WebUI | `.\scripts\run.bat webui` 或 `.\webui.bat` |
-| 直接跑后端 | `.\.venv\Scripts\python.exe -X utf8 backend\webui\gui.py` |
-| 源码更新 | `.\scripts\update.bat` |
+| 场景　　　　　　　 | 命令　　　　　　　　　　　　　　　　　　　　　　　　　　　|
+| --------------------| -----------------------------------------------------------|
+| 安装全部依赖　　　 | `.\scripts\install.bat`　　　　　　　　　　　　　　　　　 |
+| 只装工具链　　　　 | `.\scripts\install.bat tools`　　　　　　　　　　　　　　 |
+| 只装 Python 依赖　 | `.\scripts\install.bat python`　　　　　　　　　　　　　　|
+| 只装 Electron 依赖 | `.\scripts\install.bat electron`　　　　　　　　　　　　　|
+| 源码 Electron　　　| `.\scripts\run.bat electron` 或 `.\start.bat`　　　　　　 |
+| 源码 WebUI　　　　 | `.\scripts\run.bat webui` 或 `.\webui.bat`　　　　　　　　|
+| 直接跑后端　　　　 | `.\.venv\Scripts\python.exe -X utf8 backend\webui\gui.py` |
+| 源码更新　　　　　 | `.\scripts\update.bat`　　　　　　　　　　　　　　　　　　|
 
 安装脚本会按需准备 Git、Node.js LTS、uv、Python 3.10.15 `.venv`、`requirements.txt` 和 `frontend\electron\node_modules`。直接进入 `frontend\electron` 执行 `npm start` 前，必须先运行 `.\scripts\install.bat electron` 或手动 `npm install`。
 
