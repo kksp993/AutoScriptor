@@ -12,11 +12,32 @@ from ZmxyOL import *
 def task(redeem_code: str | list[str] = "1111"):
     redeem_codes = [redeem_code] if isinstance(redeem_code, str) else redeem_code
     ensure_in("村庄")
-    click(T("活动", box=Box(690,65,135,49).margin()), timeout=3)
+
+    # 仙盟面板展开时会盖住「活动」入口，先收起来——`_活动流程.run_activity()` 和
+    # `每日任务/村庄/星之结晶消耗` 都先做这一步，这里原本漏了。
+    while ui_F(T("仙盟", box=Box(16, 30, 130, 400)), 3):
+        click(I("导航-按钮收缩"))
+        if ui_T(T("精彩活动"), 2):
+            click(B(1100, 40, 40, 40))
+        sleep(2)
+
+    # 「活动」图标的位置会随每期新图标插入而变，固定坐标必然失效；而且图标标签行
+    # 会被 OCR 连成一串（「仙盟充值活动活动复错特权」），按文字搜「活动」会先命中
+    # 「充值活动」。改用注册在 ui_map 的图标模板全帧搜索：位置无关，也不受粘连影响。
+    click(I("导航-活动"))
     sleep(1)
-    while ui_F(T("兑换豪礼", box=Box(220,109,814,103).margin()), 1):
+    # 活动列表要横滑才能看到「兑换豪礼」。加次数上限：找不到时明确报错，
+    # 而不是无限滑动（那既不会成功也不会留下可诊断的信息）。
+    for _ in range(10):
+        if ui_T(T("兑换豪礼", box=Box(220,109,814,103).margin()), 1):
+            break
         swipe(B(1030, 160, 1, 1), B(260, 160, 1, 1), duration_s=1)
         sleep(0.5)
+    else:
+        raise RuntimeError(
+            "活动列表横向滑动 10 次仍未找到「兑换豪礼」。"
+            "可能活动页布局又变了，请检查「兑换豪礼」的搜索区域 Box(220,109,814,103)。"
+        )
     result = "未识别"
     for code in redeem_codes:
         click(T("兑换豪礼", box=Box(220,109,814,103).margin()), offset=(0,-30))
