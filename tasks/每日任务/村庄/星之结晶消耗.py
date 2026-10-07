@@ -18,7 +18,9 @@ def task(buy_spirit_liquid=True, buy_spirit_brew=True):
             click(B(1100, 40, 40, 40))
         sleep(2)
 
-    click(T("活动", box=Box(255, 127, 103, 101).margin()))
+    # 「活动」图标会随每期新图标插入而移位，写死坐标迟早失效；按文字搜又会先命中
+    # 「充值活动」（OCR 把图标标签行连成一串）。用注册好的图标模板全帧搜索。
+    click(I("导航-活动"))
     for _ in range(10):
         if ui_T(T("兑换豪礼", box=Box(0, 112, 1280, 100).margin())):
             break
