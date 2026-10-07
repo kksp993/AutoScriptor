@@ -54,6 +54,23 @@ _STATE_LABELS = {"pending": "待运行", "running": "运行中", "error": "发�
 _STATE_COLORS = {"pending": "green", "running": "orange", "error": "red"}
 
 
+def task_source_reload_paths() -> list[str]:
+    """任务脚本文件，交给配置监听器轮询。
+
+    任务源码不在监听列表里时，「热重载」只在别的被监听文件碰巧变动时才跑：改一个
+    任务、然后等它自己生效，会一直等不到——重载机制存在却不会触发，和没有它没区别。
+    2026-10-02 就是这样：改完 `本命空间.py` 后跑了 50 分钟，进程用的还是旧代码。
+
+    只列 ``.py``：``rglob`` 每次重新求值，所以新增的文件因为不在基线里而被判为变更，
+    删掉的文件因为从快照里消失也被判为变更，三种编辑都能触发。`__pycache__` 里是
+    ``.pyc``，不会被匹配——这很关键：重载会重新导入并重写字节码，若把它算作变更就会
+    变成「重载→写 pyc→再重载」的死循环。
+    """
+    from orchestrator.catalog import PACKAGE_PATH
+
+    return [str(py_file) for py_file in PACKAGE_PATH.rglob("*.py")]
+
+
 def game_layer_reload_paths() -> list[str]:
     """Game-layer source files the config watcher polls.
 
@@ -380,6 +397,7 @@ class Scheduler:
             if cfg.current_account():
                 paths.append(cfg._account_path(cfg.current_account()))
             paths.extend(game_layer_reload_paths())
+            paths.extend(task_source_reload_paths())
             return paths
 
         def _runtime_persistence_paths() -> list[str]:
