@@ -238,6 +238,57 @@ class TestGameLayerIsWatched(unittest.TestCase):
             os.utime(login_source, (original_mtime, original_mtime))
 
 
+class TestTaskSourcesAreWatched(unittest.TestCase):
+    """和游戏层同理：没人触发的重载 = 没有重载。
+
+    抓过的真实事故：改完 ``本命空间.py`` 后跑了一整轮任务（50 分钟），进程用的还是
+    旧代码——搜索区差几十像素、任务照旧失败。``reload_tasks`` 明明会把任务从磁盘重新
+    导入，但只有 ``data/`` 和游戏层在监听列表里，``tasks/`` 不在，所以那次编辑根本
+    没触发重载。当时能看到的重载全是 ``config.json`` / 账号文件顺带引起的。
+    """
+
+    def test_task_sources_are_polled(self):
+        from orchestrator.scheduler import task_source_reload_paths
+
+        names = {Path(p).name for p in task_source_reload_paths()}
+
+        self.assertIn("本命空间.py", names)
+        self.assertIn("task_register.py", names)
+
+    def test_bytecode_caches_are_not_polled(self):
+        """重载会重新导入并重写 .pyc；把它算作变更会变成「重载→写 pyc→再重载」死循环。"""
+        from orchestrator.scheduler import task_source_reload_paths
+
+        offenders = [p for p in task_source_reload_paths() if "__pycache__" in p or not p.endswith(".py")]
+
+        self.assertEqual(offenders, [])
+
+    def test_saving_a_task_source_wakes_the_watcher(self):
+        """碰 mtime 而不是改文件：在监听器眼里这就是编辑器保存，结束时还原。"""
+        import time
+
+        import orchestrator.scheduler as scheduler_module
+        from orchestrator.catalog import PACKAGE_PATH
+
+        task_source = PACKAGE_PATH / "每日任务" / "本命空间" / "本命空间.py"
+        self.assertTrue(task_source.is_file(), f"测试目标不存在: {task_source}")
+
+        watcher = scheduler_module.ConfigWatcher(
+            cfg.CONFIG_PATH,
+            extra_paths=scheduler_module.task_source_reload_paths,
+        )
+        watcher.start_watching()
+        self.assertFalse(watcher.should_reload(), "刚建好基准就不该报告变更")
+
+        original_mtime = task_source.stat().st_mtime
+        try:
+            bumped = time.time() + 10
+            os.utime(task_source, (bumped, bumped))
+            self.assertTrue(watcher.should_reload(), "任务源码被保存后应当触发重载")
+        finally:
+            os.utime(task_source, (original_mtime, original_mtime))
+
+
 class TestPruneGuard(unittest.TestCase):
     """An empty registry must never cost the user their task table."""
 
