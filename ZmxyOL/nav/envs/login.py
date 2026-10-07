@@ -116,6 +116,8 @@ class PageRouter:
         if not pages:
             raise RuntimeError(f"PageRouter: 没有适用于 {client.name} 的登录页面")
         markers = self._markers_for_pages(pages)
+        last_state = None
+        repeated = 0
         for step in range(max_steps):
             timeout = initial_timeout if step == 0 else step_timeout
             boxes = locate(markers, timeout=timeout, assure_stable=False, is_simplify=False)
@@ -123,6 +125,16 @@ class PageRouter:
             if result is None:
                 raise TimeoutError(f"页面检测超时 ({timeout}s)")
             state, handler = result
+            # 页面反复停在同一个状态，说明有东西在吞点击——最常见的是模拟器的系统模态框，
+            # 它挡着底下所有控件，handler 里的点击全部落空，状态自然不变。不处理的话会一直
+            # 重跑同一个 handler 直到 max_steps，最后报「超过最大步数」，指向的不是真因。
+            repeated = repeated + 1 if state == last_state else 0
+            last_state = state
+            if repeated >= 2:
+                repeated = 0
+                # 延迟导入：nav.api 与 nav.envs 相互引用，模块级导入会在这里拿到半成品。
+                from ZmxyOL.nav.api import dismiss_system_dialogs
+                dismiss_system_dialogs()
             ctx.prev_state = state
             name, tag = state
             logger.info(f"[PageRouter] {name}" + (f"[{tag}]" if tag else ""))
@@ -327,7 +339,10 @@ def _on_password_login(ctx):
     clients=(LoginClient.H4399, LoginClient.HZ4399),
 )
 def _on_quick_login(ctx):
-    click(T("账号登录", box=Box(384,444,84,22).margin()))
+    # 全帧搜索，不要固定搜索区：同一次登录流程里「账号登录」会因为页面 tab 不同而上下
+    # 移动——「手机号验证登录」页上它整体比旧搜索区低约 24px，被裁掉后只剩几个像素落在
+    # 区内，OCR 识别不出，于是卡在这一步超时。本页的页面标记就是它，页面上必然存在且唯一。
+    click(T("账号登录"))
     sleep(1)
     _fill_account_password(ctx)
     _finish_account_login(ctx)

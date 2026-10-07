@@ -4,7 +4,7 @@
 """
 
 from .map_manager import MapManager, Loc, Env, mm, path 
-from .api import ensure_in, try_close_via_x
+from .api import dismiss_system_dialogs, ensure_in, try_close_via_x
 from .envs import *
 from .envs.decorators import LOC_ENV
 
@@ -54,6 +54,7 @@ __all__ = [
     # 核心服务函数
     'ensure_in',
     'try_close_via_x',
+    'dismiss_system_dialogs',
     'LoginClient',
     'login',
 ]

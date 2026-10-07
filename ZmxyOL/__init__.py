@@ -42,6 +42,7 @@ if _TYPE_CHECKING:
         Loc as Loc,
         LoginClient as LoginClient,
         MapManager as MapManager,
+        dismiss_system_dialogs as dismiss_system_dialogs,
         ensure_in as ensure_in,
         login as login,
         mm as mm,
@@ -76,6 +77,7 @@ _EXPORTS: dict[str, str] = {
     "path": "ZmxyOL.nav",
     "ensure_in": "ZmxyOL.nav",
     "try_close_via_x": "ZmxyOL.nav",
+    "dismiss_system_dialogs": "ZmxyOL.nav",
     "LoginClient": "ZmxyOL.nav",
     "login": "ZmxyOL.nav",
     "LOC_ENV": "ZmxyOL.nav.envs.decorators",
@@ -109,7 +111,7 @@ _PUBLIC_NAMES = [
     "Hero", "battle_plan", "flow", "BattlePlan",
     # nav
     'MapManager', 'Loc', 'Env', 'mm', 'path', 'ensure_in', 'try_close_via_x',
-    'LoginClient', 'login',
+    'dismiss_system_dialogs', 'LoginClient', 'login',
     "detect_floating_window", "detect_floating_window_on_frame", "dismiss_floating_window",
     # task
     'register_task', "task_registry", "get_task_table",
