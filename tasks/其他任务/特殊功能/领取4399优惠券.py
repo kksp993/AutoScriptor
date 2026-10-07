@@ -34,6 +34,30 @@ def task():
             # Box 是 namedtuple：直接传给 click 会被当成多目标元组，必须用 B() 包成区域目标。
             click(B(portrait(Box(522, 381, 43, 43))), if_exist=True, timeout=2)
 
+        # 先等 App 真正加载完，再开始点「我的」。
+        # 冷启动会先显示「4399游戏大全」闪屏（2026-10-06 实测持续 26 秒以上），这期间的
+        # 点击全被闪屏吃掉。那次失败就是这样：20 次点击的预算整段花在闪屏上，首页刚出来
+        # 就报「我的」页超时——看着像被弹窗挡住，其实是加载慢。
+        # 顺带点掉开屏广告的「跳过」：每期活动都换广告，但跳过按钮固定在右上角。
+        bottom_bar = portrait(Box(0, 1210, 720, 70))
+        skip_button = portrait(Box(540, 20, 180, 90))
+        for _ in range(45):
+            if ui_T((
+                T("首页", box=bottom_bar),
+                T("找游戏", box=bottom_bar),
+                T("福利", box=bottom_bar),
+            )):
+                break
+            if ui_T(T("跳过", box=skip_button)):
+                click(B(skip_button))
+                sleep(1)
+            sleep(1)
+        else:
+            raise RuntimeError(
+                "4399 游戏盒 45 秒内没显示首页（底部「首页/找游戏/福利」标签都没出现），"
+                "请确认游戏盒能正常启动。"
+            )
+
         # 等到「我的钱包」出现为止，中途要关掉更新提示。必须有次数上限：
         # 输入通道失灵时页面永远不变，无上限的 while 会一直点下去而不报错。
         for _ in range(20):
