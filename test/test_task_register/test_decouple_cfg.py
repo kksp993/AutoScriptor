@@ -553,7 +553,7 @@ class TestTaskManagerPrepare(unittest.TestCase):
         from orchestrator.task_manager import TaskManager
 
         cfg._config.setdefault("app", {})["restart_on_error"] = True
-        cfg._config.setdefault("app", {})["max_retry"] = 0
+        cfg._config.setdefault("app", {})["max_attempts"] = 1
         cfg._config["tasks"] = {
             "测试/调试任务": {"on": True, "next_exec_time": 0, "params": {}}
         }
@@ -583,7 +583,7 @@ class TestTaskStatusProgress(unittest.TestCase):
         self._reg_backup = dict(task_registry._tasks)
         task_registry.clear()
         cfg._config = {
-            "app": {"max_retry": 0, "restart_on_error": False, "app_to_start": "com.test"},
+            "app": {"max_attempts": 1, "restart_on_error": False, "app_to_start": "com.test"},
             "emulator": {},
             "tasks": {"进度任务": {"on": True, "next_exec_time": 0, "params": {}}},
             "status": {},

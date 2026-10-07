@@ -309,13 +309,6 @@ async def _deferred_heavy_init():
     try:
         logger.info("后台初始化：运行时/任务加载（不启动设备）...")
         await loop.run_in_executor(None, _do_heavy_init)
-        if cfg.get("scheduler.auto_start", False):
-            if cfg.has_decrypted_credentials():
-                orchestrator.scheduler.activate()
-                orchestrator.scheduler.wake()
-                logger.info("Scheduler auto-started from config")
-            else:
-                logger.info("Scheduler auto-start is enabled but account is not verified yet")
         _init_done = True
         logger.info("后台初始化完成")
     except Exception as e:

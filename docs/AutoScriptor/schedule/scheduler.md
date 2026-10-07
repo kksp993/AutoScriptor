@@ -70,6 +70,7 @@
 关键点：
 
 - `activate()` 只会从非错误态进入 `running`；如果当前是 `error`，直接调用 `activate()` 不会恢复。
+- `error` 会自愈：静默 30 分钟后主循环自动 `reset()` + `activate()`（见「重试与错误状态」）。
 - `running` 表示调度长期启用，不表示当前正在执行任务。`status.enabled=true` 对应该激活态；只有调度取得共享执行闸门时 `status.executing/busy=true`。
 - 恢复错误态可调用 `reset()`、使用 WebUI“恢复调度”，或通过统一终止入口恢复；三者都重置错误额度，终止入口额外保留 cooperative cancel。
 - `request_stop()` 会通知 `TaskManager` cooperative cancel，把状态切回 `pending`，清零连续错误次数并清除本调度周期 retry 耗尽记录；它不会清除取消信号。
@@ -100,7 +101,7 @@
 4. 未处于人工接管冷却期：存在 `human_takeover_error` 但 `now < next_exec_time` 时不收集
 5. 当前时间在生效 `reschedule` 的 `window` 内；不在时会推迟 `next_exec_time`
 6. 当前星期在生效 `reschedule` 的 `weekdays` 内；不在时会推迟 `next_exec_time`
-7. 没有在本次调度激活周期内耗尽 retry
+7. 没有在原计划内耗尽 retry：任务被排到更晚的时间点后跳过自动失效（见「retry 跳过的有效期」）
 
 收集到的到期任务会再按全局 `task_ordering` 投影排序后执行。有效顺序来自确定性总排序：先把存储里的 `id` 键 overlay 换成显示路径，再递归展开 WebUI 拖拽保存的 `items` 分组顺序（`user_order` 是展平后的兼容投影），最后回退到当前注册顺序和路径字典序。旧版 `hard_edges`、`layout`、`group_order` 会被规范化忽略，不再表示偏序规则或业务成功依赖。
 
@@ -165,7 +166,7 @@ else:
   └─ 有真实执行结果时发送 Windows 桌面/配置通知，再回到首个调度角色并执行 post_execution 收尾
 ```
 
-调度器不会在同一轮里反复撞同一个失败任务。失败任务会等本轮其他任务结束后进入下一 retry 轮；达到 `max_retry` 后，在本次调度激活周期内跳过，直到重新启动调度或 reset 清理 retry exhaustion。
+调度器不会在同一轮里反复撞同一个失败任务。失败任务会等本轮其他任务结束后进入下一 retry 轮；用满 `max_attempts` 后，在同一份计划内跳过（见「retry 跳过的有效期」）。
 
 任务列表页的三个直接执行入口通过 `execution_source=task_list` 进入 `run_direct(skip_character_login=True)`。这条策略只跳过登录缓存失效和 `_ensure_character_logged_in()`；普通任务的每日重启检查、设备/App 就绪、retry、状态保存、通知和 `post_execution` 都保持原语义。默认 `run_direct()`、自动调度和跨角色切换仍失效登录缓存并校验目标角色，显式 `force_login=True` 始终覆盖跳过策略。
 
@@ -200,28 +201,57 @@ clear_task_status("progress")
 
 ## 重试与错误状态
 
-项目里有两层 retry：
+项目里有两层 retry，共用同一个上限 `cfg["app"]["max_attempts"]`：
 
 | 层级 | 位置 | 说明 |
 |------|------|------|
-| 任务内 retry | `TaskManager._execute_single_task()` | 直接调用 `execute_tasks()` 且未指定 `max_attempts` 时，会按 `cfg["app"]["max_retry"]` 在函数内循环 |
-| 调度周期 retry | `Scheduler._run_task_pipeline()` | 调度器传 `max_attempts=1`，失败任务先让出队列，下一 retry 轮再试 |
+| 任务内 retry | `TaskManager._execute_single_task()` | 直接调用 `execute_tasks()` 且未指定 `max_attempts` 参数时，在函数内连续跑到上限 |
+| 调度周期 retry | `Scheduler._run_task_pipeline()` | 调度器传 `max_attempts=1`，失败任务先让出队列，下一 retry 轮按 `attempt_offset` 接着数 |
+
+`max_attempts` 的含义是**一个任务最多跑几遍，含第一遍**——不是「失败后再来几次」。
+它以前叫 `max_retry`，同一个数字换了含义，所以配置层做了一次换算
+（`attempts = retry + 1`，见 `app_config._migrate_renamed_app_keys`）；直接沿用旧值
+会让每个任务少跑一遍。界面上对应「最多尝试次数」，默认 3，也就是最多跑 3 次。
 
 `MAX_CONSECUTIVE_ERRORS = 3` 仍存在，但不是“任意任务失败三次立刻停止”的简单规则。
 
 会增加连续错误计数的情况：
 
-- retry 耗尽后的普通失败通过 `record_result(0, failed)` 计入。
+- retry 耗尽后的普通失败通过 `record_result(0, failed, task_key)` 计入，但**同一个
+  任务反复失败只算一次**：连续错误衡量的是环境是否成片出问题（模拟器起不来、断网），
+  不是某个任务好不好用。一个必失败的任务（某期活动页改版之类）自己的重试上限已由
+  retry 跳过兜住，不该把整个调度停掉——2026-10-06 就是它一个（1 主跑 + 2 重试）把
+  调度送进 `error`，之后所有到期任务全停。
 - 模拟器启动失败。
 - 调度管线意外崩溃。
 
 不会增加连续错误计数的情况：
 
 - 任务失败但还会进入下一 retry 轮。
+- 上一次失败也是同一个任务（按同一故障计）。
 - `RequestHumanTakeover` 或进度未完成后被标记为人工接管冷却。
 - 用户手动停止导致的 cooperative cancel。
 
-连续错误达到 3 后进入 `error`，调度暂停，并同步发送 Windows 桌面/配置通知。可以调用 `reset()`、使用 WebUI“恢复调度”按钮，或点击总览/调度/任务列表任一“终止”按钮恢复到 `pending` 并获得新的 3 次连续错误额度；终止还会清除本调度周期 retry 耗尽记录。单纯调用 `activate()` 不会从 `error` 自动恢复。任务仍在协作退出时，取消信号保持有效，其随后上报的失败不重新计入连续错误。
+连续错误达到 3 后进入 `error`，调度暂停，并同步发送 Windows 桌面/配置通知。
+
+**`error` 不是终点**：静默 `ERROR_AUTO_RECOVER_SECONDS`（30 分钟）后主循环会自动
+`reset()` + `activate()` 重来一轮。没有它，一次夜间故障会让之后所有到期任务都不跑，
+直到有人发现并手点「恢复调度」——用户看到的就是“任务到期了却不继续”。错误态期间的
+等待间隔被钳到 `ERROR_WAKE_INTERVAL`（60 秒），否则会按“睡到下一个任务时间”一觉
+睡到明天，冷却形同虚设。环境没恢复时只会再次进入错误态，等下一个冷却期。
+
+也可以手动恢复：调用 `reset()`、使用 WebUI“恢复调度”按钮，或点击总览/调度/任务列表
+任一“终止”按钮恢复到 `pending` 并获得新的 3 次连续错误额度；终止还会清除 retry 跳过
+记录。单纯调用 `activate()` 不会从 `error` 自动恢复。任务仍在协作退出时，取消信号保持
+有效，其随后上报的失败不重新计入连续错误。
+
+### retry 跳过的有效期
+
+任务在“同一份计划”里耗尽 retry 后，会被跳过**直到它被排到下一次执行时间**
+（`_is_retry_exhausted` 比较当前 `next_exec_time` 与打标记的时刻）。这解决的是另一
+半问题：标记以前只在重新激活调度时清除，而用户往往一直开着调度不点停止，于是昨天
+失败过的任务今天到期了也被永久跳过。失败后 `next_exec_time` 没被推进时标记继续有效，
+这是它本来的用途——挡住同一计划内的无限重试。
 
 ## 人工接管与进度
 
@@ -283,6 +313,8 @@ clear_task_status("progress")
 - `is_task_due()`、`_collect_due()`、`TaskTreeService._task_status()` 是否一致。
 - `human_takeover_error` 到期前/到期后是否分别显示红色/待执行。
 - `progress` 未完成是否会把正常返回转为 retry 失败。
-- retry 耗尽是否只影响本次调度激活周期，避免永久“到期但永不执行”。
+- retry 跳过是否只作用于「同一份计划」（`next_exec_time` 未推进期间），避免永久“到期但永不执行”。
+- 同一个任务反复失败是否按同一故障计，不会把调度送进 `error`。
+- `error` 冷却自动恢复是否仍生效，且错误态下等待间隔被钳到 `ERROR_WAKE_INTERVAL`。
 - `cfg["tasks"]` 只保存用户配置，`TaskRegistry` 只保存运行时元数据。
 - 相关测试：`test/test_task_register/test_decouple_cfg.py` 与 `test/test_webui_contracts.py`。

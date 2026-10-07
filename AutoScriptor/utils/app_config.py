@@ -1,6 +1,6 @@
 """通用配置（data/config.json）读写层。
 
-只负责通用配置段：app / ocr / emulator / scheduler / deploy / notify / update /
+只负责通用配置段：app / ocr / emulator / deploy / notify / update /
 task_ordering / accounts / news，以及同目录临时文件 + 原子替换的持久化。
 
 ``_GLOBAL_KEYS`` 决定哪些顶层段会被写回，因此模板里存在的段必须同时登记在这里，
@@ -26,14 +26,18 @@ from AutoScriptor.utils.json_io import write_json_atomic
 
 
 _GLOBAL_KEYS = (
-    "app", "ocr", "emulator", "scheduler", "deploy", "notify",
+    "app", "ocr", "emulator", "deploy", "notify",
     "update", "task_ordering", "accounts", "news",
 )
 
 # 曾经属于全局配置、现在已经没有功能的段。加载时直接丢弃：保存路径只写
 # ``_GLOBAL_KEYS``，所以文件里不会再有它们，但旧 config.json 会一直带着，
 # 留在内存里只会让 WebUI 公开配置多出一个空壳段。
-_RETIRED_GLOBAL_KEYS = ("remote_access",)
+# ``scheduler`` 里只有 ``auto_start``，而它从未接通过：启动时要求账号已解密，
+# 而刚启动必然未解密；等到用户在 WebUI 输密码时，那条路径又刻意不激活调度
+# （见 test_account_verify_does_not_start_scheduler）。所以它是个不起作用的
+# 死开关，整段退役；调度的启停仍由 WebUI 的运行/停止按钮负责。
+_RETIRED_GLOBAL_KEYS = ("remote_access", "scheduler")
 
 
 # The atomic writer lives in a module with no import-time side effects, so a
@@ -129,6 +133,12 @@ def _require_backend(action: str) -> AccountBackend:
     return _account_backend
 
 
+# 曾经叫 ``max_retry``（重试次数）。语义换成「最多尝试几次」后，同一个数字的含义
+# 从「失败后再来几次」变成「总共跑几次」，直接复用会让每个任务都少跑一遍，所以按
+# ``attempts = retry + 1`` 换算一次，然后丢掉旧键。
+_RENAMED_APP_KEYS = {"max_retry": "max_attempts"}
+
+
 class ConfigManager:
     """全局配置的读写；账号域通过 backend 委托。"""
 
@@ -206,20 +216,47 @@ class ConfigManager:
 
         merge(self.global_cfg, self._load_default_global_config())
 
+    def _migrate_renamed_app_keys(self) -> None:
+        """把 ``app`` 段里改过名字的键换算过来，并清掉旧键。
+
+        ``max_retry``（重试次数）→ ``max_attempts``（最多尝试几次）：同一个数字的含义
+        变了，所以必须 ``attempts = retry + 1`` 换算；直接沿用会让每个任务少跑一遍。
+        新键已经存在时不覆盖——那说明配置已经迁过，旧键只是残留。
+        """
+        app = self.global_cfg.get("app")
+        if not isinstance(app, dict):
+            return
+        for old_key, new_key in _RENAMED_APP_KEYS.items():
+            if old_key not in app:
+                continue
+            legacy = app.pop(old_key)
+            if new_key in app:
+                continue
+            try:
+                app[new_key] = max(1, int(legacy) + 1)
+            except (TypeError, ValueError):
+                continue
+            logger.info(
+                "配置已迁移: app.%s=%s → app.%s=%s（语义从「重试次数」改为「最多尝试次数」）",
+                old_key, legacy, new_key, app[new_key],
+            )
+
     def load_global(self) -> None:
         if not self.config_path.exists():
             self.global_cfg = self._load_default_global_config()
         else:
             with open(self.config_path, "r", encoding="utf-8-sig") as f:
                 self.global_cfg = json.load(f)
+            # 改名迁移必须在合并模板默认值**之前**：模板里已经有 max_attempts 的默认值，
+            # 先合并会让它看起来像「用户已经设过了」，迁移就此跳过，旧数字被模板值吞掉
+            # （max_retry=0 本该是 1 次，结果变成模板的 3 次）。
+            self._migrate_renamed_app_keys()
             self._merge_global_defaults()
         for retired_key in _RETIRED_GLOBAL_KEYS:
             self.global_cfg.pop(retired_key, None)
         self.global_cfg.setdefault("tasks", {})
         self.global_cfg.setdefault("status", {})
         self.global_cfg.setdefault("game", {})
-        self.global_cfg.setdefault("scheduler", {})
-        self.global_cfg["scheduler"].setdefault("auto_start", False)
         self.global_cfg.setdefault("accounts", {})
         self.global_cfg["accounts"].setdefault("dir", "")
         self.global_cfg.setdefault("ocr", {})

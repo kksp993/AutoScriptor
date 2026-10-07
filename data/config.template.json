@@ -1,7 +1,7 @@
 {
     "app": {
         "app_to_start": "org.yjmobile.zmxy",
-        "max_retry": 2,
+        "max_attempts": 3,
         "name": "ZmxyOL",
         "restart_on_error": true,
         "run_in_background": false,
@@ -18,9 +18,6 @@
         "emu_path": "YOUR_EMU_PATH, e.g.C:/Program Files/Netease/MuMu/nx_main/MuMuManager.exe",
         "adb_path": "YOUR_ADB_PATH, e.g.C:/Program Files/Netease/MuMu/nx_main/adb.exe",
         "post_execution": "none"
-    },
-    "scheduler": {
-        "auto_start": false
     },
     "deploy": {
         "log_level": "info",
