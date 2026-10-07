@@ -150,6 +150,27 @@ SHELVED_TASKS = {
 }
 
 
+CFG_TASK_PREFIX = "tasks."
+
+
+def cfg_task_path_literals(path: Path) -> list[tuple[int, str]]:
+    """(行号, 字面量) 形式的 ``cfg.get("tasks...")`` / ``cfg.set("tasks...")``。"""
+    tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        func = node.func
+        if getattr(func, "attr", None) not in ("get", "set"):
+            continue
+        if not isinstance(node.args[0], ast.Constant):
+            continue
+        literal = node.args[0].value
+        if isinstance(literal, str) and literal.startswith(CFG_TASK_PREFIX):
+            found.append((node.lineno, literal))
+    return found
+
+
 class TestTaskRegistration(unittest.TestCase):
     def test_every_script_registers_exactly_one_task(self):
         for path in task_script_paths():
@@ -248,6 +269,35 @@ class TestImportOrder(unittest.TestCase):
         keys = [path.relative_to(TASK_ROOT).with_suffix("").parts for path in ordered]
         self.assertEqual(keys, sorted(keys))
         self.assertEqual(sorted(ordered), sorted(gather_py_files()))
+
+
+class TestTaskCfgPaths(unittest.TestCase):
+    """任务只能按 ``tasks.<自己的任务名>.<字段>`` 读写 cfg。
+
+    ``cfg["tasks"]`` 是以任务名为键的平表。写 ``tasks.每日任务.村庄.混沌炼狱塔.x`` 这种
+    旧树形路径时，``__setitem__`` 会当成字典逐层走下去，在平表里凭空造出 ``每日任务``
+    子树。真实事故（2026-10-02）：``混沌炼狱塔.py`` 这样存 ``last_buy_time``，于是
+    ① 排期永远读到默认值，本该每周/每月才买变成每天都买；② 那棵树进了用户账号文件，
+    之后每次任务重载，``register_task`` 都会因为「cfg['tasks'] 仍是树形」对所有任务
+    抛异常——一个任务写错路径，整个任务列表起不来。
+    """
+
+    def test_a_task_reads_and_writes_under_its_own_id(self):
+        offenders: list[str] = []
+        for path in task_script_paths() + helper_paths():
+            task_id = path.stem
+            for line_number, literal in cfg_task_path_literals(path):
+                segments = literal.split(".")
+                if len(segments) < 3 or segments[1] != task_id:
+                    relative = path.relative_to(ROOT).as_posix()
+                    offenders.append(f"{relative}:{line_number} {literal!r}")
+
+        self.assertEqual(
+            offenders,
+            [],
+            "这些 cfg 路径不是「tasks.<本任务名>.<字段>」的平表写法：\n  "
+            + "\n  ".join(offenders),
+        )
 
 
 class TestRecognitionTargets(unittest.TestCase):
