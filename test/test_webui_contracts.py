@@ -268,9 +268,21 @@ class TestConfigTemplateContract(unittest.TestCase):
         self.assertNotIn("current_profile", self.config)
         self.assertNotIn("profiles", self.config)
 
-    def test_scheduler_and_post_execution_defaults_are_valid(self):
-        self.assertFalse(self.config["scheduler"]["auto_start"])
+    def test_post_execution_default_is_valid(self):
         self.assertEqual(self.config["emulator"]["post_execution"], "none")
+
+    def test_retired_scheduler_section_is_gone(self):
+        """``scheduler.auto_start`` 是个从未接通的死开关，整段退役。
+
+        它要求「启动时账号已解密」才能激活调度，而刚启动必然未解密；等到用户
+        输密码时，那条路径又刻意不激活（见 test_account_verify_does_not_start_scheduler）。
+        两条路都走不通，留在配置里只会让人以为它能用。
+        """
+        from AutoScriptor.utils import app_config
+
+        self.assertNotIn("scheduler", self.config)
+        self.assertNotIn("scheduler", app_config._GLOBAL_KEYS)
+        self.assertIn("scheduler", app_config._RETIRED_GLOBAL_KEYS)
 
     def test_every_template_section_is_persisted(self):
         """每模板段都必须登记在 _GLOBAL_KEYS，否则保存时会被静默丢弃。"""
@@ -293,6 +305,47 @@ class TestConfigTemplateContract(unittest.TestCase):
 
         saved = json.loads(Path(module.cfg.CONFIG_PATH).read_text(encoding="utf-8"))
         self.assertEqual(saved.get("news"), {"account": "reader", "password": "secret"})
+
+    def _load_app_section(self, config_app: dict, template_app: dict) -> dict:
+        tmp = tempfile.mkdtemp(prefix="test_attempts_")
+        (Path(tmp) / "config.json").write_text(
+            json.dumps({"app": config_app}), encoding="utf-8")
+        (Path(tmp) / "config.template.json").write_text(
+            json.dumps({"app": template_app}), encoding="utf-8")
+        module = import_app_config_for_test(tmp)
+        manager = module.ConfigManager()
+        manager.config_path = Path(tmp) / "config.json"
+        manager.load_global()
+        return manager.global_cfg.get("app", {})
+
+    def test_max_retry_migrates_to_max_attempts(self):
+        """``max_retry``（重试次数）→ ``max_attempts``（最多尝试几次）的换算。
+
+        数字的含义变了：「重试 2 次」等于「最多跑 3 次」。不换算就直接沿用会让
+        每个任务少跑一遍——那是静默的行为回归，用户只会看到某些任务不再重试。
+        """
+        cases = (
+            (0, 1),   # 从不重试 = 只跑 1 次
+            (1, 2),
+            (2, 3),   # 默认值
+            (5, 6),
+        )
+        for legacy, expected in cases:
+            with self.subTest(max_retry=legacy):
+                app = self._load_app_section({"max_retry": legacy}, {"max_attempts": 3})
+                self.assertEqual(app.get("max_attempts"), expected)
+                self.assertNotIn("max_retry", app, "旧键必须清掉，否则两条来源会打架")
+
+    def test_migration_keeps_a_new_value_when_both_keys_exist(self):
+        """两个键都在说明已经迁过一次，旧键只是残留——不能覆盖已有的新值。"""
+        app = self._load_app_section(
+            {"max_retry": 2, "max_attempts": 9}, {"max_attempts": 3})
+        self.assertEqual(app.get("max_attempts"), 9)
+        self.assertNotIn("max_retry", app)
+
+    def test_fresh_config_takes_the_template_value(self):
+        app = self._load_app_section({}, {"max_attempts": 3})
+        self.assertEqual(app.get("max_attempts"), 3)
 
 
 class TestTaskTreeServiceContract(unittest.TestCase):
@@ -1359,7 +1412,7 @@ class TestConfigLifecycleContract(unittest.TestCase):
             config_path = Path(tmp) / "config.json"
             template_path = Path(tmp) / "config.template.json"
             template_path.write_text(json.dumps({
-                "app": {"app_to_start": "org.yjmobile.zmxy", "max_retry": 2},
+                "app": {"app_to_start": "org.yjmobile.zmxy", "max_attempts": 3},
                 "emulator": {"adb_addr": "127.0.0.1:16384"},
                 "ocr": {"use_gpu": False},
             }), encoding="utf-8")
@@ -1368,7 +1421,7 @@ class TestConfigLifecycleContract(unittest.TestCase):
             module.cfg.load_config()
 
             self.assertEqual(module.cfg._config["app"]["app_to_start"], "org.yjmobile.zmxy")
-            self.assertEqual(module.cfg._config["app"]["max_retry"], 2)
+            self.assertEqual(module.cfg._config["app"]["max_attempts"], 3)
             self.assertEqual(module.cfg._config["emulator"]["adb_addr"], "127.0.0.1:16384")
             self.assertFalse(module.cfg._config["ocr"]["use_gpu"])
 
@@ -2039,7 +2092,8 @@ print("OK")
         self.assertIn("grant_credential_unlock()", body)
         self.assertNotIn("orchestrator.scheduler.activate()", body)
         self.assertNotIn("orchestrator.scheduler.wake()", body)
-        self.assertIn("waiting for explicit run", body)
+        # 调度启停只由运行时按钮决定；验证密码不再顺带提任何自动启动的事。
+        self.assertNotIn("auto_start", body)
 
     def test_editor_save_updates_existing_ui_map_rows(self):
         content = (ROOT / "backend/webui/routes/editor.py").read_text(encoding="utf-8")

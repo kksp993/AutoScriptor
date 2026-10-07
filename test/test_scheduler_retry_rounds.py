@@ -128,7 +128,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         cfg._config = {
             "app": {
                 "app_to_start": "com.test.app",
-                "max_retry": 2,
+                "max_attempts": 3,
                 "restart_on_error": True,
             },
             "emulator": {"post_execution": "none"},
@@ -331,7 +331,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
 
         self.assertEqual(tm.calls, [("A", 0), ("B", 0), ("A", 1)])
 
-    def test_failed_task_stops_after_max_retry_rounds(self):
+    def test_failed_task_stops_after_max_attempts(self):
         tm = FakeRoundTaskManager({
             ("A", 0): (0, 1),
             ("A", 1): (0, 1),
@@ -397,7 +397,8 @@ class TestSchedulerRetryRounds(unittest.TestCase):
 
         self.assertEqual(sched.state, SchedulerState.PENDING)
         self.assertEqual(sched._consecutive_errors, 0)
-        self.assertEqual(sched._retry_exhausted_tasks, set())
+        # 标记存的是「打标记的时刻」（key -> timestamp），不是裸 key 集合。
+        self.assertEqual(sched._retry_exhausted_tasks, {})
         self.assertTrue(task_manager._cancel_event.is_set())
         self.assertTrue(sched._wake.is_set())
 
@@ -406,7 +407,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         self.assertEqual(sched.state, SchedulerState.PENDING)
 
         sched._mark_retry_exhausted(("s1", "c1"), "A", 2)
-        self.assertEqual(sched._retry_exhausted_tasks, set())
+        self.assertEqual(sched._retry_exhausted_tasks, {})
 
         sched.reset()
         self.assertFalse(task_manager._cancel_event.is_set())
@@ -463,6 +464,126 @@ class TestSchedulerRetryRounds(unittest.TestCase):
             {"server": "s1", "name": "first"},
         ])
         self.assertEqual(current, {"server": "s1", "name": "first"})
+
+
+class TestSchedulerSelfHealing(unittest.TestCase):
+    """调度自己从「跳过一个任务」和「整机停摆」里恢复的能力。
+
+    抓过的事故（2026-10-06）：任务到期了、也在调度时间窗内，却没有继续跑。
+    两个独立原因叠加：
+
+    1. 失败耗尽重试的任务被**永久**跳过。标记只在重新激活调度时清除，而用户
+       往往一直开着调度不点停止，于是昨天失败过的任务今天到期也不会跑。
+    2. 连续错误把调度送进 ERROR，而 ERROR 只能靠人工点「恢复调度」出来。更糟
+       的是计数把重试也算上，一个必失败的任务（1 主跑 + 2 重试）就能停掉全部。
+    """
+
+    def test_retry_skip_expires_when_the_task_gets_a_new_plan(self):
+        """retry 跳过只作用于同一份计划；任务被排到未来后它就该失效。"""
+        import time
+
+        from orchestrator.scheduler import Scheduler
+
+        sched = Scheduler()
+        sched._mark_retry_exhausted(("s1", "c1"), "每日任务/村庄/某任务", 2)
+
+        # 同一份计划：next_exec_time 还停在过去（失败后没被推进）→ 继续跳过，
+        # 这是标记本来的用途，挡住同一计划内的无限重试。
+        with patch.object(Scheduler, "_next_exec_time_of", return_value=0.0):
+            self.assertTrue(sched._is_retry_exhausted(("s1", "c1"), "每日任务/村庄/某任务"))
+
+        # 任务已被排到未来（第二天 05:00）→ 这是新一轮计划，标记失效。
+        with patch.object(Scheduler, "_next_exec_time_of", return_value=time.time() + 86400):
+            self.assertFalse(sched._is_retry_exhausted(("s1", "c1"), "每日任务/村庄/某任务"))
+
+            # 失效是持久的：再查一次仍然放行，而不是每次都要重新判定。
+            self.assertFalse(sched._is_retry_exhausted(("s1", "c1"), "每日任务/村庄/某任务"))
+
+    def test_one_bad_task_does_not_trip_the_error_state(self):
+        """同一个任务反复失败按同一故障计，不该把整个调度停掉。"""
+        from orchestrator.scheduler import MAX_CONSECUTIVE_ERRORS, Scheduler, SchedulerState
+
+        sched = Scheduler()
+        with patch("orchestrator.scheduler.notify_runtime_event"):
+            for _ in range(MAX_CONSECUTIVE_ERRORS + 3):
+                sched.record_result(0, 1, "其他任务/特殊功能/领取4399优惠券")
+
+        self.assertEqual(sched.state, SchedulerState.PENDING, "一个坏任务不该让调度停机")
+        self.assertEqual(sched._consecutive_errors, 1, "同一个任务只贡献一次错误")
+
+    def test_different_tasks_failing_still_trip_the_error_state(self):
+        """不同任务接连失败是真的环境故障，仍然要停机保护。"""
+        from orchestrator.scheduler import MAX_CONSECUTIVE_ERRORS, Scheduler, SchedulerState
+
+        sched = Scheduler()
+        with patch("orchestrator.scheduler.notify_runtime_event"):
+            for index in range(MAX_CONSECUTIVE_ERRORS):
+                sched.record_result(0, 1, f"每日任务/村庄/任务{index}")
+            self.assertEqual(sched.state, SchedulerState.ERROR)
+
+    def test_success_clears_the_repeat_failure_tracking(self):
+        """成功后重新开始计数：隔了一个成功任务的失败是新故障。"""
+        from orchestrator.scheduler import Scheduler, SchedulerState
+
+        sched = Scheduler()
+        with patch("orchestrator.scheduler.notify_runtime_event"):
+            sched.record_result(0, 1, "任务A")
+            self.assertEqual(sched._consecutive_errors, 1)
+            sched.record_result(1, 0)
+            self.assertEqual(sched._consecutive_errors, 0)
+            self.assertIsNone(sched._last_failed_task)
+            # 同一个任务再次失败，因为中间成功过，算新的一次错误。
+            sched.record_result(0, 1, "任务A")
+        self.assertEqual(sched._consecutive_errors, 1)
+        self.assertEqual(sched.state, SchedulerState.PENDING)
+
+    def test_error_state_recovers_after_the_cooldown(self):
+        """ERROR 不是终点：冷却结束后自动恢复，不需要人工点「恢复调度」。"""
+        import time
+
+        from orchestrator.scheduler import (
+            ERROR_AUTO_RECOVER_SECONDS,
+            Scheduler,
+            SchedulerState,
+        )
+
+        sched = Scheduler()
+        sched._consecutive_errors = 3
+        with patch("orchestrator.scheduler.notify_runtime_event"):
+            sched.mark_error()
+        self.assertEqual(sched.state, SchedulerState.ERROR)
+
+        # 冷却没到 → 保持错误态
+        self.assertFalse(sched._maybe_recover_from_error())
+        self.assertEqual(sched.state, SchedulerState.ERROR)
+
+        # 冷却到了 → 自动回到 running（patch 掉 _loop：测试里不需要真的调度线程）
+        sched._error_at = time.time() - ERROR_AUTO_RECOVER_SECONDS - 1
+        with patch.object(Scheduler, "_loop", return_value=None):
+            self.assertTrue(sched._maybe_recover_from_error())
+        self.assertEqual(sched.state, SchedulerState.RUNNING)
+        self.assertEqual(sched._consecutive_errors, 0)
+
+    def test_error_state_wakes_up_to_notice_the_cooldown(self):
+        """错误态必须定期醒来检查冷却，否则可能一觉睡到明天的任务点。"""
+        import time
+
+        from orchestrator.scheduler import (
+            ERROR_AUTO_RECOVER_SECONDS,
+            ERROR_WAKE_INTERVAL,
+            Scheduler,
+            SchedulerState,
+        )
+
+        sched = Scheduler()
+        sched.state = SchedulerState.ERROR
+        sched._error_at = time.time()
+
+        self.assertLessEqual(sched._get_wait_interval(), ERROR_WAKE_INTERVAL)
+
+        # 冷却已过 → 立即醒来处理
+        sched._error_at = time.time() - ERROR_AUTO_RECOVER_SECONDS - 1
+        self.assertEqual(sched._get_wait_interval(), 0)
 
 
 if __name__ == "__main__":

@@ -183,13 +183,18 @@ class TaskManager:
         param_override: dict[str, Any] | None = None,
     ) -> bool:
         """执行单个任务（含重试）。返回是否成功。"""
-        max_retry = cfg["app"].get("max_retry", 0)
+        # ``app.max_attempts`` 是「最多尝试几次」，**含第一次**。它以前叫 ``max_retry``
+        # 且表示「失败后再来几次」，同一个数字换了含义，所以配置层按 attempts = retry + 1
+        # 迁移（见 app_config._migrate_renamed_app_keys）。
+        # 调用方可以用 ``max_attempts`` 参数把本次限制得更小；调度器就是这么一次只跑
+        # 一遍、再按 ``attempt_offset`` 分轮接着数的。
+        total_attempts = max(1, int(cfg["app"].get("max_attempts", 1) or 1))
 
         if max_attempts is None:
-            attempt_numbers = range(0, max_retry + 1)
+            attempt_numbers = range(0, total_attempts)
         else:
             start = max(0, attempt_offset)
-            stop = min(max_retry + 1, start + max(1, max_attempts))
+            stop = min(total_attempts, start + max(1, max_attempts))
             attempt_numbers = range(start, stop)
 
         for attempt in attempt_numbers:
@@ -233,14 +238,16 @@ class TaskManager:
                 return True
 
             except TaskRequireReTry as e:
-                if attempt < max_retry:
-                    logger.info(f"🔄 任务请求重试: {task} ({attempt + 1}/{max_retry})，原因: {e}")
+                if attempt + 1 < total_attempts:
+                    logger.info(
+                        f"🔄 任务请求重试: {task}（第 {attempt + 1}/{total_attempts} 次尝试），原因: {e}"
+                    )
                     if has_local_retry:
                         continue
                     return False
-                logger.warning(f"⚠️ 重试次数已满: {task}，原因: {e}")
+                logger.warning(f"⚠️ 尝试次数已满（{total_attempts} 次）: {task}，原因: {e}")
                 with self._cfg_lock:
-                    self._mark_incomplete_progress_takeover(task, f"重试次数已满: {e}")
+                    self._mark_incomplete_progress_takeover(task, f"尝试次数已满: {e}")
                 return False
 
             except RequestHumanTakeover as e:
@@ -278,13 +285,13 @@ class TaskManager:
                     with self._cfg_lock:
                         self._mark_incomplete_progress_takeover(task, f"执行失败: {e}")
                     return False
-                if attempt < max_retry:
-                    logger.info(f"🔄 重试 ({attempt + 1}/{max_retry})")
+                if attempt + 1 < total_attempts:
+                    logger.info(f"🔄 重试（第 {attempt + 1}/{total_attempts} 次尝试）")
                     if has_local_retry:
                         continue
                     return False
                 with self._cfg_lock:
-                    self._mark_incomplete_progress_takeover(task, f"重试次数已满: {e}")
+                    self._mark_incomplete_progress_takeover(task, f"尝试次数已满: {e}")
                 return False
 
             finally:

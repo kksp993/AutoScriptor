@@ -22,7 +22,7 @@ class TestTaskDebugMode(unittest.TestCase):
         cfg._config = {
             "app": {
                 "app_to_start": "com.test.app",
-                "max_retry": 1,
+                "max_attempts": 2,
                 "restart_on_error": True,
             },
             "emulator": {"post_execution": "close_game_only"},

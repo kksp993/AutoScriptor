@@ -353,8 +353,9 @@ const SettingsPanel = {
         </div>
 
         <div class="settings-field-grid">
-          <el-form-item label="最大重试次数">
-            <el-input-number v-model="appConfig.max_retry" :min="0" :max="10" controls-position="right" />
+          <el-form-item label="最多尝试次数">
+            <el-input-number v-model="appConfig.max_attempts" :min="1" :max="10" controls-position="right" />
+            <div class="settings-help">一个任务最多跑几遍（含第一遍）。3 表示最多跑 3 次。</div>
           </el-form-item>
           <el-form-item label="执行结束后">
             <el-select v-model="emulatorConfig.post_execution" style="width:100%">

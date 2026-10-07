@@ -48,6 +48,12 @@ class SchedulerState(Enum):
 
 CHECK_INTERVAL = 3600
 MAX_CONSECUTIVE_ERRORS = 3
+# 连续错误进入 ERROR 后，等这么久自动重来一轮。没有它，一次夜间故障（模拟器
+# 起不来之类）会让之后所有到期任务都不跑，直到有人发现并点「恢复调度」。
+ERROR_AUTO_RECOVER_SECONDS = 30 * 60
+# ERROR 期间多久醒一次检查冷却。不能沿用「睡到下一个任务时间」，否则可能一觉
+# 睡到明天的任务点，冷却形同虚设。
+ERROR_WAKE_INTERVAL = 60
 
 
 _STATE_LABELS = {"pending": "待运行", "running": "运行中", "error": "发生错误"}
@@ -109,7 +115,13 @@ class Scheduler:
         self._reload_deferred = threading.Event()
         self._consecutive_errors = 0
         self._logged_in_character: tuple[str, str] | None = None  # (server, name)
-        self._retry_exhausted_tasks: set[tuple[str, str, str]] = set()
+        # key -> 打标记的时刻。存时刻而不是只存 key，见 _is_retry_exhausted：
+        # 标记只在「同一份计划」内有效，任务被排到更晚的时间点后它就该失效。
+        self._retry_exhausted_tasks: dict[tuple[str, str, str], float] = {}
+        # 上一次失败的任务。连续错误用它区分「一个坏任务反复失败」和「成片环境故障」。
+        self._last_failed_task: str | None = None
+        # 进入 ERROR 的时刻，供冷却自动恢复用。
+        self._error_at: float | None = None
 
     # ── 注入 ──
 
@@ -141,6 +153,7 @@ class Scheduler:
         self._transition(SchedulerState.PENDING)
 
     def mark_error(self):
+        self._error_at = time.time()
         logger.error("📅 连续失败 %d 次，进入 ERROR 状态", self._consecutive_errors)
         self._transition(SchedulerState.ERROR)
         notify_runtime_event(
@@ -149,10 +162,34 @@ class Scheduler:
         )
 
     def reset(self):
+        self._error_at = None
         self._transition(SchedulerState.PENDING)
         self._restore_error_recovery_budget()
         if self._task_manager:
             self._task_manager._reset_cancel()
+
+    def _maybe_recover_from_error(self) -> bool:
+        """错误态不是终点：冷却结束后自动清账重来一轮。
+
+        ERROR 由「连续错误」触发，语义是环境成片出问题（模拟器起不来、断网）。
+        以前它只能靠人工点「恢复调度」，于是一次夜间故障会让之后**所有**到期
+        任务都不跑，直到有人发现——用户看到的就是「任务到期了却不继续」。
+        冷却结束后自动重试：环境恢复了调度自己接着跑；没恢复也只是再等一个
+        冷却期，代价可控。
+        """
+        if self._error_at is None:
+            return False
+        waited = time.time() - self._error_at
+        if waited < ERROR_AUTO_RECOVER_SECONDS:
+            return False
+        logger.warning(
+            "📅 错误态已静默 %.0f 分钟，自动恢复调度并重试（环境若仍异常会再次进入错误态）",
+            waited / 60,
+        )
+        self.reset()
+        self.activate()
+        self.wake()
+        return True
 
     def request_stop(self):
         """Cooperatively cancel execution and restore scheduler recovery state."""
@@ -273,16 +310,29 @@ class Scheduler:
 
     # ── 结果反馈 ──
 
-    def record_result(self, success: int, failed: int):
+    def record_result(self, success: int, failed: int, task_key: str | None = None):
+        """累计连续错误；同一个任务反复失败只算一次。
+
+        「连续错误」衡量的是环境是否成片出问题，不是某个任务好不好用。一个坏
+        任务（比如某期活动页改版导致它必失败）不该把整个调度停掉：它自己的
+        重试上限已由 `_mark_retry_exhausted` 兜住，而调度该继续跑别的任务。
+        2026-10-06 就是这样翻车的——`领取4399优惠券` 一主跑 + 两重试 = 3 次
+        失败，把调度送进 ERROR，之后所有到期任务全停。
+        """
         if failed > 0 and self._is_cancel_requested():
             logger.info("⏹ 用户终止后的任务失败不计入连续错误恢复额度")
             return
         if failed == 0:
             self._consecutive_errors = 0
-        else:
-            self._consecutive_errors += 1
-            if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                self.mark_error()
+            self._last_failed_task = None
+            return
+        if task_key is not None and task_key == self._last_failed_task:
+            logger.info("📅 同一个任务再次失败，按同一故障计，不叠加连续错误: %s", task_key)
+            return
+        self._last_failed_task = task_key
+        self._consecutive_errors += 1
+        if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+            self.mark_error()
 
     # ── 调度周期 retry 上限 ──
 
@@ -299,22 +349,55 @@ class Scheduler:
         self._clear_retry_exhaustion()
 
     def _is_retry_exhausted(self, char_key: tuple[str, str], task_key: str) -> bool:
-        return self._retry_key(char_key, task_key) in self._retry_exhausted_tasks
+        """这个任务在本轮计划里是否已耗尽重试。
 
-    def _mark_retry_exhausted(self, char_key: tuple[str, str], task_key: str, max_retry: int) -> None:
+        标记只在「同一份计划」内有效。任务被排到比标记时刻更晚的时间点，说明它
+        已经是下一轮计划（通常是第二天），标记随之失效——否则只要调度保持
+        running（用户从不点停止），昨天失败过的任务今天到期了也会被永久跳过，
+        表现就是「任务到期且在调度时间内，却没有继续跑」。
+
+        而失败后 next_exec_time 没被推进（仍停在过去）时，标记继续有效，
+        这是它本来的用途：挡住同一份计划内的无限重试。
+        """
+        key = self._retry_key(char_key, task_key)
+        marked_at = self._retry_exhausted_tasks.get(key)
+        if marked_at is None:
+            return False
+        if self._next_exec_time_of(task_key) > marked_at:
+            self._retry_exhausted_tasks.pop(key, None)
+            logger.info("📅 任务已排入新一轮计划，解除 retry 跳过: %s", task_key)
+            return False
+        return True
+
+    @staticmethod
+    def _next_exec_time_of(task_key: str) -> float:
+        """任务当前的 next_exec_time；查不到时返回 0（视为仍在原计划内）。"""
+        from AutoScriptor.utils.app_config import cfg
+        from tasks.task_register import task_registry
+
+        try:
+            task_id = task_registry.id_of(task_key)
+        except Exception:
+            return 0.0
+        entry = (cfg.get("tasks") or {}).get(task_id)
+        if not isinstance(entry, dict):
+            return 0.0
+        return float(entry.get("next_exec_time", 0) or 0)
+
+    def _mark_retry_exhausted(self, char_key: tuple[str, str], task_key: str, max_attempts: int) -> None:
         if self._is_cancel_requested():
             logger.info("⏹ 用户终止后的任务不再标记为 retry 耗尽: %s", task_key)
             return
         key = self._retry_key(char_key, task_key)
         if key in self._retry_exhausted_tasks:
             return
-        self._retry_exhausted_tasks.add(key)
+        self._retry_exhausted_tasks[key] = time.time()
         logger.warning(
-            "📅 任务已达到本次调度周期 retry 上限，后续将跳过直到重新启动调度: %s/%s %s (max_retry=%d)",
+            "📅 任务已用完本轮计划的尝试次数（最多 %d 次），排到下一次执行时间前不再重试: %s/%s %s",
+            max_attempts,
             key[0],
             key[1],
             key[2],
-            max_retry,
         )
 
     def _filter_retry_available(self, char_key: tuple[str, str], tasks: list[str]) -> list[str]:
@@ -365,6 +448,11 @@ class Scheduler:
         return result
 
     def _get_wait_interval(self) -> float:
+        # 错误态下不能按「睡到下一个任务时间」等：那可能一觉睡到明天的任务点，
+        # 冷却自动恢复就永远不会发生。改成每分钟醒一次看冷却。
+        if self.state == SchedulerState.ERROR and self._error_at is not None:
+            remaining = ERROR_AUTO_RECOVER_SECONDS - (time.time() - self._error_at)
+            return max(0.0, min(remaining, float(ERROR_WAKE_INTERVAL)))
         times = self._collect_active_times()
         if not times:
             return CHECK_INTERVAL
@@ -419,6 +507,8 @@ class Scheduler:
             if watcher.should_reload():
                 self._handle_watched_config_change()
                 watcher.mark_seen()
+            if self.state == SchedulerState.ERROR:
+                self._maybe_recover_from_error()
             if self.state == SchedulerState.RUNNING and self._task_manager:
                 try:
                     self._check_and_run()
@@ -608,7 +698,10 @@ class Scheduler:
             return
 
         total_success = total_failed = 0
-        max_retry = int(cfg["app"].get("max_retry", 0) or 0)
+        # ``app.max_attempts`` 是「一个任务最多尝试几次」，含第一遍。调度把它拆成
+        # 「主跑 + 若干轮重试」：retry_round=0 是主跑，也就是第 1 次尝试。所以
+        # 「还能不能重试」的判据是 ``retry_round + 1 < max_attempts``。
+        max_attempts = max(1, int(cfg["app"].get("max_attempts", 1) or 1))
         retry_round = 0
         attempted_this_round: set[tuple[str, str, str]] = set()
         retry_queue: list[tuple[tuple[str, str], dict]] = []
@@ -717,15 +810,17 @@ class Scheduler:
                     {character for character, _ in retry_queue + failed_next_round},
                 )
                 if not due:
-                    if failed_next_round and retry_round < max_retry:
+                    # retry_round=0 是主跑（第 1 次尝试），所以还有余量当且仅当
+                    # 「已经用掉的尝试数 retry_round+1」小于上限。
+                    if failed_next_round and retry_round + 1 < max_attempts:
                         retry_round += 1
                         retry_queue = failed_next_round
                         failed_next_round = []
                         attempted_this_round = set()
                         logger.info(
-                            "📅 开始第 %d/%d 轮失败任务重试，共 %d 个任务",
-                            retry_round,
-                            max_retry,
+                            "📅 开始失败重试（第 %d/%d 次尝试），共 %d 个任务",
+                            retry_round + 1,
+                            max_attempts,
                             len(retry_queue),
                         )
                         continue
@@ -794,19 +889,19 @@ class Scheduler:
                             logger.info("📅 任务需要人工处理，已标记红色冷却态并跳过本轮自动重试: %s", task_key)
                             total_failed += failed
                             self.record_result(1, 0)
-                        elif retry_round < max_retry and not task_debug_mode:
+                        elif retry_round + 1 < max_attempts and not task_debug_mode:
                             failed_next_round.append((char_key, task_run))
                             logger.info(
-                                "📅 任务失败，跳过当前任务，等待本轮其他任务完成后重试: %s (%d/%d)",
+                                "📅 任务失败，跳过当前任务，等待本轮其他任务完成后重试: %s（第 %d/%d 次尝试）",
                                 task_key,
                                 retry_round + 1,
-                                max_retry,
+                                max_attempts,
                             )
                         else:
                             if scheduled_mode and not task_debug_mode:
-                                self._mark_retry_exhausted(char_key, task_key, max_retry)
+                                self._mark_retry_exhausted(char_key, task_key, max_attempts)
                             total_failed += failed
-                            self.record_result(0, failed)
+                            self.record_result(0, failed, task_key)
                 except KeyboardInterrupt:
                     logger.info("⏹ 任务执行被中断")
                     if self._task_manager:
@@ -817,13 +912,13 @@ class Scheduler:
                     logger.error("📅 执行异常: %s - %s", task_key, e)
                     if not self._task_manager._cancel_event.is_set():
                         character_reports.record(char_key, run_id, task_key, "failed")
-                    if retry_round < max_retry and not task_debug_mode:
+                    if retry_round + 1 < max_attempts and not task_debug_mode:
                         failed_next_round.append((char_key, task_run))
                     else:
                         if scheduled_mode and not task_debug_mode:
-                            self._mark_retry_exhausted(char_key, task_key, max_retry)
+                            self._mark_retry_exhausted(char_key, task_key, max_attempts)
                         total_failed += 1
-                        self.record_result(0, 1)
+                        self.record_result(0, 1, task_key)
                         if self.state == SchedulerState.ERROR:
                             break
 

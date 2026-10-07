@@ -123,7 +123,7 @@ class ActionHistoryRunBoundaryTest(unittest.TestCase):
         self._reg_backup = dict(task_registry._tasks)
         task_registry.clear()
         cfg._config = {
-            "app": {"app_to_start": "com.test.app", "max_retry": 0, "restart_on_error": False},
+            "app": {"app_to_start": "com.test.app", "max_attempts": 1, "restart_on_error": False},
             "emulator": {"post_execution": "none"},
             "ocr": {"use_gpu": False},
             "game": {"character_name": "测试角色"},
