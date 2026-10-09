@@ -121,6 +121,54 @@ class ActionHistoryRunBoundaryTest(unittest.TestCase):
 
         self._cfg_backup = copy.deepcopy(cfg._config)
         self._reg_backup = dict(task_registry._tasks)
+        # 这条测试真的跑一遍 _execute_single_task；任务成功后生产代码会在
+        # _update_next_exec_time 里调 cfg.save_config()。路径不隔离的话，夹具会被
+        # 写进真实 data/ —— 2026-10-08 的「配置全丢」事故就是这样发生的。隔离方式
+        # 与 TestCfgSaveClean 相同：CONFIG_PATH、账号目录、global_cfg 全部换到临时目录。
+        self._orig_path = cfg.CONFIG_PATH
+        self._orig_accounts_dir = cfg.ACCOUNTS_DIR
+        self._orig_mgr_config_path = cfg._mgr.config_path
+        self._orig_mgr_default_accounts_dir = cfg._mgr.default_accounts_dir
+        self._orig_mgr_global_cfg = copy.deepcopy(cfg._mgr.global_cfg)
+        self._orig_mgr_current_acc = cfg._mgr.current_acc
+        self._tmp = tempfile.mkdtemp(prefix="test_log_observability_")
+        cfg.CONFIG_PATH = os.path.join(self._tmp, "config.json")
+        cfg.ACCOUNTS_DIR = os.path.join(self._tmp, "accounts")
+        os.makedirs(cfg.ACCOUNTS_DIR, exist_ok=True)
+        cfg._mgr.config_path = Path(cfg.CONFIG_PATH)
+        cfg._mgr.default_accounts_dir = Path(cfg.ACCOUNTS_DIR)
+        cfg._mgr.global_cfg = {
+            "app": {},
+            "ocr": {},
+            "emulator": {},
+            "deploy": {},
+            "notify": {},
+            "update": {},
+            "task_ordering": {},
+            "accounts": {"dir": cfg.ACCOUNTS_DIR},
+            "news": {},
+            "current_account": "test",
+        }
+
+        from ZmxyOL.accounts.account_store import Account
+
+        cfg._mgr.current_acc = Account(
+            "test",
+            {
+                "encryption": {},
+                "active_character": {"server": "s1", "name": "c1"},
+                "characters": {
+                    "s1": {
+                        "c1": {
+                            "tasks": {},
+                            "status": {},
+                            "game_profession": "悟空",
+                        }
+                    }
+                },
+            },
+        )
+
         task_registry.clear()
         cfg._config = {
             "app": {"app_to_start": "com.test.app", "max_attempts": 1, "restart_on_error": False},
@@ -140,6 +188,14 @@ class ActionHistoryRunBoundaryTest(unittest.TestCase):
     def _restore(self, cfg, task_registry):
         cfg._config = self._cfg_backup
         task_registry._tasks = self._reg_backup
+        cfg.CONFIG_PATH = self._orig_path
+        cfg.ACCOUNTS_DIR = self._orig_accounts_dir
+        cfg._mgr.config_path = self._orig_mgr_config_path
+        cfg._mgr.default_accounts_dir = self._orig_mgr_default_accounts_dir
+        cfg._mgr.global_cfg = self._orig_mgr_global_cfg
+        cfg._mgr.current_acc = self._orig_mgr_current_acc
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_task_run_clears_the_history_before_executing(self):
         from orchestrator import task_manager as tm_mod

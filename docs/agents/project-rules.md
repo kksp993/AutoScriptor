@@ -146,6 +146,8 @@ After moving, renaming, or materially rewriting docs, run `rg` for stale paths a
 
 Use `.venv\Scripts\python.exe -X utf8` on Windows unless there is a clear reason not to. The suite is `unittest`-based; `test/README.md` documents the layout and how to run one package, file, or case. Prefer targeted runs plus `py_compile` while iterating, then a full `-m unittest discover -s test` before reporting done. New behavior gets a test file in the matching domain (`test/test_webui/`, `test/test_accounts/`, ...) rather than a throwaway probe, and any defect that only shows up at runtime (server startup, real requests, lifecycle ordering) should be pinned by one of those tests.
 
+Tests must never write real runtime data. In-process saves from test processes are refused by `_refuse_test_process_write`; tests that exercise real save paths must redirect `cfg.CONFIG_PATH` and the account directory to a temp dir (`TestCfgSaveClean` pattern); and any test that spawns a Python subprocess importing the app must set `AUTOSCRIPTOR_DATA_DIR` to a temp dir, because the guard does not apply across process boundaries. The guard freezes the test-runner signal when `AutoScriptor.utils.app_config` is imported; never re-check `sys.modules` at write time, because the real runtime imports `unittest` indirectly through Paddle and would otherwise be misclassified as a test process and have all saves refused.
+
 Before finishing, report:
 
 - The root cause or lifecycle mismatch.

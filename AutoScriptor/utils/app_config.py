@@ -16,8 +16,10 @@ import copy
 import datetime
 import json
 import os
+import sys
 import tempfile
 import time
+import traceback
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -44,6 +46,58 @@ _RETIRED_GLOBAL_KEYS = ("remote_access", "scheduler")
 # script that only needs to write JSON never triggers a config load. Kept as a
 # private alias here because the manager below writes through it.
 _atomic_write_json = write_json_atomic
+
+
+# 测试运行器（unittest/pytest）一定先于被测模块导入，所以这个信号在
+# ``app_config`` 导入时冻结。不能在写盘时实时查 sys.modules：真实运行进程里
+# Paddle OCR 运行时也会 import unittest，实时判据会把用户的运行进程误判成
+# 测试进程，把账号/config 保存全部拒掉（2026-10-09 实机事故）。
+_TEST_FRAMEWORK_AT_IMPORT = ("unittest" in sys.modules) or ("pytest" in sys.modules)
+
+
+def _first_test_caller() -> str:
+    """栈上最近的一个 ``test/`` 目录下的调用点，用于指出谁在写盘。"""
+    for frame in traceback.extract_stack():
+        path = Path(frame.filename)
+        if "test" in path.parts:
+            return "%s:%d %s()" % (path.name, frame.lineno, frame.name)
+    return "调用位置未知"
+
+
+def _refuse_test_process_write(path, what: str) -> bool:
+    """测试进程试图写真实数据目录时拒绝并记录，返回是否应拒绝。
+
+    ``unittest discover`` 导入的是真模块，一些测试会走到 ``cfg.save_config()``。
+    只要那个测试没把配置路径指到临时目录，用户的 ``data/config.json`` 和账号
+    文件就会被测试夹具覆盖 —— 2026-10-08 的事故就是这样：跑完一轮测试，账号
+    文件里的任务表被写成 ``{"任务": ...}``，下次启动按注册默认值补齐成 51 条
+    全关，用户看到「配置全丢了」。
+
+    判据是 ``app_config`` 导入时是否带着测试运行器（``_TEST_FRAMEWORK_AT_IMPORT``）。
+    测试自己的临时目录放行，别的路径拒绝并记下调用位置，让该修的测试暴露出来
+    而不是静默写盘。
+    """
+    if not _TEST_FRAMEWORK_AT_IMPORT:
+        return False
+    try:
+        resolved = Path(path).resolve()
+        resolved.relative_to(Path(tempfile.gettempdir()).resolve())
+        return False          # 测试自己的临时目录：放行
+    except (OSError, ValueError):
+        pass
+    logger.error(
+        "测试进程拒绝写入真实%s: %s（来源 %s）；"
+        "测试必须像 TestCfgSaveClean 那样把配置路径指向临时目录",
+        what, path, _first_test_caller(),
+    )
+    return True
+
+
+def _guarded_write_json(path, data, *args, **kwargs):
+    """给账号域写入用的 writer：测试进程写真实路径时拒绝。"""
+    if _refuse_test_process_write(path, "账号文件"):
+        return
+    write_json_atomic(path, data, *args, **kwargs)
 
 
 class AccountBackend(Protocol):
@@ -288,6 +342,8 @@ class ConfigManager:
         return safe_cfg
 
     def persist_global(self) -> None:
+        if _refuse_test_process_write(self.config_path, "config"):
+            return
         _atomic_write_json(self.config_path, self._persistable_global_config())
 
     # ── 账号文件（委托 backend）──
@@ -295,7 +351,7 @@ class ConfigManager:
     def load_account(self, name: str, pwd: str = "") -> None:
         if _account_backend is None:
             return
-        _account_backend.load_account(name, pwd, self.global_cfg, write_json_atomic)
+        _account_backend.load_account(name, pwd, self.global_cfg, _guarded_write_json)
 
     def load_accounts(self, name: str, pwd: str = "") -> None:
         if name:
@@ -306,7 +362,7 @@ class ConfigManager:
     def save_account_file_only(self) -> None:
         if _account_backend is None:
             return
-        _account_backend.save_account_file(self.global_cfg, write_json_atomic)
+        _account_backend.save_account_file(self.global_cfg, _guarded_write_json)
 
     def save_all(self, flat: dict[str, Any]) -> None:
         for k in _GLOBAL_KEYS:
@@ -317,7 +373,7 @@ class ConfigManager:
         )
         self._update_runtime_dates()
         if _account_backend is not None:
-            _account_backend.save(flat, self.global_cfg, write_json_atomic)
+            _account_backend.save(flat, self.global_cfg, _guarded_write_json)
         self.persist_global()
 
     def save_global_only(self, flat: dict[str, Any]) -> None:
@@ -526,7 +582,7 @@ class AutoConfig:
             raise KeyError(f"账号 '{target}' 不存在")
         self.save_config()
         self._mgr.global_cfg["current_account"] = target
-        backend.load_account(target, security_key, self._mgr.global_cfg, write_json_atomic)
+        backend.load_account(target, security_key, self._mgr.global_cfg, _guarded_write_json)
         self._mgr._update_runtime_dates()
         self._refresh_flat_config()
         self.save_config()
@@ -561,7 +617,7 @@ class AutoConfig:
         backend = _require_backend("新增账号")
         backend.add_account(
             name, account, password, server, character_name, security_key,
-            self._mgr.global_cfg, write_json_atomic,
+            self._mgr.global_cfg, _guarded_write_json,
         )
 
     def delete_account(self, name: str) -> None:
