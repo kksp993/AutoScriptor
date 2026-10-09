@@ -72,5 +72,7 @@ frontend/electron/buildResources/icon.ico
 /custom_task/
 /battle_character/
 /.autoscriptor/
+# 本地事故恢复/审计证据（可能含真实账号与凭据）：不提交
+/_recovery/
 docs/*.json
 packaging_dllhost/
