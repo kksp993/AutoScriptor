@@ -111,9 +111,19 @@ Write-Step "安装 OCR 运行时（CPU Paddle）"
 $code = Invoke-Tool uv pip install --python $venvPython -r (Join-Path $probeDir 'requirements.txt')
 if ($code -ne 0) { throw "安装 Paddle 失败（退出码 $code）" }
 
+$evidenceDir = Join-Path $runtimeDir 'evidence'
+New-Item -ItemType Directory -Force -Path $evidenceDir | Out-Null
+
+# 这两个变量只在本脚本的作用域里设置，跑完恢复原值。
+# PowerShell 的 ``$env:`` 是进程级：不还原的话，脚本结束后用户当前这个 shell 还会带着
+# 探针的数据根，接着跑仓库测试就会去 release_probe\.runtime 找账号/职业脚本并报错
+# （2026-10-12 实际踩到：test_log_observability 报「Missing runtime battle character
+# implementation」，看着像代码坏了，其实是这个变量泄漏）。
+$previousDataDir = $env:AUTOSCRIPTOR_DATA_DIR
+$previousEvidenceDir = $env:PROBE_EVIDENCE_DIR
 $env:AUTOSCRIPTOR_DATA_DIR = $runtimeDir
-$env:PROBE_EVIDENCE_DIR = Join-Path $runtimeDir 'evidence'
-New-Item -ItemType Directory -Force -Path $env:PROBE_EVIDENCE_DIR | Out-Null
+$env:PROBE_EVIDENCE_DIR = $evidenceDir
+try {
 
 Push-Location $probeDir
 try {
@@ -133,13 +143,21 @@ finally {
     Pop-Location
 }
 
+}
+finally {
+    if ($null -eq $previousDataDir) { Remove-Item Env:\AUTOSCRIPTOR_DATA_DIR -ErrorAction SilentlyContinue }
+    else { $env:AUTOSCRIPTOR_DATA_DIR = $previousDataDir }
+    if ($null -eq $previousEvidenceDir) { Remove-Item Env:\PROBE_EVIDENCE_DIR -ErrorAction SilentlyContinue }
+    else { $env:PROBE_EVIDENCE_DIR = $previousEvidenceDir }
+}
+
 Write-Step "结论"
 $results | ForEach-Object {
     $label = if ($_.ExitCode -eq 0) { '通过' } else { '未通过' }
     Write-Host ("    {0,-10} {1}（退出码 {2}）" -f $_.Probe, $label, $_.ExitCode)
 }
 Write-Host "    数据根：$runtimeDir"
-Write-Host "    证据图：$env:PROBE_EVIDENCE_DIR"
+Write-Host "    证据图：$evidenceDir"
 
 $failed = @($results | Where-Object { $_.ExitCode -ne 0 })
 if ($failed.Count -gt 0) {

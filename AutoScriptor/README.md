@@ -112,6 +112,11 @@ desktop.click_text(T("终止执行"), box=window.rect)          # 在窗口内�
 
 坐标合同：**物理像素，原点在虚拟桌面左上角**（多显示器原点是负数）。截图、`Box`、点击坐标共用这一套，所以 `desktop.screenshot()` 上量到的像素可以直接当点击坐标。键鼠注入走系统 `SendInput`，被更高权限窗口拦下时抛 `InputInjectionBlocked`，不会把没生效的点击当成成功。
 
+这一块**刻意不放进 `from AutoScriptor import *`**：上面那张公共 API 表是「安卓设备 + 游戏」
+域的任务脚本面，坐标是 1280x720 游戏帧；主机桌面控制是另一个能力域，坐标是整块虚拟桌面。
+两者混在一个星号导入里，最容易犯的错是拿游戏帧的 `T(...)` 区域去套主机屏幕。所以它按子模块
+路径发布（`AutoScriptor.control.DesktopControl`），要用就显式导入，见上面的 `get_desktop()`。
+
 ## 坐标与分辨率合同
 
 - 模拟器侧：内置截图、模板、`Box` 和点击坐标统一是 **1280x720 横屏绝对像素**，运行时不缩放。
@@ -130,6 +135,9 @@ desktop.click_text(T("终止执行"), box=window.rect)          # 在窗口内�
 
 没有 `config.json` 时用内置的一份最小默认值启动（`app` / `ocr` / `emulator` 三段，模拟器
 路径为空，用 `AutoScriptor.utils.mumu_discovery.discover_mumu_setup()` 自动填）。
+
+日志写在**数据根**下的 `logs/log/[yymmdd_HHMMSS].log`，不跟进程的工作目录走——安装位里
+进程 cwd 是用户自己的工作目录，把日志写那儿既找不到也和本节说的位置对不上。
 
 ## 边界
 

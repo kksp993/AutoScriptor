@@ -23,7 +23,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import AutoScriptor
-from AutoScriptor.utils import ui_map
 from scripts import build_wheels
 
 
@@ -129,14 +128,19 @@ class StandaloneFrameworkFallbackTest(unittest.TestCase):
 
     def test_missing_ui_map_starts_empty_and_explains_the_reason(self):
         """没有 ``ui_map.csv`` 时按空表启动；按 key 的目标要给出可执行的替代写法。"""
+        # 在用例内导入，不在模块顶层：``ui_map`` 建表依赖当时的资产根，测试模块之间
+        # 的导入顺序不该互相影响（见 ui_map.UIMapManager.get_ui 的资产根比对）。
+        from AutoScriptor.utils import ui_map
+
         with tempfile.TemporaryDirectory() as tmp:
+            # 断言必须留在 patch 里：``get_ui()`` 会比对当前资产根，patch 一撤就
+            # 判定为「资产根变了」并重新加载，那时拿到的又是真资产树。
             with patch.object(ui_map, "get_assets_dir", lambda: Path(tmp)):
                 manager = ui_map.UIMapManager()
-
-            self.assertEqual(manager.get_ui(), {})
-            with self.assertRaises(KeyError) as caught:
-                manager.get_ui()["首页"]
-            self.assertIn("ui_map.csv", str(caught.exception))
+                self.assertEqual(manager.get_ui(), {})
+                with self.assertRaises(KeyError) as caught:
+                    manager.get_ui()["首页"]
+                self.assertIn("ui_map.csv", str(caught.exception))
 
     def test_missing_config_template_still_supplies_hard_subscripted_keys(self):
         """没有 ``config.template.json`` 时，框架硬下标读的键必须有默认值。
@@ -165,6 +169,70 @@ class StandaloneFrameworkFallbackTest(unittest.TestCase):
                     keys <= set(defaults[section]),
                     f"{section} 段缺 {sorted(keys - set(defaults[section]))}",
                 )
+
+
+class DocumentedSubmoduleSurfaceTest(unittest.TestCase):
+    """README 里按子模块路径公布的 API 也要钉住。"""
+
+    def test_desktop_control_is_reachable_at_its_documented_path(self):
+        """README 用 ``AutoScriptor.control.DesktopControl`` 发布主机键鼠能力。
+
+        这一块刻意不进 ``from AutoScriptor import *``（坐标域不同，见框架 README），
+        所以它没有 ``__all__`` 兜底：改名字或挪目录时只有这条断言会拦住。
+        """
+        from AutoScriptor.control.DesktopControl import (
+            DesktopControl,
+            InputInjectionBlocked,
+            WindowInfo,
+            get_desktop,
+        )
+
+        self.assertTrue(callable(get_desktop))
+        self.assertTrue(isinstance(DesktopControl, type))
+        self.assertTrue(issubclass(InputInjectionBlocked, RuntimeError))
+        self.assertTrue(isinstance(WindowInfo, type))
+
+        readme = README_PATH.read_text(encoding="utf-8")
+        self.assertIn("from AutoScriptor.control.DesktopControl import get_desktop", readme)
+
+
+class LogLocationTest(unittest.TestCase):
+    """日志落在数据根下，不跟进程的工作目录走。"""
+
+    def test_log_file_goes_under_the_data_root(self):
+        """安装位里 cwd 是用户自己的工作目录，日志写那儿既找不到也对不上文档。
+
+        真实事故：2026-10-12 独立安装探针把 ``logs/log/`` 建在了探针目录里，
+        而 ``log_archiver`` 的兜底路径按数据根找，两边不是一个地方。
+        """
+        from AutoScriptor.core import api as core_api
+        from AutoScriptor.utils import paths
+
+        captured: list[str] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            # 数据根指向临时目录：这个调用会 mkdir，测试不该往真实数据根里建东西。
+            # ``ensure_all_environment_ready`` 在函数内部导入 get_logs_root，所以
+            # 打补丁要打在 paths 模块上。
+            with patch.object(paths, "get_logs_root", lambda: Path(tmp) / "logs"), \
+                    patch.object(core_api, "setup_logfile", lambda path, **kwargs: captured.append(path)):
+                core_api.ensure_all_environment_ready()
+            expected_parent = Path(tmp) / "logs" / "log"
+
+        self.assertEqual(len(captured), 1, "应当恰好建立一次活动日志文件")
+        log_path = Path(captured[0])
+        self.assertEqual(log_path.parent, expected_parent, str(log_path))
+        self.assertEqual(log_path.suffix, ".log")
+
+    def test_framework_does_not_write_logs_beside_the_working_directory(self):
+        """cwd 不是日志位置的一部分；框架层不该再摸 ``os.getcwd()``。"""
+        framework_root = REPOSITORY_ROOT / "AutoScriptor"
+        offenders = [
+            path.relative_to(REPOSITORY_ROOT).as_posix()
+            for path in framework_root.rglob("*.py")
+            if "os.getcwd()" in path.read_text(encoding="utf-8", errors="replace")
+        ]
+
+        self.assertEqual(offenders, [], f"这些文件把日志/数据写到了进程 cwd：{offenders}")
 
 
 if __name__ == "__main__":

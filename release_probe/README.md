@@ -20,6 +20,10 @@
 3. 跑 `probe_framework.py` 与 `probe_desktop.py`，输出 `PROBE_OK / PROBE_FAIL` 行和最后的
    `PROBE_RESULT`。
 
+脚本会在结束时**还原** `AUTOSCRIPTOR_DATA_DIR` / `PROBE_EVIDENCE_DIR`。这两个变量是进程级
+的，不还原的话你当前这个 PowerShell 窗口会一直带着探针的数据根，接着跑仓库测试就会去
+`release_probe\.runtime` 找账号与职业脚本，报出看着像代码坏了的导入错误（2026-10-12 踩到）。
+
 ## 判据
 
 | 段 | 判据 | 说明 |
