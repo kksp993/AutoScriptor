@@ -226,35 +226,46 @@ class SystemDialogRealFrameFalsePositiveTest(unittest.TestCase):
     """拿归档的真机截图验误报：认错就会往游戏里乱点，比不防护更糟。
 
     归档在 `logs/` 下（不进版本库），没有归档时跳过。
+
+    `logs/` 会随真实运行一直堆积（2026-10-12 本机已有 10133 张），一次全读进内存
+    约 28GB，会把测试进程压成 OOM、整个套件拿不到汇总。所以只取最近的一批，并且
+    一张一张解码，样本仍然全部来自真机截图。
     """
 
+    MAX_ARCHIVED_FRAMES = 24
+
     def _archived_frames(self):
+        """逐张产出归档截图；用生成器避免把整批图像同时留在内存里。"""
         import cv2
 
-        pattern = "**/debug_screenshots/*.png"
-        frames = []
-        for path in sorted((Path(__file__).resolve().parents[1] / "logs").glob(pattern)):
+        archive_root = Path(__file__).resolve().parents[1] / "logs"
+        candidates = sorted(
+            archive_root.glob("**/debug_screenshots/*.png"),
+            key=lambda path: (path.stat().st_mtime, str(path)),
+            reverse=True,
+        )[: self.MAX_ARCHIVED_FRAMES]
+        for path in candidates:
             image = cv2.imdecode(np.fromfile(str(path), np.uint8), cv2.IMREAD_COLOR)
             if image is not None and image.shape[:2] == (FRAME_SIZE[1], FRAME_SIZE[0]):
-                frames.append((path, image))
-        return frames
+                yield path, image
 
     def test_real_screens_are_not_mistaken_for_dialogs(self):
-        frames = self._archived_frames()
-        if not frames:
-            raise unittest.SkipTest("logs/ 下没有归档的真机截图")
-
         misdetected = []
-        for path, image in frames:
+        checked = 0
+        for path, image in self._archived_frames():
+            checked += 1
             with emulator_showing(image), captured_click() as clicked_boxes:
                 if nav_api.dismiss_system_dialogs():
                     misdetected.append(path.name)
             if clicked_boxes:
                 misdetected.append(f"{path.name}（还发出了点击）")
 
+        if checked == 0:
+            raise unittest.SkipTest("logs/ 下没有归档的真机截图")
+
         self.assertEqual(
             misdetected, [],
-            f"{len(frames)} 张真机截图里有 {len(misdetected)} 张被误判成弹窗",
+            f"{checked} 张真机截图里有 {len(misdetected)} 张被误判成弹窗",
         )
 
 

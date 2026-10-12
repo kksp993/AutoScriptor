@@ -212,8 +212,36 @@ def _fill_account_password(ctx_or_account, password = None):
     input(password)
     # Agree to terms checkbox (may already be checked)
     click(T("我已同意"), if_exist=True, timeout=2)
-    click(T("登录", box=Box(23,487,674,62).margin()), timeout=5, repeat=2)
+    _submit_login(ctx_or_account)
     sleep(1)
+
+
+def _submit_login(ctx_or_account):
+    """点登录按钮提交。
+
+    4399 游戏盒（HZ4399）的登录按钮忽略快速点击：2026-10-10 实机对照，同一坐标
+    ADB 快速点击（click() 默认 10-20ms 按压）连续多次界面无任何反应，700ms 长按
+    立即登录成功并弹出「用户名，欢迎回来」。快速点击与「界面没反应」不可区分，
+    所以游戏盒必须长按（同点 swipe 即长按）；游戏客户端按钮沿用原来的快速点击，
+    避免行为变化。
+    """
+    is_gamecenter = (
+        isinstance(ctx_or_account, LoginCtx)
+        and ctx_or_account.login_client() == LoginClient.HZ4399
+    )
+    if not is_gamecenter:
+        click(T("登录", box=Box(23,487,674,62).margin()), timeout=5, repeat=2)
+        return
+    login_box = locate(T("登录", box=Box(23,487,674,62).margin()), timeout=5)
+    if login_box is None:
+        raise RuntimeError("4399 游戏盒登录页找不到「登录」按钮")
+    press_x, press_y = login_box.center()
+    swipe(
+        B(press_x, press_y),
+        B(press_x, press_y),
+        duration_s=0.7,
+        ensure_stable_after_swipe=False,
+    )
 
 
 def _handle_post_login_popups():

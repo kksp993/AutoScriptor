@@ -8,6 +8,11 @@ dist/autoscriptor-<版本>-py3-none-any.whl   框架层，只含 AutoScriptor/
 dist/zmxyol-<版本>-py3-none-any.whl         游戏层，含 ZmxyOL/ 与 tasks/，依赖前者
 ```
 
+框架层的 `readme` 指向 `AutoScriptor/README.md`（包自己的 README，随 wheel 一起发布，
+构建时写成 METADATA 的正文）；框架的运行时依赖同时写在 `pyproject.toml` 的
+`[project].dependencies`（打包唯一出处）和 `AutoScriptor/requirements.txt`（给从源码装的人），
+`test/test_framework_public_api.py` 校验两者与 `__all__` 都不漂移。
+
 ## 构建
 
 ```powershell
@@ -16,6 +21,23 @@ dist/zmxyol-<版本>-py3-none-any.whl         游戏层，含 ZmxyOL/ 与 tasks/
 
 `dist/` 在 `.gitignore` 里，不提交。版本号只有 `pyproject.toml` 的 `[project] version`
 一个来源，`zmxyol` 的 `Requires-Dist` 钉同一版本，防止两个包错位。
+
+## 发布验收（release_probe）
+
+打包之后、对外发布之前，用 `release_probe/` 验一遍「这个 wheel 别人拿到能不能用」：
+
+```powershell
+.\release_probe\run_probe.ps1
+```
+
+它建一个只装这一个 wheel 的独立 venv（数据根也在探针自己的目录里），跑：
+安装位判据（导入落在 venv 内、仓库根不在 `sys.path`）、公共 API 全部可解析、
+空数据根下的配置自举（自动发现 MuMu 并认出已连接实例）、真机截图/识别/点击、
+以及「4399 优惠券」的部分操作（只导航识别，不领券）。判据与产物见
+[release_probe/README.md](../../../release_probe/README.md)。
+
+`test/test_wheel_packaging.py` 的安装树导入探针进全量测试（秒级、不碰设备），盯的是打包内容
+与 `RECORD` 哈希；`release_probe/` 是手动、真设备、真 venv 的发布验收，两者不重复。
 
 ## 安装
 

@@ -61,6 +61,10 @@ class WheelSpec:
     summary: str
     packages: tuple[str, ...]
     requires_dist: tuple[str, ...] = ()
+    # Long description shipped as the wheel's METADATA body. A published wheel
+    # without one shows up as a blank page on the index, so the framework
+    # distribution carries its own README.
+    long_description: str = ""
     # Archive path -> content, for files that are staged rather than copied.
     staged_files: dict[str, bytes] = field(default_factory=dict)
 
@@ -95,6 +99,36 @@ def read_project_dependencies() -> tuple[str, ...]:
     return tuple(requirements)
 
 
+def read_project_readme_path() -> str:
+    """The ``readme`` path declared in ``pyproject.toml``."""
+    match = re.search(r'^readme\s*=\s*"([^"]+)"', _project_table(), re.MULTILINE)
+    if match is None:
+        raise SystemExit("pyproject.toml 的 [project] 段里找不到 readme")
+    return match.group(1)
+
+
+def read_project_authors() -> tuple[str, ...]:
+    """Author names from the flat ``authors = [{ name = "..." }]`` form."""
+    match = re.search(r"^authors\s*=\s*\[([^\]]*)\]", _project_table(), re.MULTILINE)
+    if match is None:
+        return ()
+    return tuple(re.findall(r'name\s*=\s*"([^"]+)"', match.group(1)))
+
+
+def read_project_urls() -> tuple[tuple[str, str], ...]:
+    """``[project.urls]`` entries as ``(label, url)``.
+
+    Read from the whole file rather than the ``[project]`` slice: the table is a
+    sibling section, and slicing on ``[project]`` would cut it off.
+    """
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    if "[project.urls]" not in text:
+        return ()
+    block = text.split("[project.urls]", 1)[1]
+    block = block.split("\n[", 1)[0]
+    return tuple(re.findall(r'^(\w[\w-]*)\s*=\s*"([^"]+)"', block, re.MULTILINE))
+
+
 def build_specs(version: str) -> tuple[WheelSpec, WheelSpec]:
     """The two distributions, in install order."""
     framework = WheelSpec(
@@ -102,17 +136,33 @@ def build_specs(version: str) -> tuple[WheelSpec, WheelSpec]:
         summary="AutoScriptor framework: device control, recognition and the script API",
         packages=("AutoScriptor",),
         requires_dist=read_project_dependencies(),
+        long_description=read_framework_readme(),
     )
     game_layer = WheelSpec(
         distribution="zmxyol",
         summary="ZmxyOL game layer: battle, navigation, task authoring and account domain",
         packages=("ZmxyOL", "tasks"),
         requires_dist=(f"autoscriptor=={version}",),
+        long_description=(
+            "造梦西游 OL 游戏层：战斗、导航、任务编写与账号域。\n\n"
+            f"依赖 `autoscriptor=={version}`（框架层，提供设备控制、识别与脚本 API）。\n"
+            "两者互相依赖（`ZmxyOL` 重导出 `tasks.register_task`，任务注册表又 import 游戏层），"
+            "所以属于同一个发行体；编排层、后端与前端不进 wheel，仍从源码树运行。\n"
+        ),
         staged_files={
             "ZmxyOL/character/_default_impl/hero.py": read_hero_implementation_bytes(),
         },
     )
     return framework, game_layer
+
+
+def read_framework_readme() -> str:
+    """The framework README, which ``pyproject.toml`` also declares as ``readme``."""
+    declared = read_project_readme_path()
+    source = ROOT / declared
+    if not source.is_file():
+        raise SystemExit(f"pyproject.toml 声明的 readme 不存在: {source}")
+    return source.read_text(encoding="utf-8")
 
 
 def read_hero_implementation_bytes() -> bytes:
@@ -153,9 +203,18 @@ def render_metadata(spec: WheelSpec, version: str) -> str:
         f"Summary: {spec.summary}",
         "Requires-Python: >=3.10,<3.11",
     ]
+    for author in read_project_authors():
+        lines.append(f"Author: {author}")
+    for label, url in read_project_urls():
+        lines.append(f"Project-URL: {label}, {url}")
     if (ROOT / LICENSE_FILE).is_file():
         lines.append(f"License-File: {LICENSE_FILE}")
     lines.extend(f"Requires-Dist: {requirement}" for requirement in spec.requires_dist)
+    if spec.long_description.strip():
+        # 「无 body 的 wheel」在索引页上就是一片空白：README 作为正文随包发布。
+        lines.append("Description-Content-Type: text/markdown")
+        lines.append("")
+        lines.append(spec.long_description.rstrip("\n"))
     return "\n".join(lines) + "\n"
 
 

@@ -61,6 +61,11 @@ scripts/               安装、运行、更新脚本
 docs/                  项目文档
 ```
 
+`AutoScriptor/` 是可独立发布的框架层（wheel 名 `autoscriptor`），不 import 游戏层；
+`ZmxyOL/` 与 `tasks/` 是它上面的游戏层（wheel 名 `zmxyol`）。打包、独立安装与发布验收见
+[两个可安装 wheel](docs/AutoScriptor/operations/library-packages.md)；框架的公共 API
+清单见 [AutoScriptor/README.md](AutoScriptor/README.md#公共-api)。
+
 关键数据位置：
 
 ```text
@@ -83,6 +88,7 @@ logs/                         日志、错误归档、截图和礼包码缓存
 - [文档索引](docs/AutoScriptor/README.md)
 - [WebUI API 契约](docs/AutoScriptor/webui/api-contract.md)
 - [任务编写约定](docs/AutoScriptor/tasks/script-authoring.md)
+- [两个可安装 wheel（框架层发布与验收）](docs/AutoScriptor/operations/library-packages.md)
 - [OpenAI 多智能体示例](docs/AutoScriptor/reference/openai-multi-agents.md)
 
 ## 常见问题

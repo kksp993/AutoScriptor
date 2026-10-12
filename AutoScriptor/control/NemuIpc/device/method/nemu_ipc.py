@@ -16,6 +16,7 @@ from AutoScriptor.control.NemuIpc.device.method.utils import RETRY_TRIES, retry_
 from AutoScriptor.control.NemuIpc.device.method.pool import WORKER_POOL
 from AutoScriptor.control.NemuIpc.config.deep import deep_get
 from AutoScriptor.utils.app_config import cfg
+from AutoScriptor.utils.mumu_discovery import resolve_mumu_layout
 
 class RequestHumanTakeover(Exception):
     pass
@@ -295,21 +296,35 @@ class NemuIpcImpl:
     def __init__(self, nemu_folder: str, instance_id: int, display_id: int = 0):
         """
         Args:
-            nemu_folder: Installation path of MuMu12, e.g. E:/ProgramFiles/MuMuPlayer-12.0
+            nemu_folder: MuMu 安装路径（包含 ``nx_device`` / ``shell`` 的安装根，
+                例如 E:/ProgramFiles/MuMuPlayer-12.0 或 C:/Program Files/Netease/MuMu）。
+                也可以是子目录（nx_main 等），会自动上溯到安装根。
             instance_id: Emulator instance ID, starting from 0
             display_id: Always 0 if keep app alive was disabled
         """
-        self.nemu_folder: str = nemu_folder
         self.instance_id: int = instance_id
         self.display_id: int = display_id
 
-        # try to load dll from various path
-        list_dll = [
-            # MuMuPlayer12
-            os.path.abspath(os.path.join(nemu_folder, './shell/sdk/external_renderer_ipc.dll')),
-            # MuMuPlayer12 5.0
-            os.path.abspath(os.path.join(nemu_folder, './nx_device/12.0/shell/sdk/external_renderer_ipc.dll')),
-        ]
+        # 自适应解析布局：nx_device/<android系列> 的序号会随 MuMu 升级变化
+        # （12.0 = MuMu 5.0/12，15.0 = MuMu 6.0，以后还会加），所以按目录通配
+        # + 版本排序找库，不枚举版本号；顺序见 mumu_discovery.candidate_nemu_dll_paths。
+        # nemu_connect 需要的是安装根，子目录配置会被 resolve_mumu_layout 上溯修正。
+        resolved_layout = resolve_mumu_layout(nemu_folder)
+        resolved_root = str(resolved_layout.get("root") or "").strip()
+        self.nemu_folder: str = resolved_root or nemu_folder
+
+        list_dll = [str(path) for path in resolved_layout.get("nemu_dll_candidates") or []]
+        # 保底：无论解析结果如何，历史已知路径再按原样试一遍——解析期间文件可能
+        # 正好在安装器替换的窗口里（is_file 判定失败但随后可加载）。
+        for legacy_relative in (
+            './shell/sdk/external_renderer_ipc.dll',
+            './nx_device/15.0/shell/sdk/external_renderer_ipc.dll',
+            './nx_device/12.0/shell/sdk/external_renderer_ipc.dll',
+            './nx_main/sdk/external_renderer_ipc.dll',
+        ):
+            legacy_candidate = os.path.abspath(os.path.join(nemu_folder, legacy_relative))
+            if legacy_candidate not in list_dll:
+                list_dll.append(legacy_candidate)
         ipc_dll_loaded = ''
         for candidate in list_dll:
             if not os.path.exists(candidate):
@@ -329,7 +344,7 @@ class NemuIpcImpl:
         # success
         logger.info(
             f'NemuIpcImpl init, '
-            f'nemu_folder={nemu_folder}, '
+            f'nemu_folder={self.nemu_folder}, '
             f'ipc_dll={ipc_dll_loaded}, '
             f'instance_id={instance_id}, '
             f'display_id={display_id}'

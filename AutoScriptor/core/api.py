@@ -982,6 +982,16 @@ def screenshot_region(box):
     """
     if isinstance(box, (tuple, list)):
         box = Box(*box)
+    # ``B(x, y, w, h)`` 是点击用的目标包装，和 ``Box(x, y, w, h)`` 只差一个字母，
+    # 很容易写混。它内部包的就是同一个 Box，这里直接取出来用；否则会抛出
+    # 「'BoxTarget' object is not iterable」这种看不出该改成什么的错误。
+    wrapped = getattr(box, "box", None)
+    if wrapped is not None:
+        box = wrapped
+    if not isinstance(box, Box):
+        raise TypeError(
+            f"screenshot_region 需要 Box 或 (x, y, width, height)，收到 {type(box).__name__}"
+        )
     return mixctrl.screenshot_region(box)
 
 def finger_down(finger_id: int, x: float, y: float):

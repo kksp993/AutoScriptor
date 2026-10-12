@@ -115,6 +115,14 @@ backend -> orchestrator -> tasks -> ZmxyOL -> AutoScriptor
 - 实时区域检测用 `screenshot_region` 只转换 ROI；不要在热路径上对全帧截图做 OCR 循环。
 - NemuIpc 截图返回复用缓冲之上的视图：拿到帧后要么立即消费，要么复制需要保留的部分，不要跨下一次采集持有。
 
+## 主机桌面控制边界
+
+- `AutoScriptor/control/DesktopControl/` 控制**主机上的普通 Windows 程序**（浏览器、PC 客户端），与设备输入通道互补：模拟器/游戏仍走 `MixControl`（NemuIpc/ADB），主机程序走 `DesktopControl`。它不参与设备会话，也不改 `MixControl`。
+- 键鼠注入直接用系统 `SendInput` / `SetCursorPos`（pyautogui、pynput 这类框架内部包的就是同一组 API），不新增第三方依赖。`SendInput` 被更高权限窗口（如以管理员运行的窗口）拦下时抛 `InputInjectionBlocked`，绝不把没生效的点击当成功。
+- 坐标合同只有一套：**物理像素，原点在虚拟桌面左上角**（多显示器时原点可能为负）。使用前必须声明 DPI 感知（`ensure_dpi_awareness()` 幂等、只在首次生效；被宿主设过则沿用现状），否则 125%/150% 缩放下截图尺寸与鼠标坐标会差一个缩放比。截图（Pillow `ImageGrab(all_screens=True)`）与点击共用这套坐标，所以截图上量到的像素可以直接当点击坐标用。
+- 识别复用既有框架：`T("文字")` / `I(图片)` / `B(Box)` 目标 + `locate_on_screen`，返回统一的 `Box`。`T()` 未显式指定区域时自带的是模拟器 1280x720，定位前会换成本次截图的真实尺寸——否则比 1280x720 大的屏幕上，右侧和下方的控件永远找不到；显式区域会被裁剪到屏幕内，完全落在屏幕外的区域直接报错。
+- 文字是子串匹配，页面提示语里也会出现同样的字（「点击「开始运行」…」）。命中多处时 `click_text` 告警并点第一处；调用方用 `box` 把搜索区域收紧到控件所在行，这是主机上的标准用法。
+
 ## 源码启动与更新边界
 
 - Electron 只负责源码壳：创建加载窗口、清理本项目占用的 WebUI 端口（先按 `AUTOSCRIPTOR_PORT`／缺省 `5000` 挑一个空闲端口，再把同一个端口通过环境变量交给后端）、启动 `.venv\Scripts\python.exe -X utf8 backend\webui\gui.py --electron`。

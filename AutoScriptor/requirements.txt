@@ -1,0 +1,26 @@
+# 框架层运行时依赖。
+#
+# 与 pyproject.toml 的 [project].dependencies 是同一份内容：那边是打包时的唯一
+# 出处（scripts/build_wheels.py 直接读它写进 wheel 的 METADATA），这里给从源码
+# 安装的人用。test/test_framework_public_api.py 会校验两者逐条一致，别只改一边。
+adbutils==1.2.15
+numpy>=1.24.4,<2.0.0
+opencv-python
+pillow>=10.0.0
+rich>=13.0.0
+fuzzywuzzy
+# fuzzywuzzy.StringMatcher 直接 `from Levenshtein import *`；缺失会退回纯 Python
+# 匹配并显著拖慢 OCR 文本比对，属于性能必需件。
+python-Levenshtein
+lxml
+pyyaml
+uiautomator2==2.16.17
+uiautomator2cache==0.3.1
+paddleocr==3.7.0
+# 保留 pkg_resources：adbutils 1.2.15 仍经 pkg_resources 导入链。
+setuptools<81
+
+# OCR 运行时二选一，不列在上面那份依赖里（两个引擎变体互斥，装错会互相覆盖）：
+#   CPU： paddlepaddle==3.2.0  mkl>=2023.0.0
+#   GPU： paddlepaddle-gpu==3.2.2
+# 与 data/config.json -> ocr.use_gpu 保持一致；不一致时 OCR 初始化会明确报错。

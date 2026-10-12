@@ -150,6 +150,10 @@ TOOLS     编辑器    写脚本 / 识别调试
      | MuMuManager 路径 | 上面的目录 + `\nx_main\MuMuManager.exe` |
      | ADB 程序路径 | 上面的目录 + `\nx_main\adb.exe` |
 
+     > 不同 MuMu 版本目录不一样：5.0 / 12 与 6.0 用 `nx_main`（就是上表）；
+     > 更老的 12 用 `shell\MuMuManager.exe` 与 `shell\adb.exe`。拿不准就先点
+     > **自动定位**，它会按版本自己找。
+
      填完再点一次 **刷新**。
 5. 游戏服务器选你实际玩的那个（4399 官服 / 9游 / 当乐 / Vivo）。不是这些服就在下拉里选「其他」填包名。
 
