@@ -28,6 +28,11 @@ class UiTable(dict):
 class UIMapManager:
     def __init__(self):
         self._ui: UiTable = UiTable()
+        # 建表时用的资产根。``get_ui()`` 靠它发现「资产根后来才被注册」——
+        # 游戏层是在自己的包导入时才 ``set_assets_root()`` 的，而本模块可能在那之前
+        # 就被 import（例如某个测试模块顶层 import 了 ui_map）。不比对的话，表会在
+        # 第一次导入时按错误的根建好并一直空着，之后谁都想不到去 reload。
+        self._loaded_assets_root: Path | None = None
         self.init_ui()
 
     def init_ui(self) -> None:
@@ -37,13 +42,14 @@ class UIMapManager:
             # 没有资产不等于用错：框架层单独安装就是没有这张表。按空表启动，
             # T("文字") 照常可用（它只走 ui_str，不查表），按 key 的目标会在取表时报错。
             logger.info("未找到 UI map 配置（%s），按空表启动；按 key 的目标需要游戏层资产", csv_path)
-            self._ui = UiTable()
+            self._ui.clear()
+            self._loaded_assets_root = assets_root
             return
         logger.info("Loading UI map config: %s", csv_path)
         start_time = time.time()
 
         rows = _read_ui_map_rows(csv_path)
-        ui = UiTable()
+        entries: dict[str, UiEntry] = {}
 
         for index, row in enumerate(rows, start=1):
             key = row["key"].strip()
@@ -53,13 +59,20 @@ class UIMapManager:
             img_name = row.get("img", "").strip()
             img_path = str((assets_root / "pic" / img_name).resolve()) if img_name else None
             text_val = row.get("text", "").strip() or None
-            ui[key] = UiEntry(key, Box(left, top, width, height), img_path, text_val)
+            entries[key] = UiEntry(key, Box(left, top, width, height), img_path, text_val)
 
-        self._ui = ui
+        # 原地替换内容，不重新绑定 self._ui：模块级 ``ui`` 与 ``AutoScriptor.ui``
+        # 都持有同一个 dict 对象，原地刷新才能让它们一起看到新表。
+        self._ui.clear()
+        self._ui.update(entries)
+        self._loaded_assets_root = assets_root
         elapsed_time = time.time() - start_time
-        logger.info("UI map initialized: %s entries in %.2fs", len(ui), elapsed_time)
+        logger.info("UI map initialized: %s entries in %.2fs", len(entries), elapsed_time)
 
     def get_ui(self):
+        if self._loaded_assets_root != get_assets_dir():
+            logger.info("资产根已变更，重新加载 UI map")
+            self.init_ui()
         return self._ui
 
 

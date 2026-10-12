@@ -77,12 +77,18 @@ def getFrameSize() -> tuple[int, int]:
 def ensure_all_environment_ready():
     # 初始化编排器
     logger.info("编排器初始化开始...")
-    import os
     from datetime import datetime
-    log_dir = os.path.join(os.getcwd(), 'logs', 'log')
-    os.makedirs(log_dir, exist_ok=True)
+
+    from AutoScriptor.utils.paths import get_logs_root
+
+    # 日志落在**数据根**下的 logs/log，而不是进程 cwd：框架层单独安装时 cwd 是用户
+    # 自己的工作目录，写那儿会和项目文档说的「数据根下的 logs」相矛盾，用户也找不到
+    # 文件。源码位两者重合，所以这个差异只在安装位暴露（2026-10-12 探针）。
+    # log_archiver 的兜底路径同样是数据根，改这里之后两边才真正一致。
+    log_dir = get_logs_root() / "log"
+    log_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime('%y%m%d_%H%M%S')
-    setup_logfile(os.path.join(log_dir, f"[{timestamp}].log"))
+    setup_logfile(str(log_dir / f"[{timestamp}].log"))
     selected_emulator_index = cfg["emulator"]["index"]
     adb_addr = cfg["emulator"]["adb_addr"]
     app_to_start = cfg["app"]["app_to_start"]

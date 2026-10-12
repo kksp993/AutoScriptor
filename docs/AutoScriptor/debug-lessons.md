@@ -46,8 +46,18 @@
     版本、还会继续加，写死任一个都会在新版本上报「找不到 external_renderer_ipc.dll」。
     一律通配 + 版本排序（`mumu_discovery.resolve_mumu_layout`，路径知识的唯一出处）。
     同类陷阱：`nx_main/sdk` 有同名 DLL（MuMu 5.30 实测存在），会让子目录冒充安装根；
-    安装根只认含 `nx_main`/`nx_device` 子目录的那一级。`emu_path` 必须指向
+   安装根只认含 `nx_main`/`nx_device` 子目录的那一级。`emu_path` 必须指向
     `MuMuManager.exe`——它被当 CLI 执行，指到 GUI 的 `MuMuPlayer.exe` 会静默失效。
+13. **`ui_map` 会在错误时机建表**：它在模块导入时读一次资产根，而游戏层是在自己
+    包导入时才 `set_assets_root()`。谁先导入 `ui_map`（例如某个测试模块顶层
+    `import ui_map`），表就按错误（或缺失）的根建好并一直空着，之后按 key 的目标
+    报 `KeyError`。改法是 `get_ui()` 比对资产根并原地刷新——表对象只有一个，
+    模块级 `ui`、`AutoScriptor.ui` 都靠原地 `clear()+update()` 才一起看到新表。
+14. **别用 `os.getcwd()` 定日志/数据位置**：安装位里 cwd 是用户自己的工作目录，
+    源码位恰好等于仓库根所以看不出来。日志统一走 `get_logs_root()`（数据根下的
+    `logs/log/`），与 `log_archiver` 的兜底路径一致。同类：跑完
+    `release_probe\run_probe.ps1` 后当前 shell 会残留 `AUTOSCRIPTOR_DATA_DIR`，
+    接着跑仓库测试会去探针目录找职业脚本并报导入错误，看着像代码坏了。
 
 ## 手法
 
