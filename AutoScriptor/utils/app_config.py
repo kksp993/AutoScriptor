@@ -25,6 +25,7 @@ from typing import Any, Protocol
 
 from AutoScriptor.logging.logger import logger
 from AutoScriptor.utils.json_io import write_json_atomic
+from AutoScriptor.utils.mumu_discovery import default_mumu_adb_addr
 
 
 _GLOBAL_KEYS = (
@@ -40,6 +41,33 @@ _GLOBAL_KEYS = (
 # （见 test_account_verify_does_not_start_scheduler）。所以它是个不起作用的
 # 死开关，整段退役；调度的启停仍由 WebUI 的运行/停止按钮负责。
 _RETIRED_GLOBAL_KEYS = ("remote_access", "scheduler")
+
+
+# 没有 config.template.json 时（框架层单独安装）的兜底默认值。只包含框架自己会硬
+# 下标读的键，取值与 data/config.template.json 的对应段一致；真实 MuMu 路径由
+# mumu_discovery.discover_mumu_setup() 自动填，这里只保证「有键、有合理默认」。
+_FALLBACK_SECTION_DEFAULTS: dict[str, dict[str, Any]] = {
+    "app": {
+        "app_to_start": "",
+        "max_attempts": 3,
+        "name": "AutoScriptor",
+        "restart_on_error": True,
+        "run_in_background": False,
+    },
+    "ocr": {
+        "use_gpu": False,
+        "model": "PP-OCRv6_small",
+    },
+    "emulator": {
+        "index": 0,
+        # 默认端口规则只有一份出处，避免这里和 mumu_discovery 各写一个数字。
+        "adb_addr": default_mumu_adb_addr(0),
+        "mumu_folder": "",
+        "emu_path": "",
+        "adb_path": "",
+        "post_execution": "none",
+    },
+}
 
 
 # The atomic writer lives in a module with no import-time side effects, so a
@@ -255,7 +283,16 @@ class ConfigManager:
     def _load_default_global_config(self) -> dict[str, Any]:
         template = self.config_path.with_name("config.template.json")
         if not template.exists():
-            return {k: {} for k in _GLOBAL_KEYS}
+            # 框架层可以单独安装，那时数据根下没有 config.template.json。框架自己会
+            # 硬下标读下面这些键（emulator.emu_path / adb_addr、app.app_to_start …），
+            # 只给空表的话拿到的是裸 KeyError，看不出该怎么配。这里给一份能启动的
+            # 最小默认；真实路径由 mumu_discovery.discover_mumu_setup() 自动填。
+            logger.info("未找到配置模板 %s，使用框架内置默认值", template)
+            defaults: dict[str, Any] = {key: {} for key in _GLOBAL_KEYS}
+            for section, values in _FALLBACK_SECTION_DEFAULTS.items():
+                defaults.setdefault(section, {})
+                defaults[section].update(copy.deepcopy(values))
+            return defaults
         with open(template, "r", encoding="utf-8-sig") as f:
             data = json.load(f)
         return data if isinstance(data, dict) else {k: {} for k in _GLOBAL_KEYS}

@@ -1,0 +1,10 @@
+# 探针 venv 的 OCR 运行时：刻意用 CPU 变体。
+#
+# wheel 的 METADATA 只声明框架的公共依赖（paddleocr 等），paddlepaddle 与
+# paddlepaddle-gpu 互斥、必须由安装方二选一，所以不写在 wheel 依赖里。
+# 探针用 CPU 变体：不需要 GPU，也顺带验证「use_gpu=false 的默认路径」可用。
+-i https://pypi.tuna.tsinghua.edu.cn/simple
+--extra-index-url https://pypi.org/simple
+--prefer-binary
+paddlepaddle==3.2.0
+mkl>=2023.0.0

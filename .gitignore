@@ -76,3 +76,8 @@ frontend/electron/buildResources/icon.ico
 /_recovery/
 docs/*.json
 packaging_dllhost/
+# 框架层发布验收的探针环境与运行数据（每次跑都会重建/覆盖）
+/release_probe/.venv/
+/release_probe/.runtime/
+# 框架把运行日志写在进程的 cwd 下（logs/log/），探针的 cwd 就是自己的目录
+/release_probe/logs/

@@ -4,11 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "autoscriptor"
-version = "1.0.3"
+version = "1.0.4"
 description = "Android 模拟器游戏自动化的通用层：设备控制、OCR/识别、通用配置与路径。"
-readme = "README.md"
+readme = "AutoScriptor/README.md"
 requires-python = ">=3.10,<3.11"
 license = { text = "See LICENSE" }
+authors = [{ name = "Kksp993" }]
+
+[project.urls]
+Repository = "https://github.com/kksp993/AutoScriptor"
 
 # 只列 AutoScriptor 自己 import 的第三方包；WebUI/游戏层/测试的依赖
 # （fastapi、uvicorn、cryptography、dpath、openpyxl…）不在这里，见 extras。

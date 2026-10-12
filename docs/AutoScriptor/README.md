@@ -35,6 +35,7 @@
 | OpenAI 多智能体示例 | [reference/openai-multi-agents.md](reference/openai-multi-agents.md) |
 | Nemu IPC 快速路径与实时闭环 | [reference/fast-path.md](reference/fast-path.md) |
 | MuMu 实时化调研（2026-09-29） | [reference/mumu-realtime-control-research.md](reference/mumu-realtime-control-research.md) |
+| 主机（Windows 桌面）键鼠控制 | [architecture.md](architecture.md)（「主机桌面控制边界」）、`AutoScriptor/control/DesktopControl/` |
 | 第三方资料 | [3rdparties/MumuAdaptor_README.md](3rdparties/MumuAdaptor_README.md) |
 
 在线截图/OCR 检查的入口与证据规范见 [docs/agents/online-screenshot-test.md](../agents/online-screenshot-test.md) 和 `.cursor/skills/autoscriptor-live-check/SKILL.md`。

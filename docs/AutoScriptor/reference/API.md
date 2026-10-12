@@ -67,12 +67,15 @@ from AutoScriptor import *
 | 定位/区域识别 | `locate`、`match`、`ui_T`、`ui_F`、`wait_for_appear`、`wait_for_disappear` |
 | OCR/提取颜色　| `extract_info`、`get_colors`、`coloris`　　　　　　　　　　　　　　　　　　|
 | 后台　　　　　| `bg`、`BG_SIGNALS`　　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
-| 配置/状态　　 | `cfg`、`logger`、`get_task_status`、`set_task_status`　　　　　　　　　　　|
+| 配置/日志　　 | `cfg`、`logger`、`log_flush`　　　　　　　　　　　　　　　　　　　　　　　|
 | 初始化/App　　| `init`、`launch_app`、`close_app`、`go_home`　　　　　　　　　　　　　　　|
 | 帧尺寸　　　　| `setFrameSize`、`getFrameSize`、`MUMU_SIZE_1280_720`、`MUMU_SIZE_720_1280` |
 | 错误　　　　　| `TaskRequireReTry`、`RequestHumanTakeover`　　　　　　　　　　　　　　　　 |
 
-`clear_task_status` 不是 `AutoScriptor.__all__` 公共导出；需要清理状态时从 `tasks.task_state` 导入。
+框架层的公共导出就是 `AutoScriptor.__all__` 里的那些（完整清单见
+[框架层 README](../../../AutoScriptor/README.md#公共-api)，`test/test_framework_public_api.py`
+会校验两边不漂移）。任务状态相关的 `get_task_status` / `set_task_status` / `clear_task_status`
+**都不在其中**，它们属于任务编写面，从 `tasks.task_state` 导入。
 
 独立设备脚本直接调用 `init()`；若目标是游戏盒等其他 App，不希望先拉起配置中的游戏，则调用 `init(launch_app=False)`，然后使用 `launch_app(package_name)`、`close_app(package_name)` 和 `go_home()`。不要从星号导入后长期保存 `mixctrl/mumu` 快照。
 

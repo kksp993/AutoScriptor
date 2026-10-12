@@ -135,12 +135,20 @@ class OCRManager:
         self._init_thread = threading.Thread(target=init_ocr, daemon=True)
         self._init_thread.start()
 
-    def wait_for_initialization(self, timeout=30):
+    # 冷启动要等够：第一次 OCR 之前要先 import Paddle 运行时并构造模型，CPU 变体在慢盘上
+    # 实测超过 30 秒（2026-10-12 独立安装探针：建好 venv 后第一次识别在 37 秒处超时）。
+    # 这里只是「等多久」，不是「算不算坏」：真正的初始化失败会写 initialization_error
+    # 并在下面直接抛出，所以等得久不会把故障伪装成正常。
+    INITIALIZATION_TIMEOUT_S = 120
+
+    def wait_for_initialization(self, timeout=None):
+        if timeout is None:
+            timeout = self.INITIALIZATION_TIMEOUT_S
         if self._init_thread and self._init_thread.is_alive():
-            logger.info("等待 PaddleOCR 引擎初始化...")
+            logger.info("等待 PaddleOCR 引擎初始化（最多 %s 秒）...", timeout)
             self._init_thread.join(timeout)
             if self._init_thread.is_alive():
-                logger.warning("PaddleOCR 引擎初始化超时")
+                logger.warning("PaddleOCR 引擎初始化超时（%s 秒）", timeout)
                 return False
         if self.initialization_error is not None:
             raise self.initialization_error

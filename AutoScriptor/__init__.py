@@ -181,8 +181,8 @@ __all__ = [
     "BgSignals",
     "mixctrl",
     "mumu",
-    "RequestHumanTakeover",
-    "TaskRequireReTry",
+    # 错误类整体来自 _ERROR_EXPORTS：上面单列过就会在 __all__ 里出现两次，
+    # 而 __all__ 是「对外公布这一部分 API」的清单，不该自相矛盾。
     *_ERROR_EXPORTS,
 ]
 

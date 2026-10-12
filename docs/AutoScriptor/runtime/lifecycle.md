@@ -50,7 +50,7 @@
 
 任务级 `debug` 只跳过调度器的自动登录、任务前重启和常规失败恢复，不跳过设备会话的基本就绪检查。重启设备的任务应先调用 `runtime_ctx.shutdown()` 释放旧 NemuIpc 和运行态引用，再重启 MuMu 并通过 `runtime_ctx.refresh()` 建立新会话。
 
-`LoginClient.HZ4399` 表示 4399 游戏盒而不是游戏客户端。它提交游戏盒账号密码后直接结束登录状态机，不等待游戏角色选择页的“进入游戏”，也不选择服务器或角色；`LoginClient.H4399` 等游戏客户端仍按原流程进入角色选择页。
+`LoginClient.HZ4399` 表示 4399 游戏盒而不是游戏客户端。它提交游戏盒账号密码后直接结束登录状态机，不等待游戏角色选择页的“进入游戏”，也不选择服务器或角色；`LoginClient.H4399` 等游戏客户端仍按原流程进入角色选择页。游戏盒的「登录」按钮忽略快速点击，必须用 700ms 长按提交（同点 swipe；2026-10-10 实机对照），见 `login._submit_login`。
 
 ## 通知生命周期
 
@@ -63,6 +63,8 @@ QQ 结果通知不属于设备生命周期：保存 `notify.qq` 只写全局配�
 - `DeviceFacade` 用于诊断页聚合 Manager、ADB、App、NemuIpc、OCR、UI Map 状态。
 - MuMuManager 负责低频生命周期命令；`version` 等命令失败但 ADB 可用时通常是 warning。
 - ADB 是点击、滑动、输入、按键、App 启停和包状态的稳定路径；高频输入优先直接走 `adb.exe`。
+- NemuIpc 的 `external_renderer_ipc.dll` 位置随 MuMu 版本变化（`shell/sdk` → `nx_device/12.0/shell/sdk` → `nx_device/15.0/...`），解析只在 `AutoScriptor/utils/mumu_discovery.py`：`nx_device/<Android 大版本>` 通配 + 版本号从大到小（新版本优先），回退 `nx_main/sdk`、`shell/sdk`；`nemu_connect` 只接受安装根，配成子目录会向上修正，配成上级目录（如 `...\Netease`）会按库位置反推回安装根；版本目录不会冒充安装根。限深查找只在与 MuMu 相关的目录里做，避免一路扫到盘根。新增 MuMu 版本时只改这一个模块，`NemuIpcImpl` 只消费结果。
+- NemuIpc 注入输入只在横屏 1280x720 下可靠；竖屏 720x1280 的 App（如 4399 游戏盒）注入点击会被吞掉（2026-10-10 实机对照：同一坐标 nemu 点击 20 次无反应、ADB 点击一次即生效）。竖屏任务在入口 `switch_base("mumu")` 走 ADB、`finally` 恢复 `nemu`；截图仍走 NemuIpc。
 - MuMu TCP ADB 地址（如 `127.0.0.1:16384`）不会因为 `adb start-server` 自动出现在 `adb devices`；`DeviceFacade` 在 `get-state` 失败时会先 `adb connect <adb_addr>` 并重试，再判断端口错误或设备未启动。
  - MuMu TCP ADB 地址（如 `127.0.0.1:16384`）不会因为 `adb start-server` 自动出现在 `adb devices`；`DeviceFacade` 在配置串号不是 `device` 时会先 `adb disconnect <adb_addr>` 再 `adb connect <adb_addr>` 并重试。已列出但状态为 `offline` 的 TCP 串号只做 `connect` 会回 `already connected` 却不恢复，必须 disconnect 后再 connect。
 - NemuIpc 仍是截图主路径。默认诊断不做截图探测；用户点击“截图探测”才检查该层。

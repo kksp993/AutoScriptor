@@ -432,6 +432,15 @@ def locate_on_screen(haystack_frame, targets, confidence=0.8, pf_boxes=None, col
         )
 
     if len(roi_dict) == 1:
+        if len(res) != len(targets):
+            # 识别失败时下游会返回空列表（``ocr()`` 出错就走这条路，例如 OCR 引擎还没就绪），
+            # 而不是与 targets 等长的表。照原样按角标取值会把它变成 IndexError，看起来像
+            # 定位代码出错，真正的原因（识别没跑成）反而只在日志里。这里收口成「全部未命中」。
+            logger.warning(
+                "识别结果行数 %s 与目标数 %s 不一致，按未命中处理：%s",
+                len(res), len(targets), [repr(item) for item in targets],
+            )
+            return [None] * len(targets)
         res = [[to_full_frame(box, pf_boxes[i]) for box in res[i]] for i in range(len(targets))]
 
     for i, boxes in enumerate(res):

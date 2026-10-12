@@ -29,11 +29,28 @@ if TYPE_CHECKING:
 
 class Mumu:
     def __init__(self):
+        self._require_configured_path("emu_path", "MuMuManager.exe")
+        self._require_configured_path("adb_path", "adb.exe")
+
+    @staticmethod
+    def _require_configured_path(key: str, executable: str) -> None:
+        """确认配置里的可执行文件路径可用。
+
+        分两种情况报错：**没配**（空值/占位）说明还没定位过模拟器，要给出可执行的做法；
+        **配了但不存在**说明装到了别处或被移动过，直接指出路径。混成一句「not found in 」
+        会让框架单独安装的人看不出该先做什么。
+        """
         from AutoScriptor.utils.app_config import cfg
-        if not os.path.exists(cfg["emulator"]["emu_path"]):
-            raise RuntimeError(f"MuMuManager.exe not found in {cfg['emulator']['emu_path']}")
-        if not os.path.exists(cfg["emulator"]["adb_path"]):
-            raise RuntimeError(f"adb.exe not found in {cfg['emulator']['adb_path']}")
+
+        configured = str(cfg["emulator"].get(key) or "").strip()
+        if not configured or configured.startswith("YOUR_"):
+            raise RuntimeError(
+                f"模拟器路径尚未配置（emulator.{key}）。请先自动定位："
+                f"AutoScriptor.utils.mumu_discovery.discover_mumu_setup()，"
+                f"或在 WebUI 的「模拟器连接」里点「自动定位 MuMu」，也可以手动填这一项。"
+            )
+        if not os.path.exists(configured):
+            raise RuntimeError(f"{executable} not found in {configured}")
 
     def select(self, vm_index: Union[int, list, tuple] = None, *args):
         """

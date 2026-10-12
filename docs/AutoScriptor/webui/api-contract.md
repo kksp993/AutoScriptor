@@ -162,7 +162,7 @@ Editor `execute-code` 的受限命名空间直接提供运行时全局角色对�
 
 `GET /api/editor/navigation-options` 只读取 `ZmxyOL.nav.envs` 已注册到 `mm` 的名称，不执行导航、识别或设备初始化。响应按注册顺序返回 `items: [{"name": "村庄", "locations": ["法相", "背包"]}]`；环境自身的同名根位置不重复列入 `locations`。导入或注册异常返回 `500 editor_navigation_options_failed`，前端不得把失败伪装成空菜单。
 
-MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和常见安装目录，并从安装目录推导 `mumu_folder`、`emu_path`、`adb_path`，可选探测已连接 ADB 设备。探测到设备后 `index` 按真实实例号落定，`adb_addr` 只在两种情况下跟随设备：值本身没信息量（空、`YOUR_` 占位、`:0` 结尾），或它恰好等于 `default_mumu_adb_addr(原 index)`——后者只是实例号的镜像，跟着新的实例号走才不会两个字段各说一个实例。手填地址（局域网主机、自定义端口、`localhost` 写法）与推导结果永不相等，照旧保留。`mumu_discovery` 是端口推导的唯一出处（`MUMU_ADB_BASE_PORT`/`MUMU_ADB_PORT_STEP`、`default_mumu_adb_addr`、`is_derived_adb_addr`），`orchestrator.projection` 从中导入而不是各存一份。运行热路径仍依赖已持久化配置，不能在任务执行时临时扫盘。
+MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和常见安装目录，并从安装目录推导 `mumu_folder`、`emu_path`、`adb_path`，可选探测已连接 ADB 设备。推导是版本自适应的（`AutoScriptor/utils/mumu_discovery.py` 是布局知识的唯一出处）：NemuIpc 库按 `nx_device/<Android 大版本>` 通配并从大到小取（MuMu 6.0 = 15.0、MuMu 5.0/12 = 12.0，未来新版本不用改代码），回退 `nx_main/sdk` 与旧的 `shell/sdk`；MuMuManager 认 `nx_main`（v5+）与 `shell`（v4 及更早）两代位置，adb 额外兼容 `vmonitor\bin\adb_server.exe`；安装根以含 `nx_main`/`nx_device` 子目录的那一级为准，配成子目录时向上修正、配成上级目录时按 NemuIpc 库的位置反推回安装根，版本目录不会冒充安装根，限深查找只在与 MuMu 相关的目录里做（不会一路扫到盘根）。探测到设备后 `index` 按真实实例号落定，`adb_addr` 只在两种情况下跟随设备：值本身没信息量（空、`YOUR_` 占位、`:0` 结尾），或它恰好等于 `default_mumu_adb_addr(原 index)`——后者只是实例号的镜像，跟着新的实例号走才不会两个字段各说一个实例。手填地址（局域网主机、自定义端口、`localhost` 写法）与推导结果永不相等，照旧保留。`mumu_discovery` 是端口推导的唯一出处（`MUMU_ADB_BASE_PORT`/`MUMU_ADB_PORT_STEP`、`default_mumu_adb_addr`、`is_derived_adb_addr`），`orchestrator.projection` 从中导入而不是各存一份。运行热路径仍依赖已持久化配置，不能在任务执行时临时扫盘。
 
 `POST /api/editor/save-custom-task` 请求体约定：
 
