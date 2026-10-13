@@ -143,14 +143,22 @@ def _diag_info(**extra) -> dict:
     return info
 
 
-def init():
+def init(*, start_emulator: bool = True, launch_app: bool = False):
     """Explicitly initialize environment and device controls.
 
     Must be called once before any API function (click, locate, ...) is used.
+
+    launch_app:
+        默认 False —— 只准备模拟器与设备控制，**不**拉起 ``app.app_to_start``
+        （造梦西游 OL）。需要游戏在前台的脚本/入口请显式传 ``launch_app=True``。
+    start_emulator:
+        默认 True —— 模拟器未运行时允许自动启动。
     """
     global mixctrl, mumu
     idx, addr, app = ensure_all_environment_ready()
-    mixctrl, mumu = ensure_app_running(idx, addr, app, start_emulator=True, launch_app=True)
+    mixctrl, mumu = ensure_app_running(
+        idx, addr, app, start_emulator=start_emulator, launch_app=launch_app
+    )
     # Propagate live references to package-level namespaces so that
     # ``from AutoScriptor import mixctrl`` picks up the real object
     # when the import happens *after* init().

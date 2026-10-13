@@ -214,7 +214,7 @@ def task(
 
 if __name__ == "__main__":
     try:
-        init()
+        init(launch_app=True)
         task()
     except Exception as e:
         traceback.print_exc()

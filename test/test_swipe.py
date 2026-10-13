@@ -25,7 +25,7 @@ def ensure_character(character_name:str):
 if __name__ == "__main__":
     try:
         # swipe(I("法宝-戮仙剑"),I("炼丹炉-进阶-添加装备"),duration_s=2)
-        init()
+        init(launch_app=True)
         ensure_server("兽神峰")
         ensure_character("可莉不知道哦")
 

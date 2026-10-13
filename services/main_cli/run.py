@@ -13,7 +13,7 @@ def run_cli_navigation():
     """CLI 主入口。"""
     # 1. 显式初始化设备控制（不再依赖 import 副作用）
     from AutoScriptor.core.api import init as _init_env
-    _init_env()
+    _init_env(launch_app=True)  # CLI 跑游戏任务：需要把 app_to_start 拉到前台
 
     # 1.5 将初始化后的运行时对象注册到 RuntimeContext
     from services.core.runtime_context import runtime_ctx

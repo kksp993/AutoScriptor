@@ -4,7 +4,7 @@ import traceback
 
 if __name__ == "__main__":
     try:
-        init()
+        init(launch_app=True)
         for i in range(10):
             ensure_in("联盟")
             ensure_in("村庄")

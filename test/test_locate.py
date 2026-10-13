@@ -15,7 +15,7 @@ if __name__ == "__main__":
     # print(locate(T("同意并登录",color="青色", box=Box(160,707,442,95))))
     # print(locate(T("仙盟",box=Box(16,30,924,400)), timeout=10, assure_stable=True))
     try:
-        init()
+        init(launch_app=True)
         # print(timeit(lambda: print(locate((I("悬浮窗-上",color="绿色"),I("悬浮窗-下",color="绿色"),I("悬浮窗-左",color="绿色"),I("悬浮窗-右",color="绿色")),timeout=1)), number=1))
         # print(timeit(lambda: print(locate((I("悬浮窗-上")),timeout=1)), number=1))
         print(timeit(lambda: print(click((T("登录", color="绿色")),timeout=1)), number=1))

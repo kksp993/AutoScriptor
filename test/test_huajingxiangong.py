@@ -67,7 +67,7 @@ def challenge_x(index:int):
 
 if __name__ == "__main__":
     try:
-        init()
+        init(launch_app=True)
         shop(1)
 
     except Exception as e:
