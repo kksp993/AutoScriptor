@@ -297,6 +297,18 @@ def launch_bot(
     return process.pid
 
 
+def ensure_bot_running(root: Path | None = None) -> bool:
+    """Start the local bot with its cached QQ session when it is not running."""
+    root = root or BOT_ROOT
+    if load_local_settings(root) is None or bot_is_running(root):
+        return False
+    account = remembered_account(root) or next(iter(cached_accounts(root)), "")
+    if not account:
+        return False
+    launch_bot(root, account=account)
+    return True
+
+
 def stop_bot(root: Path | None = None) -> bool:
     """Terminate the bot serving this installation. Returns whether it stopped.
 

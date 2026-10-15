@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import requests
-from starlette.requests import Request
+from fastapi import Request
 
 from backend.core import qq_bot
 from orchestrator.delivery import CharacterReports

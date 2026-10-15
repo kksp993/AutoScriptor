@@ -1,9 +1,12 @@
 """Accounts, characters, the dispatch queue and the credential unlock."""
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from backend.core import qq_bot
 from AutoScriptor.logging.logger import logger
 from AutoScriptor.utils.app_config import cfg
 from backend.webui.api_response import api_error, api_ok
@@ -377,6 +380,12 @@ async def verify_account_api(request: Request):
             status_code=400,
             content={"error": "账号中未找到角色，请先选择或创建角色"},
         )
+
+    if cfg.get("notify.qq.enabled", False):
+        try:
+            await asyncio.to_thread(qq_bot.ensure_bot_running)
+        except (OSError, ValueError) as error:
+            logger.warning("安全密码验证后自动启动 QQ 机器人失败: %s", error)
 
     old_tok = credential_unlock_from_request(request)
     revoke_credential_unlock(old_tok)

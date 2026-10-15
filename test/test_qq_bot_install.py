@@ -112,6 +112,40 @@ class TestLocalBotInstall(unittest.TestCase):
         # is not misled by a dead pid.
         self.assertFalse(qq_bot._pid_file(self.root).exists())
 
+    def test_ensure_bot_running_uses_the_remembered_quick_login_account(self):
+        with patch.object(qq_bot, "load_local_settings", return_value={"http_port": 3010}), \
+                patch.object(qq_bot, "bot_is_running", return_value=False), \
+                patch.object(qq_bot, "remembered_account", return_value="1480755330"), \
+                patch.object(qq_bot, "launch_bot") as launch:
+            self.assertTrue(qq_bot.ensure_bot_running(self.root))
+
+        launch.assert_called_once_with(self.root, account="1480755330")
+
+    def test_ensure_bot_running_is_noop_without_a_cached_account(self):
+        with patch.object(qq_bot, "load_local_settings", return_value={"http_port": 3010}), \
+                patch.object(qq_bot, "bot_is_running", return_value=False), \
+                patch.object(qq_bot, "remembered_account", return_value=""), \
+                patch.object(qq_bot, "cached_accounts", return_value=[]), \
+                patch.object(qq_bot, "launch_bot") as launch:
+            self.assertFalse(qq_bot.ensure_bot_running(self.root))
+
+        launch.assert_not_called()
+
+    def test_ensure_bot_running_does_not_start_a_second_process(self):
+        with patch.object(qq_bot, "load_local_settings", return_value={"http_port": 3010}), \
+                patch.object(qq_bot, "bot_is_running", return_value=True), \
+                patch.object(qq_bot, "launch_bot") as launch:
+            self.assertFalse(qq_bot.ensure_bot_running(self.root))
+
+        launch.assert_not_called()
+
+    def test_ensure_bot_running_is_noop_when_not_installed(self):
+        with patch.object(qq_bot, "load_local_settings", return_value=None), \
+                patch.object(qq_bot, "launch_bot") as launch:
+            self.assertFalse(qq_bot.ensure_bot_running(self.root))
+
+        launch.assert_not_called()
+
     def test_native_runtime_failure_is_not_accepted(self):
         with patch.object(qq_bot.subprocess, "run", return_value=Mock(
             returncode=1, stderr="wrapper.node: required DLL missing",
