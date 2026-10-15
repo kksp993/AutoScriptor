@@ -200,14 +200,15 @@ def _diag_info(**extra) -> dict:
 def init(
     *,
     start_emulator: bool = True,
-    launch_app: bool = True,
+    launch_app: bool = False,
     cancel_check: Callable[[], None] | None = None,
 ):
     """Explicitly initialize environment and device controls.
 
     Must be called once before any API function (click, locate, ...) is used.
-    ``launch_app=False`` connects to the configured emulator without launching
-    the configured game, which is useful for scripts that operate another app.
+    ``launch_app=False`` is the safe default: it connects to the configured
+    emulator without launching the configured game. Game scripts and runners
+    must explicitly pass ``launch_app=True`` when they own that lifecycle.
     """
     global mixctrl, mumu
     idx, addr, app = ensure_all_environment_ready()

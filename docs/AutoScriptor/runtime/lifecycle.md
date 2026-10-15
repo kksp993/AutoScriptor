@@ -21,6 +21,9 @@
 - WebUI 启动后只做静态服务、日志 WebSocket、任务注册和后台监控代理。
 - 后台初始化必须完成运行时上下文、任务重载和配置读取后才把 `/api/init-status` 标记为 `ready=true`；失败时保留 `ready=false` 和错误信息，不伪装成已完成。
 - 启动、刷新、普通轮询和默认诊断不应主动创建 `mixctrl/mumu`。
+- 公共 `AutoScriptor.core.api.init()` 默认只建立模拟器控制、不启动 `app_to_start`；游戏脚本
+  必须显式传 `launch_app=True`。不需要进入游戏的安全教育/设备实验 runner 应保持
+  `launch_app=False`，并显式选择 ADB 输入通道，避免误拉起游戏或误触业务页面。
 - 设备会话由明确需要实时设备的入口创建：任务执行、实时截图、遥控点击/滑动、无缓存定位、真实代码执行。
 - `RuntimeContext` 是唯一运行态对象中心，负责 `mixctrl`、`mumu`、`bg` 和兼容全局变量同步。
 - 长生命周期模块不要保存 `from AutoScriptor import *` 或 `from AutoScriptor import mixctrl` 得到的 `mixctrl/mumu` 快照；需要运行态对象时从 `runtime_ctx` 或 `AutoScriptor.core.api` 读取当前值。

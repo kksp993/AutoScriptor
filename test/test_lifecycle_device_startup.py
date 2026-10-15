@@ -999,6 +999,15 @@ class TestDeviceFacadeDiagnostics(unittest.TestCase):
 
 
 class TestEnsureAppRunningLifecycle(unittest.TestCase):
+    def test_init_defaults_to_connecting_without_launching_configured_app(self):
+        module = import_api_for_test()
+
+        with patch.dict(sys.modules, module.stub_modules):
+            module.init(start_emulator=True)
+
+        self.assertTrue(module.FakeMumu.selected.power.started)
+        self.assertEqual(module.FakeMumu.selected.app.launched, [])
+
     def test_init_can_connect_without_launching_configured_app(self):
         module = import_api_for_test()
         cancel_checks = []
