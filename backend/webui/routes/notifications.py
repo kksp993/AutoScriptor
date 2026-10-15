@@ -1,8 +1,9 @@
 """Notification channel: the QQ / OneBot sink for per-character run results."""
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Request
-from starlette.concurrency import run_in_threadpool
 
 from backend.core.qq_bot import local_installation_status, local_notification_settings
 from backend.webui.api_context import guard_runtime_idle
@@ -38,7 +39,7 @@ async def qq_save_settings(request: Request):
         return busy_response
     try:
         payload = await request.json()
-        version = await run_in_threadpool(orchestrator.tasks.save_qq_settings, payload)
+        version = await asyncio.to_thread(orchestrator.tasks.save_qq_settings, payload)
     except ValueError as error:
         return api_error(400, str(error), code="invalid_notify_config")
     except OSError:
@@ -50,12 +51,12 @@ async def qq_save_settings(request: Request):
 async def qq_test_settings(request: Request):
     try:
         payload = await request.json()
-        settings = await run_in_threadpool(
+        settings = await asyncio.to_thread(
             orchestrator.tasks.prepare_qq_settings, payload, require_target=True
         )
     except ValueError as error:
         return api_error(400, str(error), code="invalid_notify_config")
-    record = await run_in_threadpool(
+    record = await asyncio.to_thread(
         qq_notifier.deliver, settings,
         "AutoScriptor 测试通知\nQQ 结果通知已连接。这是测试消息，不代表真实任务执行。",
     )
@@ -95,8 +96,8 @@ async def qq_use_local_bot():
     if busy_response is not None:
         return busy_response
     try:
-        connection = await run_in_threadpool(local_notification_settings)
-        version = await run_in_threadpool(orchestrator.tasks.save_qq_settings, connection)
+        connection = await asyncio.to_thread(local_notification_settings)
+        version = await asyncio.to_thread(orchestrator.tasks.save_qq_settings, connection)
     except ValueError:
         return api_error(400, "本机机器人尚未完整安装，请运行 scripts\\install.bat qq", code="local_bot_invalid")
     except OSError:

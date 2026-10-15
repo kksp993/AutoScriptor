@@ -25,7 +25,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 os.environ.setdefault("AUTOSCRIPTOR_TESTING", "1")
 
-from starlette.requests import Request
+from fastapi import Request
 
 from backend.webui.routes import ops as ops_routes
 from backend.webui.security import hash_deploy_password, verify_deploy_password
