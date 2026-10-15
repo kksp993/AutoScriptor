@@ -5,7 +5,7 @@ from AutoScriptor import *
 
 HAS_SHIJIEDITU = ["村庄", "天庭", "极北", "极北村庄", "地狱", "洪荒遗境"]
 SHIJIEDITU_CANTO_DICT = {
-    "天庭": I("世界地图-天庭"),
+    "天庭": (T("庭", box=Box(429,126,80,87).margin()),I("世界地图-天庭")),
     "极北": I("世界地图-极北"),
     "地狱": T("炼狱"),
     "极北村庄": T("极北村庄"),

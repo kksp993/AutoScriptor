@@ -1,6 +1,32 @@
 from AutoScriptor import *
-from ZmxyOL.battle.character.hero import *
+from ZmxyOL.character.hero import *
 
+
+def _collect_bonus_rewards(expected: int):
+    expected = max(0, int(bg.signal("bonus_x", expected)))
+    if expected <= 1:
+        return
+
+    collected = 0
+    max_attempts = expected + 3
+    for _ in range(max_attempts):
+        if click(T("确定"), timeout=2, if_exist=True):
+            collected += 1
+            sleep(0.5)
+            continue
+
+        if click(I("极北-关卡奖励"), timeout=2, delay=1, if_exist=True):
+            sleep(1)
+            if click(T("确定", box=Box(546,481,188,83).margin()), timeout=5, if_exist=True):
+                collected += 1
+            sleep(0.5)
+            continue
+
+        if collected < expected:
+            logger.warning("关卡奖励入口/确认弹窗未出现，已领取 %s/%s，结束奖励处理", collected, expected)
+        break
+
+    click(B(1050, 60, 10, 10))
 
 
 @combo
@@ -12,9 +38,30 @@ def battle_task(
     bonus_x:int=0,
     cancel_on_failed:bool=True,
     flow_name: str | None = None,
+    check_pioneer: bool = False,
+    fight_pioneer: bool = False,
 ):
     bg.clear_signals()
     wait_for_disappear((I("加载中"), I("极北-加载中")))
+    if flow_name is None:
+        flow_name = getattr(self, "task_context_battle_flow", None) or "战斗循环"
+
+    def battle_fail_callback():
+        # 必须先 set try_exit，再执行耗时 click；否则 battle_loop 在点「取消」整段期间仍在战斗
+        switch_base("mumu")
+        logger.info("战斗失败")
+        if cancel_on_failed:
+            bg.set_signal(BG_SIGNALS.FAILED, True)
+            bg.set_signal(BG_SIGNALS.TRY_EXIT, True)
+            bg.set_signal("bonus_x", 0)
+            switch_base("mumu")
+            click(T("取消"), delay=4, repeat=3)
+        else:
+            switch_base("mumu")
+            click(T("确定"), delay=4, repeat=3)
+
+    bg.set_signal(BG_SIGNALS.TRY_EXIT, False)
+    bg.set_signal(BG_SIGNALS.FAILED, False)
     switch_base("nemu")
     with bg.scope("天庭通用战斗") as scope:
         scope.add(
@@ -22,61 +69,134 @@ def battle_task(
             identifier=(T(key="战斗-离开关卡"), T("倍战"), I(key="返回地图")),
             callback=lambda: [
                 logger.info("战斗结束"),
-                bg.set_signal("try_exit", True),
+                bg.set_signal(BG_SIGNALS.TRY_EXIT, True),
             ]
         )
-
-        def battle_fail_callback():
-            # 必须先 set try_exit，再执行耗时 click；否则 battle_loop 在点「取消」整段期间仍在战斗
-            switch_base("mumu")
-            logger.info("战斗失败")
-            bg.set_signal("Failed", True)
-            if cancel_on_failed:
-                bg.set_signal("try_exit", True)
-                bg.set_signal("bonus_x", 0)
-                bg.set_signal("failed", True)
-                switch_base("mumu")
-                click(T("取消"), delay=4, repeat=3)
-            else:
-                switch_base("mumu")
-                click(T("确定"), delay=4, repeat=3)
-
         scope.add(
             name="战斗失败",
             identifier=((T("198点券"), T("159点券"), T("复活"), T("取消"))),
             callback=battle_fail_callback,
         )
         sleep(0.5)
-        # 战斗结束不执行
-        if flow_name is None:
-            flow_name = getattr(self, "task_context_battle_flow", None) or "战斗循环"
         self.battle_loop(flow_name=flow_name)
+
     # bonus=0 不执行
-    if bg.signal("bonus_x", bonus_x) > 1:
-        _ = 0
-        while _ < bg.signal("bonus_x", bonus_x) or ui_T(I("极北-关卡奖励")):
-            _ += 1
-            click(I("极北-关卡奖励"), delay=1)
-            sleep(1)
-            click(T("确定"))
-        click(B(1050, 60, 10, 10))
+    _collect_bonus_rewards(bonus_x)
+
     switch_base("mumu")
     # 失败不执行
-    if not bg.signal("failed", False):
+    if not bg.signal(BG_SIGNALS.FAILED, False):
         if not crash_suddenly:
             self.travel()
             logger.info("到达最右侧")
             switch_base("nemu")
             if not has_loading_after_battle:
-                _home = T("回家", box=Box(29, 613, 77, 88).margin())
-                self.way_to_exit(until=_home, exit_loc=exit_loc)
+                self.way_to_exit(
+                    until=(
+                        T("回家", box=Box(29, 656, 77, 54).margin()),
+                        T("抽牌", box=Box(514,513,253,97)),
+                    ),
+                    exit_loc=exit_loc,
+                )
             else:
-                self.way_to_exit(until=(I("加载中"), I("极北-加载中"), T("还有")), exit_loc=exit_loc)
+                self.way_to_exit(
+                    until=(
+                        I("加载中"),
+                        I("极北-加载中"),
+                        T("抽牌", box=Box(514,513,253,97)),
+                    ),
+                    exit_loc=exit_loc,
+                )
         else:
-            wait_for_appear((I("返回地图"), T("回家", box=Box(29,613,77,88).margin())))
-            if ui_T((I("返回地图"),T("返回地图"))): click((I("返回地图"),T("返回地图")), until=lambda:ui_F((I("返回地图"),T("返回地图"))))
-    wait_for_appear(T("回家", box=Box(29,613,77,88).margin()))
+            wait_for_appear((I("返回地图"), T("回家", box=Box(29, 656, 77, 54).margin())))
+            if ui_T((I("返回地图"), T("返回地图"))):
+                click(
+                    (I("返回地图"), T("返回地图")),
+                    until=lambda: ui_F((I("返回地图"), T("返回地图"))),
+                )
+    wait_for_appear(T("回家", box=Box(29, 656, 77, 54).margin()))
     switch_base("mumu")
+
+    if not check_pioneer or bg.signal(BG_SIGNALS.FAILED, False):
+        return
+
+    bg.set_signal("pioneer_seen", False)
+    try:
+        with bg.scope("混沌先锋") as scope, bg.interval(0.25):
+            scope.add(
+                "短标记",
+                T("混沌先锋", box=Box(608, 494, 112, 47).margin()),
+                callback=lambda: [
+                    logger.info("检测到混沌先锋"),
+                    bg.set_signal("pioneer_seen", True),
+                ],
+                once=True,
+                throttle=0.2,
+            )
+            scope.add(
+                "自动进入",
+                (I("加载中"), I("极北-加载中")),
+                callback=lambda: [
+                    logger.info("混沌先锋自动进入"),
+                    bg.set_signal("pioneer_seen", True),
+                ],
+                once=True,
+                throttle=0.2,
+            )
+            if not bg.signal("pioneer_seen", False) and ui_T(
+                T("混沌先锋", box=Box(608, 494, 112, 47).margin()),
+                timeout=4,
+            ):
+                logger.info("检测到混沌先锋")
+                bg.set_signal("pioneer_seen", True)
+
+        if not bg.signal("pioneer_seen", False):
+            return
+
+        logger.info("进入混沌先锋副本")
+        wait_for_disappear((I("加载中"), I("极北-加载中")))
+        bg.set_signal(BG_SIGNALS.TRY_EXIT, False)
+        bg.set_signal(BG_SIGNALS.FAILED, False)
+        switch_base("nemu")
+
+        if fight_pioneer:
+            with bg.scope("混沌先锋副本") as scope:
+                scope.add(
+                    name="战斗结束",
+                    identifier=(T(key="战斗-离开关卡"), T("倍战"), I(key="返回地图")),
+                    callback=lambda: [
+                        logger.info("战斗结束"),
+                        bg.set_signal(BG_SIGNALS.TRY_EXIT, True),
+                    ]
+                )
+                scope.add(
+                    name="战斗失败",
+                    identifier=((T("198点券"), T("159点券"), T("复活"), T("取消"))),
+                    callback=battle_fail_callback,
+                )
+                sleep(0.5)
+                self.battle_loop(flow_name=flow_name)
+
+            if not bg.signal(BG_SIGNALS.FAILED, False):
+                wait_for_appear((I("返回地图"), T("回家", box=Box(29, 656, 77, 54).margin())))
+                if ui_T((I("返回地图"), T("返回地图"))):
+                    click(
+                        (I("返回地图"), T("返回地图")),
+                        until=lambda: ui_F((I("返回地图"), T("返回地图"))),
+                    )
+                wait_for_appear(T("回家", box=Box(29, 656, 77, 54).margin()))
+                switch_base("mumu")
+        else:
+            logger.info("当前关卡配置为不打混沌先锋，退出副本")
+            click(
+                T("退出", box=Box(1154, 33, 87, 70).margin()),
+                until=lambda: ui_T(T("确定", box=Box(658, 374, 142, 80).margin())),
+            )
+            click(T("确定", box=Box(658, 374, 142, 80).margin()))
+            wait_for_appear(T("回家", box=Box(29, 656, 77, 54).margin()))
+            switch_base("mumu")
+    finally:
+        bg.set_signal("pioneer_seen", False)
 
 @combo
 def heaven_draw_card_exit(self:Hero):
@@ -86,31 +206,43 @@ def heaven_draw_card_exit(self:Hero):
     click(B(Box(182,232,904,102)),repeat=3)
     sleep(1)
     click(B(Box(10,10,0,0)))
-    click(T("返回"),repeat=2)
-    wait_for_appear((T("我的队伍"), T("回家", box=Box(29,613,77,88).margin())))
-
-
+    click(T("返回", box=Box(0,538,720,38).margin()), until=lambda:ui_T((
+        T("我的队伍"),
+        T("回家", box=Box(29,656,77,54).margin()),
+        T("云中子", box=Box(692,258,78,32).margin()),
+        T("家", box=Box(20,605,93,96).margin()),
+        T("回家", box=Box(25,616,83,94).margin()),
+        T("九重天", box=Box(433,367,123,73).margin())
+    )))
 
 @combo
 def heaven_battle(
     self,
     exit_loc:float=100,
     flow_name: str | None = None,
+    exit_after_battle: bool = True,
 ):
-    """天庭战斗"""
+    """天庭战斗，可选择在战斗结束后是否自动离场。"""
+    def battle_failed_callback():
+        logger.info("检测到战斗失败")
+        bg.set_signal(BG_SIGNALS.FAILED, True)
+        bg.set_signal(BG_SIGNALS.PAUSE_BATTLE, True)
+        bg.set_signal(BG_SIGNALS.TRY_EXIT, True)
+
     try:
-        with bg.scope("天庭战斗") as scope:
+        # 战斗结束/抽牌窗口短，默认 bg 1.0s 一轮会慢半拍；这里临时加速到 0.1s 截新图 locate。
+        with bg.scope("天庭战斗") as scope, bg.interval(0.1):
             scope.add(
                 name="战斗结束",
-                identifier=I("战斗结束"),
+                identifier=(
+                    I("战斗结束"),
+                    T("抽牌", box=Box(514, 513, 253, 97)),
+                    T("站在这里", box=Box(0, 267, 1280, 91).margin()),
+                ),
                 callback=lambda: [
-                    bg.set_signal("Pause_battle", True),
+                    bg.set_signal(BG_SIGNALS.PAUSE_BATTLE, True),
                     logger.info("检测到战斗结束"),
-                    self.way_to_exit(until=(T("抽牌", box=Box(514,513,253,97)), T("还有")), exit_loc=exit_loc),
-                    self.heaven_draw_card_exit(),
-                    switch_base("mumu"),
-                    bg.set_signal("try_exit", True),
-                    sleep(4),
+                    bg.set_signal(BG_SIGNALS.TRY_EXIT, True),
                 ]
             )
             scope.add(
@@ -121,18 +253,48 @@ def heaven_battle(
                 ],
                 once=False
             )
+            scope.add(
+                name="战斗失败",
+                identifier=((T("198点券"), T("159点券"), T("复活"), T("取消"))),
+                callback=battle_failed_callback,
+            )
+
             if flow_name is None:
                 flow_name = getattr(self, "task_context_battle_flow", None) or "战斗循环"
-            self.battle_loop(flow_name=flow_name, battle_weight=2, delay=2)
+            self.battle_loop(flow_name=flow_name, delay=2)
+
+        if bg.signal(BG_SIGNALS.FAILED):
+            if not exit_after_battle:
+                logger.info("战斗失败后保留当前界面，交给调用方处理")
+                return self
+
+            click(T("取消", box=Box(487,377,135,79).margin()))
+            click(T("重新挑战", box=Box(791,596,234,94).margin()), until=lambda: ui_T(I("加载中")))
+            # 重置失败、暂停和退出信号，避免递归重试继承上一轮状态。
+            bg.set_signal(BG_SIGNALS.FAILED, False)
+            bg.set_signal(BG_SIGNALS.PAUSE_BATTLE, False)
+            bg.set_signal(BG_SIGNALS.TRY_EXIT, False)
+            return self.heaven_battle(exit_loc=exit_loc, flow_name=flow_name, exit_after_battle=exit_after_battle)
+
+        if not exit_after_battle:
+            logger.info("战斗结束后保留当前关卡，不自动离场")
+            return self
+
+        # 组队本里队友可能已经触发抽牌；看见抽牌就不再强行走出口。
+        if not ui_T(T("抽牌", box=Box(514,513,253,97)), timeout=1):
+            self.way_to_exit(until=T("抽牌", box=Box(514,513,253,97)), exit_loc=exit_loc)
+        self.heaven_draw_card_exit()
+        switch_base("mumu")
+        sleep(4)
     finally:
-        bg.set_signal("try_exit", False)
-        bg.set_signal("Pause_battle", False)
+        bg.set_signal(BG_SIGNALS.TRY_EXIT, False)
+        bg.set_signal(BG_SIGNALS.PAUSE_BATTLE, False)
 
 @combo
 def task(self, task_name:str):
     from ZmxyOL.battle.tasks import get_task_table
     from ZmxyOL.nav.api import ensure_in
-    from ZmxyOL.battle.character.hero import h
+    from ZmxyOL.character.hero import h
     ensure_in(*get_task_table(task_name)["location"])
     logger.info(f"===={task_name}====")
     box = Box(174,253+100*get_task_table(task_name)["idx"],930,75)

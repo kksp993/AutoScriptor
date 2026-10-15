@@ -1,4 +1,4 @@
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 from AutoScriptor import *
 from ZmxyOL.nav.map_manager import mm, path
 from .login import login
@@ -13,7 +13,7 @@ def way():
     from ZmxyOL.nav.api import ensure_in
     ensure_in(mm.get_region()[0])
     logger.debug(f"当前区域: {mm.get_region()[0]}==>世界地图")
-    click(I("导航-世界地图"), until=lambda: ui_T(I("世界地图-极北")))
+    click(I("导航-世界地图"), until=lambda: ui_T(I("世界地图-极北")) or ui_T(T("庭", box=Box(429,126,80,87).margin())))
     # mm.set_region("世界地图")
 
 def way(env_name: str):
@@ -33,6 +33,7 @@ def way():
     click(I("导航-挑战"))
     while ui_F(I("挑战-昆仑山")):
         swipe(B(1000, 300), B(700, 300), duration_s=0.5)
+        sleep(0.5)
     click(I("挑战-昆仑山"))
     wait_for_disappear(I("加载中"))
     wait_for_appear(T("夺回昆仑山"))
@@ -51,7 +52,7 @@ def way():
 "=======================    极北    ======================="
 @path("极北", "极北村庄")
 def way():
-    click(T("回家", box=Box(29,613,77,88).margin()))
+    click(T("回家", box=Box(29,656,77,54).margin()),until=lambda:ui_T(I("加载中")))
     wait_for_disappear(I("加载中"))
     wait_for_appear(I("极北村庄背景"))
     sleep(2)
@@ -77,7 +78,7 @@ def way():
 "=======================    村庄    ======================="
 @path(["天庭", "地狱"], "村庄")
 def way():
-    click(T("回家", box=Box(29,613,77,88).margin()))
+    click(T("回家", box=Box(29,656,77,54).margin()))
     wait_for_disappear(I("加载中"))
     mm.set_region("村庄")
     sleep(1)

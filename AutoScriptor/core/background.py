@@ -4,7 +4,7 @@ from functools import wraps
 from threading import Thread, RLock, Event, current_thread, get_ident
 import time
 from typing import Any, Callable, List
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 from AutoScriptor.core.targets import Target
 
 DEFAULT_INTERVAL = 1.0
@@ -19,18 +19,23 @@ class BgSignals:
     """Well-known signal names used by battle/task code.
 
     The values intentionally keep the legacy strings so existing scripts that
-    call bg.signal("try_exit") continue to work.
+    call bg.signal("try_exit") continue to work. The lowercase "failed"
+    spelling is canonicalized by BackgroundMonitor so old scripts read and
+    write the same state as current code.
     """
 
     TRY_EXIT = "try_exit"
     PAUSE_BATTLE = "Pause_battle"
     BUILTIN_ADVANCE = "_builtin_advance"
-    FAILED = "failed"
-    FAILED_LEGACY = "Failed"
+    FAILED = "Failed"
     EXIT = "Exit"
 
 
 BG_SIGNALS = BgSignals
+
+_SIGNAL_ALIASES = {
+    "failed": BG_SIGNALS.FAILED,
+}
 
 
 class BackgroundScope:
@@ -144,6 +149,7 @@ class BackgroundMonitor(Thread):
         self._stop_event = Event()
         self._in_callback = False  # 标记：是否正在执行某个常规 callback
         self._event_history: deque = deque(maxlen=50)  # 最近 50 条事件记录
+        self._last_warning_times: dict[str, float] = {}
         self._mutation_version = 0
         self._external_clear_protect_count = 0
         self._callback_thread_ids: set[int] = set()
@@ -157,6 +163,20 @@ class BackgroundMonitor(Thread):
     def get_event_history(self) -> List[str]:
         """返回最近的事件历史列表"""
         return list(self._event_history)
+
+    def _record_operational_error(self, key: str, message: str, exc: Exception, *, warn_interval: float = 30.0):
+        """Record device/OCR boundary failures without changing task control flow."""
+        self._record_event(f"{message}: {type(exc).__name__}: {exc}")
+        now = time.time()
+        warning_times = getattr(self, "_last_warning_times", None)
+        if warning_times is None:
+            warning_times = self._last_warning_times = {}
+        with self._lock:
+            last_warning_time = warning_times.get(key, 0.0)
+            if now - last_warning_time < warn_interval:
+                return
+            warning_times[key] = now
+        logger.warning("%s: %s", message, exc, exc_info=True)
 
     def _any_callback_eligible_for_scan(self, snapshot: list) -> bool:
         """本帧是否有至少一个回调已过 throttle、需要截图并 locate（否则不截屏，避免与主线程争 IPC）。"""
@@ -199,7 +219,8 @@ class BackgroundMonitor(Thread):
             try:
                 mc = _core_api.mixctrl
                 screenshot = mc.screenshot() if mc is not None else None
-            except Exception:
+            except Exception as exc:
+                self._record_operational_error("run_screenshot", "bg截图异常", exc)
                 screenshot = None
                 time.sleep(self._interval)
                 continue
@@ -236,7 +257,8 @@ class BackgroundMonitor(Thread):
             if pending and all_targets and screenshot is not None:
                 try:
                     boxes = _locate_all(tuple(all_targets), screenshot=screenshot, image_first=True)
-                except Exception:
+                except Exception as exc:
+                    self._record_operational_error("run_locate", "bg常规识别异常", exc)
                     boxes = [None] * len(all_targets)
 
                 for (name, info, _targets), (start, end) in zip(pending, offsets):
@@ -314,12 +336,14 @@ class BackgroundMonitor(Thread):
             try:
                 mc = _core_api.mixctrl
                 screenshot = mc.screenshot() if mc is not None else None
-            except Exception:
+            except Exception as exc:
+                self._record_operational_error("concurrent_screenshot", "bg并发截图异常", exc)
                 return
 
         try:
             boxes = _locate_all(tuple(all_targets), screenshot=screenshot, image_first=True)
-        except Exception:
+        except Exception as exc:
+            self._record_operational_error("concurrent_locate", "bg并发识别异常", exc)
             return
 
         for (name, info, _), (start, end) in zip(pending, offsets):
@@ -447,17 +471,33 @@ class BackgroundMonitor(Thread):
         if current_thread() is not self and self.is_alive():
             self.join()
 
+    def _canonical_signal_key(self, key: str):
+        """Map deprecated signal names to the single runtime storage key."""
+        return _SIGNAL_ALIASES.get(key, key)
+
+    def _drop_alias_signal_keys(self, canonical_key: str):
+        for alias_key, alias_target_key in _SIGNAL_ALIASES.items():
+            if alias_target_key == canonical_key and alias_key != canonical_key:
+                self._signals.pop(alias_key, None)
+
     def signal(self, key: str, default: Any = None):
+        canonical_key = self._canonical_signal_key(key)
         with self._lock:
-            return self._signals.get(key, default)
+            if canonical_key in self._signals:
+                return self._signals[canonical_key]
+            if canonical_key != key:
+                return self._signals.get(key, default)
+            return default
 
     def set_signal(self, key: str, value: Any):
+        canonical_key = self._canonical_signal_key(key)
         with self._lock:
-            old_value = self._signals.get(key, '<unset>')
-            self._signals[key] = value
+            old_value = self._signals.get(canonical_key, self._signals.get(key, '<unset>'))
+            self._signals[canonical_key] = value
+            self._drop_alias_signal_keys(canonical_key)
         if old_value != value:
-            logger.info('📡 signal %s: %s → %s', key, old_value, value)
-            self._record_event(f"signal {key}: {old_value} → {value}")
+            logger.info('📡 signal %s: %s → %s', canonical_key, old_value, value)
+            self._record_event(f"signal {canonical_key}: {old_value} → {value}")
         return value
 
     def wait_signal(

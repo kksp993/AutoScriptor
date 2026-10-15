@@ -1,7 +1,7 @@
 """
 协作式任务取消
 ==============
-与 services.core.task_manager.TaskManager._cancel_event 绑定后，
+与 orchestrator.task_manager.TaskManager._cancel_event 绑定后，
 在 locate/click/sleep 等热点路径中检查并抛出 TaskCancelled。
 """
 

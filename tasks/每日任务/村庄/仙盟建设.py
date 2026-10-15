@@ -1,0 +1,39 @@
+from ZmxyOL import *
+from AutoScriptor import *
+from AutoScriptor.logging.logger import logger
+
+@register_task(
+    description="完成仙盟建设并领取每日任务奖励。",
+    reschedule="daily",
+)
+def daily_alliance_task():
+    """完成仙盟建设+每日任务【仙盟建设1】。"""
+    logger.info("====仙盟贡献====")
+    ensure_in("仙盟")
+    sleep(1)
+    click(B(544,340,240,140))
+    click(T("议事"))
+    click(B(925,220,120,40))
+    click(T("确定",color="绿色"))
+    wait_for_appear(T("优秀建设"))
+    click(B(1200,30,30,30), until=lambda:ui_F(T("优秀建设")))
+    logger.info("====日常任务====")
+    sleep(2)
+    click(I("导航-任务"))
+    click(T("经典任务"))
+    click(T("日常任务"))
+    cnt = 0
+    while ui_F(T("仙盟建设1")) and cnt<5:
+        swipe(B(315,600),B(315,230),duration_s=0.3)
+        sleep(0.2)
+        cnt += 1
+    if ui_T(T("仙盟建设1")):
+        click(T("仙盟建设1"))
+        click(T("领取奖励"))
+    while ui_F(T("翡翠灵签任务")):
+        click(T("限时任务"))
+        sleep(0.5)
+    click(B(1200,30,30,30))
+    wait_for_appear(T("活跃任务"))
+    click(B(1200,30,30,30))
+

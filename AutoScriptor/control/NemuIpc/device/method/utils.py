@@ -5,6 +5,8 @@ import socket
 import time
 import typing as t
 
+# Initialize setuptools' distutils shim before legacy adbutils imports packaging.tags.
+import setuptools
 import uiautomator2 as u2
 import uiautomator2cache
 from adbutils import AdbTimeout
@@ -48,7 +50,7 @@ except ImportError:
     adbutils._device.BaseDevice.shell = shell
 
 from AutoScriptor.control.NemuIpc.base.decorator import cached_property
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 RETRY_TRIES = 5
 RETRY_DELAY = 3

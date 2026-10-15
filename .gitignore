@@ -16,10 +16,8 @@
 **/.mypy_cache
 **/.ruff_cache
 /.nuitka-cache
-# Nuitka 专用完整 Python venv（与 **/.venv 不同名，需单独忽略）
-/.venv-nuitka/
-# electron-builder 输出（与 **/dist 的「dist」目录名不同，需单独忽略）
-/dist_electron/
+
+/release_snapshots/
 # Nuitka 崩溃报告（本地排错）
 nuitka-crash-report.xml
 # Playwright / 调试截图（脚本目录）
@@ -28,20 +26,38 @@ nuitka-crash-report.xml
 **/.venv
 **/.env
 **/.env.local
-# Cursor：默认忽略插件/缓存，但跟踪协作用 rules（*.mdc）
+# Cursor：默认忽略插件/缓存，但跟踪协作用 rules（*.mdc）与项目 skill
 /.cursor/*
 !/.cursor/rules/
 !/.cursor/rules/**
+!/.cursor/skills/
+!/.cursor/skills/**
+# Agent 本机目录：共享规则放 docs/agents/，不要提交工具私有 skill/cache 目录
+/.codex/
+/.claude/
 /.playwright-mcp/
 # 忽略根目录下的 PNG 和 LOG 文件
 /*.png
 /*.log
+/main.js
 
 /output/
+/activity_analysis/
+/activity_lib/
+/news/
+/out/app/
+/dist_plain_portable/
+/dist_source_portable/
+/packaging/
 /errors/
 /examples/
 /logs/
+/data/config.json
 /data/accounts/*.json
+# 配置与账号的原子写临时文件：.{文件名}.{随机}.tmp。正常路径会被 os.replace 消费，
+# 进程在写入中途被终止时会残留；它们和 config.json 一样属于本机数据。
+/data/.*.tmp
+/data/accounts/.*.tmp
 /data/canvas_data/
 /data/logs/
 /config.json
@@ -50,14 +66,13 @@ nuitka-crash-report.xml
 /.gitadd*
 /docs/refs/
 **/node_modules
-webapp/.release-staging
-webapp/buildResources/icon.ico
+frontend/electron/.release-staging
+frontend/electron/buildResources/icon.ico
 /accounts/
 /custom_task/
 /battle_character/
 /.autoscriptor/
-docs/zmxy_codes.json
-docs/zmxy_gift_codes_rows.json
-docs/zmxy_redeem_codes_only_detail.txt
-docs/zmxy_redeem_codes_only.meta.txt
-docs/zmxy_redeem_codes_only.txt
+# 本地事故恢复/审计证据（可能含真实账号与凭据）：不提交
+/_recovery/
+docs/*.json
+packaging_dllhost/

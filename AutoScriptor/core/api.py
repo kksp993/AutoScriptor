@@ -1,27 +1,78 @@
 import os
-import sys
 import threading
 import time
-import traceback
-import getpass
-import cv2
-from typing import Callable
+from typing import Any, Callable, Iterable, Literal
 from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
-from AutoScriptor.core.control import MixControl
+from AutoScriptor.core.control import MixControl, ControlModeProxy
+from AutoScriptor.core.background import bg
 from AutoScriptor.core.targets import Target, B
-from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget,VLMTarget
-from AutoScriptor.core.locate_dispatch import has_handler, dispatch_locate
+from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget
 from AutoScriptor.recognition.ocr_rec import ocr_for_box
-from AutoScriptor.recognition.rec import get_box_color
-from AutoScriptor.utils.box import Box, b2p
-from AutoScriptor.utils.logger import setup_task_aware_logging
-from AutoScriptor.utils.tracer import save_debug_screenshot
-from AutoScriptor.utils.logger import logger, setup_logfile
+from AutoScriptor.recognition.locate import get_box_color
+from AutoScriptor.logging.recognition_trace import (
+    create_recognition_result,
+    record_recognition_result,
+)
+from AutoScriptor.core.box import Box, b2p
+from AutoScriptor.logging.tracer import save_debug_screenshot
+from AutoScriptor.logging.logger import logger, setup_logfile
 from AutoScriptor.utils.app_config import cfg
-from AutoScriptor.utils.app_package_resolve import resolve_app_to_start
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
-from AutoScriptor.utils.edit_img import launch_editor
 from AutoScriptor.utils.cancel import check_cancel_raise, cancellable_sleep, join_with_cancel, sleep_with_cancel
+
+
+# Package-name resolution is pluggable; register one with
+# set_app_package_resolver().
+_app_package_resolver: Callable[[Any, Callable[[], None] | None], str] | None = None
+
+
+def set_app_package_resolver(
+    resolver: Callable[[Any, Callable[[], None] | None], str] | None,
+) -> None:
+    """Register ``resolver(mumu, cancel_check) -> package_name``."""
+    global _app_package_resolver
+    _app_package_resolver = resolver
+
+
+def _resolve_app_package(mumu, cancel_check: Callable[[], None]) -> str:
+    """Resolve the package to launch, via the registered resolver when present.
+
+    Without a resolver only an explicit configured package can be used; an
+    empty or placeholder value fails visibly instead of guessing a channel.
+    """
+    if _app_package_resolver is not None:
+        return _app_package_resolver(mumu, cancel_check=cancel_check)
+
+    configured = str(cfg["app"].get("app_to_start") or "").strip()
+    if configured and not configured.startswith("YOUR_"):
+        return configured
+    raise RuntimeError(
+        "未配置可启动的游戏包名，且没有注册包名解析器（set_app_package_resolver）。"
+        "请在 data/config.json 设置 app.app_to_start，或注册一个解析器。"
+    )
+
+
+# Frame-size contract: reference assets, Box regions and tap coordinates are all
+# authored in 1280x720 landscape absolute pixels.
+MUMU_SIZE_1280_720 = (1280, 720)
+MUMU_SIZE_720_1280 = (720, 1280)
+EXPECTED_FRAME_SIZE = MUMU_SIZE_1280_720
+
+_configured_frame_size = EXPECTED_FRAME_SIZE
+
+
+def setFrameSize(frame_size: tuple[int, int]) -> None:
+    """Set the frame size used by regions whose bounds are implicit."""
+    global _configured_frame_size
+    if len(frame_size) != 2:
+        raise ValueError(f"frame_size 必须是 (宽, 高)，收到 {frame_size!r}")
+    _configured_frame_size = int(frame_size[0]), int(frame_size[1])
+
+
+def getFrameSize() -> tuple[int, int]:
+    """Return the frame size used by regions whose bounds are implicit."""
+    return _configured_frame_size
+
 
 def ensure_all_environment_ready():
     # 初始化编排器
@@ -32,7 +83,6 @@ def ensure_all_environment_ready():
     os.makedirs(log_dir, exist_ok=True)
     timestamp = datetime.now().strftime('%y%m%d_%H%M%S')
     setup_logfile(os.path.join(log_dir, f"[{timestamp}].log"))
-    setup_task_aware_logging()
     selected_emulator_index = cfg["emulator"]["index"]
     adb_addr = cfg["emulator"]["adb_addr"]
     app_to_start = cfg["app"]["app_to_start"]
@@ -43,38 +93,27 @@ def ensure_app_running(
     adb_addr,
     app_to_start,
     *,
-    start_emulator: bool | None = None,
-    launch_app: bool | None = None,
+    start_emulator: bool = True,
+    launch_app: bool = True,
     cancel_check: Callable[[], None] | None = None,
 ):
     """
     确保当前配置的 MuMu 实例可控制，并按需启动游戏。
 
     start_emulator:
-        True 表示执行链需要 MuMu，未运行时必须启动。None 兼容旧语义，
-        使用 cfg["app"]["auto_start"]。
+        True 表示执行链需要 MuMu，未运行时必须启动。
     launch_app:
-        True 表示启动/拉起 app_to_start。None 兼容旧语义，使用
-        cfg["app"]["auto_start"]。
+        True 表示启动/拉起 app_to_start。
     cancel_check:
         协作式取消检查；WebUI 停止按钮会通过它快速打断启动、解析和探测等待。
     """
     cancel_check = cancel_check or check_cancel_raise
-    if start_emulator is None:
-        start_emulator = bool(cfg["app"].get("auto_start", True))
-    if launch_app is None:
-        launch_app = bool(cfg["app"].get("auto_start", True))
 
     mumu_manager_path = cfg["emulator"]["emu_path"]
     logger.debug(
         "ensure_app_running: index=%s, adb=%s, app=%s, emu=%s, start_emulator=%s, launch_app=%s",
         selected_emulator_index, adb_addr, app_to_start, mumu_manager_path, start_emulator, launch_app,
     )
-    # 启动模拟器前必须恢复正常进程优先级。
-    # boost() 会将 Python 设为 HIGH_PRIORITY_CLASS，subprocess 子进程默认继承，
-    # MuMu Hypervisor 在高优先级下启动会误判权限 → "安卓设备无法启动"。
-    from AutoScriptor.utils.perf import unboost as _unboost
-    _unboost()
     mumu = Mumu().select(selected_emulator_index)
     cancel_check()
 
@@ -87,11 +126,20 @@ def ensure_app_running(
     if not is_running:
         raise RuntimeError("ensure_app_running: 模拟器启动失败")
 
-    # app_to_start 为空或未安装时由 resolve_app_to_start 枚举候选包并写回 config.json。
+    # MuMuManager may report a running process while its TCP ADB endpoint is
+    # still offline. Do not create controls or launch the app until the
+    # configured serial is connected and Android has completed booting.
+    logger.info("正在确认模拟器 ADB 与 Android 启动状态")
+    if not mumu.power.wait_until_android_ready(cancel_check=cancel_check):
+        raise RuntimeError(
+            f"ensure_app_running: ADB 设备 {adb_addr} 未就绪或 Android 启动未完成"
+        )
+
+    # app_to_start 为空或未安装时由 resolve_app_to_start 枚举候选包并写回 data/config.json。
     # 解析只在需要拉起应用时进行，避免 WebUI 初始化或纯设备探测误触 MuMuManager。
     if launch_app:
         cancel_check()
-        resolved = resolve_app_to_start(mumu, cancel_check=cancel_check)
+        resolved = _resolve_app_package(mumu, cancel_check)
         mumu.app.launch(resolved)
         cancel_check()
 
@@ -143,14 +191,28 @@ def _diag_info(**extra) -> dict:
     return info
 
 
-def init():
+def init(
+    *,
+    start_emulator: bool = True,
+    launch_app: bool = True,
+    cancel_check: Callable[[], None] | None = None,
+):
     """Explicitly initialize environment and device controls.
 
     Must be called once before any API function (click, locate, ...) is used.
+    ``launch_app=False`` connects to the configured emulator without launching
+    the configured game, which is useful for scripts that operate another app.
     """
     global mixctrl, mumu
     idx, addr, app = ensure_all_environment_ready()
-    mixctrl, mumu = ensure_app_running(idx, addr, app, start_emulator=True, launch_app=True)
+    mixctrl, mumu = ensure_app_running(
+        idx,
+        addr,
+        app,
+        start_emulator=start_emulator,
+        launch_app=launch_app,
+        cancel_check=cancel_check,
+    )
     # Propagate live references to package-level namespaces so that
     # ``from AutoScriptor import mixctrl`` picks up the real object
     # when the import happens *after* init().
@@ -159,9 +221,67 @@ def init():
     _pkg.mixctrl = mixctrl
     _pkg.mumu = mumu
     _core_pkg.mixctrl = mixctrl
+    _core_pkg.mumu = mumu
+
+
+def _require_mixctrl() -> MixControl:
+    if mixctrl is None:
+        raise RuntimeError("AutoScriptor 尚未初始化，请先调用 init()")
+    return mixctrl
+
+
+def launch_app(package_name: str) -> None:
+    """Launch an Android package through the active device session."""
+    _require_mixctrl().app.launch(package_name)
+
+
+def close_app(package_name: str) -> None:
+    """Close an Android package through the active device session."""
+    _require_mixctrl().app.close(package_name)
+
+
+def go_home() -> None:
+    """Return the active Android device to its home screen."""
+    _require_mixctrl().androidEvent.go_home()
+
+
+def _validate_timeout(timeout, caller: str) -> None:
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+        hint = ""
+        if isinstance(timeout, Target):
+            hint = "；多个目标请用 tuple/list 包起来，例如 wait_for_appear((T(...), T(...)))"
+        raise TypeError(
+            f"{caller} 的 timeout 必须是数字秒数，收到 {type(timeout).__name__}: {timeout!r}{hint}"
+        )
+
+
+def _validate_target(target, caller: str) -> None:
+    """裸 Box 不是识别目标：Box 是 namedtuple，会被当成多目标元组逐元素解析。
+
+    真实事故：任务里的 ``portrait()`` 返回裸 Box，``click(portrait(Box(...)))``
+    直到识别阶段才报 ``Unsupported target type: <class 'int'>``（第一个元素是坐标数字）。
+    在入口拦下，错误就直接出现在调用点。
+    """
+    if isinstance(target, Box):
+        raise TypeError(
+            f"{caller} 的 target 收到裸 Box({target})：Box 是 namedtuple，会被当成多目标"
+            "元组逐元素解析。要点击/识别一块区域请用 B(...) 包一层：B(Box(...)) 或"
+            " B(x, y, w, h)；只要文本或图片时用 T(...)/I(...)。"
+        )
+
+
+def _validate_swipe_duration(duration_s: float, caller: str) -> None:
+    if isinstance(duration_s, bool) or not isinstance(duration_s, (int, float)):
+        raise TypeError(
+            f"{caller} 的 duration_s 必须是数字秒数，收到 "
+            f"{type(duration_s).__name__}: {duration_s!r}"
+        )
+    if duration_s <= 0:
+        raise ValueError(f"{caller} 的 duration_s 必须大于 0，收到 {duration_s!r}")
 
 
 def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->int:
+    _validate_timeout(timeout, "ui_idx")
     target = [t for t in target]
     boxes = locate(target, timeout, assure_stable=False)
     if not first(boxes): return -1
@@ -169,6 +289,7 @@ def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->in
 
 
 def ui_T(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, *, screenshot=None)->bool:
+    _validate_timeout(timeout, "ui_T")
     boxes = locate(target, timeout, assure_stable=False, screenshot=screenshot)
     if isinstance(target, list):
         return full(boxes)
@@ -266,6 +387,73 @@ def _first_hit_path(boxes: list, target: Target|list[Target]|tuple[Target, ...])
     return None
 
 
+def match(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, *, screenshot=None) -> dict | None:
+    """
+    结构化匹配目标，沿用 locate 的组合语义，并返回命中细节。
+
+    target:
+        Target 表示查找单个目标。
+        tuple[Target, ...] 表示 OR，任一目标命中即成功。
+        list[Target] 表示 AND，全部目标命中才成功。
+    timeout:
+        最长等待秒数；0 表示只检查当前画面一次。
+    screenshot:
+        可传入固定截图帧，复用同一帧做定位，适合截图测试或批量识别。
+
+    返回:
+        None 表示未满足 target 对应的组合条件。
+        dict 表示匹配成功，常用字段如下：
+            all: 是否按 list 的 AND 语义匹配。
+            index: 扁平目标列表中的首个命中下标。
+            path: 目标结构中的嵌套位置，不是文件路径；如 (1, 0) 表示第 1 组里的第 0 个目标。
+            target: 首个命中的目标对象。
+            box: 首个命中的 Box。
+            boxes: 完整定位结果矩阵。
+    """
+    _validate_timeout(timeout, "match")
+    check_cancel_raise()
+    is_all_match = isinstance(target, list)
+    if isinstance(target, Target):
+        normalized_targets = [target]
+        target_for_paths = target
+    elif isinstance(target, (list, tuple)):
+        normalized_targets = target
+        target_for_paths = target
+    else:
+        raise TypeError(f"match 目标必须是 Target/list/tuple，收到 {type(target)!r}: {target!r}")
+
+    boxes = locate(
+        normalized_targets,
+        timeout,
+        assure_stable=False,
+        is_simplify=False,
+        screenshot=screenshot,
+    )
+    if not boxes:
+        return None
+    if is_all_match:
+        if not full(boxes):
+            return None
+    elif first(boxes) is None:
+        return None
+
+    matched_index = index(boxes)
+    flattened_targets = _flatten_target_paths(target_for_paths)
+    if 0 <= matched_index < len(flattened_targets):
+        matched_path, matched_target = flattened_targets[matched_index]
+    else:
+        matched_path, matched_target = (matched_index,), None
+    matched_box = first([boxes[matched_index]]) if matched_index >= 0 else None
+    return {
+        "all": is_all_match,
+        "index": matched_index,
+        "path": matched_path,
+        "target": matched_target,
+        "box": matched_box,
+        "boxes": boxes,
+    }
+
+
 def switch_base(base: str):
     if base == "mumu":
         mixctrl.switch_to_mumu()
@@ -273,6 +461,60 @@ def switch_base(base: str):
         mixctrl.switch_to_nemu()
     else:
         raise ValueError(f"Invalid base: {base}")
+
+
+def _current_control():
+    return mixctrl
+
+
+ctrl_nemu = ControlModeProxy("nemu", _current_control)
+ctrl_mumu = ControlModeProxy("mumu", _current_control)
+
+
+def _locate_targets_with_trace(
+    targets,
+    target_triples,
+    screenshot,
+    *,
+    frame_source: str | None = None,
+):
+    started_at = time.perf_counter()
+    resolved_frame_source = frame_source or (
+        "injected" if screenshot is not None else "live"
+    )
+    try:
+        boxes = mixctrl.locate(target_triples, screenshot=screenshot)
+    except Exception as error:
+        record_recognition_result(
+            create_recognition_result(
+                operation="locate",
+                success=False,
+                target=targets,
+                result=None,
+                started_at=started_at,
+                frame_source=resolved_frame_source,
+                frame=screenshot,
+                engine="locate_on_screen",
+                error=error,
+                metadata={"target_count": len(targets)},
+            )
+        )
+        raise
+
+    record_recognition_result(
+        create_recognition_result(
+            operation="locate",
+            success=first(boxes) is not None,
+            target=targets,
+            result=boxes,
+            started_at=started_at,
+            frame_source=resolved_frame_source,
+            frame=screenshot,
+            engine="locate_on_screen",
+            metadata={"target_count": len(targets)},
+        )
+    )
+    return boxes
 
 
 def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=None, image_first: bool = False)->list[list[Box]]:
@@ -289,49 +531,55 @@ def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=No
         elif isinstance(target, BoxTarget):
             return target.box, target.box, target.color
         else:
-            raise ValueError(f"Unsupported target type: {type(target)}")
-
-    dispatched: dict[int, Target] = {}
-    batch: list[tuple[int, Target]] = []
-    for i, tgt in enumerate(target):
-        if has_handler(type(tgt)):
-            dispatched[i] = tgt
-        else:
-            batch.append((i, tgt))
+            raise ValueError(
+                f"Unsupported target type: {type(target)}"
+                "；识别目标只能是 T()/I()/B() 的返回值（裸 Box 是 namedtuple，"
+                "会被当成多目标元组逐元素解析）"
+            )
 
     boxes: list[list[Box] | None] = [None] * len(target)
+    frame_source = "injected" if screenshot is not None else "live"
 
-    if batch:
-        if image_first:
-            img_items = [(idx, t) for idx, t in batch if isinstance(t, ImageTarget)]
-            rest_items = [(idx, t) for idx, t in batch if not isinstance(t, ImageTarget)]
+    if image_first:
+        img_items = [(idx, t) for idx, t in enumerate(target) if isinstance(t, ImageTarget)]
+        rest_items = [(idx, t) for idx, t in enumerate(target) if not isinstance(t, ImageTarget)]
 
-            if img_items:
-                img_triples = [genertate_source(t) for _, t in img_items]
-                frame = screenshot if screenshot is not None else mixctrl.screenshot()
-                img_boxes = mixctrl.locate(img_triples, screenshot=frame)
-                for j, (orig_idx, _) in enumerate(img_items):
-                    boxes[orig_idx] = img_boxes[j]
-                if first(boxes):
-                    return boxes
-                screenshot = frame
+        if img_items:
+            img_triples = [genertate_source(t) for _, t in img_items]
+            frame = screenshot if screenshot is not None else mixctrl.screenshot()
+            img_targets = [target_item for _, target_item in img_items]
+            img_boxes = _locate_targets_with_trace(
+                img_targets,
+                img_triples,
+                frame,
+                frame_source=frame_source,
+            )
+            for j, (orig_idx, _) in enumerate(img_items):
+                boxes[orig_idx] = img_boxes[j]
+            if first(boxes):
+                return boxes
+            screenshot = frame
 
-            if rest_items:
-                rest_triples = [genertate_source(t) for _, t in rest_items]
-                rest_boxes = mixctrl.locate(rest_triples, screenshot=screenshot)
-                for j, (orig_idx, _) in enumerate(rest_items):
-                    boxes[orig_idx] = rest_boxes[j]
-        else:
-            ordered_targets = [t for _, t in batch]
-            tgt_triples = [genertate_source(t) for t in ordered_targets]
-            batch_boxes = mixctrl.locate(tgt_triples, screenshot=screenshot)
-            for j, (orig_idx, _) in enumerate(batch):
-                boxes[orig_idx] = batch_boxes[j]
-
-    if dispatched:
-        frame = screenshot if screenshot is not None else mixctrl.screenshot()
-        for idx, tgt in dispatched.items():
-            boxes[idx] = dispatch_locate(tgt, frame)
+        if rest_items:
+            rest_triples = [genertate_source(t) for _, t in rest_items]
+            rest_targets = [target_item for _, target_item in rest_items]
+            rest_boxes = _locate_targets_with_trace(
+                rest_targets,
+                rest_triples,
+                screenshot,
+                frame_source=frame_source,
+            )
+            for j, (orig_idx, _) in enumerate(rest_items):
+                boxes[orig_idx] = rest_boxes[j]
+    else:
+        target_items = list(target)
+        target_triples = [genertate_source(target_item) for target_item in target_items]
+        return _locate_targets_with_trace(
+            target_items,
+            target_triples,
+            screenshot,
+            frame_source=frame_source,
+        )
 
     return boxes
 
@@ -344,7 +592,8 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
         timeout: 超时时间
         assure_stable: 是否保证稳定,如果为True，则每次定位都会保证稳定，直到找到目标或超时
     """
-    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
+    _validate_timeout(timeout, "locate")
+    _validate_target(target, "locate")
     check_cancel_raise()
     first_attempt = True
     _stable_retry = False
@@ -374,7 +623,6 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
                         _stable_retry = True
                     continue
             if first(boxes): return first(boxes) if is_simplify else boxes  # 确保返回单个Box或None
-            # if delta > 5 and cfg["llm"]["use_agent"]:
         # 超时未找到目标时，保存搜索失败截图
         if timeout >= 5:
             try:
@@ -421,12 +669,14 @@ def wait_for_appear(target: Target|tuple[Target, ...], timeout: float=30) -> Box
     """等待目标出现并返回 Box。超时抛 TimeoutError（与 wait_for_disappear 对称）。"""
     if not isinstance(target, (Target, tuple, list)):
         raise TypeError(f"wait_for_appear 期望 Target/tuple/list，收到 {type(target).__name__!r}: {target!r}")
+    _validate_timeout(timeout, "wait_for_appear")
     result = locate(target, timeout, assure_stable=False)
     if result is None:
         raise TimeoutError(f"wait_for_appear({target}) 超时 ({timeout}s)")
     return result
 
 def wait_for_disappear(target: Target|tuple[Target, ...], timeout: float=30)->bool:
+    _validate_timeout(timeout, "wait_for_disappear")
     locate(target, timeout=5, assure_stable=False)
     t = time.time()
     while locate(target, timeout=0, assure_stable=False) is not None:
@@ -444,14 +694,13 @@ def click(
         if_exist: bool = False,
         repeat: int = 1,
         delay: float = 0,
-        interval: float = 0,
+        interval: float | None = None,
         offset:tuple=(0,0), 
         resize:tuple=(-1,-1),
         until: callable = None,
         assure_stable: bool = True,
         save_screenshot: bool = True
 ):
-    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     """
     点击目标元素
     
@@ -471,7 +720,7 @@ def click(
         
         delay: 点击前延迟（秒），默认0
         
-        interval: 多次点击之间的间隔（秒），默认0
+        interval: 多次点击之间的间隔（秒）。普通点击默认0；click(..., until=...)未显式传入时默认0.5秒。
         
         offset: 点击位置偏移量 (x, y)，相对于定位到的Box左上角
             - 示例: offset=(120, 120) 表示在定位到的Box基础上，向右偏移120px，向下偏移120px
@@ -492,7 +741,7 @@ def click(
         
         assure_stable: 是否保证定位稳定，True时会连续两次定位结果一致才认为成功
         
-        save_screenshot: 是否在debug模式下保存点击截图（带标注），默认True
+        save_screenshot: 是否保存点击截图（带标注），默认True；与 debug 开关无关
     
     Returns:
         bool: 点击是否成功（如果if_exist=True且目标不存在，返回False）
@@ -516,13 +765,16 @@ def click(
         # 点击直到条件满足
         click(T("确定"), until=lambda: ui_F(T("确定")))
     """
+    _validate_target(target, "click")
     check_cancel_raise()
+    click_interval = 0 if interval is None else interval
+    until_interval = 0.5 if interval is None else interval
     if until:
         t = time.time()
-        click(target, long_click_duration_s, timeout=timeout, if_exist=False, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize,assure_stable=assure_stable)
+        click(target, long_click_duration_s, timeout=timeout, if_exist=False, repeat=repeat, delay=delay, interval=until_interval, offset=offset, resize=resize,assure_stable=assure_stable)
         while not until():
             check_cancel_raise()
-            click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize,assure_stable=assure_stable)
+            click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=until_interval, offset=offset, resize=resize,assure_stable=assure_stable)
             if time.time() - t > timeout:
                 try:
                     save_debug_screenshot(
@@ -535,7 +787,7 @@ def click(
     if isinstance(target, list): target = tuple(target)
     if isinstance(target, BoxTarget): box = target.box
     else:
-        box = locate(target, timeout if not if_exist else max(2, timeout) if timeout != 30 else 2, assure_stable)    # 至少2s
+        box = locate(target, timeout if not if_exist else max(1, timeout) if timeout != 30 else 2, assure_stable)    # 至少1s
     if if_exist and first(box) is None: return False
     if first(box) is None:
         try:
@@ -552,7 +804,7 @@ def click(
             mixctrl.long_click(*pt, duration=long_click_duration_s)
         else:
             mixctrl.click(*pt)
-        cancellable_sleep(interval)
+        cancellable_sleep(click_interval)
     if pt is None:
         return True
     if isinstance(target, BoxTarget):
@@ -564,6 +816,88 @@ def click(
     return True  
 
 
+def click_all(
+    target: Target,
+    *,
+    timeout: float = 30,
+    if_exist: bool = False,
+    delay: float = 0,
+    interval: float = 0,
+    offset: tuple = (0, 0),
+    resize: tuple = (-1, -1),
+    assure_stable: bool = True,
+    save_screenshot: bool = True,
+) -> int:
+    """Locate every occurrence of one target on a frame and click each once.
+
+    Unlike ``click(..., repeat=N)``, this function clicks each distinct match.
+    Matches are frozen before the first click and processed from top to bottom,
+    then left to right. The return value is the number of clicks performed.
+    """
+    if not isinstance(target, Target):
+        raise TypeError(f"click_all 期望单个 Target，收到 {type(target).__name__}: {target!r}")
+
+    _validate_timeout(timeout, "click_all")
+    check_cancel_raise()
+    effective_timeout = (
+        timeout
+        if not if_exist
+        else max(1, timeout) if timeout != 30 else 2
+    )
+
+    if isinstance(target, BoxTarget):
+        matched_boxes = [target.box]
+    else:
+        located_matrix = locate(
+            (target,),
+            timeout=effective_timeout,
+            assure_stable=assure_stable,
+            is_simplify=False,
+        )
+        matched_boxes = located_matrix[0] if located_matrix and located_matrix[0] else []
+
+    if not matched_boxes:
+        if if_exist:
+            return 0
+        try:
+            save_debug_screenshot(target, mixctrl.screenshot(), prefix="s", extra_info=_diag_info())
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"Click all {target} failed, for failed to locate target in {timeout} seconds"
+        )
+
+    ordered_boxes = sorted(matched_boxes, key=lambda matched_box: (matched_box.top, matched_box.left))
+    cancellable_sleep(delay)
+    pre_click_frame = (
+        mixctrl.screenshot()
+        if save_screenshot and not isinstance(target, BoxTarget)
+        else None
+    )
+    clicked_points = []
+    for matched_box in ordered_boxes:
+        check_cancel_raise()
+        clicked_point = b2p(matched_box, offset, resize)
+        mixctrl.click(*clicked_point)
+        clicked_points.append(clicked_point)
+        cancellable_sleep(interval)
+
+    if isinstance(target, BoxTarget):
+        _box_click_trace.extend(clicked_points)
+    elif pre_click_frame is not None:
+        prior_clicks = list(_box_click_trace)
+        _box_click_trace.clear()
+        save_debug_screenshot(
+            target,
+            pre_click_frame,
+            ordered_boxes[-1],
+            clicked_points[-1],
+            prefix="c",
+            prior_clicks=[*prior_clicks, *clicked_points[:-1]],
+        )
+    return len(clicked_points)
+
+
 def swipe(
         start_target: Target, 
         end_target: Target, 
@@ -572,7 +906,6 @@ def swipe(
         delay: float = 0,
         ensure_stable_after_swipe: bool = True,
     ):
-    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     check_cancel_raise()
     start_box = locate(start_target, 3) if not isinstance(start_target, BoxTarget) else start_target.box
     end_box = locate(end_target, 3, assure_stable=False) if not isinstance(end_target, BoxTarget) else end_target.box
@@ -583,8 +916,53 @@ def swipe(
         cancellable_sleep(duration_s)
     return True
 
+
+def swipe_precise(
+        start_target: Target,
+        end_target: Target,
+        *,
+        duration_s: float = 1,
+        delay: float = 0,
+        ensure_stable_after_swipe: bool = True,
+    ) -> bool:
+    """按确定的起止中心点执行滑动。
+
+    与 ``swipe`` 不同，此接口不会使用 ``b2p`` 的随机偏移，也不会经过
+    Nemu IPC 的随机贝塞尔轨迹。两个目标定位后取各自 Box 的中心点，最后
+    通过 MuMu ADB ``input swipe`` 发送，``duration_s`` 会精确转换为毫秒。
+    适合滑块、分页控件和其他对起止位置敏感的操作。
+    """
+    _validate_swipe_duration(duration_s, "swipe_precise")
+    check_cancel_raise()
+    start_box = (
+        locate(start_target, 3)
+        if not isinstance(start_target, BoxTarget)
+        else start_target.box
+    )
+    end_box = (
+        locate(end_target, 3, assure_stable=False)
+        if not isinstance(end_target, BoxTarget)
+        else end_target.box
+    )
+    if start_box is None or end_box is None:
+        raise RuntimeError(
+            f"Precise swipe {start_target} to {end_target} failed, "
+            "for failed to locate target"
+        )
+
+    start_point = start_box.center()
+    end_point = end_box.center()
+    cancellable_sleep(delay)
+    mixctrl.swipe_precise(
+        *start_point,
+        *end_point,
+        duration_s,
+    )
+    if ensure_stable_after_swipe:
+        cancellable_sleep(duration_s)
+    return True
+
 def input(text: str, target_field: Target|tuple[Target, ...] = None):
-    _ensure_boosted()  # 延迟 boost：只在首次真正使用 API 时才执行
     check_cancel_raise()
     if target_field:
         click(target_field)
@@ -595,54 +973,382 @@ def key_event(key_code: int):
     logger.info("Key event: {}".format(next((attr for attr in dir(AndroidKey) if attr.startswith("KEYCODE_") and getattr(AndroidKey, attr) == key_code), key_code)))
     mixctrl.key_event(key_code)
 
+def screenshot_region(box):
+    """只转换给定屏幕区域的快速截图（RGB、正向）。
+
+    ``box`` 为 ``(x, y, width, height)`` 或 ``Box``，使用与点击一致的屏幕
+    坐标（左上原点）。只对区域做颜色转换，适合「条子」类实时检测循环；
+    需要全帧时仍用 ``mixctrl.screenshot()``。
+    """
+    if isinstance(box, (tuple, list)):
+        box = Box(*box)
+    return mixctrl.screenshot_region(box)
+
+def finger_down(finger_id: int, x: float, y: float):
+    """按下 1..10 号手指（Nemu IPC 原生的多点触控通道）。"""
+    mixctrl.finger_down(int(finger_id), int(x), int(y))
+
+def finger_move(finger_id: int, x: float, y: float):
+    """移动已按住的手指（IPC 没有独立 move 事件：重复 down 即移动）。"""
+    mixctrl.finger_move(int(finger_id), int(x), int(y))
+
+def finger_up(finger_id: int):
+    """抬起 1..10 号手指。"""
+    mixctrl.finger_up(int(finger_id))
+
+def multi_finger_down(contacts):
+    """同时按下多根手指。
+
+    ``contacts`` 为 ``[(finger_id, x, y), ...]``；与逐个 ``click`` 不同，
+    每根手指的按下之间没有中间 up 事件，可表达双指同按/捏合起手。
+    """
+    normalized = [(int(finger_id), int(x), int(y)) for finger_id, x, y in contacts]
+    mixctrl.multi_finger_down(normalized)
+
+def release_all_fingers():
+    """兜底释放 1..10 号手指（不会抛错）；实时步骤的 ``finally`` 里调用。"""
+    mixctrl.release_all_fingers()
+
+
+REPLAY_MIN_FINGER_ID = 1
+REPLAY_MAX_FINGER_ID = 10
+_REPLAY_TOUCH_OPS = ("down", "move", "up")
+_REPLAY_COMMAND_OPS = ("command", "vcontrol")
+# 比这更短的等待直接 sleep；更长的等待分片，以便及时响应 WebUI 停止。
+_REPLAY_MIN_SLEEP_S = 0.002
+_REPLAY_SLEEP_SLICE_S = 0.005
+# 落后超过该值说明卡过，重新锚定时序而不是疯狂追赶。
+_REPLAY_REANCHOR_LAG_S = 0.5
+
+
+def _normalize_replay_event(event):
+    """把一条回放事件归一为 ``(t_ms, op, finger_id, nx, ny, payload)``。
+
+    同时接受三种来源，让生成的任务常量与工具侧事件流共用同一个回放器：
+    紧凑五元组 ``(t_ms, op, finger, nx, ny)``、dict（JSON 导出）、以及带同名
+    字段的对象（外部 ``mumuinner`` 项目 ``mmor_to_fast_replay.py`` 的 ``Event``，其归一化坐标
+    字段名为 ``x``/``y``）。``up`` 事件没有坐标，缺省按 0 处理。
+    """
+    if isinstance(event, dict):
+        t_ms = event.get("t_ms", 0)
+        op = event.get("op")
+        finger_id = event.get("finger")
+        nx = event.get("nx", event.get("x"))
+        ny = event.get("ny", event.get("y"))
+        payload = event
+    elif hasattr(event, "op"):
+        t_ms = getattr(event, "t_ms", 0)
+        op = event.op
+        finger_id = getattr(event, "finger", None)
+        nx = getattr(event, "nx", None)
+        ny = getattr(event, "ny", None)
+        if nx is None:
+            nx = getattr(event, "x", None)
+        if ny is None:
+            ny = getattr(event, "y", None)
+        payload = {
+            "cmd": getattr(event, "cmd", None),
+            "params": getattr(event, "params", {}),
+        }
+    else:
+        fields = tuple(event)
+        if len(fields) < 5:
+            raise ValueError(
+                f"replay 事件需要 (t_ms, op, finger, nx, ny) 五个字段，收到 {event!r}"
+            )
+        t_ms, op, finger_id, nx, ny = fields[:5]
+        payload = {}
+    return (
+        int(t_ms),
+        str(op),
+        finger_id,
+        0.0 if nx is None else float(nx),
+        0.0 if ny is None else float(ny),
+        payload,
+    )
+
+
+def _validate_replay_finger(finger_id, op: str, index: int) -> int:
+    """校验手指编号落在 IPC 支持范围内。
+
+    录制文件的槽位号与 IPC 的 ``finger_id`` 不是同一编号空间：``.mmor`` 实测
+    样本出现槽位 19/20，而最大并发只有 3 指。所以越界必须显式报错，由调用方
+    先做槽位→手指重映射；夹取或取模会静默把手势落到错误手指上。
+    """
+    if finger_id is None:
+        raise ValueError(f"replay 事件 #{index} ({op}) 缺少手指编号")
+    finger_id = int(finger_id)
+    if not (REPLAY_MIN_FINGER_ID <= finger_id <= REPLAY_MAX_FINGER_ID):
+        raise ValueError(
+            f"replay 事件 #{index} 的手指编号 {finger_id} 超出 IPC 支持范围 "
+            f"[{REPLAY_MIN_FINGER_ID}, {REPLAY_MAX_FINGER_ID}]；录制槽位号需先"
+            f"重映射为手指编号（见外部 mumuinner 项目 mmor_to_fast_replay.py 的 FingerPool）"
+        )
+    return finger_id
+
+
+def _resolve_replay_frame(frame_size, recording_size) -> tuple[int, int]:
+    """确定归一化坐标的目标分辨率，并拒绝跨方向缩放。"""
+    if frame_size is None:
+        frame_size = getFrameSize()
+    frame_width, frame_height = int(frame_size[0]), int(frame_size[1])
+    if frame_width <= 0 or frame_height <= 0:
+        raise ValueError(f"replay frame_size 非法: {frame_size!r}")
+    if recording_size is not None:
+        recording_width, recording_height = int(recording_size[0]), int(recording_size[1])
+        if (recording_width > recording_height) != (frame_width > frame_height):
+            raise ValueError(
+                f"录制分辨率 {recording_width}x{recording_height} 与运行分辨率 "
+                f"{frame_width}x{frame_height} 方向不一致；按轴独立缩放会得到错误"
+                f"落点，请在与运行方向一致的分辨率下重新录制"
+            )
+    return frame_width, frame_height
+
+
+def replay(
+    events: Iterable,
+    *,
+    speed: float = 1.0,
+    frame_size: tuple[int, int] | None = None,
+    recording_size: tuple[int, int] | None = None,
+    start_ms: int = 0,
+    end_ms: int | None = None,
+    on_command: Callable[[dict], None] | None = None,
+    cancel_check: Callable[[], None] | None = None,
+) -> int:
+    """按录制时序回放一条多点触控事件流，返回已执行的触摸事件数。
+
+    事件按 ``t_ms`` 升序排列，每条为 ``(t_ms, op, finger_id, nx, ny)``：
+    ``op`` 取 ``down`` / ``move`` / ``up``，``finger_id`` 为 1~10，``nx``/``ny``
+    是 0~1 归一化坐标（``up`` 时忽略）。**同一 ``t_ms`` 的多条事件即"多指同时"**，
+    因此一条扁平事件流就同时表达了多指与时序，不需要两套概念。
+
+    计时对齐绝对时间锚点而非逐条累加 sleep，长时间回放不会漂移；落后超过
+    0.5s 时重新锚定并告警。IPC 交付本身约 0.2ms，所以事件间的时间差就是你
+    给的时间差，不要为相邻事件再叠加人为 sleep 凑时序。
+
+    ``.mmor`` 的解析不属于本仓库：用外部 ``mumuinner`` 项目的 ``mmor_to_fast_replay.py`` 把录制
+    转成事件流（含槽位→手指重映射），本函数只负责回放。
+
+    Args:
+        events: 事件序列；元素可为五元组、dict 或带同名字段的对象。
+        speed: 倍速，>1 加速（等待与时序按比例压缩）。
+        frame_size: 归一化坐标的目标分辨率，默认取 ``getFrameSize()``。
+        recording_size: 录制分辨率 ``(宽, 高)``；与 ``frame_size`` 方向不一致时抛错。
+        start_ms: 只回放该时刻及之后的事件，用于分段调试。
+        end_ms: 只回放该时刻及之前的事件；``None`` 表示到结尾。
+        on_command: 处理 ``command`` / ``vcontrol`` 事件的回调；不给则跳过并记录一次。
+        cancel_check: 取消检查函数，默认 ``check_cancel_raise``。
+
+    Returns:
+        int: 已执行的触摸事件数。
+
+    Examples:
+        >>> EVENTS = [
+        ...     (0,   "down", 1, 0.50, 0.50),
+        ...     (0,   "down", 2, 0.70, 0.50),   # 同一 t_ms = 双指同按
+        ...     (120, "up",   1, 0.0,  0.0),
+        ...     (120, "up",   2, 0.0,  0.0),
+        ... ]
+        >>> replay(EVENTS, speed=1.5)
+        4
+    """
+    control = _require_mixctrl()
+    check = cancel_check or check_cancel_raise
+    if speed <= 0:
+        raise ValueError(f"replay speed 必须大于 0，收到 {speed!r}")
+    frame_width, frame_height = _resolve_replay_frame(frame_size, recording_size)
+    start_ms = int(start_ms)
+
+    anchor: float | None = None
+    pressed_fingers: set[int] = set()
+    executed_count = 0
+    skipped_command_count = 0
+    try:
+        for index, raw_event in enumerate(events):
+            t_ms, op, raw_finger_id, nx, ny, payload = _normalize_replay_event(raw_event)
+            if t_ms < start_ms:
+                continue
+            if end_ms is not None and t_ms > int(end_ms):
+                break
+            # 每个事件开头检查一次取消，这是唯一的检查点：事件本身足够密集，
+            # 不需要额外的循环前检查（多一次会让取消时机相对事件流前移一位）。
+            check()
+
+            if op in _REPLAY_COMMAND_OPS:
+                if on_command is not None:
+                    on_command(payload)
+                elif skipped_command_count == 0:
+                    logger.info("replay 跳过录制内嵌命令事件（未提供 on_command）")
+                skipped_command_count += 1
+                continue
+            if op not in _REPLAY_TOUCH_OPS:
+                raise ValueError(f"replay 事件 #{index} 的 op 非法: {op!r}")
+
+            finger_id = _validate_replay_finger(raw_finger_id, op, index)
+
+            # 绝对时间锚点：第一条事件立即执行，其余按录制时刻对齐。
+            offset_s = (t_ms - start_ms) / 1000.0 / speed
+            if anchor is None:
+                anchor = time.perf_counter() - offset_s
+            remaining_s = anchor + offset_s - time.perf_counter()
+            if remaining_s > _REPLAY_MIN_SLEEP_S:
+                sleep_with_cancel(remaining_s, check, chunk=_REPLAY_SLEEP_SLICE_S)
+            elif remaining_s < -_REPLAY_REANCHOR_LAG_S:
+                logger.warning(
+                    f"replay 落后 {-remaining_s * 1000:.0f}ms，重新锚定时序（事件 #{index}）"
+                )
+                anchor = time.perf_counter() - offset_s
+
+            if op == "up":
+                control.finger_up(finger_id)
+                pressed_fingers.discard(finger_id)
+            else:
+                point_x = min(max(0, int(round(nx * frame_width))), frame_width - 1)
+                point_y = min(max(0, int(round(ny * frame_height))), frame_height - 1)
+                if op == "down":
+                    control.finger_down(finger_id, point_x, point_y)
+                else:
+                    control.finger_move(finger_id, point_x, point_y)
+                pressed_fingers.add(finger_id)
+            executed_count += 1
+    finally:
+        # 只释放本次回放按住的手指：任务可能在回放之外异步按住别的手指，
+        # release_all_fingers() 会误伤。清理失败不得掩盖原始异常。
+        for finger_id in sorted(pressed_fingers):
+            try:
+                control.finger_up(finger_id)
+            except Exception as cleanup_error:
+                logger.warning(f"replay 清理手指 {finger_id} 失败: {cleanup_error}")
+
+    logger.info(
+        f"replay 完成: 执行 {executed_count} 个触摸事件"
+        + (f"，跳过 {skipped_command_count} 个命令事件" if skipped_command_count else "")
+        + f"，倍速 {speed}"
+    )
+    return executed_count
+
+
 def extract_info(
     target,
-    post_process: callable = None,
+    post_process: Callable[[Any], Any] | None = None,
     ensure_not_empty: bool = True,
     save_screenshot: bool = True,
     *,
-    digit_only: bool = False,
-    digital: bool | None = None,
+    mode: Literal["text", "img", "both"] = "text",
     ocr_ttl: float = 0.5,
     max_retries: int = 10,
     screenshot_frame=None,
-)->str|None:
-    """若传入 *screenshot_frame*（BGR ndarray），则在该帧上 OCR，且重试时不再刷新画面；
-    用于 Web 编辑器导入图片与模拟执行时与画布一致。未传入时仍每次重试从 mixctrl 截屏。"""
-    if digital is not None:
-        digit_only = bool(digital)
-    if digit_only:
-        from AutoScriptor.recognition.digit_rec import extract_digits
-        screenshot = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
-        res = extract_digits(screenshot, target)
-        if post_process:
-            res = post_process(res)
-        return res
+) -> Any:
+    """Extract OCR text or registered UI image keys from Box targets.
 
-    res = None
+    ``target`` may be one Box-like target, a row, or a two-dimensional grid.
+    Row and grid inputs preserve their original result shape. ``both`` checks
+    registered ``ui_map`` images first for each box and runs OCR only for image
+    misses. Supplying ``screenshot_frame`` keeps every recognition operation on
+    that fixed BGR frame.
+    """
+    supported_modes = {"text", "img", "both"}
+    if mode not in supported_modes:
+        raise ValueError(
+            f"Unsupported extract_info mode {mode!r}; expected one of {sorted(supported_modes)}"
+        )
+
+    from AutoScriptor.recognition.locate import (
+        BoxTargetLayout,
+        extract_registered_image_keys,
+    )
+
+    target_layout = BoxTargetLayout.from_target(target)
+
+    def contains_information(value: Any) -> bool:
+        if isinstance(value, (list, tuple)):
+            return any(contains_information(item) for item in value)
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        return True
+
+    started_at = time.perf_counter()
+    result = None
+    recognition_frame = None
+    attempt_count = 0
     last_ocr_at: float | None = None
-    for _ in range(max_retries):
+    last_post_process_error: Exception | None = None
+    for attempt_index in range(max_retries):
+        attempt_count = attempt_index + 1
         check_cancel_raise()
-        if last_ocr_at is not None:
+        needs_text_recognition = mode in {"text", "both"}
+        if needs_text_recognition and last_ocr_at is not None:
             wait = ocr_ttl - (time.monotonic() - last_ocr_at)
             if wait > 0:
                 cancellable_sleep(wait)
+
         screenshot = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
-        res = ocr_for_box(screenshot, target.box, ttl=ocr_ttl)
-        last_ocr_at = time.monotonic()
-        logger.debug(f"Extract info {target} raw_res: {res}")
+        recognition_frame = screenshot
+        flat_values: list[Any] = [None] * target_layout.box_count
+
+        if mode in {"img", "both"}:
+            image_result = extract_registered_image_keys(screenshot, target)
+            flat_values = target_layout.flatten_values(image_result)
+
+        if needs_text_recognition:
+            for target_index, target_box in enumerate(target_layout.flat_boxes):
+                if mode == "both" and flat_values[target_index] is not None:
+                    continue
+                flat_values[target_index] = ocr_for_box(screenshot, target_box, ttl=ocr_ttl)
+            last_ocr_at = time.monotonic()
+
+        raw_result = target_layout.restore_values(flat_values)
+        logger.debug("Extract info %s mode=%s raw_res: %s", target, mode, raw_result)
+        result = raw_result
         if post_process:
             try:
-                res = post_process(res)
-            except Exception as e:
-                logger.error(f"Extract info {target} failed, raw_res: {res}, for {e}")
+                result = post_process(raw_result)
+                last_post_process_error = None
+            except Exception as error:
+                result = None
+                last_post_process_error = error
+                logger.error(
+                    "Extract info %s mode=%s failed, raw_res: %s, for %s",
+                    target,
+                    mode,
+                    raw_result,
+                    error,
+                )
                 continue
-        if ensure_not_empty and isinstance(res, str) and len(res) == 0: continue
-        if res is not None: break
-    if save_screenshot and cfg["app"]["debug_mode"]:
-        dbg = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
-        save_debug_screenshot(target=target, screenshot=dbg, box=target.box, ocr_text=res, prefix="e")
-    return res
+
+        if not ensure_not_empty or contains_information(result):
+            break
+
+    record_recognition_result(
+        create_recognition_result(
+            operation="extract_info",
+            success=contains_information(result),
+            target=target,
+            result=result,
+            started_at=started_at,
+            frame_source="injected" if screenshot_frame is not None else "live",
+            frame=recognition_frame,
+            engine=mode,
+            error=last_post_process_error,
+            metadata={"mode": mode, "attempt_count": attempt_count},
+        )
+    )
+
+    # 与 c/s 一致：提取信息的标注帧属于决策点证据，不看 debug 开关，
+    # 由调用方用 save_screenshot=False 关闭。
+    if save_screenshot:
+        debug_screenshot = screenshot_frame if screenshot_frame is not None else mixctrl.screenshot()
+        save_debug_screenshot(
+            target=target,
+            screenshot=debug_screenshot,
+            box=target_layout.bounding_box,
+            ocr_text=result,
+            prefix="e",
+        )
+    return result
 
 def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), resize: tuple = (-1, -1))->list[str|None]:
     """
@@ -662,10 +1368,7 @@ def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), re
         for i in range(len(boxes)):
             if boxes[i]:
                 for j in range(len(boxes[i])):
-                    offset_tuple = (offset[0], offset[1], 
-                                  resize[0] if resize[0] != -1 else boxes[i][j].width,
-                                  resize[1] if resize[1] != -1 else boxes[i][j].height)
-                    boxes[i][j] = boxes[i][j] + offset_tuple
+                    boxes[i][j] = boxes[i][j] + {"offset": offset, "resize": resize}
     
     colors = [[] for _ in range(len(boxes))]
     for i in range(len(boxes)):
@@ -677,69 +1380,73 @@ def get_colors(targets: Target|tuple[Target, ...], *, offset: tuple = (0, 0), re
     logger.debug(f"get_colors {targets} colors: {colors}")
     return colors
 
+
+def coloris(targets: Target|tuple[Target, ...]|list[Target], color: str, timeout: float=0, *, offset: tuple = (0, 0), resize: tuple = (-1, -1))->bool:
+    """
+    判断目标区域颜色是否匹配，是 get_colors 的布尔快捷入口。
+
+    targets:
+        Target 表示判断单个目标区域。
+        tuple[Target, ...] 表示 OR，任一目标区域颜色匹配即返回 True。
+        list[Target] 表示 AND，全部目标区域颜色都匹配才返回 True。
+    color:
+        期望颜色名称，例如 "绿色"、"红色"、"灰色"；按 get_colors 返回值精确比较。
+    timeout:
+        最长等待秒数；0 表示只检查当前画面一次。
+    offset:
+        颜色采样区域相对定位 Box 的偏移量。
+    resize:
+        颜色采样区域大小；(-1, -1) 表示保持定位 Box 原大小。
+
+    返回:
+        True 表示颜色满足 targets 的组合语义，False 表示超时或不匹配。
+    """
+    _validate_timeout(timeout, "coloris")
+    if hasattr(targets, '__iter__') and not isinstance(targets, (list, tuple, str)):
+        targets = list(targets)
+    is_all_match = isinstance(targets, list)
+
+    def color_matches_once() -> bool:
+        color_matrix = get_colors(targets, offset=offset, resize=resize)
+        matched_by_target = []
+        for target_colors in color_matrix:
+            matched_by_target.append(any(color_value == color for color_value in target_colors))
+        return all(matched_by_target) if is_all_match else any(matched_by_target)
+
+    first_attempt = True
+    start_time = time.time()
+    while first_attempt or time.time() - start_time < timeout:
+        check_cancel_raise()
+        first_attempt = False
+        if color_matches_once():
+            return True
+        if timeout <= 0:
+            break
+        cancellable_sleep(0.5)
+    return False
+
 def sleep(seconds: float):
     cancellable_sleep(seconds)
 
-def edit_img():
-    launch_editor(mixctrl,is_screenshot=True) 
 
-def detect_floating_window(debug: bool = False) -> dict:
-    """
-    检测屏幕边缘的 4399 悬浮窗（基于 HSV 绿色边缘扫描，不依赖模板匹配）。
-    
-    Returns:
-        dict: {'found': bool, 'edge': str, 'box': Box, 'center': (x,y), ...}
-    """
-    from AutoScriptor.recognition.floating_window import detect_floating_window as _detect
-    screenshot = mixctrl.screenshot()
-    return _detect(screenshot, debug=debug)
-
-
-def dismiss_floating_window(max_retries: int = 1, debug: bool = False) -> bool:
-    """
-    检测并移除 4399 悬浮窗：检测到后将其滑动到屏幕中央触发设置面板，然后隐藏。
-    
-    Args:
-        max_retries: 最大重试次数（悬浮窗可能需要多次截图才能稳定检测到）
-        debug: 保存调试图像
-    
-    Returns:
-        bool: True 表示检测到并处理了悬浮窗，False 表示未检测到
-    """
-    from AutoScriptor.recognition.floating_window import detect_floating_window as _detect
-
-    for attempt in range(max_retries):
+def wait_for_signal(
+    signal: str,
+    expected: bool = True,
+    seconds: float = 0,
+    *,
+    timeout: float | None = None,
+    start: float | None = None,
+) -> bool:
+    start = time.time() if start is None else start
+    end = time.time() + max(seconds, 0)
+    while True:
         check_cancel_raise()
-        screenshot = mixctrl.screenshot()
-        result = _detect(screenshot, debug=debug)
-        if not result["found"]:
-            cancellable_sleep(0.3)
-            continue
-
-        logger.info(f"🔍 检测到悬浮窗: {result['edge']}边 {result['box']} (第{attempt+1}次)")
-
-        # 从悬浮窗位置滑到屏幕中央，触发悬浮窗设置面板
-        cx, cy = result["center"]
-        swipe(B(cx, cy, 10, 10), B(640, 650, 10, 10), duration_s=1)
-        cancellable_sleep(1)
-        click(B(740, 555, 10, 10))
-        cancellable_sleep(0.5)
-
-        verify = _detect(mixctrl.screenshot(), debug=debug)
-        if not verify["found"]:
-            logger.info("✅ 悬浮窗已隐藏")
+        now = time.time()
+        if timeout is not None and now - start > timeout:
+            raise RuntimeError(f"等待信号 {signal!r} 超时: {timeout}秒, 条件 {repr(expected)} 未满足")
+        if bool(bg.signal(signal, False)) is expected:
             return True
-
-        logger.warning(f"⚠️ 悬浮窗关闭后仍检测到: {verify['edge']}边 {verify['box']}")
-
-    return False
-
-_boosted = False
-def _ensure_boosted():
-    """延迟 boost：只在首次真正使用 API 时才执行性能优化。"""
-    global _boosted
-    if _boosted:
-        return
-    _boosted = True
-    from AutoScriptor.utils.perf import ABOVE_NORMAL_PRIORITY_CLASS, boost
-    boost(process_priority=ABOVE_NORMAL_PRIORITY_CLASS)  # 温和提升 Python 自身；不提升 MuMu，避免干扰其他程序
+        remaining = end - now
+        if remaining <= 0:
+            return False
+        sleep(min(0.05, remaining))

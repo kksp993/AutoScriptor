@@ -1,8 +1,10 @@
 from AutoScriptor import *
+from ZmxyOL.nav.envs.floating_window import dismiss_floating_window
 import getpass
+import time
 from dataclasses import dataclass
 from enum import Enum
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 # ── 通用页面路由器（可复用于登录、导航等多种页面流程） ──
 class LoginClient(Enum):
@@ -10,6 +12,7 @@ class LoginClient(Enum):
     UC = "com.zmxyol.union.uc"  # 9游
     DANGLE = "com.zmxyol.union.dn"
     VIVO = "com.sy4399.zmxyol.vivo"
+    HZ4399 = "com.m4399.gamecenter"
 
     @classmethod
     def all(cls):
@@ -113,6 +116,8 @@ class PageRouter:
         if not pages:
             raise RuntimeError(f"PageRouter: 没有适用于 {client.name} 的登录页面")
         markers = self._markers_for_pages(pages)
+        last_state = None
+        repeated = 0
         for step in range(max_steps):
             timeout = initial_timeout if step == 0 else step_timeout
             boxes = locate(markers, timeout=timeout, assure_stable=False, is_simplify=False)
@@ -120,6 +125,16 @@ class PageRouter:
             if result is None:
                 raise TimeoutError(f"页面检测超时 ({timeout}s)")
             state, handler = result
+            # 页面反复停在同一个状态，说明有东西在吞点击——最常见的是模拟器的系统模态框，
+            # 它挡着底下所有控件，handler 里的点击全部落空，状态自然不变。不处理的话会一直
+            # 重跑同一个 handler 直到 max_steps，最后报「超过最大步数」，指向的不是真因。
+            repeated = repeated + 1 if state == last_state else 0
+            last_state = state
+            if repeated >= 2:
+                repeated = 0
+                # 延迟导入：nav.api 与 nav.envs 相互引用，模块级导入会在这里拿到半成品。
+                from ZmxyOL.nav.api import dismiss_system_dialogs
+                dismiss_system_dialogs()
             ctx.prev_state = state
             name, tag = state
             logger.info(f"[PageRouter] {name}" + (f"[{tag}]" if tag else ""))
@@ -136,6 +151,7 @@ class LoginCtx:
     # 仅保存“入口传参”，不预先解密，实现到用时才解密
     account: str = None
     password: str = None
+    server_name: str = None
     character_name: str = None
     character_index: int = 0
     done: bool = False
@@ -186,7 +202,9 @@ def _fill_account_password(ctx_or_account, password = None):
         account, password = ctx.account, ctx.password
     else:
         account = ctx_or_account
-    click(B(611,220,26,26))
+    click(B(611,220,26,26));sleep(0.5)
+    click(B(611,220,26,26));sleep(0.5)
+    click(B(612,304,25,26));sleep(0.5)
     click(B(612,304,25,26))
     click(T("请输入手机号或用户名"), if_exist=True, timeout=5)
     input(account)
@@ -200,24 +218,65 @@ def _fill_account_password(ctx_or_account, password = None):
 
 def _handle_post_login_popups():
     """Dismiss popups that appear between login and character selection."""
-    click(T("同意并登录", color="青色", box=Box(160, 707, 442, 95)), if_exist=True, timeout=3)
+    click(T("登录", box=Box(23,487,674,62).margin()))
     click(T("授权并登录"), if_exist=True, timeout=3)
+    wait_for_appear(T("进入游戏", box=Box(543,586,190,62).margin()), timeout=10)
 
 
-def _select_character():
-    """在角色选择页进入游戏；服务器与角色名仅来自已加载的 cfg['game']（Web 验证或 load_config 已写入），此处不解析、不触发解密。"""
+# 游戏盒登录界面的标记。任一仍在屏幕上，就说明这次登录还没真正完成。
+_GAMECENTER_LOGIN_MARKERS = (
+    T("账号密码登录"),
+    T("手机号登录"),
+    T("账号登录"),
+    T("已阅读并同意"),
+)
+
+
+def _wait_for_gamecenter_login(timeout: float = 20) -> None:
+    """等 4399 游戏盒登录界面消失；没消失就当场说清楚是谁没成。
+
+    点过「登录」不等于登录成功：账号密码错误、需要短信/图形验证、按钮没吃到
+    点击，界面都会原地不动。以前这里直接宣布完成，于是任务带着登录页往下跑，
+    三十秒后在一个毫不相干的步骤上报「找不到目标」，真实原因被埋掉。
+    """
+    deadline = time.time() + timeout
+    while not ui_F(_GAMECENTER_LOGIN_MARKERS):
+        if time.time() >= deadline:
+            raise RuntimeError(
+                f"4399 游戏盒登录未完成：已提交账号密码并点击登录，登录界面在 {timeout:g} 秒后仍然存在。"
+                "请确认账号密码正确，且该账号登录不需要短信或图形验证码。"
+            )
+        sleep(1)
+
+
+def _finish_account_login(ctx: LoginCtx):
+    """按客户端结束账号登录；4399 游戏盒不进入游戏角色页。"""
+    if ctx.login_client() == LoginClient.HZ4399:
+        # 必须等登录界面真的消失再算完成，不能拿「点击已发出」当「登录已成功」。
+        _wait_for_gamecenter_login()
+        logger.info("4399游戏盒账号登录完成")
+        ctx.done = True
+        return
+    _handle_post_login_popups()
+
+
+def _select_character(ctx: LoginCtx):
+    """在角色选择页进入游戏；入口参数优先，未传时才读取 cfg。"""
     click(T("开心收下"), if_exist=True, timeout=3)
+    click(B(805,209,35,35))
     click(B(640, 575), if_exist=True)
 
     g = cfg["game"]
-    assert g.get("server_name") and g.get("character_name"), "请先配置服务器和角色"
-    ensure_server(g["server_name"])
-    ensure_character(g["character_name"])
+    server_name = ctx.server_name or g.get("server_name")
+    character_name = ctx.character_name or g.get("character_name")
+    assert server_name and character_name, "请先传入服务器和角色，或先配置服务器和角色"
+    ensure_server(server_name)
+    ensure_character(character_name)
 
     # 部分客户端，需要每次请求才给登录
     if first(get_colors(B(277,686,6,13))) != "绿色": click(B(277,686,6,13))
 
-    click(T("进入游戏", color="橙色"), timeout=10)
+    click(T("进入游戏", box=Box(543,586,190,62).margin()), timeout=10)
 
     if ui_T(T("确定"), 3):
         click(T("确定"))
@@ -239,12 +298,17 @@ def _select_character():
 _login = PageRouter()
 
 
-@_login.page("角色选择", T("进入游戏", color="橙色"))
+@_login.page("角色选择", T("进入游戏", box=Box(543,586,190,62).margin()))
 def _on_character_select(ctx):
-    _select_character()
+    if ctx.login_client() != LoginClient.HZ4399:
+        _select_character(ctx)
     ctx.done = True
 
-@_login.page("初始授权", T("已阅读并同意"), clients=LoginClient.H4399)
+@_login.page(
+    "初始授权",
+    T("已阅读并同意"),
+    clients=(LoginClient.H4399, LoginClient.HZ4399),
+)
 def _on_authorization(ctx):
     click(T("账号登录"), if_exist=True)
     click(T("已阅读并同意"))
@@ -252,28 +316,36 @@ def _on_authorization(ctx):
     click(T("授权并登录"), if_exist=True, timeout=3)
     click(T("添加账号"), if_exist=True, timeout=3)
     sleep(1)
+    click(T("账号登录"), if_exist=True, delay=1)
     if ui_T(T("请输入手机号或用户名"), 3) or ui_T(T("账号密码登录"), 3):
-        click(T("账号登录"), if_exist=True, delay=1)
         _fill_account_password(ctx)
-    _handle_post_login_popups()
+        _finish_account_login(ctx)
 
 
-@_login.page("账号密码登录", T("账号密码登录"), clients=LoginClient.H4399)
+@_login.page(
+    "账号密码登录",
+    T("账号密码登录"),
+    clients=(LoginClient.H4399, LoginClient.HZ4399),
+)
 def _on_password_login(ctx):
     _fill_account_password(ctx)
-    _handle_post_login_popups()
+    _finish_account_login(ctx)
 
 
-@_login.page("快速登录", T("手机号登录"), T("账号登录"), clients=LoginClient.H4399)
+@_login.page(
+    "快速登录",
+    T("手机号登录"),
+    T("账号登录"),
+    clients=(LoginClient.H4399, LoginClient.HZ4399),
+)
 def _on_quick_login(ctx):
+    # 全帧搜索，不要固定搜索区：同一次登录流程里「账号登录」会因为页面 tab 不同而上下
+    # 移动——「手机号验证登录」页上它整体比旧搜索区低约 24px，被裁掉后只剩几个像素落在
+    # 区内，OCR 识别不出，于是卡在这一步超时。本页的页面标记就是它，页面上必然存在且唯一。
     click(T("账号登录"))
     sleep(1)
-    if ui_T(T("账号密码登录"), 5) or ui_T(T("请输入手机号或用户名"), 5):
-        _fill_account_password(ctx)
-    else:
-        logger.warning("未能切换到账号密码页，尝试快速登录")
-        click(T("登录", color="绿色"), if_exist=True)
-    _handle_post_login_popups()
+    _fill_account_password(ctx)
+    _finish_account_login(ctx)
 
 # 当乐
 
@@ -341,6 +413,7 @@ def ensure_server(server_name:str):
         wait_for_appear(T("更换服务器", box=Box(532,110,217,38).margin()))
         while ui_F(T(server_name)):
             swipe(B(482,494), B(482,224))
+            sleep(0.5)
         click(T(server_name))
         cnt = 0
         while cnt < 10:
@@ -352,20 +425,25 @@ def ensure_server(server_name:str):
 
 def ensure_character(character_name:str):
     click(B(104,16,60,26))
-    if ui_F(T(character_name, box=Box(17,54,254,433).margin())):
+    for _ in range(2):
+        if ui_T(T(character_name, box=Box(21,54,260,465).margin()), timeout=2):
+            return click(T(character_name, box=Box(21,54,260,465).margin()))
         click(B(104,516,63,26))
-    if ui_F(T(character_name, box=Box(17,54,254,433).margin())):
-        raise Exception(f"角色{character_name}不存在,请检查账户服务器是否正确")
-    click(T(character_name, box=Box(17,54,254,433).margin()))
+    raise Exception(f"角色{character_name}不存在,请检查账户服务器是否正确")
 
 
 
 # ── 登录入口 ──
 def login(account: str = None, password: str = None,
           character_name: str = None, character_index: int = 0,
-          client: LoginClient = None):
-    """4399 登录全流程（页面状态机驱动）。仅在用到账密时才触发解密。"""
-    ctx = LoginCtx(account, password, character_name, character_index, client=client)
+          client: LoginClient = None, server_name: str = None):
+    """4399 登录全流程；server_name/character_name 仅覆盖本次调用，不写入配置。"""
+    ctx = LoginCtx(
+        account=account,
+        password=password,
+        server_name=server_name,
+        character_name=character_name,
+        character_index=character_index,
+        client=client,
+    )
     _login.run(ctx)
-
-

@@ -6,7 +6,7 @@
 from typing import Dict, Optional, Callable, Any, List
 import numpy as np
 from scipy.sparse.csgraph import floyd_warshall
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 
 
 

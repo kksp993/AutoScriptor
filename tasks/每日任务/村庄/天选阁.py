@@ -1,0 +1,105 @@
+from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import RequestHumanTakeover
+from ZmxyOL import *
+from AutoScriptor import *
+from AutoScriptor.logging.logger import logger
+
+
+def reset_task():
+    if extract_info(B(1053,581,213,48), lambda x: int(x.strip()[-1])==0):
+        logger.info("今日天选阁已通关")
+        return False
+    click(T("重置"))
+    click(T("确定"), until=lambda:ui_F(T("确定")))
+    sleep(2)
+    return True
+
+
+@register_task(
+    description="处理天选阁每日领取或挑战。",
+    reschedule="daily",
+)
+def task(
+    battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
+):
+    """【bug】云端模式暂不会自动操作，需要手动处理。"""
+    if cfg["weekday"] in [1,2,3,4]:
+        logger.info(f"今日{cfg['weekday']}为周一至周四，不进行天选阁任务")
+        return
+    ensure_in("村庄")
+    click(I("导航-挑战"))
+    click(T("天选阁"),repeat=1)
+    if ui_T(T("没有报名"),timeout=2):
+        logger.critical("没有报名天选阁，请下周再来！")
+        return
+    if ui_T(T("报名"),timeout=2):
+        click(T("报名"))
+        click(T("回家", box=Box(1,663,94,56).margin()))
+        wait_for_appear(T("天选阁"))
+        sleep(0.5)
+        click(B(60,680,30,30))
+        return
+    wait_for_appear(T("回家", box=Box(1,663,94,56).margin()))
+    sleep(1)
+    if ui_T(T("云端模式")):
+        logger.critical("AutoScriptor暂不支持天选阁云端模式，请手动操作！")
+        click(T("回家", box=Box(1,663,94,56).margin()))
+        wait_for_appear(T("天选阁"))
+        sleep(0.5)
+        click(B(1200,30,30,30))
+        raise RequestHumanTakeover("AutoScriptor暂不支持天选阁云端模式，请手动操作！")
+    not_finish = True
+    task_idx = -1
+    while not_finish:
+        if task_idx == -1:
+            task_arr = []
+            task_arr.extend(simple(get_colors((T(f"第{i}关") for i in (1,2,3)), offset=(120,120), resize=(80,80))))
+            swipe(B(800,300,),B(200,300))
+            task_arr.extend(simple(get_colors((T(f"第{i}关") for i in (4,5)), offset=(120,120), resize=(80,80))))
+            swipe(B(200,300,),B(800,300))
+            task_idx = 1
+            logger.info(f"当前关卡状态: {task_arr}")
+            if "灰色" in task_arr:
+                task_idx = task_arr.index("灰色")
+            else:
+                task_idx = len(task_arr)
+        else:
+            task_idx += 1
+        if task_idx > 5:
+            break
+        logger.info(f"准备开始第{task_idx}关")
+        swipe(B(800,300,),B(200,300)) if task_idx>3 else None
+        sleep(2)
+        # 第四关会卡，这造梦无敌了
+        if task_idx==4:
+            click(T("得分记录", box=Box(145,664,113,33).margin()))
+            wait_for_appear(T("得分记录", box=Box(493,29,292,73).margin()))
+            click(B(1028,39,38,45))
+        click(T(f"第{task_idx}关"), offset=(120, 120), resize=(80, 80))
+        if task_idx>5:
+            if not reset_task(): break
+            not_finish = False
+            continue
+        wait_for_appear(I("加载中"))
+        with bg.scope("天选阁") as scope:
+            scope.add(
+                name="战斗结束",
+                identifier=(T("胜利", box=Box(568,30,161,85).margin()),T("确定", box=Box(571,509,135,66).margin()),T("联赛排行"),T("回家")),
+                callback=lambda : [
+                    logger.info("战斗结束"),
+                    bg.set_signal(BG_SIGNALS.TRY_EXIT, True),
+                    bg.set_signal(BG_SIGNALS.FAILED, True),
+                    click(T("确定"),until=lambda:ui_F(T("确定"))),
+                    h.heaven_draw_card_exit(),
+                ],
+                once=True
+            )
+            h.set(True,3).battle_task(crash_suddenly=True)
+        if ui_T(T("恭喜本次通关，请重置或等待"),timeout=3):
+            click(T("确定"))
+            sleep(1)
+            if not reset_task(): break
+            not_finish = False
+    click(T("回家", box=Box(1,663,94,56).margin()))
+    wait_for_appear(T("天选阁"))
+    sleep(0.5)
+    click(B(1200,30,30,30))

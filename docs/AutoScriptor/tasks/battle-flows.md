@@ -1,0 +1,48 @@
+# 战斗职业与 Flow 维护说明
+
+当前战斗配招只使用 `data/character/` 里的职业脚本；旧 `ZmxyOL/assets/profiles/*.yaml` 资源已移除。
+
+## 当前结构
+
+| 位置 | 职责 |
+|------|------|
+| [`data/character/hero.py`](../../../data/character/hero.py) | 运行态 `Hero` 基类、`battle_loop` 外壳、职业注册表、`@flow`、`battle_plan` 接入 |
+| `data/character/<职业>.py` | 用户职业脚本；在文件里写 `profession = "<游戏职业>"` 完成注册。可注册的职业名见 `ZmxyOL/character/profession.py` 的 `GAME_PROFESSIONS` |
+| [`ZmxyOL/character/hero.py`](../../../ZmxyOL/character/hero.py) | 兼容入口，加载 `data/character/hero.py` |
+| [`ZmxyOL/character/plan.py`](../../../ZmxyOL/character/plan.py) | `BattlePlan` DSL：`first`、`at`、`every`、`combo` |
+| [`tasks/battle_task_params.py`](../../../tasks/battle_task_params.py) | 聚合 Hero `@flow` 注册，生成 `BattleFlowName` |
+| [`tasks/task_register.py`](../../../tasks/task_register.py) | 任务执行前加载当前职业，并注入 WebUI 选择的 `battle_flow` |
+
+## 生命周期
+
+1. 启动或导入任务参数时，`ensure_battle_heroes_loaded()` 扫描 `data/character/*.py`，跳过 `hero.py`，执行职业脚本。
+2. 职业类继承 `Hero` 并显式声明 `profession` 时，通过 `__init_subclass__` 写入 `_hero_registry`。
+3. 类上 `battle_plan("流程名")` 或 `@flow("流程名")` 注册 flow；WebUI 的 `BattleFlowName` 由 `get_registered_flows()` 聚合。
+4. 任务函数声明 `battle_flow: BattleFlowName` 时，`task_wrapper` 在任务体前调用 `get_battle_profile(h)`，按当前账号 `game.game_profession` 切换全局 `h` 的职业类。
+5. `resolve_battle_flow_for_profile()` 只允许当前职业可解析的 flow 生效；配置了其他职业的 flow 会回到任务默认 flow，避免借用错误职业的流程。
+6. `battle_loop()` 解析 flow，初始化信号和内置触发器，然后循环执行 flow；`TRY_EXIT`、超时、取消、暂停和前进信号决定退出或跳转。
+7. 热重载 `custom_task` 或 `character` 时，scheduler 调用 `reload_character_modules()`，清空注册表、恢复 `h` 为基类并重载职业脚本。
+
+## 编写规则
+
+- 新职业放在 `data/character/<name>.py`，继承 `Hero`，显式写 `profession`。
+- 普通循环优先用 `battle_plan()`，少写手动状态判断。
+- 需要定制连招时，实现 `combo_xxx()`，再在 plan 中 `.combo("xxx")`。
+- 需要职业默认战斗循环时，在类上定义 `default_battle_flow = battle_plan("战斗循环...")...`。
+- 需要限制任务可见范围时，使用 `battle_plan("流程名", task="任务路径叶名")` 或 `@flow(..., task=...)`。
+- 使用明确的 `battle_flow` 选择战斗流程；所选 flow 只有属于当前角色 `game.game_profession` 对应职业脚本时才会生效，不要再传旧 `battle_weight` 参数。
+- 当前角色 `game.game_profession` 找不到同名 `profession` 注册时，会使用 `default` 职业，这是保留的业务默认。
+- 全局默认 `战斗循环` / `竞技场循环` 必须由已注册职业提供；缺失会在任务参数导入时直接报错。
+- 天庭组队 `heaven_battle()` 中，`抽牌` 可见等同于战斗循环完成。该 bg scope 使用 `bg.interval(0.1)` 每 0.1 秒截新图并批量 locate，避免默认 1 秒轮询慢半拍；战斗结束回调只置位 `Pause_battle`/`try_exit`，战斗失败回调置位规范 `failed`、`Pause_battle` 和 `try_exit`，旧 `Failed` 信号由后台别名映射兼容。退出移动、抽牌收尾、取消复活和重新挑战必须在 `battle_loop()` 返回后的主线程顺序执行，避免 bg callback 异常阻断退出信号。调用方传 `exit_after_battle=False` 时，失败也不在 `heaven_battle()` 内递归重新挑战，而是保留 `failed` 状态返回给调用方处理。
+- `way_to_exit(until=...)` 使用 bg 监听出口迹象，主线程按“到最右侧 → 快速左移到出口附近 → 再注册 `战斗-离开标记` → 小步左移搜索 → 看到 `秒` 后原地驻留 → 未出去再向右微调”的节奏移动。退出位移用 `mumu` 长按，位移后切回 `nemu` 继续识别。`战斗-离开标记` 只表示站上出口倒计时点，`until` 必须是真正离开后的加载、回家或抽牌等完成状态，不要用 `还有`/`秒` 作为完成条件，也不要重新加入私有检测线程、`fast_until`、OCR 节流或 list/AND 特判。
+- 位移距离是按 `hero.speed_x` 换算的长按时长（`WUSHUANG_SPEED_1X` / `WUSHUANG_SPEED_3X`），`way_to_exit` 的搜索步长、等待与驻留时间也按倍速分支，因此 `hero.speed_x` 必须等于游戏当前真实倍速。场景强制降速时要先 `h.set(has_cd=..., speed_x=1)` 再移动，并在流程结束（`finally`）恢复原值；例：昆仑山玉虚殿内场会被压回 1 倍速、离开后才恢复，按 3 倍速时长按压只有约一半位移，会走不到出口并触发 `离开关卡 超时`。
+- 多轮关卡（如昆仑山）某一轮出错后不要整局重打：把「回地图 → 重进关卡 → 从下一轮继续」放在主线程的轮次循环里，bg 监控回调只置失败信号并请求 `try_exit`，不要在回调里直接切图或重进。入口段抽成可复用函数（如 `enter_kunlunshan()`），首次进入与出错重进共用同一入口，保证两条路径行为一致。失败那一轮在游戏内已消耗门票与进度（进度也已推进），所以恢复成功后要把轮次序号推进到下一轮（`round_idx += 1`），不要重打出错的那一轮；轮次序号只由主循环推进，场景回调（如玉虚殿）不得改它。恢复动作本身也可能失败，应在剩余额度内重试，额度用完才抛错。恢复次数必须有上限（如 `kunlunshan_battle(max_recoveries=...)`），避免设备/网络异常时无限重进；恢复路径也要复位 `try_exit`、`hidden` 等轮次信号。回调里的 `except` 必须让 `TaskCancelled`（`AutoScriptor.utils.cancel`）继续抛出，否则用户在 WebUI 点停止后脚本还会在地图上继续点击。
+- 极寒深渊、洪荒遗境这类会触发“混沌先锋”的新 boss 任务，通过 `battle_task(check_pioneer=True)` 打开通用收尾处理。是否挑战先锋属于每关用户配置：例如遗境副本在 `battle_config` 各行提供 `fight_pioneer`，任务层将该布尔值传给共享流程；不要传原副本名，也不要在先锋页面反向识别原副本。流程必须先按原关卡逻辑正常返回地图并看到“回家”，再开 4 秒短窗口检测 `T("混沌先锋", box=Box(608,494,112,47).margin())`；若短窗口内直接出现“加载中”也按自动进入处理。命中后按 `fight_pioneer` 挑战或退出，`pioneer_seen` 在收尾时复位，先锋本不再递归检测先锋。
+- 旧 YAML profile 和 `ZmxyOL/battle/skill/*` 不是当前实现入口；不要把新功能写回旧路径。
+
+## 排障入口
+
+- WebUI 下拉缺 flow：检查职业脚本是否在 `data/character/`、是否声明 `profession`、是否被 `ensure_battle_heroes_loaded()` 成功导入。
+- 选中的 flow 未执行：检查它是否属于当前职业；不属于时会回到任务默认 flow。
+- `battle_loop` 超时：这表示业务未达成退出条件，不等于函数执行成功；应检查 flow 是否能触发 `TRY_EXIT` 或任务后续状态。
+- 职业脚本更新后不生效：确认触发了 `custom_task`/`character` reload，或重启服务。

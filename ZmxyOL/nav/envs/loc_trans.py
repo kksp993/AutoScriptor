@@ -60,7 +60,7 @@ def way():
         from ZmxyOL.nav.api import ensure_in
         ensure_in("极北")
         ensure_in("炼器师")
-    click(T('炼器师'),until=lambda:ui_T(I('炼器炉')))
+    click(T('炼器师'),until=lambda:ui_T(T("+", box=Box(259,374,101,112).margin())))
     
 
 @path("背包", LOC_ENV)
@@ -112,3 +112,17 @@ for dst_loc in available_dst_locs:
         path(src_loc, dst_loc)(partial(way, dst_loc=dst_loc))
     path("荒古万界", dst_loc)(partial(way, dst_loc=dst_loc))
     path(dst_loc, "荒古万界")(lambda: mm.set_loc(mm.get_region()[0]))
+
+
+"=======================    荒古村庄    ======================="
+@path(LOC_ENV, "荒古村庄")
+def way():
+    click(T("回家", box=Box(29,656,77,54).margin()))
+    mm.set_loc("荒古村庄")
+
+def way(env_name: str):
+    click(I("导航-世界地图"), until=lambda: ui_T(I("世界地图-极北")))
+    mm.paths["世界地图", env_name]()
+
+for env_name in SHIJIEDITU_CANTO:
+    path("荒古村庄", env_name)(partial(way, env_name=env_name))

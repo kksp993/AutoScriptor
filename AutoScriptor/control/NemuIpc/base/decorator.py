@@ -35,7 +35,9 @@ class Config:
             def retire_ships(self, amount=None, rarity=None):
                 pass
         """
-        from MumuAdaptor.loggings.logger import logger
+        # 原为 vendored 包的 `MumuAdaptor.loggings.logger`，该模块在本仓库不存在；
+        # 这里改用项目 logger，避免调用 Config.when() 时 ModuleNotFoundError。
+        from AutoScriptor.logging.logger import logger
         options = kwargs
 
         def decorate(func):
@@ -153,7 +155,8 @@ def function_drop(rate=0.5, default=None):
         70% possibility:
         INFO | Click (1091,  628) @ REWARD_GOTO_MAIN
     """
-    from MumuAdaptor.loggings.logger import logger
+    # 同上：vendored 的 MumuAdaptor.loggings 不在本仓库，改用项目 logger。
+    from AutoScriptor.logging.logger import logger
 
     def decorate(func):
         @wraps(func)

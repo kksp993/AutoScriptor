@@ -5,7 +5,7 @@
 # @File : mumu.py
 # @Software: PyCharm
 import os.path
-from typing import Union
+from typing import TYPE_CHECKING, Union
 
 from AutoScriptor.control.MumuAdaptor.api.adb.Adb import Adb
 from AutoScriptor.control.MumuAdaptor.api.core.Core import Core
@@ -19,14 +19,12 @@ from AutoScriptor.control.MumuAdaptor.api.develop.androidevent import AndroidEve
 from AutoScriptor.control.MumuAdaptor.api.driver.Driver import Driver
 from AutoScriptor.control.MumuAdaptor.api.network.Network import Network
 from AutoScriptor.control.MumuAdaptor.api.permission.Permission import Permission
-from AutoScriptor.control.MumuAdaptor.api.screen.gui import Gui
 from AutoScriptor.control.MumuAdaptor.api.setting.setting import Setting
 from AutoScriptor.control.MumuAdaptor.utils import utils
 from AutoScriptor.control.MumuAdaptor.api.screen.screen import Screen
-from AutoScriptor.control.MumuAdaptor.api.screen.gui import Gui
 
-global gui
-gui = None
+if TYPE_CHECKING:
+    from AutoScriptor.control.MumuAdaptor.api.screen.gui import Gui
 
 
 class Mumu:
@@ -68,7 +66,7 @@ class Mumu:
         return self
 
     def generate_utils(self) -> utils:
-        return utils().set_vm_index(self.__vm_index).set_mumu_root_object(self)
+        return utils().set_vm_index(self.__vm_index)
 
     def all(self):
         """
@@ -212,15 +210,11 @@ class Mumu:
         return Adb(self.generate_utils())
 
     @property
-    def auto(self) -> Gui:
+    def auto(self) -> "Gui":
         """
             GUI自动化类
         :return:
         """
-        try:
-            import cv2
-            import pyscrcpy
-        except ImportError:
-            raise ImportError("if you want to use autoGui class, you should install opencv-python")
+        from AutoScriptor.control.MumuAdaptor.api.screen.gui import Gui
 
         return Gui(self.generate_utils())

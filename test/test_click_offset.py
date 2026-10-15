@@ -1,14 +1,58 @@
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
-from AutoScriptor.core.targets import T
-from AutoScriptor.utils.box import Box
+from AutoScriptor.core.targets import B, T
+from AutoScriptor.core.box import Box
 
 
 class ClickOffsetSemanticsTest(unittest.TestCase):
-    @patch("AutoScriptor.core.api._ensure_boosted")
+    @patch("AutoScriptor.core.api.cancellable_sleep")
     @patch("AutoScriptor.core.api.mixctrl")
-    def test_click_offset_does_not_move_locate_target_box(self, mock_ctrl, _mock_boost):
+    def test_click_all_clicks_every_match_in_visual_order(self, mock_ctrl, mock_sleep):
+        from AutoScriptor.core.api import click_all
+
+        target = T("领取", box=Box(900, 400, 120, 220))
+        mock_ctrl.locate.return_value = [[
+            Box(930, 520, 60, 30),
+            Box(940, 430, 60, 30),
+            Box(850, 430, 60, 30),
+        ]]
+
+        with patch("AutoScriptor.core.box.random.randint", return_value=0):
+            clicked_count = click_all(
+                target,
+                timeout=0,
+                interval=0.2,
+                assure_stable=False,
+                save_screenshot=False,
+            )
+
+        self.assertEqual(clicked_count, 3)
+        self.assertEqual(
+            mock_ctrl.click.call_args_list,
+            [call(880, 445), call(970, 445), call(960, 535)],
+        )
+        self.assertEqual(mock_sleep.call_args_list, [call(0), call(0.2), call(0.2), call(0.2)])
+
+    @patch("AutoScriptor.core.api.mixctrl")
+    def test_click_all_returns_zero_when_optional_target_is_absent(self, mock_ctrl):
+        from AutoScriptor.core.api import click_all
+
+        mock_ctrl.locate.return_value = [[]]
+
+        clicked_count = click_all(
+            T("领取"),
+            timeout=0,
+            if_exist=True,
+            assure_stable=False,
+            save_screenshot=False,
+        )
+
+        self.assertEqual(clicked_count, 0)
+        mock_ctrl.click.assert_not_called()
+
+    @patch("AutoScriptor.core.api.mixctrl")
+    def test_click_offset_does_not_move_locate_target_box(self, mock_ctrl):
         from AutoScriptor.core.api import click
 
         search_box = Box(1153, 184, 126, 50).margin()
@@ -17,7 +61,7 @@ class ClickOffsetSemanticsTest(unittest.TestCase):
         mock_ctrl.locate.return_value = [[found_box]]
         mock_ctrl.click = MagicMock()
 
-        with patch("AutoScriptor.utils.box.random.randint", return_value=0):
+        with patch("AutoScriptor.core.box.random.randint", return_value=0):
             click(
                 target,
                 timeout=0,
@@ -29,6 +73,25 @@ class ClickOffsetSemanticsTest(unittest.TestCase):
         triples = mock_ctrl.locate.call_args.args[0]
         self.assertEqual(triples[0][1], search_box)
         mock_ctrl.click.assert_called_once_with(125, 200)
+
+    @patch("AutoScriptor.core.api.cancellable_sleep")
+    @patch("AutoScriptor.core.api.mixctrl")
+    def test_click_until_omitted_interval_defaults_to_half_second(self, mock_ctrl, mock_sleep):
+        from AutoScriptor.core.api import click
+
+        click(B(10, 20, 1, 1), until=lambda: True, timeout=1)
+
+        self.assertIn(call(0.5), mock_sleep.call_args_list)
+
+    @patch("AutoScriptor.core.api.cancellable_sleep")
+    @patch("AutoScriptor.core.api.mixctrl")
+    def test_plain_click_and_explicit_zero_interval_stay_zero(self, mock_ctrl, mock_sleep):
+        from AutoScriptor.core.api import click
+
+        click(B(10, 20, 1, 1))
+        click(B(10, 20, 1, 1), until=lambda: True, timeout=1, interval=0)
+
+        self.assertNotIn(call(0.5), mock_sleep.call_args_list)
 
 
 class BoxOffsetCompatibilityTest(unittest.TestCase):

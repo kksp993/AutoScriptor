@@ -10,10 +10,11 @@
 """
 
 from AutoScriptor import *
+import AutoScriptor.core.api as _core_api
 from AutoScriptor.core.api import ui_idx
 from ZmxyOL.nav.envs.decorators import LOC_ENV
 from .map_manager import mm
-from AutoScriptor.utils.logger import logger
+from AutoScriptor.logging.logger import logger
 from typing import Any, Callable
 
 def _flatten_identifiers(idfs: list[Any]) -> tuple[list[Any], list[list[Any]]]:
@@ -55,11 +56,8 @@ def check_env_idx(env_list: list[str]) -> int:
 
 def locate_region(cnt = 0, check_only = False) -> tuple[str, str]:
     if cnt == 0:
-        try:
-            mixctrl.app.launch(cfg["app"]["app_to_start"])
-            sleep(2)
-        except Exception:
-            pass
+        _core_api.mixctrl.app.launch(cfg["app"]["app_to_start"])
+        sleep(2)
     """
         按优先级检查当前位置
     """
@@ -78,13 +76,17 @@ def locate_region(cnt = 0, check_only = False) -> tuple[str, str]:
         return mm.set_region(list(mm.envs.keys())[idx])
     
     logger.debug("# 1.4 检查所有loc")
-    idx = check_loc_idx(mm.locs.keys())
+    loc_names = list(mm.locs.keys())
+    idx = check_loc_idx(loc_names)
 
-    if check_only: return "当前位置未知, 请自行判断下一步并尝试再次调用，请先根据当前的图像一步步关闭窗口，直至没有返回或关闭，再调用本工具"
     if idx >= 0:
-        print(list(mm.locs.keys())[idx])
-        loc = mm.locs[list(mm.locs.keys())[idx]]
+        loc_name = loc_names[idx]
+        logger.debug("定位命中位置: %s", loc_name)
+        loc = mm.locs[loc_name]
         return mm.set_region(loc.envs[0].name, loc.name)
+    # 「未知」必须放在判定之后：否则第 1.4 步明明认出来了也报未知，
+    # 错误归档会拿到一条假阴性。
+    if check_only: return "当前位置未知"
     if cnt % 2 == 0:
         try_close_via_x()
     if cnt > 10:
@@ -112,6 +114,61 @@ def ensure_in(tar_loc: str|list[str], idx:int|None|list[int]=None):
 
 
 
+# 会吞掉所有触控的系统模态框。锚点必须是弹窗独有的字串——不要用通用「确定」：
+# 游戏里到处都是它，拿它当锚点会去点正常的确认弹窗。
+_SYSTEM_DIALOG_ANCHORS = ("App启动超时", "App启动失败")
+# MuMu 的系统框居中弹出，按钮在最后一行文字正下方、和窗口同一条中轴线上。
+# 这两个数值是 2026-10-02 在 1280x720 实机上量出来的。
+_SYSTEM_DIALOG_BUTTON_GAP = 35
+_SYSTEM_DIALOG_BUTTON_SIZE = (80, 45)
+
+
+def dismiss_system_dialogs() -> bool:
+    """点掉会吞掉点击的系统模态框，返回是否点掉了一个。
+
+    MuMu 在应用启动失败时弹的「App 启动失败 / 启动超时」是**模态**的：不点掉它，
+    屏幕上任何点击都到不了游戏，任务表现为「页面一直不变」然后超时。2026-10-02
+    有一轮 52 个任务因为这个弹窗连续失败，报错还都指向各自的第一步。
+
+    只搜屏幕中央区域：这类框由模拟器居中弹出，而全帧 OCR 每次要多花好几秒，
+    这段代码跑在「已经卡住」的恢复路径上，不值得为边缘位置付这个代价。
+    """
+    frame_width, frame_height = getFrameSize()
+    center_region = Box(
+        int(frame_width * 0.15), int(frame_height * 0.15),
+        int(frame_width * 0.7), int(frame_height * 0.7),
+    )
+    # 所有锚点共用同一个搜索区，所以只做一次 locate：OCR 只跑一遍。分开查的话每个锚点
+    # 都要单独 OCR 一次，实测 2 个锚点 6.6s，合成一次后减半。
+    found_boxes = locate(
+        tuple(T(anchor_text, box=center_region) for anchor_text in _SYSTEM_DIALOG_ANCHORS),
+        assure_stable=False,
+        is_simplify=False,
+    ) or []
+    # is_simplify=False 时每个锚点给的是「该锚点的全部命中」（list[Box] 或 None），
+    # 默认的 is_simplify=True 只返回第一个命中的锚点，拿不到其余几个的位置。
+    hits = [
+        (box.top + box.height, anchor_text, box)
+        for anchor_text, boxes_of_anchor in zip(_SYSTEM_DIALOG_ANCHORS, found_boxes)
+        for box in (boxes_of_anchor or ())
+    ]
+    if not hits:
+        return False
+
+    # 取最靠下的那一行：它离按钮最近，标题行点不到按钮。
+    _, anchor_text, anchor_box = max(hits, key=lambda hit: hit[0])
+    logger.warning("检测到系统弹窗「%s」，点掉它：%s", anchor_text, anchor_box)
+    button_width, button_height = _SYSTEM_DIALOG_BUTTON_SIZE
+    click(B(
+        frame_width // 2 - button_width // 2,
+        anchor_box.top + anchor_box.height + _SYSTEM_DIALOG_BUTTON_GAP,
+        button_width,
+        button_height,
+    ))
+    sleep(0.5)
+    return True
+
+
 def try_close_via_x():
     """
     尝试关闭各种弹窗和等待加载完成
@@ -124,7 +181,7 @@ def try_close_via_x():
         (I("x"), I("x")),
         (I("x-in"), B(1061,178,39,47)),
         (I("菜单-宠物"), B(10,10)),
-        # (T("回家", box=Box(29,613,77,88).margin()), T("回家", box=Box(29,613,77,88).margin())),
+        # (T("回家", box=Box(29,656,77,54).margin()), T("回家", box=Box(29,656,77,54).margin())),
         (T("确认"), T("确认")),
         (T("返回地图"), T("返回地图")),
         (T("返回大厅"), T("返回大厅")),
@@ -142,6 +199,9 @@ def try_close_via_x():
     found = True
     while found:
         found = False
+        # 模态框优先：它挡着底下所有东西，不先点掉，后面的关闭目标一个都点不动。
+        if dismiss_system_dialogs():
+            found = True
         tgts = tuple(target for target, _ in close_targets)
         idx = ui_idx(tgts)
         if idx >= 0:

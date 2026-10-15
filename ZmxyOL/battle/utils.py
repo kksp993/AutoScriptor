@@ -1,5 +1,4 @@
 import enum
-import traceback
 from AutoScriptor import *
 from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
 from ZmxyOL import *
@@ -41,7 +40,12 @@ ITEM_TABLE = {
         "武器": {"bag_class": BAG.SHIZHUANG, "item_name": "冰神之殇"},
         "衣服": {"bag_class": BAG.SHIZHUANG, "item_name": "冰神甲胄"},
         "翅膀": {"bag_class": BAG.SHIZHUANG, "item_name": "冰神翼"},
-    }
+    },
+    "鬼牌":{
+        "武器": {"bag_class": BAG.SHIZHUANG, "item_name": "鬼牌魔杖"},
+        "衣服": {"bag_class": BAG.SHIZHUANG, "item_name": "王牌礼装"},
+        "翅膀": {"bag_class": BAG.SHIZHUANG, "item_name": "诡术披风"},
+    },
 }
 
 class WuQi(str, enum.Enum):
@@ -50,19 +54,20 @@ class WuQi(str, enum.Enum):
     星轨裁决 = "星轨裁决"
     仲夏裁决 = "仲夏裁决"
     冰神之殇 = "冰神之殇"
+    鬼牌魔杖 = "鬼牌魔杖"
 
 class YiFu(str, enum.Enum):
     风虎潮流 = "风虎潮流"
     影蛇灵袍 = "影蛇灵袍"
     天律华装 = "天律华装"
     冰神甲胄 = "冰神甲胄"
-
+    王牌礼装 = "王牌礼装"
 class ChiBang(str, enum.Enum):
     风虎背饰 = "风虎背饰"
     影蛇风翼 = "影蛇风翼"
     命定光轮 = "命定光轮"
     冰神翼 = "冰神翼"
-
+    诡术披风 = "诡术披风"
 
 def check_quality(item_name: str):
     pass
@@ -122,19 +127,3 @@ def wear_suite(suite_name: str):
     ensure_in("背包")
     for item_dict in ITEM_TABLE[suite_name].values():
         wear_item(item_dict)
-    
-
-if __name__ == "__main__":
-    try:
-        # wear_item(ITEM_TABLE["风虎"]["武器"])
-        # wear_item(ITEM_TABLE["风虎"]["衣服"])
-        # wear_item(ITEM_TABLE["风虎"]["翅膀"])
-        # wear_item(ITEM_TABLE["蛇年"]["武器"])
-        # wear_item(ITEM_TABLE["蛇年"]["衣服"])
-        # wear_item(ITEM_TABLE["蛇年"]["翅膀"])
-        wear_suite("风虎")
-    except Exception as e:
-        traceback.print_exc()
-    finally:
-        bg.stop()
-        exit(0)

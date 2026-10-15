@@ -12,6 +12,7 @@ from AutoScriptor.control.MumuAdaptor.api.adb.direct import (
 )
 import json
 import os.path
+import subprocess
 import warnings
 from typing import Union
 
@@ -42,16 +43,15 @@ class Adb:
         """
         Prefer direct adb.exe for high-frequency input.
 
-        MuMuManager subprocesses are wrapped in mumu_safe_subprocess() and will
-        temporarily unboost/reboost the Python process. That is correct for
-        lifecycle commands, but too noisy for every tap/swipe/key event.
+        MuMuManager subprocesses are reserved for lifecycle commands; direct
+        adb.exe is quieter and cheaper for every tap/swipe/key event.
         """
         direct_error = None
         try:
             for _ in range(repeat):
                 self._direct_shell(direct_args, timeout=timeout)
             return True
-        except Exception as e:
+        except (OSError, RuntimeError, subprocess.SubprocessError) as e:
             direct_error = e
 
         self.utils.set_operate('adb')

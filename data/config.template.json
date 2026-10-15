@@ -1,0 +1,53 @@
+{
+    "app": {
+        "app_to_start": "org.yjmobile.zmxy",
+        "max_attempts": 3,
+        "name": "ZmxyOL",
+        "restart_on_error": true,
+        "run_in_background": false,
+        "cpu_cores": 4
+    },
+    "ocr": {
+        "use_gpu": false,
+        "model": "PP-OCRv6_small"
+    },
+    "emulator": {
+        "index": 0,
+        "adb_addr": "127.0.0.1:16384",
+        "mumu_folder": "YOUR_MUMU_FOLDER, e.g.C:/Program Files/Netease/MuMu",
+        "emu_path": "YOUR_EMU_PATH, e.g.C:/Program Files/Netease/MuMu/nx_main/MuMuManager.exe",
+        "adb_path": "YOUR_ADB_PATH, e.g.C:/Program Files/Netease/MuMu/nx_main/adb.exe",
+        "post_execution": "none"
+    },
+    "deploy": {
+        "log_level": "info",
+        "theme": "dark",
+        "password": null,
+        "ssl_key": null,
+        "ssl_cert": null
+    },
+    "notify": {
+        "enabled": false,
+        "config_yaml": "provider: null",
+        "qq": {
+            "enabled": false,
+            "endpoint": "http://127.0.0.1:3000",
+            "target_type": "private",
+            "target_id": "",
+            "access_token": ""
+        }
+    },
+    "update": {},
+    "task_ordering": {
+        "schema_version": 1,
+        "user_order": []
+    },
+    "accounts": {
+        "dir": ""
+    },
+    "current_account": "default",
+    "news": {
+        "account": "85rwm3janyyc",
+        "password": "123456"
+    }
+}

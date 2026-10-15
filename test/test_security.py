@@ -21,7 +21,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-from services.webui.security import (
+from backend.webui.security import (
     hash_deploy_password, verify_deploy_password,
     create_session, validate_session, get_sessions,
     RateLimiter, login_limiter, verify_limiter,
@@ -37,7 +37,7 @@ def load_config_manager_for_test():
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: F401
     from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC  # noqa: F401
 
-    logger_mod = types.ModuleType("AutoScriptor.utils.logger")
+    logger_mod = types.ModuleType("AutoScriptor.logging.logger")
     logger_mod.logger = type("_Logger", (), {
         "debug": staticmethod(lambda *args, **kwargs: None),
         "info": staticmethod(lambda *args, **kwargs: None),
@@ -50,14 +50,14 @@ def load_config_manager_for_test():
     utils.__path__ = [os.path.join(ROOT, "AutoScriptor", "utils")]
     spec = importlib.util.spec_from_file_location(
         "_config_manager_under_test",
-        os.path.join(ROOT, "AutoScriptor", "crypto", "config_manager.py"),
+        os.path.join(ROOT, "ZmxyOL", "accounts", "crypto", "config_manager.py"),
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     with patch.dict(sys.modules, {
         "AutoScriptor": autoscriptor,
         "AutoScriptor.utils": utils,
-        "AutoScriptor.utils.logger": logger_mod,
+        "AutoScriptor.logging.logger": logger_mod,
     }):
         spec.loader.exec_module(module)
     return module.ConfigManager
@@ -220,8 +220,8 @@ class TestReplayProtection(unittest.TestCase):
     def test_future_request(self):
         self.assertFalse(check_request_freshness({"_timestamp": time.time() + 120}))
 
-    def test_no_timestamp_backward_compat(self):
-        self.assertTrue(check_request_freshness({}))
+    def test_missing_timestamp_rejected(self):
+        self.assertFalse(check_request_freshness({}))
 
     def test_invalid_timestamp(self):
         self.assertFalse(check_request_freshness({"_timestamp": "not_a_number"}))
@@ -368,12 +368,12 @@ class TestAttackScenarios(unittest.TestCase):
         self.assertNotIn(pwd, hashed)
 
     def test_profile_encryption_prevents_file_theft(self):
-        """config.json 被盗时，加密的档案数据无法被读取"""
+        """data/config.json 被盗时，加密的档案数据无法被读取"""
         try:
             ConfigManager = load_config_manager_for_test()
         except ImportError:
             import sys as _s
-            mod = _s.modules.get("AutoScriptor.crypto.config_manager")
+            mod = _s.modules.get("ZmxyOL.accounts.crypto.config_manager")
             if not mod:
                 self.skipTest("ConfigManager 不可用")
             ConfigManager = mod.ConfigManager
