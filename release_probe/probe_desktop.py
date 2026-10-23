@@ -3,7 +3,7 @@
 桌面键鼠与模拟器通道都在这一个 wheel 里，所以发布验收要连它一起过一遍。
 本探针**不做桌面点击**：主机是用户正在用的桌面，没有明确目标时不该动手。
 点击链路的验收在 ``docs/AutoScriptor/debug-lessons.md`` 与任务 4 的实机记录里
-（Edge → WebUI → 终止/启动调度），离线契约由 ``test/test_desktop_control.py`` 钉住。
+（Edge → WebUI → 终止/启动调度），离线契约由 ``test/device/test_desktop_control.py`` 钉住。
 
 用法::
 

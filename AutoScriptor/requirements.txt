@@ -2,7 +2,7 @@
 #
 # 与 pyproject.toml 的 [project].dependencies 是同一份内容：那边是打包时的唯一
 # 出处（scripts/build_wheels.py 直接读它写进 wheel 的 METADATA），这里给从源码
-# 安装的人用。test/test_framework_public_api.py 会校验两者逐条一致，别只改一边。
+# 安装的人用。test/framework/test_framework_public_api.py 会校验两者逐条一致，别只改一边。
 adbutils==1.2.15
 numpy>=1.24.4,<2.0.0
 opencv-python

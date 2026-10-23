@@ -11,7 +11,7 @@ dist/zmxyol-<版本>-py3-none-any.whl         游戏层，含 ZmxyOL/ 与 tasks/
 框架层的 `readme` 指向 `AutoScriptor/README.md`（包自己的 README，随 wheel 一起发布，
 构建时写成 METADATA 的正文）；框架的运行时依赖同时写在 `pyproject.toml` 的
 `[project].dependencies`（打包唯一出处）和 `AutoScriptor/requirements.txt`（给从源码装的人），
-`test/test_framework_public_api.py` 校验两者与 `__all__` 都不漂移。
+`test/framework/test_framework_public_api.py` 校验两者与 `__all__` 都不漂移。
 
 ## 构建
 
@@ -36,7 +36,7 @@ dist/zmxyol-<版本>-py3-none-any.whl         游戏层，含 ZmxyOL/ 与 tasks/
 以及「4399 优惠券」的部分操作（只导航识别，不领券）。判据与产物见
 [release_probe/README.md](../../../release_probe/README.md)。
 
-`test/test_wheel_packaging.py` 的安装树导入探针进全量测试（秒级、不碰设备），盯的是打包内容
+`test/framework/test_wheel_packaging.py` 的安装树导入探针进全量测试（秒级、不碰设备），盯的是打包内容
 与 `RECORD` 哈希；`release_probe/` 是手动、真设备、真 venv 的发布验收，两者不重复。
 
 ## 安装
@@ -111,6 +111,6 @@ sleep(0.5)
 
 ## 这块的验收
 
-`test/test_wheel_packaging.py` 覆盖构建、内容、`RECORD` 哈希、两次构建字节一致，并且真的把
+`test/framework/test_wheel_packaging.py` 覆盖构建、内容、`RECORD` 哈希、两次构建字节一致，并且真的把
 wheel 摊成一个安装树、在仓库外用子进程导入一遍。不想跑这一步时设
 `AUTOSCRIPTOR_SKIP_WHEEL_PROBE=1`。

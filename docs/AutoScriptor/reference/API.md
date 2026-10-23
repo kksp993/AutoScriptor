@@ -73,7 +73,7 @@ from AutoScriptor import *
 | 错误　　　　　| `TaskRequireReTry`、`RequestHumanTakeover`　　　　　　　　　　　　　　　　 |
 
 框架层的公共导出就是 `AutoScriptor.__all__` 里的那些（完整清单见
-[框架层 README](../../../AutoScriptor/README.md#公共-api)，`test/test_framework_public_api.py`
+[框架层 README](../../../AutoScriptor/README.md#公共-api)，`test/framework/test_framework_public_api.py`
 会校验两边不漂移）。任务状态相关的 `get_task_status` / `set_task_status` / `clear_task_status`
 **都不在其中**，它们属于任务编写面，从 `tasks.task_state` 导入。
 

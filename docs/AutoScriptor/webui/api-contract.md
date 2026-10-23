@@ -225,4 +225,4 @@ MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和�
 - 是否需要 credential unlock。
 - 是否泄露账号、密码、加密块或运行时字段。
 - 前端是否统一走 `window.WebUIApi.request()` 和错误文案处理。
-- 是否需要更新 `test/test_webui_contracts.py`。
+- 是否需要更新 `test/webui/test_webui_contracts.py`。

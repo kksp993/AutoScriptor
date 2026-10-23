@@ -63,7 +63,7 @@ WebUI 编辑器保存的脚本也落在那里，同样按位置决定路径。
 | 停用任务用 `deprecated=True`，不要删源码　　　　　　　　　　　　　　　　　| 源码和注册元数据保留，但不写 cfg、不出现在 WebUI 和调度列表　　　　　　　　　　 |
 | 重命名文件时把 `id` 钉在旧任务名上　　　　　　　　　　　　　　　　　　　　| 用户配置、拖拽顺序和运行状态都跟着 `id` 走；换目录不用写 `id`　　　　　　　　　 |
 
-这些约定由 `test/test_tasks/test_task_conventions.py` 检查，新增任务会自动纳入。
+这些约定由 `test/task_domain/test_task_conventions.py` 检查，新增任务会自动纳入。
 
 ## 一个任务的生命周期
 

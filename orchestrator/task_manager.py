@@ -8,6 +8,7 @@ TaskManager: 任务执行管理器
 import datetime
 import inspect
 import sys
+import time
 from contextlib import contextmanager
 from typing import Any, List, Tuple
 from threading import Event, RLock
@@ -40,6 +41,13 @@ from orchestrator.model import (
 )
 
 
+# 连续这么多次「关掉 App 重新拉起仍失败」才升级为重启 MuMu 实例。
+APP_START_FAILURE_RESTART_THRESHOLD = 3
+# 两次 MuMu 重启之间至少隔这么久。没有这个上限，一次坏会话会变成每几分钟
+# 关一次模拟器：没人看着的时候，重启本身比失败更打扰。
+MUMU_RESTART_COOLDOWN_SECONDS = 10 * 60
+
+
 def _is_request_human_takeover(exc: Exception) -> bool:
     cls = exc.__class__
     return cls.__name__ == "RequestHumanTakeover" and "NemuIpc" in cls.__module__
@@ -65,6 +73,8 @@ class TaskManager:
         self._cfg_lock = RLock()
         self._runtime_state_lock = RLock()
         self._current_task_path: str | None = None
+        self._app_start_failure_count = 0
+        self._last_mumu_restart_at: float | None = None
 
     # ── 公共接口 ──
 
@@ -230,6 +240,9 @@ class TaskManager:
                 if task_video:
                     task_video.stop(keep=False)
                     task_video = None
+                # 任务真的跑完了，说明 App 这一轮是健康的；否则昨天偶发的一次启动
+                # 失败会和今天的一次累加，凭一天一次的偶发也凑够重启阈值。
+                self._app_start_failure_count = 0
                 logger.info(f"▶️  执行成功: {task}")
                 with self._cfg_lock:
                     clear_task_status("progress", task_path=task, save=False)
@@ -440,13 +453,67 @@ class TaskManager:
             if retry_count >= 1:
                 self._restart_adb_and_wait()
             if not self._wait_app_running(app_name):
-                return False
+                self._app_start_failure_count += 1
+                logger.warning(
+                    "🔄 应用启动失败累计 %d/%d 次",
+                    self._app_start_failure_count,
+                    APP_START_FAILURE_RESTART_THRESHOLD,
+                )
+                if self._app_start_failure_count < APP_START_FAILURE_RESTART_THRESHOLD:
+                    return False
+
+                logger.warning("🔄 应用连续启动失败达到阈值，准备重启 MuMu 实例")
+                self._app_start_failure_count = 0
+                return self._restart_mumu_and_launch_app(app_name)
+
+            self._app_start_failure_count = 0
             sleep(5)
             from ZmxyOL.nav.map_manager import mm
             mm.set_region("登录")
             return True
         except Exception as e:
             logger.error("🔄 应用重启失败: %r", e)
+            return False
+
+    def _restart_mumu_and_launch_app(self, app_name: str) -> bool:
+        """重启卡死的 MuMu 会话，并重新建立控制与游戏启动链。"""
+        current_mumu = runtime_ctx.mumu
+        if current_mumu is None:
+            logger.warning("🔄 MuMu 实例不可用，无法执行模拟器重启回退")
+            return False
+
+        now = time.monotonic()
+        if (
+            self._last_mumu_restart_at is not None
+            and now - self._last_mumu_restart_at < MUMU_RESTART_COOLDOWN_SECONDS
+        ):
+            logger.warning(
+                "🔄 距上次重启 MuMu 不足 %d 秒，本轮不再重启；先按应用启动失败处理",
+                MUMU_RESTART_COOLDOWN_SECONDS,
+            )
+            return False
+        # 记在尝试之前：重启本身失败时也要吃冷却，否则每次任务失败都会再关一次模拟器。
+        self._last_mumu_restart_at = now
+
+        try:
+            # 先释放旧 NemuIpc，避免关闭/启动 MuMu 时仍有旧句柄占用实例。
+            runtime_ctx.release_session()
+            current_mumu.power.restart()
+            logger.info("🔄 MuMu 实例已重启，重新建立设备会话")
+            runtime_ctx.refresh(
+                cancel_check=self._check_cancel_requested,
+                launch_app=False,
+            )
+            if not self._wait_app_running(app_name):
+                logger.error("🔄 MuMu 重启后应用仍未启动")
+                return False
+            logger.info("✅ MuMu 重启回退完成，应用已重新启动")
+            self._app_start_failure_count = 0
+            return True
+        except TaskCancelled:
+            raise
+        except Exception as e:
+            logger.error("🔄 MuMu 重启回退失败: %r", e)
             return False
 
     def _wait_app_stopped(self, app_name: str, timeout: int = 15):

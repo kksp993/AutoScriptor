@@ -9,7 +9,8 @@
 2. **有东西吞点击**：① 遮罩压暗页面吃掉点击、不会自己消失，点关闭无效，判据是目标区
    近白像素归零、亮度减半；② 模拟器的「App 启动失败/超时」模态框，判据是同一状态反复
    重试、报错却指向各自第一步；锚点须用弹窗独有字串（`App启动超时`），**别用「确定」**
-   （游戏里到处都是）。恢复路径：`try_close_via_x`、PageRouter。
+   （游戏里到处都是）。恢复路径：`try_close_via_x`、PageRouter。若同一会话反复出现
+   「应用启动超时 (60s)」，只重启 App/ADB 无效，要重启 MuMu 实例（`TaskManager` 已内建）。
 3. **裸 Box 当识别目标**：`Box` 是 namedtuple，会被当多目标元组解析报
    `Unsupported target type`。用 `B(...)` 包一层。
 4. **日志会漏读**：`_log_action` 按 1 秒合并同类动作，条数写在下一行。「日志没这一行」
@@ -69,4 +70,4 @@
 
 ## 约定
 
-- 做不完的任务 `deprecated=True` 下架，同步 `test/test_tasks`。
+- 做不完的任务 `deprecated=True` 下架，同步 `test/task_domain`。
