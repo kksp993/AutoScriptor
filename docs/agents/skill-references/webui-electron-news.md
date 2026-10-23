@@ -95,4 +95,4 @@ Get-Process -Name "electron" -ErrorAction SilentlyContinue | Stop-Process -Force
 
 - `docs/AutoScriptor/webui/api-contract.md`
 - `docs/AutoScriptor/webui/user-trajectories.md`
-- `test/test_webui_contracts.py`
+- `test/webui/test_webui_contracts.py`

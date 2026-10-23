@@ -23,7 +23,7 @@
 | 主机性能策略 | [schedule/README.md](schedule/README.md)、[schedule/perf.md](schedule/perf.md) |
 | 任务编写 | [tasks/script-authoring.md](tasks/script-authoring.md) |
 | 任务安全 | [tasks/script-authoring-safety.md](tasks/script-authoring-safety.md) |
-| 实验室安全教育脚本 | `test/run_lab_security.py`、`test/run_lab_security_table.py`（不启动游戏 App） |
+| 实验室安全教育脚本 | `test/manual/security_education/run_lab_security.py`、`test/manual/security_education/run_lab_security_table.py`（不启动游戏 App） |
 | 任务列表交互与排序持久化 | [tasks/task-ordering-graph-plan.md](tasks/task-ordering-graph-plan.md) |
 | 安装位写脚本（两个 wheel） | [operations/library-packages.md](operations/library-packages.md) |
 | OCR 模型实验 | [reference/ocr-model-experiment.md](reference/ocr-model-experiment.md) |

@@ -79,7 +79,7 @@ replay(EVENTS, speed=1.5, recording_size=(1080, 1920))
 - 核心不认识 `.mmor`：解析与槽位重映射在外部 `mumuinner` 项目的 `mmor_to_fast_replay.py` 里
   完成，导出的 timeline JSON（`t_ms`/`op`/`finger`/`x`/`y`）可直接喂给 `replay`。
 
-契约由 `test/test_replay_events.py` 固化（21 项：坐标换算、同刻多指保序、
+契约由 `test/runtime/test_replay_events.py` 固化（21 项：坐标换算、同刻多指保序、
 编号越界、跨方向、时间窗、取消清理、清理失败不掩盖原始异常、公共导出）。
 
 ## 实时闭环（「条子」类）
@@ -108,7 +108,7 @@ finger_down(1, x, y) / finger_up(1)        # 只在状态翻转时发边沿
   5.30.1.3586 实测输入、多指、并发全部正常。升级 MuMu 后应回归本页验证脚本。
 - `app_keptlive`（后台保活）开启时 display id 语义变化，现有代码在检测到
   keep-alive 时会要求人工处理，保持即可。
-- 并发语义已由 `test/test_nemu_ipc_concurrency.py` 固化：输入与截图并发、
+- 并发语义已由 `test/device/test_nemu_ipc_concurrency.py` 固化：输入与截图并发、
   截图之间串行。
 
 ## 验证入口
@@ -117,5 +117,5 @@ finger_down(1, x, y) / finger_up(1)        # 只在状态翻转时发边沿
 $py = ".venv\Scripts\python.exe"
 & $py -X utf8 logs\fastpath_online_20260929\verify_fast_path_live.py   # 通道延迟与闭环
 & $py -X utf8 logs\fastpath_online_20260929\verify_init_live.py        # init 全链路
-& $py -X utf8 -m unittest test.test_nemu_ipc_fast_path test.test_nemu_ipc_concurrency
+& $py -X utf8 -m unittest test.device.test_nemu_ipc_fast_path test.device.test_nemu_ipc_concurrency
 ```

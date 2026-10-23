@@ -51,6 +51,13 @@
 5. 通过测试点击确认模拟器响应。
 6. 按 `run_in_background` 隐藏窗口。
 
+任务失败恢复（`TaskManager._try_recover_app`）只在 `app.restart_on_error=true` 时执行：关闭 App，
+等状态离开 `running`，再重新 launch。第一次恢复失败时额外重启 ADB；如果连续 3 次恢复后 App
+仍进不到 `running`（日志里的「应用启动超时 (60s)」），升级为重启 MuMu 实例：先
+`runtime_ctx.release_session()` 释放旧 NemuIpc，再 `mumu.power.restart()`，然后用
+`runtime_ctx.refresh(launch_app=False)` 重建会话并重新 launch 游戏。两次 MuMu 重启之间至少间隔
+10 分钟，任务成功会清零连续失败计数，避免无人值守时把坏会话变成反复关模拟器的重启风暴。
+
 任务级 `debug` 只跳过调度器的自动登录、任务前重启和常规失败恢复，不跳过设备会话的基本就绪检查。重启设备的任务应先调用 `runtime_ctx.shutdown()` 释放旧 NemuIpc 和运行态引用，再重启 MuMu 并通过 `runtime_ctx.refresh()` 建立新会话。
 
 `LoginClient.HZ4399` 表示 4399 游戏盒而不是游戏客户端。它提交游戏盒账号密码后直接结束登录状态机，不等待游戏角色选择页的“进入游戏”，也不选择服务器或角色；`LoginClient.H4399` 等游戏客户端仍按原流程进入角色选择页。游戏盒的「登录」按钮忽略快速点击，必须用 700ms 长按提交（同点 swipe；2026-10-10 实机对照），见 `login._submit_login`。
@@ -180,7 +187,7 @@ stale 条目清理还要求注册表非空。空注册表表示本轮注册没�
 | `ZmxyOL.character.profession` | `GAME_PROFESSIONS` 被 `projection` 和总览路由持有。 |
 | `ZmxyOL.character` / `hero` / `plan` | 持有 `Hero` 基类、职业注册表和 `h` 单例。`hero` 由 `reload_character_modules()` **就地**重载，重新导入会造出第二份注册表和第二个 `h`；`plan` 的 `BattlePlan` 被不重跑的 `data/character/hero.py` 在导入时绑定。职业脚本（`ZmxyOL.character._user_*`）模块名是内容哈希、没有 finder，只能由 `reload_character_modules()` 重跑。 |
 
-`orchestrator/catalog.py` 的 `TASK_MODULES_KEPT_ON_RELOAD` 和 `ZMXYOL_MODULES_KEPT_ON_RELOAD` 是两份保留清单，`is_reloadable_module()` 是统一判据。重建后的 `mm` 是干净实例：believed region 归零，导航会重新定位而不是沿用旧判断。`test/test_task_register/test_task_reload_contract.py` 钉住这些，其中一组用例真的跑一次重建并断言 `TableParam`、`Hero`、`h` 的身份不变。
+`orchestrator/catalog.py` 的 `TASK_MODULES_KEPT_ON_RELOAD` 和 `ZMXYOL_MODULES_KEPT_ON_RELOAD` 是两份保留清单，`is_reloadable_module()` 是统一判据。重建后的 `mm` 是干净实例：believed region 归零，导航会重新定位而不是沿用旧判断。`test/task_domain/test_task_reload_contract.py` 钉住这些，其中一组用例真的跑一次重建并断言 `TableParam`、`Hero`、`h` 的身份不变。
 
 ## 性能边界
 

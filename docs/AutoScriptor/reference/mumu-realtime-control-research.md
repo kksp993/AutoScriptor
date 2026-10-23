@@ -159,7 +159,7 @@ MAA 的实现细节值得抄作业（`MumuExtras.cpp`）：display id **缓存**
 - 本项目实现（2026-10-12）：`AutoScriptor/utils/mumu_discovery.py` 的 `candidate_nemu_dll_paths` /
   `resolve_mumu_layout` 是布局知识的唯一出处——`nx_device/<Android 大版本>` 通配 + 版本号从大到小
   （不枚举版本号，未来新增版本无需改代码），回退 `nx_main/sdk`、`shell/sdk`，并把配置里的子目录
-  上溯到安装根后交给 `nemu_connect`；`NemuIpcImpl` 只消费结果。回归见 `test/test_mumu_layout_adaptive.py`。
+  上溯到安装根后交给 `nemu_connect`；`NemuIpcImpl` 只消费结果。回归见 `test/device/test_mumu_layout_adaptive.py`。
 - 国际版（MuMuPlayer）与官方版/方舟专版在截图增强门槛上也有差异（MAA 手册：截图增强需官版 V4.1.26+ /
   国际版 V5.21.3+；触控增强目前「方舟专版与国际版均不支持」）。
 

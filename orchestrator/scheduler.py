@@ -330,8 +330,8 @@ class Scheduler:
             logger.info("📅 同一个任务再次失败，按同一故障计，不叠加连续错误: %s", task_key)
             return
         self._last_failed_task = task_key
-        self._consecutive_errors += 1
-        if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+        self._consecutive_errors += failed
+        if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS and not self.is_executing:
             self.mark_error()
 
     # ── 调度周期 retry 上限 ──
@@ -901,7 +901,7 @@ class Scheduler:
                             if scheduled_mode and not task_debug_mode:
                                 self._mark_retry_exhausted(char_key, task_key, max_attempts)
                             total_failed += failed
-                            self.record_result(0, failed, task_key)
+                            self.record_result(0, failed * (retry_round + 1), task_key=None)
                 except KeyboardInterrupt:
                     logger.info("⏹ 任务执行被中断")
                     if self._task_manager:
@@ -918,7 +918,7 @@ class Scheduler:
                         if scheduled_mode and not task_debug_mode:
                             self._mark_retry_exhausted(char_key, task_key, max_attempts)
                         total_failed += 1
-                        self.record_result(0, 1, task_key)
+                        self.record_result(0, retry_round + 1, task_key=None)
                         if self.state == SchedulerState.ERROR:
                             break
 
@@ -936,6 +936,7 @@ class Scheduler:
             character_reports.finish(
                 interrupted=not pipeline_completed or self._task_manager._cancel_event.is_set()
             )
+        if scheduled_mode and self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS: self.mark_error()
 
         if total_success > 0 or total_failed > 0:
             logger.info("📅 执行完成: 成功 %d, 失败 %d", total_success, total_failed)

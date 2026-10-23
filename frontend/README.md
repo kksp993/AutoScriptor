@@ -21,7 +21,7 @@ Vue 3 + Element Plus 页面，以及 Electron 桌面壳。
 ## 注意
 
 - 静态资源由后端挂载，路径是 `/static` 与 `/vendor`；搬迁后必须同步 `backend` 的挂载点。
-- `index.html` 用 `?v=N` 做缓存失效，改动 JS 时要一起改版本号，`test/test_webui_contracts.py` 有对应断言。
+- `index.html` 用 `?v=N` 做缓存失效，改动 JS 时要一起改版本号，`test/webui/test_webui_contracts.py` 有对应断言。
 
 ## 不负责
 

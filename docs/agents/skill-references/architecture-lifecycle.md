@@ -32,7 +32,7 @@ Useful docs:
 
 - `docs/AutoScriptor/architecture.md`
 - `docs/AutoScriptor/tasks/script-authoring.md`
-- `test/test_task_register/`
+- `test/task_domain/`
 
 ## Runtime Context
 
@@ -66,7 +66,7 @@ Useful docs:
 Useful docs:
 
 - `docs/AutoScriptor/runtime/background.md`
-- `test/test_perf_optimize/test_bg_monitor.py`
+- `test/performance/test_bg_monitor.py`
 
 ## Scheduler And Progress
 

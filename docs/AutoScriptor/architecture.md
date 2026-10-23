@@ -98,7 +98,7 @@ backend -> orchestrator -> tasks -> ZmxyOL -> AutoScriptor
 | `ZmxyOL.character` / `hero` / `plan` | 持有 `Hero` 基类、职业注册表和 `h` 单例；`hero` 由 `reload_character_modules()` **就地**重载（重新执行职业脚本），重新导入会造出第二份注册表和第二个 `h`。`plan` 的 `BattlePlan` 被 `data/character/hero.py` 在导入时绑定，而该文件不重跑。 |
 | `ZmxyOL.character._user_*` | 职业脚本，模块名是内容哈希、没有 finder，由 `reload_character_modules()` 重跑。 |
 
-两份保留清单和 `is_reloadable_module()` / `reload_game_layer_modules()` 都在 `orchestrator/catalog.py`，`test/test_task_register/test_task_reload_contract.py` 钉住它们——其中一组用例真的跑一次重建，断言逻辑模块被换掉、而 `TableParam` 与 `Hero`/`h` 的身份不变。重建后的 `mm` 是干净实例（believed region 归零），导航会重新定位而不是沿用旧判断。stale 叶子清理在注册表为空时拒绝执行：那表示注册没落到读它的注册表上，而不是用户配置过期。详见 [运行生命周期](runtime/lifecycle.md#重载保留哪些模块)。
+两份保留清单和 `is_reloadable_module()` / `reload_game_layer_modules()` 都在 `orchestrator/catalog.py`，`test/task_domain/test_task_reload_contract.py` 钉住它们——其中一组用例真的跑一次重建，断言逻辑模块被换掉、而 `TableParam` 与 `Hero`/`h` 的身份不变。重建后的 `mm` 是干净实例（believed region 归零），导航会重新定位而不是沿用旧判断。stale 叶子清理在注册表为空时拒绝执行：那表示注册没落到读它的注册表上，而不是用户配置过期。详见 [运行生命周期](runtime/lifecycle.md#重载保留哪些模块)。
 
 ## 动态 API 边界
 

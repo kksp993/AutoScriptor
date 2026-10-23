@@ -51,9 +51,9 @@ release_probe\.runtime\evidence\   探针存下的帧（gitignore）
 
 `.runtime/config.json` 是探针自己的配置，与仓库的 `data/config.json` 无关；两者互不影响。
 
-## 与 `test/test_wheel_packaging.py` 的分工
+## 与 `test/framework/test_wheel_packaging.py` 的分工
 
-- `test/test_wheel_packaging.py` 进全量测试：把 wheel 摊成安装树、用 `PYTHONPATH` 起子进程导入，
+- `test/framework/test_wheel_packaging.py` 进全量测试：把 wheel 摊成安装树、用 `PYTHONPATH` 起子进程导入，
   钉打包内容与 `RECORD` 哈希，**不碰设备**，秒级完成。
 - `release_probe/` 是**手动**验收：真 venv、真安装、真设备，验证「发布出去别人能用」。
   它不参与 `unittest discover`，因为要模拟器、要装 Paddle，跑一次几分钟。

@@ -28,7 +28,7 @@ pip install -r requirements.txt
 
 - Python `>=3.10,<3.11`。
 - `paddlepaddle` 与 `paddlepaddle-gpu` 互斥，**不能同时存在**；`use_gpu=true` 但装了 CPU 变体时 OCR 会明确报错，不会静默降级。
-- `requirements.txt` 与 `pyproject.toml` 的 `[project].dependencies` 是同一份内容，`test/test_framework_public_api.py` 会校验两者一致。
+- `requirements.txt` 与 `pyproject.toml` 的 `[project].dependencies` 是同一份内容，`test/framework/test_framework_public_api.py` 会校验两者一致。
 
 ## 快速开始
 
@@ -66,7 +66,7 @@ go_home()
 
 ## 公共 API
 
-`from AutoScriptor import *` 暴露下面全部名字（等同于 `AutoScriptor.__all__`，由 `test/test_framework_public_api.py` 对着本文校核，两边不允许漂移）：
+`from AutoScriptor import *` 暴露下面全部名字（等同于 `AutoScriptor.__all__`，由 `test/framework/test_framework_public_api.py` 对着本文校核，两边不允许漂移）：
 
 | 类别 | 名称 |
 | --- | --- |

@@ -168,6 +168,11 @@ else:
 
 调度器不会在同一轮里反复撞同一个失败任务。失败任务会等本轮其他任务结束后进入下一 retry 轮；用满 `max_attempts` 后，在同一份计划内跳过（见「retry 跳过的有效期」）。
 
+任务失败后的设备恢复由 `TaskManager._try_recover_app()` 负责：关闭并重新拉起 App，第一次失败时
+再重启 ADB。若连续 3 次恢复后 App 仍没进入 `running`，改为重启 MuMu 实例并重建设备会话；两次
+MuMu 重启至少间隔 10 分钟，任务成功会清零计数。它只处理设备/App 启动失败，不改变任务自身的
+retry 计数或调度尝试次数。详见 [runtime/lifecycle.md](../runtime/lifecycle.md#设备会话)。
+
 任务列表页的三个直接执行入口通过 `execution_source=task_list` 进入 `run_direct(skip_character_login=True)`。这条策略只跳过登录缓存失效和 `_ensure_character_logged_in()`；普通任务的每日重启检查、设备/App 就绪、retry、状态保存、通知和 `post_execution` 都保持原语义。默认 `run_direct()`、自动调度和跨角色切换仍失效登录缓存并校验目标角色，显式 `force_login=True` 始终覆盖跳过策略。
 
 ## 角色结果通知
@@ -317,4 +322,4 @@ clear_task_status("progress")
 - 同一个任务反复失败是否按同一故障计，不会把调度送进 `error`。
 - `error` 冷却自动恢复是否仍生效，且错误态下等待间隔被钳到 `ERROR_WAKE_INTERVAL`。
 - `cfg["tasks"]` 只保存用户配置，`TaskRegistry` 只保存运行时元数据。
-- 相关测试：`test/test_task_register/test_decouple_cfg.py` 与 `test/test_webui_contracts.py`。
+- 相关测试：`test/task_domain/test_decouple_cfg.py` 与 `test/webui/test_webui_contracts.py`。
