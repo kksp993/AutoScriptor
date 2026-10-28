@@ -4,12 +4,6 @@
 # @Author : wlkjyy
 # @File : Adb.py
 # @Software: PyCharm
-from AutoScriptor.utils.app_config import cfg
-from AutoScriptor.control.MumuAdaptor.api.adb.direct import (
-    adb_device_ready,
-    configured_adb_host_port,
-    run_adb,
-)
 import json
 import os.path
 import subprocess
@@ -21,13 +15,14 @@ class Adb:
 
     def __init__(self, utils):
         self.utils = utils
+        self._device_facade = utils.get_device_facade()
 
     @staticmethod
     def _adb_error(result) -> str:
         return (result.stderr or result.stdout or "").strip()
 
     def _direct_shell(self, args: list[str], timeout: int = 10) -> bool:
-        result = run_adb(["shell", *args], timeout=timeout)
+        result = self._device_facade.run_adb(["shell", *args], timeout=timeout)
         if result.returncode == 0:
             return True
         raise RuntimeError(self._adb_error(result))
@@ -72,14 +67,14 @@ class Adb:
         ret_code, retval = self.utils.run_command([''])
 
         if ret_code != 0:
-            if adb_device_ready() and (configured := configured_adb_host_port()):
+            if self._device_facade.adb_device_ready() and (configured := self._device_facade.configured_adb_host_port()):
                 return configured
             return None, None
 
         try:
             data = json.loads(retval)
         except json.JSONDecodeError:
-            if adb_device_ready() and (configured := configured_adb_host_port()):
+            if self._device_facade.adb_device_ready() and (configured := self._device_facade.configured_adb_host_port()):
                 return configured
             return None, None
 
@@ -162,14 +157,14 @@ class Adb:
         ret_code, retval = self.utils.run_command([''])
 
         if ret_code != 0:
-            if adb_device_ready() and (configured := configured_adb_host_port()):
+            if self._device_facade.adb_device_ready() and (configured := self._device_facade.configured_adb_host_port()):
                 yield configured
             return
 
         try:
             data = json.loads(retval)
         except json.JSONDecodeError:
-            if adb_device_ready() and (configured := configured_adb_host_port()):
+            if self._device_facade.adb_device_ready() and (configured := self._device_facade.configured_adb_host_port()):
                 yield configured
             return
 
@@ -197,11 +192,12 @@ class Adb:
         if not os.path.exists(src):
             raise FileNotFoundError(f"File not found: {src}")
 
-        if not os.path.exists(cfg["emulator"]["adb_path"]):
-            raise FileNotFoundError(f"adb not found in {cfg['emulator']['adb_path']}")
+        adb_path = self._device_facade.emulator["adb_path"]
+        if not os.path.exists(adb_path):
+            raise FileNotFoundError(f"adb not found in {adb_path}")
 
         for (host, port) in self.__connect():
-            ret_code, retval = self.utils.run_command([cfg["emulator"]["adb_path"], '-s', f"{host}:{port}", 'push', src, path],
+            ret_code, retval = self.utils.run_command([adb_path, '-s', f"{host}:{port}", 'push', src, path],
                                                       mumu=False)
 
             if ret_code != 0:
@@ -232,11 +228,12 @@ class Adb:
         :return:
         """
 
-        if not os.path.exists(cfg["emulator"]["adb_path"]):
-            raise FileNotFoundError(f"adb not found in {cfg['emulator']['adb_path']}")
+        adb_path = self._device_facade.emulator["adb_path"]
+        if not os.path.exists(adb_path):
+            raise FileNotFoundError(f"adb not found in {adb_path}")
 
         for (host, port) in self.__connect():
-            ret_code, retval = self.utils.run_command([cfg["emulator"]["adb_path"], '-s', f"{host}:{port}", 'pull', src, path],
+            ret_code, retval = self.utils.run_command([adb_path, '-s', f"{host}:{port}", 'pull', src, path],
                                                       mumu=False)
 
             if ret_code != 0:

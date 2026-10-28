@@ -54,6 +54,28 @@ class TestHz4399Login(unittest.TestCase):
         self.assertFalse(login_context.done)
         handle_game_popups.assert_called_once_with()
 
+    def test_login_runs_the_router_with_adb_input(self):
+        """登录/授权页是竖屏，NemuIpc 在竖屏下点不动；login() 必须临时切到 ADB，
+        并由 ctrl_mumu 负责恢复调用前的输入模式。"""
+        login_module = importlib.import_module("ZmxyOL.nav.envs.login")
+        captured = {}
+
+        def fake_proxy(runner):
+            def run_with_adb_input(ctx):
+                captured["runner"] = runner
+                captured["ctx"] = ctx
+
+            return run_with_adb_input
+
+        with patch.object(login_module, "ctrl_mumu", side_effect=fake_proxy) as ctrl_mumu:
+            login_module.login(account="acc", password="pwd", character_name="角色")
+
+        ctrl_mumu.assert_called_once_with(login_module._login.run)
+        self.assertEqual(captured["runner"], login_module._login.run)
+        self.assertEqual(captured["ctx"].account, "acc")
+        self.assertEqual(captured["ctx"].password, "pwd")
+        self.assertEqual(captured["ctx"].character_name, "角色")
+
 
 if __name__ == "__main__":
     unittest.main()

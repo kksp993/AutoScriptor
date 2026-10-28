@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, call, patch
 import numpy as np
 
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import NemuIpc, NemuIpcError
-from AutoScriptor.core.control import MixControl
+from AutoScriptor.core.control import BaseMumuControl, MixControl
 
 
 def build_bottom_up_bgra_frame(height, width):
@@ -146,6 +146,13 @@ class TestMixControlNemuFallback(unittest.TestCase):
     def test_default_mode_is_nemu(self):
         mix, _ = self.build_mix()
         self.assertEqual(mix.mode, "nemu")
+
+    def test_dynamic_attributes_use_the_bound_emulator(self):
+        controls, emulator = self.build_mix()
+        self.assertIs(controls.app, emulator.app)
+        self.assertIs(controls.window, emulator.window)
+        with self.assertRaises(AttributeError):
+            getattr(BaseMumuControl(), "app")
 
     def test_click_falls_back_to_adb_when_nemu_input_fails(self):
         mix, mumu = self.build_mix()

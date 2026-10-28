@@ -16,7 +16,7 @@ from AutoScriptor.control.NemuIpc.device.method.utils import RETRY_TRIES, retry_
 from AutoScriptor.control.NemuIpc.device.method.pool import WORKER_POOL
 from AutoScriptor.control.NemuIpc.config.deep import deep_get
 from AutoScriptor.utils.app_config import cfg
-from AutoScriptor.utils.mumu_discovery import resolve_mumu_layout
+from AutoScriptor.utils.mumu_discovery import mumu_instance_id_from_serial, resolve_mumu_layout
 
 class RequestHumanTakeover(Exception):
     pass
@@ -642,16 +642,7 @@ class NemuIpcImpl:
         Returns:
             int: instance_id, or None if failed to predict
         """
-        try:
-            port = int(serial.split(':')[1])
-        except (IndexError, ValueError):
-            return None
-        index, offset = divmod(port - 16384 + 16, 32)
-        offset -= 16
-        if 0 <= index < 32 and offset in [-2, -1, 0, 1, 2]:
-            return index
-        else:
-            return None
+        return mumu_instance_id_from_serial(serial)
 
 
 class NemuIpc():

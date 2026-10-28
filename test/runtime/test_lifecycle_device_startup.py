@@ -38,7 +38,9 @@ def import_power_for_test():
     adb_pkg = types.ModuleType("AutoScriptor.control.MumuAdaptor.api.adb")
     direct = types.ModuleType("AutoScriptor.control.MumuAdaptor.api.adb.direct")
     direct.adb_device_ready = lambda: False
-    facade = SimpleNamespace(adb_device_ready=lambda: False)
+    facade = SimpleNamespace(
+        adb_device_ready=lambda: False, last_adb_error="offline", adb_addr="127.0.0.1:16448"
+    )
     device_facade = types.ModuleType("AutoScriptor.control.MumuAdaptor.device_facade")
     device_facade.get_device_facade = lambda vm_index=None: facade
     cancel = types.ModuleType("AutoScriptor.utils.cancel")
@@ -150,6 +152,7 @@ def import_mumu_adb_for_test():
     }):
         assert spec.loader is not None
         spec.loader.exec_module(module)
+    module.test_facade = direct
     return module
 
 
@@ -233,11 +236,15 @@ def import_api_for_test():
         def click(self, x, y):
             return None
 
+        def screenshot(self):
+            return SimpleNamespace(shape=(720, 1280, 3))
+
     class FakePower:
         def __init__(self):
             self.running = False
             self.started = False
             self.ready_checks = 0
+            self.last_readiness_error = "offline"
 
         def is_running(self):
             return self.running
@@ -266,7 +273,8 @@ def import_api_for_test():
     class FakeMumu:
         selected: FakeMumu | None = None
 
-        def __init__(self):
+        def __init__(self, *, adb_addr=None):
+            self.adb_addr = adb_addr
             self.power = FakePower()
             self.app = FakeApp()
             FakeMumu.selected = self
@@ -274,6 +282,9 @@ def import_api_for_test():
         def select(self, index):
             self.index = index
             return self
+
+        def verify_connection(self, *, allow_stopped=False):
+            return {"index": str(self.index), "name": "test-instance"}
 
     targets.Target = Target
     targets.B = lambda *args, **kwargs: ("B", args, kwargs)
@@ -292,13 +303,14 @@ def import_api_for_test():
     logger.setup_logfile = lambda *args, **kwargs: None
     tracer.save_debug_screenshot = lambda *args, **kwargs: None
     app_config.cfg = {
-        "emulator": {"emu_path": "mumu.exe", "index": 2, "adb_addr": "addr"},
+        "emulator": {"emu_path": "mumu.exe", "index": 2, "adb_addr": "127.0.0.1:16448"},
         "app": {
             "app_to_start": "pkg",
             "run_in_background": False,
         },
     }
     mumu_mod.Mumu = FakeMumu
+    cancel.TaskCancelled = Cancelled
     cancel.check_cancel_raise = lambda: None
     cancel.cancellable_sleep = lambda seconds, chunk=0.05: None
 
@@ -332,6 +344,9 @@ class TestMuMuPowerLifecycle(unittest.TestCase):
         module = import_power_for_test()
 
         class FakeUtils:
+            def get_device_facade(self):
+                return module.test_facade
+
             def get_vm_id(self):
                 return "3"
 
@@ -351,6 +366,9 @@ class TestMuMuPowerLifecycle(unittest.TestCase):
         module = import_power_for_test()
 
         class FakeUtils:
+            def get_device_facade(self):
+                return module.test_facade
+
             def get_vm_id(self):
                 return "1"
 
@@ -405,6 +423,9 @@ class TestMuMuPowerLifecycle(unittest.TestCase):
         ready_checks = []
 
         class FakeUtils:
+            def get_device_facade(self):
+                return module.test_facade
+
             def __init__(self):
                 self.commands = []
 
@@ -435,6 +456,9 @@ class TestMuMuAppLifecycle(unittest.TestCase):
         module = import_mumu_app_for_test()
 
         class FakeUtils:
+            def get_device_facade(self):
+                return module.test_facade
+
             def set_operate(self, operate):
                 self.operate = operate
 
@@ -454,6 +478,9 @@ class TestMuMuAppLifecycle(unittest.TestCase):
         module = import_mumu_app_for_test()
 
         class FakeUtils:
+            def get_device_facade(self):
+                return module.test_facade
+
             def set_operate(self, operate):
                 self.operate = operate
 
@@ -472,6 +499,9 @@ class TestMuMuAdbLifecycle(unittest.TestCase):
         manager_calls = []
 
         class FakeUtils:
+            def get_device_facade(self):
+                return module.test_facade
+
             def set_operate(self, operate):
                 self.operate = operate
 
@@ -483,7 +513,7 @@ class TestMuMuAdbLifecycle(unittest.TestCase):
             calls.append(args)
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        with patch.object(module, "run_adb", side_effect=fake_run_adb):
+        with patch.object(module.test_facade, "run_adb", side_effect=fake_run_adb):
             self.assertTrue(module.Adb(FakeUtils()).click(2000, 0))
 
         self.assertEqual(calls, [["shell", "input", "tap", "2000", "0"]])
@@ -494,6 +524,9 @@ class TestMuMuAdbLifecycle(unittest.TestCase):
         manager_calls = []
 
         class FakeUtils:
+            def get_device_facade(self):
+                return module.test_facade
+
             def set_operate(self, operate):
                 self.operate = operate
 
@@ -501,7 +534,7 @@ class TestMuMuAdbLifecycle(unittest.TestCase):
                 manager_calls.append((args, repeat))
                 return 0, ""
 
-        with patch.object(module, "run_adb", return_value=SimpleNamespace(returncode=1, stdout="", stderr="offline")):
+        with patch.object(module.test_facade, "run_adb", return_value=SimpleNamespace(returncode=1, stdout="", stderr="offline")):
             self.assertTrue(module.Adb(FakeUtils()).click(2000, 0))
 
         self.assertEqual(
@@ -513,14 +546,17 @@ class TestMuMuAdbLifecycle(unittest.TestCase):
         module = import_mumu_adb_for_test()
 
         class FakeUtils:
+            def get_device_facade(self):
+                return module.test_facade
+
             def set_operate(self, operate):
                 self.operate = operate
 
             def run_command(self, args):
                 return 3221226505, ""
 
-        with patch.object(module, "adb_device_ready", return_value=True), \
-                patch.object(module, "configured_adb_host_port", return_value=("127.0.0.1", "16416")):
+        with patch.object(module.test_facade, "adb_device_ready", return_value=True), \
+                patch.object(module.test_facade, "configured_adb_host_port", return_value=("127.0.0.1", "16416")):
             self.assertEqual(module.Adb(FakeUtils()).get_connect_info(), ("127.0.0.1", "16416"))
 
     def test_mumu_manager_command_reads_replace_bad_bytes(self):

@@ -13,6 +13,16 @@ class utils:
     __VM_INDEX = None
     __OPERATE = None
 
+    def __init__(self, *, device_facade=None):
+        self._device_facade = device_facade
+
+    def get_device_facade(self):
+        if self._device_facade is not None:
+            return self._device_facade
+        from AutoScriptor.control.MumuAdaptor.device_facade import get_device_facade
+
+        return get_device_facade(vm_index=self.get_vm_id())
+
     def set_vm_index(self, vm_index):
         """
         设置虚拟机索引
@@ -20,6 +30,8 @@ class utils:
         :return:
         """
         self.__VM_INDEX = vm_index
+        if self._device_facade is not None:
+            self._device_facade.vm_index = str(vm_index)
 
         return self
 
@@ -42,8 +54,7 @@ class utils:
         :return:
         """
         if mumu:
-            from AutoScriptor.utils.app_config import cfg
-            command_extend = [cfg["emulator"]["emu_path"]]
+            command_extend = [self.get_device_facade().emulator["emu_path"]]
 
             if self.__OPERATE is not None:
                 if isinstance(self.__OPERATE, list):

@@ -44,9 +44,13 @@ WebUI 侧栏 **QQ 通知** 是独立页面，不需要填写 YAML。
   全局保存事务完成连接配置交接，保留已保存的接收号码/自动推送开关；表单未保存草稿会被重新加载。
   不会凭空填写接收号码或开启自动推送。该按钮要求 runtime idle。
 - `GET /api/notify/qq/local` 返回 installed/version/running/login_url，不返回任何令牌。
-  `running` 只表示**进程在不在**（pid 文件活着，或配置的 HTTP 端口有 `node.exe` 在监听），
+  `running` 只表示**进程在不在**（pid 对应进程确实未退出，或配置的 HTTP 端口有 `node.exe` 在监听），
   既不代表已登录、也不代表能发出去；安装存在更不等于已登录。
   `POST /api/notify/qq/local` 不接受外部地址或路径，只读取受管目录并保存通知连接参数。
+- 2026-10-24 实测安全密码验证后仍不起机器人：旧进程已退出，但 Windows 因残留句柄仍允许
+  `OpenProcess`，旧判断误报运行中并跳过启动。现在以 `WaitForSingleObject(handle, 0)` 检查
+  退出状态，清除已退出进程的 pid 记录；活进程即使尚未监听端口也不重复启动。
+  此修复不改变发送重试策略，历史失败消息不会自动补发。
 - 两条启动路径：`scripts\qq-notify\2-start.cmd`（后台、无窗口，日常用）与 `scripts\run.bat qq`
   （前台窗口，关闭窗口即停）。两条都记录子进程 pid，`3-stop.cmd` / `qq_bot.py stop` 因此都停得掉。
   停止不只是读 pid 文件：控制台路径过去不写它，导致 stop 谎报「not running」而端口一直被占，
@@ -92,8 +96,7 @@ WebUI 侧栏 **QQ 通知** 是独立页面，不需要填写 YAML。
 
 | 模块 | 职责 |
 | --- | --- |
-| `backend/core/character_reports.py` | 每管线角色结果聚合、重试合并、文本格式；使用 publish 回调 |
-| `backend/core/qq_notify.py` | 配置校验、OneBot HTTP 发送、后台 FIFO 和最近记录；不依赖 cfg/调度/游戏 |
+| `orchestrator/delivery.py` | 每管线角色结果聚合、重试合并、文本格式，以及配置校验、OneBot HTTP 发送、后台 FIFO 和最近记录 |
 | `orchestrator/scheduler.py` | 在执行边界记录 pending/success/failed，结束时收束报告 |
 | `orchestrator/projection.py` | 全局配置持久化、令牌保留/清除、公开版本递增 |
 | `backend/webui/routes/notifications.py` | 独立配置、测试和记录 API |
@@ -116,7 +119,7 @@ HTTP 200 不是成功证明，必须有 OneBot `status=ok`、整数 `retcode=0` 
 ## 离线回归
 
 ```powershell
-.venv\Scripts\python.exe -X utf8 -m unittest test.test_qq_notifications test.test_scheduler_retry_rounds
+.venv\Scripts\python.exe -X utf8 -m unittest test.notifications.test_qq_bot_install test.notifications.test_qq_bot_autostart test.notifications.test_qq_notifications
 node --check backend/webui/static/js/components/NotificationsPanel.js
 ```
 

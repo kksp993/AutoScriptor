@@ -474,4 +474,8 @@ def login(account: str = None, password: str = None,
         character_index=character_index,
         client=client,
     )
-    _login.run(ctx)
+    # 4399 客户端的登录/授权页是竖屏 720x1280，NemuIpc 的注入点击在竖屏下会被
+    # 吞掉（2026-10-10 实机对照：同坐标点 20 次无反应、ADB 一次即生效），表现就是
+    # 每日跨日后的重新登录偶发卡住。登录全程临时改走 ADB；ctrl_mumu 会在结束后
+    # 恢复调用前的输入模式，别把 mumu 模式留给后面的游戏操作。
+    ctrl_mumu(_login.run)(ctx)

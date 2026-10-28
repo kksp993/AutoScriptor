@@ -17,7 +17,7 @@ AutoScriptor 后台定时调度器
 import os
 import time
 import threading
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Callable
@@ -115,6 +115,9 @@ class Scheduler:
         self._reload_deferred = threading.Event()
         self._consecutive_errors = 0
         self._logged_in_character: tuple[str, str] | None = None  # (server, name)
+        # 最近一次「每日重启」所属的游戏日（本地日期的 date）。只放内存：
+        # status 是角色级数据，写进去会让多角色账号在 5 点后每个角色各重启一次。
+        self._daily_restart_day: date | None = None
         # key -> 打标记的时刻。存时刻而不是只存 key，见 _is_retry_exhausted：
         # 标记只在「同一份计划」内有效，任务被排到更晚的时间点后它就该失效。
         self._retry_exhausted_tasks: dict[tuple[str, str, str], float] = {}
@@ -460,12 +463,6 @@ class Scheduler:
         if any(t <= now for t in times):
             return 0
         return max(min(times) - now, 0)
-
-    def _earliest_future_active_time(self) -> float | None:
-        """仅统计严格晚于当前时刻的 next_exec_time（供每日 5:00 重启等逻辑使用）。"""
-        now = time.time()
-        future = [t for t in self._collect_active_times() if t > now]
-        return min(future) if future else None
 
     def get_next_execution_timestamp(self) -> float | None:
         """对外展示的「下次执行」：若有已到期任务则视为即刻，否则为最早的未来计划时间。"""
@@ -847,7 +844,7 @@ class Scheduler:
                     logger.info("📅 debug_mode: 跳过自动登录与任务前重启: %s", task_key)
                 elif task_debug_mode:
                     logger.info("📅 debug_mode: 跳过任务前重启，但按本次请求执行自动登录: %s", task_key)
-                else:
+                elif not skip_character_login:
                     self._maybe_daily_restart(cfg)
 
                 try:
@@ -1060,22 +1057,25 @@ class Scheduler:
             return False
 
     def _maybe_daily_restart(self, cfg):
-        """每日 5:00 首次执行前重启模拟器（一天只触发一次）。"""
-        next_ts = self._earliest_future_active_time()
-        if next_ts is None:
+        """每日 05:00 后首次执行前重启模拟器，让游戏用当天的新会话重新登录。
+
+        游戏跨日结算后会随机把客户端踢回 4399 登录/授权页。停在那个页面时，重开
+        App 只会反复弹「App 启动失败 / App 启动超时」，要等连续 3 次启动失败才升级
+        到重启 MuMu 实例——2026-10-25 05:26~05:31 就是这样连挂多个任务的。
+
+        旧实现要求「最早的下一次执行时间正好是今天 05:00」，可调度器醒来时那个
+        时间已经 <= now，不在「未来时间」集合里，所以从未触发。这里改成按游戏日
+        边界判断：本地时间过了 05:00，每个进程只在第一次执行前重启一次。
+        """
+        now = datetime.now()
+        if now.hour < 5 or self._daily_restart_day == now.date():
             return
-        from datetime import datetime, time as dtime
-        next_dt = datetime.fromtimestamp(next_ts)
-        now_dt = datetime.now()
-        if not (next_dt.date() == now_dt.date() and next_dt.hour == 5 and next_dt.minute == 0):
-            return
-        today_5am_ts = datetime.combine(now_dt.date(), dtime(5, 0)).timestamp()
-        if cfg.get("status.last_login_time.time", 0) >= today_5am_ts or datetime.now().hour < 5:
-            return
-        logger.info("📅 检测到今日5:00首次执行，先关闭模拟器以清理状态")
-        self._safe_shutdown_emulator(cfg, reason="每日重启")
-        cfg.set("status.last_login_time.time", time.time())
-        cfg.save_config()
+        self._daily_restart_day = now.date()
+        logger.info("📅 今日 05:00 后首次执行，先重启模拟器以清理跨日登录态")
+        # 就算关闭没确认成功，登录缓存也要失效：当天的新会话不能继续沿用旧的。
+        self.invalidate_login()
+        if not self._safe_shutdown_emulator(cfg, reason="每日重启"):
+            logger.warning("📅 每日重启未能确认模拟器关闭，交给后面的设备启动检查处理")
 
     @staticmethod
     def _release_nemu_ipc():

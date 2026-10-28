@@ -96,6 +96,65 @@ def is_derived_adb_addr(adb_addr: Any, index: Any) -> bool:
     return str(adb_addr or "").strip() == default_mumu_adb_addr(index)
 
 
+def resolve_mumu_adb_addr(
+    emulator_index: Any,
+    emulator_config: dict[str, Any],
+    *,
+    adb_addr: str | None = None,
+) -> str:
+    """Resolve a session address without changing persistent configuration."""
+    if adb_addr is not None:
+        if not isinstance(adb_addr, str):
+            raise ValueError(f"ADB 地址须为 host:port 字符串，收到 {adb_addr!r}")
+        return adb_addr.strip()
+    configured_address = str(emulator_config.get("adb_addr") or "").strip()
+    # Manager also accepts "all" and comma-separated indices, with no single
+    # derived ADB endpoint. Preserve their existing configured-address behavior.
+    if str(emulator_index).isdigit() and (
+        is_placeholder_adb_addr(configured_address)
+        or is_derived_adb_addr(configured_address, emulator_config.get("index", 0))
+    ):
+        return default_mumu_adb_addr(emulator_index)
+    return configured_address
+
+
+def mumu_instance_id_from_serial(serial: str) -> int | None:
+    """Return the instance selected by NemuIpc's supported port mapping."""
+    try:
+        port = int(serial.split(":")[1])
+    except (IndexError, ValueError):
+        return None
+    instance_index, port_offset = divmod(port - MUMU_ADB_BASE_PORT + 16, MUMU_ADB_PORT_STEP)
+    port_offset -= 16
+    if 0 <= instance_index < 32 and -2 <= port_offset <= 2:
+        return instance_index
+    return None
+
+
+def validate_mumu_connection_parameters(emulator_index: int, adb_addr: str) -> None:
+    """Reject unsupported or contradictory Manager/ADB/IPC selections."""
+    selection = f"index={emulator_index!r}, adb_addr={adb_addr!r}"
+    if isinstance(emulator_index, bool) or not isinstance(emulator_index, int) or not 0 <= emulator_index < 32:
+        raise ValueError(f"模拟器连接参数错误: {selection}；NemuIpc 实例号须为 0..31 的整数。")
+    if not isinstance(adb_addr, str) or not re.fullmatch(r"[^:\s]+:[0-9]+", adb_addr):
+        raise ValueError(f"模拟器连接参数错误: {selection}；ADB 地址须为 host:port，不含协议头或空白。")
+    host, port_text = adb_addr.rsplit(":", 1)
+    if not 1 <= int(port_text) <= 65535:
+        raise ValueError(f"模拟器连接参数错误: {selection}；ADB 端口须为 1..65535。")
+    if host.lower() not in {"localhost", "127.0.0.1"}:
+        raise ValueError(
+            f"模拟器连接参数错误: {selection}；当前 init 使用本机 MuMuManager/NemuIpc，"
+            "不支持远端或未经验证的主机地址，不能把远端 ADB 当成本机 IPC。"
+        )
+    ipc_index = mumu_instance_id_from_serial(adb_addr)
+    if ipc_index != emulator_index:
+        raise ValueError(
+            f"模拟器连接参数冲突: {selection}，NemuIpc 端口映射实例={ipc_index!r}；"
+            f"该实例默认地址为 {default_mumu_adb_addr(emulator_index)}。"
+            "请核对 MuMuManager info 的实际端口后传入匹配的 index/adb_addr；不会自动切换实例。"
+        )
+
+
 def _is_windows() -> bool:
     return os.name == "nt"
 

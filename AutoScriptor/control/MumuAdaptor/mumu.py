@@ -21,6 +21,7 @@ from AutoScriptor.control.MumuAdaptor.api.network.Network import Network
 from AutoScriptor.control.MumuAdaptor.api.permission.Permission import Permission
 from AutoScriptor.control.MumuAdaptor.api.setting.setting import Setting
 from AutoScriptor.control.MumuAdaptor.utils import utils
+from AutoScriptor.control.MumuAdaptor.device_facade import DeviceFacade, get_device_facade
 from AutoScriptor.control.MumuAdaptor.api.screen.screen import Screen
 
 if TYPE_CHECKING:
@@ -28,9 +29,11 @@ if TYPE_CHECKING:
 
 
 class Mumu:
-    def __init__(self):
+    def __init__(self, *, adb_addr: str | None = None):
         self._require_configured_path("emu_path", "MuMuManager.exe")
         self._require_configured_path("adb_path", "adb.exe")
+        self._device_defaults = get_device_facade()
+        self._adb_addr = adb_addr
 
     @staticmethod
     def _require_configured_path(key: str, executable: str) -> None:
@@ -83,7 +86,19 @@ class Mumu:
         return self
 
     def generate_utils(self) -> utils:
-        return utils().set_vm_index(self.__vm_index)
+        facade = DeviceFacade(
+            emulator=self._device_defaults.emulator,
+            app=self._device_defaults.app,
+            vm_index=self.__vm_index,
+            adb_addr=self._adb_addr,
+        )
+        return utils(device_facade=facade).set_vm_index(self.__vm_index)
+
+    def verify_connection(self, *, allow_stopped: bool = False) -> dict:
+        """Read the selected instance's actual endpoint before device actions."""
+        return self.generate_utils().get_device_facade().verify_mumu_endpoint(
+            allow_stopped=allow_stopped
+        )
 
     def all(self):
         """

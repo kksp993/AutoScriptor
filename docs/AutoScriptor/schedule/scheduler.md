@@ -154,7 +154,7 @@ else:
   ├─ 未验证角色？跳过
   ├─ 收集到期任务或使用显式任务列表
   ├─ 对每个任务:
-  │    ├─ 非 debug 任务先做每日重启检查
+  │    ├─ 非 debug、非任务列表直跑的任务先做每日重启检查
   │    ├─ runtime_ctx.refresh() 确保设备与 App 可用
   │    ├─ 非任务列表直跑时确认角色登录；任务列表来源直接复用当前游戏状态
   │    ├─ TaskManager.execute_tasks([task], max_attempts=1, attempt_offset=retry_round)
@@ -168,12 +168,22 @@ else:
 
 调度器不会在同一轮里反复撞同一个失败任务。失败任务会等本轮其他任务结束后进入下一 retry 轮；用满 `max_attempts` 后，在同一份计划内跳过（见「retry 跳过的有效期」）。
 
+每日重启检查（`_maybe_daily_restart()`）的判据是本地时间的游戏日边界：过了 05:00 后，
+当前进程第一次遇到非 debug、非任务列表直跑的任务时关闭 MuMu 实例，由随后的
+`runtime_ctx.refresh()` 重新启动它，同时失效登录缓存，强制游戏用当天的新会话重新登录。
+游戏跨日会把客户端踢回 4399 登录/授权页，停在该页时重开 App 只会反复触发
+「App 启动失败 / 启动超时」，要等连续 3 次启动失败才升级到重启 MuMu——2026-10-25
+05:26~05:31 就是这样连挂多个任务的。标记只保存在调度器内存里：`status` 是角色级数据，
+写进去会让多角色账号在 5 点后每个角色各重启一次；进程重启后同一天可能再重启一次，
+代价可控。旧实现要求「最早的下一次执行时间正好是今天 05:00」，但调度器醒来时该时间
+已经 <= now，不在未来时间集合里，所以这项检查从未触发过。
+
 任务失败后的设备恢复由 `TaskManager._try_recover_app()` 负责：关闭并重新拉起 App，第一次失败时
 再重启 ADB。若连续 3 次恢复后 App 仍没进入 `running`，改为重启 MuMu 实例并重建设备会话；两次
 MuMu 重启至少间隔 10 分钟，任务成功会清零计数。它只处理设备/App 启动失败，不改变任务自身的
 retry 计数或调度尝试次数。详见 [runtime/lifecycle.md](../runtime/lifecycle.md#设备会话)。
 
-任务列表页的三个直接执行入口通过 `execution_source=task_list` 进入 `run_direct(skip_character_login=True)`。这条策略只跳过登录缓存失效和 `_ensure_character_logged_in()`；普通任务的每日重启检查、设备/App 就绪、retry、状态保存、通知和 `post_execution` 都保持原语义。默认 `run_direct()`、自动调度和跨角色切换仍失效登录缓存并校验目标角色，显式 `force_login=True` 始终覆盖跳过策略。
+任务列表页的三个直接执行入口通过 `execution_source=task_list` 进入 `run_direct(skip_character_login=True)`。这条策略跳过登录缓存失效、`_ensure_character_logged_in()` 和每日重启检查：该入口明确要复用当前游戏现场，而重启模拟器会把现场清掉。设备/App 就绪、retry、状态保存、通知和 `post_execution` 保持原语义。默认 `run_direct()`、自动调度和跨角色切换仍做每日重启检查、失效登录缓存并校验目标角色，显式 `force_login=True` 始终覆盖跳过策略。
 
 ## 角色结果通知
 
@@ -322,4 +332,4 @@ clear_task_status("progress")
 - 同一个任务反复失败是否按同一故障计，不会把调度送进 `error`。
 - `error` 冷却自动恢复是否仍生效，且错误态下等待间隔被钳到 `ERROR_WAKE_INTERVAL`。
 - `cfg["tasks"]` 只保存用户配置，`TaskRegistry` 只保存运行时元数据。
-- 相关测试：`test/task_domain/test_decouple_cfg.py` 与 `test/webui/test_webui_contracts.py`。
+- 相关测试：`test/orchestration/test_scheduler_daily_restart.py`、`test/task_domain/test_decouple_cfg.py` 与 `test/webui/test_webui_contracts.py`。

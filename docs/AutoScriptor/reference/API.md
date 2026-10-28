@@ -79,6 +79,10 @@ from AutoScriptor import *
 
 独立设备脚本直接调用 `init()`；若目标是游戏盒等其他 App，不希望先拉起配置中的游戏，则调用 `init(launch_app=False)`，然后使用 `launch_app(package_name)`、`close_app(package_name)` 和 `go_home()`。不要从星号导入后长期保存 `mixctrl/mumu` 快照。
 
+通过 `init(emulator_index=0)` 选择 0 号实例，不需要临时改 `cfg`。仅 `None` 表示使用配置中的实例；默认推导的 ADB 地址随实例号变化（0 号为 `127.0.0.1:16384`），手填地址保留。需要指定地址时直接传 `init(emulator_index=0, adb_addr="127.0.0.1:16384")`。参数只绑定本次设备会话，不写回配置；启动检查、ADB 输入/App 回退、Manager 和 NemuIpc 使用同一组选择。
+
+`init` 在操作 App 前核对本机 MuMuManager 返回的实例和实际地址、ADB/Android 就绪状态及只读 IPC 截图，不发送测试点击。参数非法/实例与 IPC 端口映射冲突抛 `ValueError`；管理器核验、ADB 或截图失败抛带实例、地址和原因的 `RuntimeError`。当前混合控制只支持 `127.0.0.1` / `localhost`、实例 0..31 和 IPC 可映射端口；保留手填值不等于支持任意远端地址/端口，无法验证时不会偷偷改连其他实例。核验成功只说明设备通道，不说明页面或 OCR 目标正确。
+
 造梦业务接口可从聚合入口导入，例如：
 
 ```python

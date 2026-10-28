@@ -52,8 +52,7 @@ class BaseMumuControl:
         self.mumu.adb.key_event(key_code)
 
     def __getattr__(self, name):
-        from AutoScriptor.utils.app_config import cfg
-        return getattr(Mumu().select(cfg["emulator"]["index"]), name)
+        return getattr(object.__getattribute__(self, "mumu"), name)
     
 class NemuIpcControl(BaseMumuControl):
     def __init__(self, mumu: Mumu, serial: str = '127.0.0.1:16416'):
