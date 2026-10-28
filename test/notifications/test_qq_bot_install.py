@@ -2,7 +2,10 @@
 import hashlib
 from contextlib import nullcontext
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -190,6 +193,50 @@ class TestLocalBotProcess(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
         qq_bot.prepare_configuration(self.root, 3010, 6100)
+
+    @unittest.skipUnless(os.name == "nt", "Windows process handle semantics")
+    def test_exited_process_with_open_handle_does_not_block_autostart(self):
+        """OpenProcess can succeed after exit while Popen retains its handle."""
+        with subprocess.Popen([sys.executable, "-c", "pass"]) as process:
+            process.wait(timeout=10)
+            qq_bot._pid_file(self.root).write_text(str(process.pid), encoding="ascii")
+            qq_bot.remember_account("123456789", self.root)
+
+            with patch.object(qq_bot, "_listening_pid", return_value=None), \
+                    patch.object(qq_bot, "launch_bot") as launch:
+                self.assertTrue(qq_bot.ensure_bot_running(self.root))
+
+            launch.assert_called_once_with(self.root, account="123456789")
+            self.assertFalse(qq_bot._pid_file(self.root).exists())
+
+    @unittest.skipUnless(os.name == "nt", "Windows process handle semantics")
+    def test_live_process_without_listener_still_blocks_duplicate_start(self):
+        process_id = os.getpid()
+        qq_bot._pid_file(self.root).write_text(str(process_id), encoding="ascii")
+
+        with patch.object(qq_bot, "_listening_pid", return_value=None), \
+                patch.object(qq_bot, "launch_bot") as launch:
+            self.assertEqual(qq_bot.running_bot_pid(self.root), process_id)
+            self.assertFalse(qq_bot.ensure_bot_running(self.root))
+
+        launch.assert_not_called()
+        self.assertTrue(qq_bot._pid_file(self.root).exists())
+
+    @unittest.skipUnless(os.name == "nt", "Windows process handle semantics")
+    def test_failed_wait_closes_handle_without_discarding_pid(self):
+        qq_bot._pid_file(self.root).write_text("4321", encoding="ascii")
+        kernel32 = Mock()
+        kernel32.OpenProcess.return_value = 1234
+        kernel32.WaitForSingleObject.return_value = 0xFFFFFFFF
+
+        with patch("ctypes.WinDLL", return_value=kernel32), \
+                patch("ctypes.get_last_error", return_value=6):
+            with self.assertRaises(OSError):
+                qq_bot.running_bot_pid(self.root)
+
+        kernel32.WaitForSingleObject.assert_called_once_with(1234, 0)
+        kernel32.CloseHandle.assert_called_once_with(1234)
+        self.assertTrue(qq_bot._pid_file(self.root).exists())
 
     def test_listening_pid_reads_the_pid_column_of_a_listener(self):
         output = "\n".join([

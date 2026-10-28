@@ -6,7 +6,6 @@
 # @Software: PyCharm
 import json
 import os.path
-from AutoScriptor.control.MumuAdaptor.device_facade import get_device_facade
 from AutoScriptor.logging.logger import logger
 
 
@@ -20,30 +19,6 @@ def _is_not_handle_cmd(retval) -> bool:
         return False
     s = retval if isinstance(retval, str) else str(retval)
     return "not handle cmd" in s
-
-
-def _adb_app_close(package: str) -> bool:
-    """ADB 回退：强制关闭应用（MuMu 6 等不支持 MuMuManager app close 时使用）"""
-    return get_device_facade().adb_force_stop_app(package)
-
-
-def _adb_app_launch(package: str) -> bool:
-    """ADB 回退：通过 monkey 启动应用（MuMu 6 等不支持 MuMuManager app launch 时使用）"""
-    return get_device_facade().adb_launch_app(package)
-
-
-def _adb_app_state(package: str) -> str:
-    """ADB 回退：通过 pidof 判断应用是否在运行"""
-    return get_device_facade().adb_app_state(package)
-
-
-def _adb_list_packages() -> list[dict[str, str]]:
-    """ADB 回退：列出已安装包。app_name/version 留空，调用方只依赖 package。"""
-    return get_device_facade().adb_list_packages()
-
-
-def _adb_app_exists(package: str) -> bool:
-    return get_device_facade().adb_app_exists(package)
 
 
 class App:
@@ -101,7 +76,7 @@ class App:
             return True
         if _manager_failed(ret_code, retval):
             logger.debug("MuMuManager app launch 失败，回退至 ADB monkey: ret=%s, out=%s", ret_code, retval)
-            return _adb_app_launch(package)
+            return self.utils.get_device_facade().adb_launch_app(package)
         raise RuntimeError(retval)
 
     def close(self, package: str) -> bool:
@@ -117,7 +92,7 @@ class App:
             return True
         if _manager_failed(ret_code, retval):
             logger.debug("MuMuManager app close 失败，回退至 ADB force-stop: ret=%s, out=%s", ret_code, retval)
-            return _adb_app_close(package)
+            return self.utils.get_device_facade().adb_force_stop_app(package)
         raise RuntimeError(retval)
 
     def get_installed(self):
@@ -130,7 +105,7 @@ class App:
 
         if ret_code != 0:
             logger.debug("MuMuManager app info -i 失败，回退至 ADB pm list packages: ret=%s, out=%s", ret_code, retval)
-            return _adb_list_packages()
+            return self.utils.get_device_facade().adb_list_packages()
 
         data = json.loads(retval)
         installed = []
@@ -156,7 +131,7 @@ class App:
 
         if ret_code != 0:
             logger.debug("MuMuManager app exists 失败，回退至 ADB pm path: ret=%s, out=%s", ret_code, retval)
-            return _adb_app_exists(package)
+            return self.utils.get_device_facade().adb_app_exists(package)
 
         data = json.loads(retval)
 
@@ -184,5 +159,5 @@ class App:
             return data['state']
         if _manager_failed(ret_code, retval):
             logger.debug("MuMuManager app info 失败，回退至 ADB pidof: ret=%s, out=%s", ret_code, retval)
-            return _adb_app_state(package)
+            return self.utils.get_device_facade().adb_app_state(package)
         raise RuntimeError(retval)

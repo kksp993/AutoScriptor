@@ -1,5 +1,4 @@
 import os
-import threading
 import time
 from typing import Any, Callable, Iterable, Literal
 from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
@@ -17,8 +16,9 @@ from AutoScriptor.core.box import Box, b2p
 from AutoScriptor.logging.tracer import save_debug_screenshot
 from AutoScriptor.logging.logger import logger, setup_logfile
 from AutoScriptor.utils.app_config import cfg
+from AutoScriptor.utils.mumu_discovery import resolve_mumu_adb_addr, validate_mumu_connection_parameters
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
-from AutoScriptor.utils.cancel import check_cancel_raise, cancellable_sleep, join_with_cancel, sleep_with_cancel
+from AutoScriptor.utils.cancel import TaskCancelled, check_cancel_raise, cancellable_sleep
 
 
 # Package-name resolution is pluggable; register one with
@@ -74,7 +74,11 @@ def getFrameSize() -> tuple[int, int]:
     return _configured_frame_size
 
 
-def ensure_all_environment_ready():
+def ensure_all_environment_ready(
+    emulator_index: int | None = None,
+    *,
+    adb_addr: str | None = None,
+):
     # 初始化编排器
     logger.info("编排器初始化开始...")
     from datetime import datetime
@@ -89,8 +93,9 @@ def ensure_all_environment_ready():
     log_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime('%y%m%d_%H%M%S')
     setup_logfile(str(log_dir / f"[{timestamp}].log"))
-    selected_emulator_index = cfg["emulator"]["index"]
-    adb_addr = cfg["emulator"]["adb_addr"]
+    emulator_config = cfg["emulator"]
+    selected_emulator_index = emulator_config["index"] if emulator_index is None else emulator_index
+    adb_addr = resolve_mumu_adb_addr(selected_emulator_index, emulator_config, adb_addr=adb_addr)
     app_to_start = cfg["app"]["app_to_start"]
     return selected_emulator_index, adb_addr, app_to_start
 
@@ -114,20 +119,27 @@ def ensure_app_running(
         协作式取消检查；WebUI 停止按钮会通过它快速打断启动、解析和探测等待。
     """
     cancel_check = cancel_check or check_cancel_raise
+    cancel_check()
+    validate_mumu_connection_parameters(selected_emulator_index, adb_addr)
 
     mumu_manager_path = cfg["emulator"]["emu_path"]
-    logger.debug(
+    logger.info(
         "ensure_app_running: index=%s, adb=%s, app=%s, emu=%s, start_emulator=%s, launch_app=%s",
         selected_emulator_index, adb_addr, app_to_start, mumu_manager_path, start_emulator, launch_app,
     )
-    mumu = Mumu().select(selected_emulator_index)
+    mumu = Mumu(adb_addr=adb_addr).select(selected_emulator_index)
+    mumu.verify_connection(allow_stopped=True)
     cancel_check()
 
-    is_running = mumu.power.is_running()
+    power = mumu.power
+    is_running = power.is_running()
     if not is_running:
         if not start_emulator:
-            raise RuntimeError("ensure_app_running: 模拟器未运行，且当前调用不允许自动启动")
-        mumu.power.start(None, cancel_check=cancel_check)
+            raise RuntimeError(
+                f"模拟器未运行: index={selected_emulator_index}, adb_addr={adb_addr!r}；"
+                "start_emulator=False，不允许自动启动，也不会改连其他实例。"
+            )
+        power.start(None, cancel_check=cancel_check)
         is_running = True
     if not is_running:
         raise RuntimeError("ensure_app_running: 模拟器启动失败")
@@ -135,49 +147,49 @@ def ensure_app_running(
     # MuMuManager may report a running process while its TCP ADB endpoint is
     # still offline. Do not create controls or launch the app until the
     # configured serial is connected and Android has completed booting.
+    player = mumu.verify_connection()
     logger.info("正在确认模拟器 ADB 与 Android 启动状态")
-    if not mumu.power.wait_until_android_ready(cancel_check=cancel_check):
+    if not power.wait_until_android_ready(cancel_check=cancel_check):
         raise RuntimeError(
-            f"ensure_app_running: ADB 设备 {adb_addr} 未就绪或 Android 启动未完成"
+            f"ADB/Android 就绪检查失败: index={selected_emulator_index}, adb_addr={adb_addr!r}；"
+            f"{power.last_readiness_error}；请检查该实例的 ADB 连接/授权和 Android 启动状态。"
         )
 
-    # app_to_start 为空或未安装时由 resolve_app_to_start 枚举候选包并写回 data/config.json。
-    # 解析只在需要拉起应用时进行，避免 WebUI 初始化或纯设备探测误触 MuMuManager。
-    if launch_app:
-        cancel_check()
-        resolved = _resolve_app_package(mumu, cancel_check)
-        mumu.app.launch(resolved)
-        cancel_check()
-
-    logger.info("模拟器启动完成")
     mixctrl = MixControl(mumu, serial=adb_addr)
-    logger.info("编排器初始化完成.")
-    success = False
-    intervals = [1, 2, 3, 3, 3, 3, 3, 3]
-    for i, interval in enumerate(intervals, 1):
-        click_result = {}
-        def _click_test():
+    initialized = False
+    try:
+        cancel_check()
+        # Read-only IPC verification: an off-screen tap proves neither device
+        # identity nor delivery and can silently fall back to a different lane.
+        try:
+            frame = mixctrl.screenshot()
+            frame_shape = getattr(frame, "shape", ())
+            if len(frame_shape) < 2 or min(frame_shape[:2]) <= 0:
+                raise RuntimeError(f"截图为空或尺寸无效: shape={frame_shape!r}")
+        except TaskCancelled:
+            raise
+        except Exception as error:
+            raise RuntimeError(
+                f"NemuIpc 截图检查失败: index={selected_emulator_index}, adb_addr={adb_addr!r}；{error}"
+            ) from error
+        cancel_check()
+        if launch_app:
+            resolved = _resolve_app_package(mumu, cancel_check)
+            mumu.app.launch(resolved)
+            cancel_check()
+        if cfg["app"]["run_in_background"]:
+            mixctrl.window.hidden()
+        initialized = True
+    finally:
+        if not initialized:
             try:
-                mixctrl.click(2000, 0)
-                click_result['ok'] = True
-            except Exception as e:
-                click_result['error'] = e
-                logger.error(f"测试点击(0,0)，第{i}次尝试，第{interval}秒后重试, 错误信息: {e}")
-        t = threading.Thread(target=_click_test)
-        t.daemon = True
-        t.start()
-        join_with_cancel(t, 3, cancel_check)
-        if not t.is_alive() and 'error' not in click_result:
-            success = True
-        if success:
-            logger.info("测试点击(0,0)成功，模拟器响应正常。")
-            break
-        logger.error(f"测试点击(0,0)，第{i}次尝试，第{interval}秒后重试")
-        sleep_with_cancel(interval, cancel_check)
-    if not success:
-        logger.error("多次点击测试失败，模拟器无响应")
-        raise RuntimeError("ensure_app_running: 多次点击测试失败，模拟器无响应，请检查模拟器状态")
-    mixctrl.window.hidden() if cfg["app"]["run_in_background"] else None
+                mixctrl.nemu_control.nemu_ipc.nemu_ipc_release()
+            except Exception as cleanup_error:
+                logger.warning("初始化失败后的 IPC 清理失败: %s", cleanup_error)
+    logger.info(
+        "设备连接核验通过: index=%s, name=%s, adb=%s, IPC截图=%sx%s；未发送测试点击，不代表目标页面正确。",
+        selected_emulator_index, player.get("name", ""), adb_addr, frame_shape[1], frame_shape[0],
+    )
     return mixctrl, mumu
 
 
@@ -199,6 +211,8 @@ def _diag_info(**extra) -> dict:
 
 def init(
     *,
+    emulator_index: int | None = None,
+    adb_addr: str | None = None,
     start_emulator: bool = True,
     launch_app: bool = False,
     cancel_check: Callable[[], None] | None = None,
@@ -209,9 +223,15 @@ def init(
     ``launch_app=False`` is the safe default: it connects to the configured
     emulator without launching the configured game. Game scripts and runners
     must explicitly pass ``launch_app=True`` when they own that lifecycle.
+    ``emulator_index`` (including zero) and ``adb_addr`` override defaults for
+    this session only. A default-derived ADB address follows the selected
+    instance; custom configured addresses survive unless explicitly overridden.
+    Conflicting or unsupported endpoints fail rather than being rewritten.
+    Local Manager identity, ADB readiness and a read-only IPC frame are checked
+    before app launch. Initialization never sends a test click.
     """
     global mixctrl, mumu
-    idx, addr, app = ensure_all_environment_ready()
+    idx, addr, app = ensure_all_environment_ready(emulator_index, adb_addr=adb_addr)
     mixctrl, mumu = ensure_app_running(
         idx,
         addr,

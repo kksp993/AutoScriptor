@@ -43,7 +43,7 @@ os.environ.setdefault("AUTOSCRIPTOR_DATA_DIR", str(Path(__file__).resolve().pare
 
 from AutoScriptor import *
 
-init()                                     # 连模拟器、起 OCR、进入配置里的游戏
+init()                                     # 连接模拟器；进入游戏需 launch_app=True
 print("分辨率:", getFrameSize())
 
 click(T("确定"), if_exist=True)
@@ -63,6 +63,10 @@ go_home()
 ```
 
 `init()` 之前的导入都是懒的：`import AutoScriptor` 不会初始化 OCR、UI Map、MuMu、NemuIpc 或 `mixctrl/mumu`。
+
+切换实例直接传 `init(emulator_index=0)`，不需要修改 `cfg`。默认推导的 ADB 端口随编号变化，手填地址保留；也可显式传 `adb_addr="127.0.0.1:16384"`。这些参数只绑定本次会话，不保存为全局配置，后续 ADB/Manager/IPC 控制使用同一选择。
+
+初始化会核对 MuMuManager 实际实例/地址、ADB 启动状态和一帧 IPC 截图，不发送测试点击；参数冲突或无法验证会明确报错并停止，不自动选择其他在线实例。当前混合控制仅支持本机 `127.0.0.1` / `localhost`、实例 0..31 和 NemuIpc 可映射端口；任意远端 IP/自定义端口并不因可传参就获得支持。成功日志会列出实例名称、地址和截图尺寸，但不保证目标页面或 OCR 区域正确。
 
 ## 公共 API
 

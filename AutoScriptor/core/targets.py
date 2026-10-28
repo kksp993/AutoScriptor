@@ -112,13 +112,24 @@ class BoxTarget(Target):
     def __repr__(self):
         return f"B({self.box})"
 
+def _ui_table():
+    """当前 UI 表。
+
+    必须走 ``ui_manager.get_ui()``，不能直接读模块级的 ``ui`` 绑定：游戏层是在
+    自己包导入时才 ``set_assets_root()`` 的，在那之前建好的表是空的，而
+    ``get_ui()`` 会比对资产根并原地刷新。直接取绑定就绕过了这次刷新，
+    游戏层资产齐全时也会报「UI map 里没有 …」（见 docs/AutoScriptor/debug-lessons.md 第 13 条）。
+    """
+    from AutoScriptor.utils.ui_map import ui_manager
+
+    return ui_manager.get_ui()
+
 def B(x, y=None, w=0, h=0, color=None):
-    from AutoScriptor.utils.ui_map import ui
     # 支持通过 color 关键字指定颜色筛选
     if isinstance(x, Box):
         return BoxTarget(x, color)
     if isinstance(x, str):
-        entry = ui[x]
+        entry = _ui_table()[x]
         if color is not None:
             entry = entry.set_color(color)
         return entry.b
@@ -126,15 +137,13 @@ def B(x, y=None, w=0, h=0, color=None):
     return BoxTarget(box, color)
 
 def I(key,*,box:Box|None=None,color=None):
-    from AutoScriptor.utils.ui_map import ui
-    entry = ui[key]
+    entry = _ui_table()[key]
     if box is not None: entry = entry.set_box(box)
     return entry.set_color(color).i
 
 def T(text=None, *, key=None,box:Box|None=None,color=None):
-    from AutoScriptor.utils.ui_map import ui
     if isinstance(key,str):
-        entry = ui[key]
+        entry = _ui_table()[key]
     else:
         entry = ui_str(text)
     if box is not None: entry = entry.set_box(box)

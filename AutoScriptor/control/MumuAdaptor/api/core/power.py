@@ -10,7 +10,6 @@ import json
 import subprocess
 from typing import Callable
 
-from AutoScriptor.control.MumuAdaptor.device_facade import get_device_facade
 from AutoScriptor.utils.cancel import TaskCancelled, check_cancel_raise, sleep_with_cancel
 from AutoScriptor.logging.logger import logger
 
@@ -19,6 +18,7 @@ class Power:
 
     def __init__(self, utils):
         self.utils = utils
+        self.last_readiness_error = ""
 
     def wait_until_android_ready(
         self,
@@ -28,11 +28,13 @@ class Power:
     ) -> bool:
         cancel_check = cancel_check or check_cancel_raise
         deadline = time.monotonic() + timeout
-        facade = get_device_facade(vm_index=self.utils.get_vm_id())
+        facade = self.utils.get_device_facade()
         while time.monotonic() < deadline:
             cancel_check()
             if facade.adb_device_ready():
+                self.last_readiness_error = ""
                 return True
+            self.last_readiness_error = facade.last_adb_error
             sleep_with_cancel(interval, cancel_check)
         return False
 
@@ -57,7 +59,7 @@ class Power:
             logger.debug("MuMuManager info 失败，回退 ADB 检测: ret=%s, out=%s", ret_code, retval)
         except (OSError, RuntimeError, subprocess.SubprocessError):
             logger.debug("MuMuManager info 异常，回退 ADB 检测", exc_info=True)
-        return get_device_facade(vm_index=self.utils.get_vm_id()).adb_device_ready()
+        return self.utils.get_device_facade().adb_device_ready()
 
     def start(
         self,
@@ -88,10 +90,14 @@ class Power:
                 ret_code, retval = self.utils.run_command(args)
                 if ret_code == 0:
                     if not self.wait_until_android_ready(cancel_check=cancel_check):
-                        raise RuntimeError("MuMuManager launch code succeeded, but device did not become ready")
+                        raise RuntimeError(
+                            f"MuMuManager launch accepted, but index={self.utils.get_vm_id()} "
+                            f"adb={self.utils.get_device_facade().adb_addr} did not become ready: "
+                            f"{self.last_readiness_error}"
+                        )
                     logger.info(f"模拟器 {self.utils.get_vm_id()} 启动成功")
                     return True
-                if get_device_facade(vm_index=self.utils.get_vm_id()).adb_device_ready():
+                if self.utils.get_device_facade().adb_device_ready():
                     logger.warning("MuMuManager launch 失败，但 ADB 已可用，视为模拟器已启动: %s", retval)
                     return True
 

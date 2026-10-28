@@ -142,6 +142,45 @@ class StandaloneFrameworkFallbackTest(unittest.TestCase):
                     manager.get_ui()["首页"]
                 self.assertIn("ui_map.csv", str(caught.exception))
 
+    def test_keyed_target_refreshes_the_table_when_the_asset_root_arrives_late(self):
+        """按 key 的目标必须自己触发 ui_map 的资产根刷新。
+
+        真实事故（2026-10-25，手工脚本 ``test/manual/shuake.py``）：先
+        ``from AutoScriptor import *``（资产根还是仓库根的 ``assets/``，表是空的），
+        再 ``from ZmxyOL import *`` 才 ``set_assets_root()`` 注册游戏层资产，接着
+        ``nav/envs/decorators.py`` 顶层的 ``I("世界地图-天庭")`` 直接抛 KeyError。
+        ``get_ui()`` 的资产根比对本身是对的，但 ``I()``/``B(键名)``/``T(key=...)``
+        读的是模块级 ``ui`` 绑定，没人调用就永远等不到那次原地刷新。
+        """
+        from AutoScriptor.core import targets
+        from AutoScriptor.core.box import Box
+        from AutoScriptor.utils import paths, ui_map
+
+        with tempfile.TemporaryDirectory() as tmp:
+            framework_only_root = Path(tmp) / "framework_only"   # 没有 config/ui_map.csv
+            framework_only_root.mkdir()
+            game_root = Path(tmp) / "game_assets"                # 游戏层导入时才注册的资产根
+            (game_root / "config").mkdir(parents=True)
+            (game_root / "config" / "ui_map.csv").write_text(
+                "key,text,left,top,width,height,img\n世界地图-天庭,,11,22,33,44,\n",
+                encoding="utf-8",
+            )
+            # 资产根是进程级全局状态：别的用例（task_domain 的 hero 脚本）要用游戏层
+            # 注册的那棵树，测完必须原样放回去，否则同进程后续用例会拿到空表。
+            original_assets_root = paths.get_assets_dir()
+            try:
+                paths.set_assets_root(framework_only_root)
+                ui_map.reload_ui_map()                            # 复现「先按错误的根建好空表」
+                self.assertEqual(len(ui_map.ui), 0)
+
+                paths.set_assets_root(game_root)                  # 模拟游戏层 register_assets_root()
+                target = targets.I("世界地图-天庭")                 # 刷新必须由这一行触发
+
+                self.assertEqual(target.ui.box, Box(11, 22, 33, 44))
+            finally:
+                paths.set_assets_root(original_assets_root)
+                ui_map.reload_ui_map()
+
     def test_missing_config_template_still_supplies_hard_subscripted_keys(self):
         """没有 ``config.template.json`` 时，框架硬下标读的键必须有默认值。
 

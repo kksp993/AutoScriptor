@@ -27,6 +27,8 @@
 | 任务列表交互与排序持久化 | [tasks/task-ordering-graph-plan.md](tasks/task-ordering-graph-plan.md) |
 | 安装位写脚本（两个 wheel） | [operations/library-packages.md](operations/library-packages.md) |
 | OCR 模型实验 | [reference/ocr-model-experiment.md](reference/ocr-model-experiment.md) |
+| 独立 DOM 接口与当前课程观看流程 | [reference/dom-parser.md](reference/dom-parser.md) |
+| Cocos 游戏组件读取结论（临时检查已移除） | [reference/cocos-runtime-inspection.md](reference/cocos-runtime-inspection.md) |
 | 识别质量维护 | [reference/API.md](reference/API.md)、[operations/log-archiver.md](operations/log-archiver.md)、`scripts/audit_ui_assets.py`、`scripts/run_recognition_baselines.py` |
 | 战斗流程 | [tasks/battle-flows.md](tasks/battle-flows.md) |
 | 后台监控 | [runtime/background.md](runtime/background.md) |

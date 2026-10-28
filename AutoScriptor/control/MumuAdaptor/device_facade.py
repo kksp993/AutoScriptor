@@ -20,6 +20,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from AutoScriptor.utils.mumu_discovery import resolve_mumu_adb_addr, validate_mumu_connection_parameters
+
 
 CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
 
@@ -119,19 +121,26 @@ class DeviceFacade:
         emulator: dict[str, Any] | None = None,
         app: dict[str, Any] | None = None,
         vm_index: str | int | None = None,
+        adb_addr: str | None = None,
     ):
         if emulator is None or app is None:
             from AutoScriptor.utils.app_config import cfg
 
             emulator = emulator if emulator is not None else cfg["emulator"]
             app = app if app is not None else cfg["app"]
-        self.emulator = emulator
-        self.app = app
+        self.emulator = dict(emulator)
+        self.app = dict(app)
         self.vm_index = str(vm_index if vm_index is not None else emulator.get("index", ""))
+        self.emulator["adb_addr"] = resolve_mumu_adb_addr(
+            self.vm_index, emulator, adb_addr=adb_addr
+        )
+        self.last_adb_error = ""
 
     @classmethod
-    def from_config(cls, *, vm_index: str | int | None = None) -> "DeviceFacade":
-        return cls(vm_index=vm_index)
+    def from_config(
+        cls, *, vm_index: str | int | None = None, adb_addr: str | None = None,
+    ) -> "DeviceFacade":
+        return cls(vm_index=vm_index, adb_addr=adb_addr)
 
     @property
     def adb_addr(self) -> str:
@@ -162,6 +171,8 @@ class DeviceFacade:
             self.adb_base_args() + args,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             creationflags=CREATE_NO_WINDOW,
         )
@@ -177,6 +188,8 @@ class DeviceFacade:
             self.manager_base_args(operate) + args,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             creationflags=CREATE_NO_WINDOW,
         )
@@ -189,21 +202,76 @@ class DeviceFacade:
             return None
         return host, port
 
+    def verify_mumu_endpoint(self, *, allow_stopped: bool = False) -> dict[str, Any]:
+        """Verify identity using Manager's report, not port arithmetic alone."""
+        if not self.vm_index.isdigit():
+            raise ValueError(f"连接核验需要单个实例编号，收到 index={self.vm_index!r}")
+        instance_index = int(self.vm_index)
+        validate_mumu_connection_parameters(instance_index, self.adb_addr)
+        context = f"index={self.vm_index}, adb_addr={self.adb_addr!r}"
+        command = self.manager_base_args("info")
+        try:
+            result = self.run_manager([], operate="info", timeout=8)
+        except (OSError, subprocess.SubprocessError) as error:
+            raise RuntimeError(
+                f"无法核验 MuMu 连接: {context}；命令 {command!r} 失败: {error}；已停止初始化。"
+            ) from error
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"无法核验 MuMu 连接: {context}；命令 {command!r} "
+                f"exit={result.returncode}: {_text(result)}；请检查管理器路径/实例，不会改连其他设备。"
+            )
+        players = _parse_mumu_info_payload(result.stdout)
+        if len(players) != 1 or _coerce_player_index(players[0]) != instance_index:
+            raise RuntimeError(
+                f"MuMu 实例核验失败: {context}；Manager 返回的实例为 "
+                f"{[player.get('index') for player in players]!r}，输出={result.stdout[:500]!r}；"
+                "请检查实例是否存在及管理器路径。"
+            )
+        player = players[0]
+        explicitly_stopped = (
+            player.get("is_process_started") is False
+            and player.get("is_android_started") is False
+        )
+        if explicitly_stopped:
+            if allow_stopped:
+                return player
+            raise RuntimeError(f"MuMu 实例未运行: {context}；请启动该实例，不会改连其他设备。")
+        if not player.get("adb_host_ip") or not player.get("adb_port"):
+            raise RuntimeError(f"无法核验 MuMu 连接: {context}；Manager 未返回实际 ADB 主机/端口。")
+        reported_address = _player_serial(player)
+        if _split_adb_serial(reported_address) != _split_adb_serial(self.adb_addr):
+            raise RuntimeError(
+                f"MuMu 连接不一致: {context}；Manager 实际报告 adb_addr={reported_address!r}。"
+                "请核对后显式传入匹配地址；不会静默改写配置或切换实例。"
+            )
+        return player
+
     def adb_device_ready(self) -> bool:
+        self.last_adb_error = ""
         try:
             state = self.run_adb(["get-state"], timeout=5)
             if state.returncode != 0 or state.stdout.strip() != "device":
+                self.last_adb_error = f"get-state exit={state.returncode}: {_text(state)}"
                 if ":" not in self.adb_addr:
                     return False
                 # Already-listed offline TCP serials report "already connected"
                 # on plain adb connect; heal them with disconnect then connect.
-                self._adb_reconnect_serial(self.adb_addr)
+                reconnect_detail = self._adb_reconnect_serial(self.adb_addr)
                 state = self.run_adb(["get-state"], timeout=5)
                 if state.returncode != 0 or state.stdout.strip() != "device":
+                    self.last_adb_error = (
+                        f"get-state exit={state.returncode}: {_text(state)}; reconnect: {reconnect_detail}"
+                    )
                     return False
             booted = self.run_adb(["shell", "getprop", "sys.boot_completed"], timeout=5)
-            return booted.returncode == 0 and booted.stdout.strip() == "1"
-        except (OSError, subprocess.SubprocessError):
+            ready = booted.returncode == 0 and booted.stdout.strip() == "1"
+            self.last_adb_error = "" if ready else (
+                f"sys.boot_completed={booted.stdout.strip()!r}, exit={booted.returncode}: {_text(booted)}"
+            )
+            return ready
+        except (OSError, subprocess.SubprocessError) as error:
+            self.last_adb_error = str(error)
             return False
 
     def adb_shell(self, args: list[str], timeout: int = 10) -> bool:
@@ -619,6 +687,8 @@ class DeviceFacade:
         }
 
 
-def get_device_facade(*, vm_index: str | int | None = None) -> DeviceFacade:
+def get_device_facade(
+    *, vm_index: str | int | None = None, adb_addr: str | None = None,
+) -> DeviceFacade:
     """Return a fresh facade so config changes are picked up immediately."""
-    return DeviceFacade.from_config(vm_index=vm_index)
+    return DeviceFacade.from_config(vm_index=vm_index, adb_addr=adb_addr)

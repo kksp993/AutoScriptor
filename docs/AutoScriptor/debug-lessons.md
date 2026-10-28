@@ -51,9 +51,10 @@
     `MuMuManager.exe`——它被当 CLI 执行，指到 GUI 的 `MuMuPlayer.exe` 会静默失效。
 13. **`ui_map` 会在错误时机建表**：它在模块导入时读一次资产根，而游戏层是在自己
     包导入时才 `set_assets_root()`。谁先导入 `ui_map`（例如某个测试模块顶层
-    `import ui_map`），表就按错误（或缺失）的根建好并一直空着，之后按 key 的目标
-    报 `KeyError`。改法是 `get_ui()` 比对资产根并原地刷新——表对象只有一个，
-    模块级 `ui`、`AutoScriptor.ui` 都靠原地 `clear()+update()` 才一起看到新表。
+    `import ui_map`），表就按错误（或缺失）的根建好并一直空着。修法是 `get_ui()`
+    比对资产根并原地 `clear()+update()` 刷新，所以按 key 的目标（`I`、`B(键名)`、
+    `T(key=)`）必须经 `ui_manager.get_ui()` 取表——直接读模块级 `ui` 绑定会绕过
+    这次刷新，游戏层资产齐全也照样报 `KeyError`。
 14. **别用 `os.getcwd()` 定日志/数据位置**：安装位里 cwd 是用户自己的工作目录，
     源码位恰好等于仓库根所以看不出来。日志统一走 `get_logs_root()`（数据根下的
     `logs/log/`），与 `log_archiver` 的兜底路径一致。同类：跑完

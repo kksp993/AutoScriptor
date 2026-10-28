@@ -266,7 +266,9 @@ class TestTaskDebugMode(unittest.TestCase):
         self.assertEqual(task_manager.executed, ["测试/任务"])
         invalidate_login.assert_not_called()
         ensure_login.assert_not_called()
-        daily_restart.assert_called_once()
+        # 任务列表直跑要复用当前游戏现场；每日重启会关掉模拟器，和这个入口的
+        # 「跳过角色校验」语义冲突，所以只在真正需要登录的入口做。
+        daily_restart.assert_not_called()
         post_action.assert_called_once()
 
         task_manager, invalidate_login, daily_restart, ensure_login, post_action = run_direct(

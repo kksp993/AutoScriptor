@@ -158,18 +158,36 @@ def running_bot_pid(root: Path | None = None) -> int | None:
         pid = int(path.read_text(encoding="ascii").strip())
     except (OSError, ValueError):
         return None
-    # ``os.kill(pid, 0)`` is not a portable existence check: on Windows it raises
-    # SystemError for a signal it does not implement. Opening the process and
-    # closing the handle asks the same question without sending anything.
+    # Windows can open an exited process while another handle keeps its object
+    # alive. Only a non-signaled process handle means it is still running.
     import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
 
     SYNCHRONIZE = 0x00100000
-    handle = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+    WAIT_OBJECT_0 = 0x00000000
+    WAIT_TIMEOUT = 0x00000102
+    handle = kernel32.OpenProcess(SYNCHRONIZE, False, pid)
     if not handle:
         path.unlink(missing_ok=True)
         return None
-    ctypes.windll.kernel32.CloseHandle(handle)
-    return pid
+    try:
+        wait_result = kernel32.WaitForSingleObject(handle, 0)
+        if wait_result == WAIT_TIMEOUT:
+            return pid
+        if wait_result != WAIT_OBJECT_0:
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        kernel32.CloseHandle(handle)
+    path.unlink(missing_ok=True)
+    return None
 
 
 def _listening_pid(port: int) -> int | None:

@@ -42,14 +42,17 @@
 
 独立脚本可通过公共 `AutoScriptor.init(start_emulator=True, launch_app=True)` 建立同一类设备控制。操作游戏盒等非配置 App 时使用 `init(launch_app=False)`，再调用公共 `launch_app()` / `close_app()` / `go_home()`；这些包装函数在调用时读取当前设备控制，不会持有星号导入时的旧 `mixctrl` 快照。
 
+`init(emulator_index=0, adb_addr=...)` 的选择只作用于本次会话，不改写 `cfg`：省略参数时读配置默认值，显式 `0` 是有效编号。省略地址时，默认推导地址跟随实例，手填地址保留。`ensure_app_running(index, addr, app)` 将编号和地址传入 MuMu/IPC；MuMu 的启动检查、ADB、App 回退及动态控制属性均使用绑定的会话参数，不重新选择全局配置中的实例。诊断入口仍通过新的 `get_device_facade()` 读取最新配置；编排器的 `runtime_ctx.refresh()` 仍按当前配置重建设备会话。
+
 `ensure_app_running()` 会：
 
-1. 依据 `start_emulator` 确认 MuMu 进程存在；`MuMuManager launch` 返回成功只代表启动命令已被接受。
-2. 无论 MuMu 是刚启动还是已在运行，都等待配置的 TCP ADB 串号重连为 `device`，并确认 `sys.boot_completed=1`。
-3. 按 `launch_app` 解析并启动 `app_to_start`，必要时写回配置。
-4. 创建 `MixControl(mumu, serial=adb_addr)`。
-5. 通过测试点击确认模拟器响应。
-6. 按 `run_in_background` 隐藏窗口。
+1. 校验实例号、`host:port` 格式及 NemuIpc 端口映射；当前混合控制仅支持本机 `127.0.0.1` / `localhost` 和 IPC 支持的实例 0..31。远端地址或不支持的自定义端口明确报错，不改写手填地址。
+2. 查询 `MuMuManager info -v <index>`，核对返回的实例和实际 ADB 主机/端口；管理器失败、实例缺失或地址冲突都终止初始化。停机实例只允许在启动前暂缺地址，启动后重新核验；不能仅凭端口公式或其他在线设备宣称核验成功。
+3. 依据 `start_emulator` 启动/确认实例，并等待指定 ADB 串号为 `device`、`sys.boot_completed=1`。失败保留实例、地址及最后的 ADB/重连错误。`launch` 成功只代表命令已被接受。
+4. 创建 `MixControl` 并只读获取一帧 IPC 截图，记录实例名称及帧尺寸；失败或取消时释放新建 IPC，不发布半初始化的会话。初始化不发送测试点击。
+5. 校验通过后才按 `launch_app` 解析并启动 App，按 `run_in_background` 隐藏窗口。包名解析器仍可按原规则写回包名配置。
+
+连接核验不证明目标页面或 OCR 区域正确。`extract_info` 读空返回 `None` 时，应检查实际页面、帧尺寸、区域及后处理，不能直接判断为 IP/端口故障。已有会话的输入/App 运行期回退仍保留，但新会话不能绕过身份核验。
 
 任务失败恢复（`TaskManager._try_recover_app`）只在 `app.restart_on_error=true` 时执行：关闭 App，
 等状态离开 `running`，再重新 launch。第一次恢复失败时额外重启 ADB；如果连续 3 次恢复后 App
@@ -57,6 +60,11 @@
 `runtime_ctx.release_session()` 释放旧 NemuIpc，再 `mumu.power.restart()`，然后用
 `runtime_ctx.refresh(launch_app=False)` 重建会话并重新 launch 游戏。两次 MuMu 重启之间至少间隔
 10 分钟，任务成功会清零连续失败计数，避免无人值守时把坏会话变成反复关模拟器的重启风暴。
+
+自动调度和需要登录的直接执行入口还会在每天 05:00 后的第一次执行前主动重启 MuMu 实例
+（`Scheduler._maybe_daily_restart()`）：关闭实例后由随后的 `runtime_ctx.refresh()` 重新启动，
+并失效登录缓存。游戏跨日后会把客户端踢回 4399 登录/授权页，该页面上的「App 启动超时」
+只能靠重启实例清掉。任务列表直跑和 debug 任务要保留现场，不做这一步。
 
 任务级 `debug` 只跳过调度器的自动登录、任务前重启和常规失败恢复，不跳过设备会话的基本就绪检查。重启设备的任务应先调用 `runtime_ctx.shutdown()` 释放旧 NemuIpc 和运行态引用，再重启 MuMu 并通过 `runtime_ctx.refresh()` 建立新会话。
 
@@ -68,6 +76,8 @@ QQ 结果通知不属于设备生命周期：保存 `notify.qq` 只写全局配�
 安全密码验证成功后，若 `notify.qq.enabled=true`，本机已有安装和缓存 QQ 会话，WebUI 会用缓存账号
 后台快速启动机器人；没有缓存会话时不启动首次扫码流程。每轮执行冻结通知配置，角色结果以文本快照
 异步发送；队列排空后发送线程退出，失败不触发游戏重试。
+机器人存活检查必须验证 Windows 进程尚未退出，不能只看 `OpenProcess` 是否成功；残留句柄可能
+保留已退出的进程对象。确认退出后清除旧 pid，下次验证可再次启动；活进程尚未监听时不重复启动。
 进程退出不保证队列持久送达，记录只保留在内存。详见 [QQ 通知](../operations/qq-notifications.md)。
 
 ## 设备通道
@@ -76,7 +86,7 @@ QQ 结果通知不属于设备生命周期：保存 `notify.qq` 只写全局配�
 - MuMuManager 负责低频生命周期命令；`version` 等命令失败但 ADB 可用时通常是 warning。
 - ADB 是点击、滑动、输入、按键、App 启停和包状态的稳定路径；高频输入优先直接走 `adb.exe`。
 - NemuIpc 的 `external_renderer_ipc.dll` 位置随 MuMu 版本变化（`shell/sdk` → `nx_device/12.0/shell/sdk` → `nx_device/15.0/...`），解析只在 `AutoScriptor/utils/mumu_discovery.py`：`nx_device/<Android 大版本>` 通配 + 版本号从大到小（新版本优先），回退 `nx_main/sdk`、`shell/sdk`；`nemu_connect` 只接受安装根，配成子目录会向上修正，配成上级目录（如 `...\Netease`）会按库位置反推回安装根；版本目录不会冒充安装根。限深查找只在与 MuMu 相关的目录里做，避免一路扫到盘根。新增 MuMu 版本时只改这一个模块，`NemuIpcImpl` 只消费结果。
-- NemuIpc 注入输入只在横屏 1280x720 下可靠；竖屏 720x1280 的 App（如 4399 游戏盒）注入点击会被吞掉（2026-10-10 实机对照：同一坐标 nemu 点击 20 次无反应、ADB 点击一次即生效）。竖屏任务在入口 `switch_base("mumu")` 走 ADB、`finally` 恢复 `nemu`；截图仍走 NemuIpc。
+- NemuIpc 注入输入只在横屏 1280x720 下可靠；竖屏 720x1280 的 App（如 4399 游戏盒）注入点击会被吞掉（2026-10-10 实机对照：同一坐标 nemu 点击 20 次无反应、ADB 点击一次即生效）。竖屏任务在入口 `switch_base("mumu")` 走 ADB、`finally` 恢复 `nemu`；登录/授权页本身是竖屏，所以 `login()` 全程通过 `ctrl_mumu` 临时切到 ADB，结束后恢复原输入模式；截图仍走 NemuIpc。
 - MuMu TCP ADB 地址（如 `127.0.0.1:16384`）不会因为 `adb start-server` 自动出现在 `adb devices`；`DeviceFacade` 在 `get-state` 失败时会先 `adb connect <adb_addr>` 并重试，再判断端口错误或设备未启动。
  - MuMu TCP ADB 地址（如 `127.0.0.1:16384`）不会因为 `adb start-server` 自动出现在 `adb devices`；`DeviceFacade` 在配置串号不是 `device` 时会先 `adb disconnect <adb_addr>` 再 `adb connect <adb_addr>` 并重试。已列出但状态为 `offline` 的 TCP 串号只做 `connect` 会回 `already connected` 却不恢复，必须 disconnect 后再 connect。
 - NemuIpc 仍是截图主路径。默认诊断不做截图探测；用户点击“截图探测”才检查该层。

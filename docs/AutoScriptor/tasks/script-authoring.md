@@ -4,6 +4,14 @@
 
 独立脚本可直接 `init()`。操作配置游戏以外的 App 时用 `init(launch_app=False)`，并通过 `launch_app()`、`close_app()`、`go_home()` 操作当前设备。竖屏脚本可调用 `setFrameSize(MUMU_SIZE_720_1280)`，随后统一使用 `Box(...).margin()`；共享 WebUI/调度进程中的任务更适合继续为每个区域显式传入 `frame_size`，避免改变其他任务的默认裁剪尺寸。
 
+独立脚本选择多开实例时直接传 `init(emulator_index=0)`，地址也可通过 `adb_addr` 显式传入；不要为了初始化临时修改全局 `cfg`。默认地址推导和手填地址优先级见 [API 速查](../reference/API.md#公共导入)。
+
+`init` 会核验实际实例/地址、ADB 与 IPC 截图，失败直接报错，不通过测试点击或自动切换实例掩盖问题。连接成功不等于进入了正确页面；`extract_info` 返回 `None` 时先检查页面、帧尺寸和识别区域，并在算术/业务处理前明确处理缺失值，不能将它填成 `0` 假装识别成功。
+
+可调试网页的 DOM 实验可使用独立的 [`test/manual/dom_parser.py`](../reference/dom-parser.md)；它不属于框架公共 API，不依赖 `init/cfg`。快照只读，`element()` 显式提供 Playwright 元素交互；`read_media()` 直接读取播放进度，无需 hover，暂停/播放及有限重试由调用方明确控制。选择器由调用方传入，CSS 坐标不能直接作为模拟器坐标，当前 DOM 中没有下一项或媒体 `ended` 都不表示整个业务已完成。
+
+`test/manual/shuake.py` 的站点完成标记、选课、播放与继续弹窗逻辑留在任务内，不扩散到通用 DOM 接口。它按实时目录跳过已完成项，确认正常完成弹窗刷新后的绿色标记才进入下一项，最后一项也必须确认；运行范围与异常边界见 [DOM 观看流程](../reference/dom-parser.md#shuake当前课程目录的观看流程)。
+
 任务之间共享的代码放在同一目录下的下划线开头文件里（例如 `tasks/其他任务/活动脚本/活动任务/_活动流程.py`），用完整包路径导入：
 `from tasks.其他任务.活动脚本.活动任务._活动流程 import run_activity`。下划线前缀表示它是模块而不是任务，注册表不会为它生成任务项。
 
