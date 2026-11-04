@@ -103,7 +103,13 @@
 6. 当前星期在生效 `reschedule` 的 `weekdays` 内；不在时会推迟 `next_exec_time`
 7. 没有在原计划内耗尽 retry：任务被排到更晚的时间点后跳过自动失效（见「retry 跳过的有效期」）
 
-收集到的到期任务会再按全局 `task_ordering` 投影排序后执行。有效顺序来自确定性总排序：先把存储里的 `id` 键 overlay 换成显示路径，再递归展开 WebUI 拖拽保存的 `items` 分组顺序（`user_order` 是展平后的兼容投影），最后回退到当前注册顺序和路径字典序。旧版 `hard_edges`、`layout`、`group_order` 会被规范化忽略，不再表示偏序规则或业务成功依赖。
+自动调度在到期集合上应用 `after_tasks`：前置仍待执行则阻塞，前置关闭、延期或成功后不再待执行则放行。不新增成功记录，不改时间规则。随后在就绪集合中按 `task_ordering.selection_policy` 选择：默认 `nearest_ready` 先比较多推荐地点的最短导航步数，**仅同距离内**优先有前序约束且已就绪的任务，再按原列表与稳定 ID 决胜；未知/不可达归入无限距离组，使用同一决胜规则。`list_ready` 仅按列表，不加入后继优先级。执行后重新计算，不按固定拓扑层跑完整轮；重试分轮不变。详情见 [任务列表与依赖就近调度](../tasks/task-ordering-graph-plan.md)。
+
+每个任务必须在源码注册时声明 `ensure_in` 起点，未另行声明的推荐地点默认取该集合；角色覆盖或清空 `preferred_locations` 不改变真实起点。少量保留现场/外部 App 的 debug 任务显式写 `ensure_in=None`，不伪造地图地点。声明不触发预导航，也不是结束地点。
+
+位置探测命中多个子地点或无法唯一确定所属环境时返回未知，不按注册顺序猜第一个。计算图先排直接依赖主干，再按源码起点的最近静态有向距离把独立任务附到主干牌后，可跨展示层，优先零距离；无可达主干时仅共同零距离任务合堆。附牌不继承依赖，静态拓扑层与归堆不变成调度优先级，也不是实际连续路线。
+
+列表投影仍通过稳定 ID 换为路径、展开 `items`、回退注册顺序和路径字典序生成，保留给手动执行和自动决胜。旧版 `hard_edges`、`layout`、`group_order` 仍忽略。依赖错误只阻塞受影响链；重试耗尽的前置仍参与阻塞判定。跨角色收集和等待时间必须排除仅依赖阻塞的立即任务，防止零间隔空转。
 
 人工接管标记不是永久冻结。`human_takeover_error` 存在时：
 
@@ -167,6 +173,8 @@ else:
 ```
 
 调度器不会在同一轮里反复撞同一个失败任务。失败任务会等本轮其他任务结束后进入下一 retry 轮；用满 `max_attempts` 后，在同一份计划内跳过（见「retry 跳过的有效期」）。
+
+自动调度每个任务独立记尝试次数；前置重试成功会重新发现刚解锁的后继，后继不会继承前置的 retry 次数。设备就绪后只读探测一次位置，不按候选逐个 OCR。普通任务在登录/每日重启后选择；混合 debug/普通候选尚未确认角色时先按列表选择，再仅应用最终任务自己的生命周期策略，避免用别的候选触发重启。`last_selection` 是最近决策记录而非未来整轮路线；页面轮询不触发定位。
 
 每日重启检查（`_maybe_daily_restart()`）的判据是本地时间的游戏日边界：过了 05:00 后，
 当前进程第一次遇到非 debug、非任务列表直跑的任务时关闭 MuMu 实例，由随后的
@@ -248,6 +256,14 @@ clear_task_status("progress")
 - 用户手动停止导致的 cooperative cancel。
 
 连续错误达到 3 后进入 `error`，调度暂停，并同步发送 Windows 桌面/配置通知。
+
+设备启动失败必须在 `runtime_ctx.refresh()` 的异常分支直接检查连续错误额度，不能只等待
+`state == error`：任务执行期间 `record_result()` 会延后状态切换，仅检查状态会让管线永远
+无法退出。连续三次失败时立即停止，不再等待或进行第四次启动；前两次分别等待 10、20 秒。
+该额度独立于任务的 `app.max_attempts`，启动失败不消耗任务尝试次数、不改任务计划，已弹出的
+retry 任务仍留在当前重试轮。调度未启用的直接执行仍在第一次启动失败后返回，不自动激活调度。
+启动异常由调度器直接归档（`stage=device_startup`），不依赖尚未进入的任务异常捕获；用户终止
+不计错、不重试、不归档。成功执行任务后清零错误额度。
 
 **`error` 不是终点**：静默 `ERROR_AUTO_RECOVER_SECONDS`（30 分钟）后主循环会自动
 `reset()` + `activate()` 重来一轮。没有它，一次夜间故障会让之后所有到期任务都不跑，
@@ -331,5 +347,6 @@ clear_task_status("progress")
 - retry 跳过是否只作用于「同一份计划」（`next_exec_time` 未推进期间），避免永久“到期但永不执行”。
 - 同一个任务反复失败是否按同一故障计，不会把调度送进 `error`。
 - `error` 冷却自动恢复是否仍生效，且错误态下等待间隔被钳到 `ERROR_WAKE_INTERVAL`。
+- 启动失败是否在 pipeline 活跃期间仍至多尝试三次；启动异常是否独立归档且不采集旧设备现场。
 - `cfg["tasks"]` 只保存用户配置，`TaskRegistry` 只保存运行时元数据。
-- 相关测试：`test/orchestration/test_scheduler_daily_restart.py`、`test/task_domain/test_decouple_cfg.py` 与 `test/webui/test_webui_contracts.py`。
+- 相关测试：`test/orchestration/test_scheduler_startup_failures.py`、`test/orchestration/test_scheduler_retry_rounds.py`、`test/orchestration/test_scheduler_daily_restart.py`、`test/task_domain/test_decouple_cfg.py` 与 `test/webui/test_webui_contracts.py`。

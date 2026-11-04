@@ -10,6 +10,7 @@ from tasks.其他任务.活动脚本.活动任务._活动流程 import run_activ
 
 
 @register_task(
+    ensure_in="村庄",
     description="领取百宝树的宝树奖励与宝树护理",
     reschedule="daily",
 )

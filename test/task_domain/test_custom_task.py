@@ -92,7 +92,7 @@ class TestCustomTaskRegisterPathNormalization(unittest.TestCase):
                 script = ct / "背包清空" / "进阶仙宝.py"
                 script.write_text(
                     "from tasks.task_register import register_task\n"
-                    "@register_task\n"
+                    "@register_task(ensure_in='法相')\n"
                     "def tmp_task(xianbao_idx=1):\n"
                     "    pass\n",
                     encoding="utf-8",
@@ -138,7 +138,7 @@ class TestCustomTaskDynamicImport(unittest.TestCase):
             (ct / "演示").mkdir(parents=True)
             (ct / "演示" / "tmp_hello.py").write_text(
                 "from tasks import register_task\n"
-                "@register_task\n"
+                "@register_task(ensure_in='村庄')\n"
                 "def tmp_hello():\n"
                 "    pass\n",
                 encoding="utf-8",

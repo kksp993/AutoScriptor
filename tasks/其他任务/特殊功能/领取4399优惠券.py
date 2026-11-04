@@ -23,6 +23,7 @@ def portrait(box) -> Box:
 
 
 @register_task(
+    ensure_in=None,  # 操作外部游戏盒 App，不存在游戏地图入口。
     description="打开 4399 游戏盒，领取我的优惠券",
     debug=True,
 )

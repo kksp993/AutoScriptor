@@ -69,6 +69,7 @@ _DIFF_ORDER = {"初难": 1, "灾厄": 2, "浩劫": 3}
 
 
 @register_task(
+    ensure_in="洪荒遗境",
     description="完成遗境副本挑战，根据配置自行选择挑战难度和关卡。",
     reschedule="daily",
 )

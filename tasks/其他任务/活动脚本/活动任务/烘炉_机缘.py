@@ -4,6 +4,7 @@ from ZmxyOL import *
 from AutoScriptor.logging.logger import logger
 
 @register_task(
+    ensure_in="天庭#4",  # battle_tasks 按 TASK_TABLE 固定顺序筛选，首项是龙宫。
     description="依次处理造化烘炉和机缘大集。",
     reschedule="daily",
 )

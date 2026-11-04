@@ -135,8 +135,8 @@ const NewsPanel = {
           <i class="fa fa-newspaper-o text-primary mr-1"></i>游戏资讯
         </h2>
         <span class="text-xs text-gray-400">造梦西游OL · 官方公告</span>
-        <span v-if="bbsSessionEligible" class="text-xs text-emerald-600" title="配置中有可用于资讯代理的通行证；非公开凭据需先验证安全密码">
-          <i class="fa fa-unlock-alt"></i> 通行证代拉已就绪
+        <span v-if="bbsSessionEligible" class="text-xs text-emerald-600" title="已具备尝试自动登录的条件，不代表论坛登录已成功；具体结果见正文窗口">
+          <i class="fa fa-unlock-alt"></i> 可尝试通行证代拉
         </span>
       </div>
       <div class="flex items-center gap-2">

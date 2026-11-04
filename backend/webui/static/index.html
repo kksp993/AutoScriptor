@@ -59,7 +59,9 @@
       .stat-label { @apply text-sm text-gray-500 mt-1.5; }
     }
   </style>
-  <link rel="stylesheet" href="/static/css/style.css?v=47" />
+  <link rel="stylesheet" href="/static/css/style.css?v=48" />
+  <link rel="stylesheet" href="/static/css/task-hierarchy.css?v=2" />
+  <link rel="stylesheet" href="/static/css/task-planning.css?v=3" />
 </head>
 <body class="app-body overflow-hidden" style="height:100vh;">
   <div id="app" class="flex h-screen overflow-hidden">
@@ -90,7 +92,7 @@
           </button>
 
           <!-- 账号切换下拉 -->
-          <el-dropdown trigger="click" @command="handleAccountCommand" :disabled="executionBusy">
+          <el-dropdown trigger="click" @command="handleAccountCommand" :disabled="executionBusy || taskGraphSaving">
             <span class="account-dropdown topbar-account text-sm font-medium">
               <i class="fa fa-id-card-o"></i>
               {{ currentAccount || '无账号' }}
@@ -118,7 +120,7 @@
           </el-dropdown>
 
           <!-- 角色切换下拉 -->
-          <el-dropdown v-if="currentAccount && charactersList.length" trigger="click" :disabled="executionBusy">
+          <el-dropdown v-if="currentAccount && charactersList.length" trigger="click" :disabled="executionBusy || taskGraphSaving">
             <span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 rounded-full text-sm font-medium cursor-pointer">
               <i class="fa fa-user text-sm flex-shrink-0"></i>
               <span v-if="activeCharacter.server && activeCharacter.name">{{ activeCharacter.server }}/{{ activeCharacter.name }}</span>
@@ -234,12 +236,13 @@
         <about-panel v-if="activeTab==='about'"></about-panel>
 
         <task-panel v-if="activeTab==='tasks'"
+          :key="JSON.stringify([currentAccount, activeCharacter.server, activeCharacter.name])"
           :active-tab="activeTab"
           :current-tasks="currentTasks" :logs="logs" :character-name="characterName"
           :scheduler-status="schedulerStatus" :execution-busy="executionBusy"
           :runtime-status="runtimeStatus"
           :ordering-projection="taskOrderingProjection"
-          :ordering-saving="taskOrderingSaving"
+          :ordering-saving="taskOrderingSaving || taskGraphSaving"
           @edit-task="openEditModal" @expanded-change="setActiveGroup"
           @start-run="startRun" @stop-dispatch="stopDispatch" @save-tasks="saveTasks"
           @restart-task="saveTasks({ successMessage: '任务已重新开启' })"
@@ -247,6 +250,7 @@
       @run-task="runSingleTask"
       @run-task-range="runTaskRange"
           @save-task-ordering="saveTaskOrdering"
+          @save-task-graph="saveTaskGraph"
           @reorder-task="reorderTaskByDrop"></task-panel>
 
       </main>
@@ -308,6 +312,29 @@
           <el-form-item label="调试直跑">
             <el-switch :model-value="editTaskDebug" @change="setEditTaskDebug"></el-switch>
             <span class="text-xs text-gray-400 ml-2">跳过自动登录与失败恢复，保留现场</span>
+          </el-form-item>
+          <el-form-item label="推荐地点">
+            <div class="w-full space-y-1">
+              <el-select :model-value="editPlanningValue('preferred_locations')" multiple filterable clearable
+                         @update:model-value="editTaskData.preferred_locations = $event" class="w-full" placeholder="无地点偏好">
+                <el-option v-for="location in (configData.task_planning_options?.locations || [])"
+                           :key="location" :label="location" :value="location"></el-option>
+              </el-select>
+              <el-button link type="primary" @click="resetPlanningValue('preferred_locations')">恢复作者默认</el-button>
+              <span class="text-xs text-gray-400">仅影响自动调度排序，不额外导航</span>
+            </div>
+          </el-form-item>
+          <el-form-item label="前置任务">
+            <div class="w-full space-y-1">
+              <el-select :model-value="editPlanningValue('after_tasks')" multiple filterable clearable
+                         @update:model-value="editTaskData.after_tasks = $event" class="w-full" placeholder="无前置约束">
+                <el-option v-for="option in (configData.task_planning_options?.tasks || [])"
+                           :key="option.id" :label="option.path" :value="option.id" :disabled="option.id === editTaskData.id"></el-option>
+              </el-select>
+              <el-button link type="primary" @click="resetPlanningValue('after_tasks')">恢复作者默认</el-button>
+              <p class="text-xs text-gray-400">所有前置任务不再待执行后才参与自动调度；关闭、延期也会解除约束。手动直跑不受影响。</p>
+              <p v-if="editTaskData.planning_status?.error" class="text-xs text-red-600">{{ editTaskData.planning_status.error }}</p>
+            </div>
           </el-form-item>
           <template v-for="(val, key) in editTaskData.params" :key="key">
             <el-form-item v-if="key !== 'profession' && isTableParam(key)" :label="paramLabel(key)" label-width="80px">
@@ -542,7 +569,9 @@
   <script src="/static/js/components/TaskTree.js?v=15"></script>
   <script src="/static/js/components/Overview.js?v=19"></script>
   <script src="/static/js/components/SchedulerPanel.js?v=15"></script>
-  <script src="/static/js/components/TaskPanel.js?v=23"></script>
+  <script src="/static/js/core/taskPlanningLayout.js?v=4"></script>
+  <script src="/static/js/components/TaskPlanningGraph.js?v=4"></script>
+  <script src="/static/js/components/TaskPanel.js?v=25"></script>
   <script src="/static/js/components/Settings.js?v=13"></script>
   <script src="/static/js/components/NotificationsPanel.js?v=4"></script>
   <script src="/static/js/components/AboutPanel.js?v=1"></script>
@@ -550,11 +579,12 @@
   <script src="/static/js/components/editor/EditorCanvas.js?v=10"></script>
   <script src="/static/js/components/editor/EditorControls.js?v=14"></script>
   <script src="/static/js/components/editor/PythonCodeEditor.js?v=3"></script>
-<script src="/static/js/components/editor/EditorPanel.js?v=36"></script>
+  <script src="/static/js/components/editor/EditorMenuBar.js?v=1"></script>
+<script src="/static/js/components/editor/EditorPanel.js?v=39"></script>
   <script src="/static/js/components/DiagnosticsPanel.js?v=3"></script>
   <script src="/static/js/components/ErrorArchivesPanel.js?v=4"></script>
   <script src="/static/js/core/api.js?v=1"></script>
   <script src="/static/js/stores/runtimeStore.js?v=1"></script>
-  <script src="/static/js/app.js?v=44"></script>
+  <script src="/static/js/app.js?v=45"></script>
 </body>
 </html>

@@ -4,6 +4,7 @@ from ZmxyOL import *
 from AutoScriptor.logging.logger import logger
 
 @register_task(
+    ensure_in="天庭#4",
     description="挑战机缘大集活动副本。",
     reschedule="daily",
 )

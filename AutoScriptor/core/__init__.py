@@ -26,9 +26,13 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "RuntimeContext": ("AutoScriptor.core.runtime_context", "RuntimeContext"),
 }
 
+for _name in ["pretext", "posttext", "prenum", "postnum"]:
+    _EXPORTS[_name] = ("AutoScriptor.utils.text", _name)
+
 for _name in [
     "init",
     "click",
+    "seq_click",
     "click_all",
     "locate",
     "match",

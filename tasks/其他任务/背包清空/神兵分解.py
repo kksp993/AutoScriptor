@@ -5,6 +5,7 @@ from tasks.task_register import register_task
 
 
 @register_task(
+    ensure_in="荒古村庄",
     description='分解普通、精良、史诗品质神兵以清空背包',
     reschedule='daily',
 )

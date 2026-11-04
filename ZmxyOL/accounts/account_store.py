@@ -31,6 +31,7 @@ INJECTED_TASK_FIELDS = (
     "custom",
     "debug_effective",
     "reschedule_effective",
+    "ensure_in",
     "task_description",
     "task_doc_flow",
     "fn",
@@ -38,6 +39,9 @@ INJECTED_TASK_FIELDS = (
     "progress",
     "progress_display",
     "_due",
+    "planning_defaults",
+    "planning_effective",
+    "planning_status",
 )
 
 

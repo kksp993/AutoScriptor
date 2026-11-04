@@ -4,6 +4,7 @@ from ZmxyOL.nav.envs.decorators import *
 from tasks.task_register import register_task
 from ZmxyOL import *
 @register_task(
+    ensure_in="荒古万界",
     description='进入异兽入侵并阻击相柳',
     debug=True,
 )

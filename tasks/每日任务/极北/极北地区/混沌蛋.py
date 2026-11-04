@@ -3,6 +3,7 @@ from AutoScriptor import *
 from AutoScriptor.logging.logger import logger
 # """
 @register_task(
+    ensure_in="极北",
     description="扫荡极北混沌蛋。",
     reschedule="daily",
 )

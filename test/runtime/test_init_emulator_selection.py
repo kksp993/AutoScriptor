@@ -213,6 +213,13 @@ class TestBoundEmulatorAdapters(unittest.TestCase):
         def run_command(command, **kwargs):
             commands.append(command)
             if command[0] == "MuMuManager.exe":
+                if command[1] == "info":
+                    player = {
+                        "index": "0", "is_process_started": True,
+                        "is_android_started": True, "adb_host_ip": "127.0.0.1",
+                        "adb_port": 16384,
+                    }
+                    return subprocess.CompletedProcess(command, 0, json.dumps(player), "")
                 return subprocess.CompletedProcess(command, 1, "", "manager unavailable")
             output = "device\n" if command[-1] == "get-state" else "1\n"
             return subprocess.CompletedProcess(command, 0, output, "")

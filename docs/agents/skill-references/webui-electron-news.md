@@ -14,6 +14,7 @@ Read this when changing WebUI, the source Electron shell, source update UI, or 4
 - Task-list run actions must send `execution_source=task_list`; this preserves the current in-game login and skips character validation only for those direct runs. Do not spread this policy to scheduler, cross-character, default direct-run, or gift-code execution, and do not bypass credential unlock or runtime busy guards.
 - Overview, scheduler, and task-list stop buttons must share `stop-dispatch` and `/api/stop`. Stopping preserves cooperative cancel until workers exit, but immediately restores scheduler `pending`, consecutive-error budget, and retry-exhaustion budget; post-cancel failures must not consume the restored budget.
 - Component state is managed in `app.js`; components receive props and emit events upward.
+- Editor recorder/function menus share `EditorMenuBar`: teleport each scrollable panel independently, constrain it to the viewport and resolve open items from current props after async options load. Do not restore fixed-depth, overflow-clipped submenu copies. Navigation and map-object menus share `/api/editor/navigation-options`; map objects must retain `mm.locs[name].identifier` references rather than inline recognition values. Real remote input waits 1.5 seconds before editor recapture; that buffer is not proof of a scene transition.
 
 Component convention:
 
@@ -84,6 +85,7 @@ Get-Process -Name "electron" -ErrorAction SilentlyContinue | Stop-Process -Force
 - Forum fetches may use the exact public news pair without credential unlock; non-public news or game credentials still require WebUI credential unlock.
 - News list opening must force `/api/news/posts?force=1`; do not rely on the 30-minute cache for first display after auth or tab entry.
 - News proxy should retry once with a fresh 4399 session when the upstream page redirects to the 4399 login wall; stale cached sessions must not become permanent placeholders.
+- A ptlogin HTTP 202/429 response is a rejected login even if initialization cookies exist. Never cache that response as success; expose a safe reason in the no-store proxy error page with manual retry. Credential eligibility is not proof of an authenticated forum session.
 - The gift-code collector should inspect official announcements only: last 10 days, at most 15 posts, with `checked_post_ids` and active rows in runtime `logs/zmxy_redeem_codes.json` for incremental refresh.
 - The gift-code dialog iframe should load local `/api/news/gift_codes/page` and refresh through `/api/news/gift_codes?refresh=1`; do not use the stale external 4399 gift-code page.
 - Gift-code redemption uses `/api/news/redeem_targets` and `POST /api/news/gift_codes/redeem`; keep credential unlock/security-key checks, support `redeem_code` and batched `redeem_codes`, switch to the selected `server:character`, force login even for debug-mode redeem tasks, and pass each code as a one-time task param override to the built-in task `其他任务/活动脚本/兑换豪礼礼品兑换`.

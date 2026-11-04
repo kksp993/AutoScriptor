@@ -15,6 +15,7 @@ class Method(Enum):
 
 
 @register_task(
+    ensure_in=["极北村庄", "法相"],
     description="按配置完成极北村庄点券消费。",
     reschedule="daily",
 )

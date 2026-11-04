@@ -60,6 +60,7 @@ LOCAL_PROJECTION_ENDPOINTS = frozenset({
     "/api/runtime/snapshot",
     "/api/scheduler/status",
     "/api/task-ordering",
+    "/api/task-planning/locations",
     "/api/update/status",
 })
 
@@ -312,6 +313,44 @@ class WebUIServerSmokeTest(unittest.TestCase):
             [],
             "这些本地投影接口没返回干净结果：\n" + "\n".join(problems) + f"\n\n{self._server_log()}",
         )
+
+    def test_every_builtin_entrypoint_reaches_the_public_task_graph(self):
+        from test.task_domain.test_task_conventions import (
+            decorator_flag, registration_of, string_keyword, task_script_paths,
+        )
+
+        expected_ids = set()
+        for source_path in task_script_paths():
+            declaration, _function = registration_of(source_path)[0]
+            if not decorator_flag(declaration, "deprecated"):
+                expected_ids.add(string_keyword(declaration, "id") or source_path.stem)
+
+        configuration = self._get_json("/api/refresh")
+        locations = set(self._get_json("/api/task-planning/locations")["locations"])
+        leaves = {}
+
+        def collect_leaves(branch):
+            for value in branch.values():
+                if not isinstance(value, dict):
+                    continue
+                if "on" in value:
+                    leaves[value["id"]] = value
+                else:
+                    collect_leaves(value)
+
+        collect_leaves(configuration["tasks"])
+        self.assertEqual(set(leaves), expected_ids, "A declaration error must not silently remove built-in tasks")
+        for identifier, leaf in leaves.items():
+            with self.subTest(task=identifier):
+                self.assertIn("ensure_in", leaf)
+                entrypoints = leaf["ensure_in"]
+                if entrypoints is None:
+                    self.assertTrue(leaf["debug_effective"])
+                else:
+                    self.assertTrue(entrypoints, "Game entrypoints are mandatory")
+                    self.assertTrue(set(entrypoints) <= locations)
+                    self.assertEqual(leaf["planning_defaults"]["preferred_locations"], entrypoints)
+                self.assertIsNone(leaf["planning_status"]["error"])
 
     def test_external_dependency_endpoints_fail_visibly(self):
         """没有网络/模拟器时也必须给出结构化错误，而不是空 500。"""

@@ -27,6 +27,10 @@ _session_cache: dict[str, tuple[float, requests.Session]] = {}
 _SESSION_TTL_SEC = 3600.0
 
 
+class News4399LoginError(RuntimeError):
+    """An upstream login failure that must remain visible to news consumers."""
+
+
 def is_public_news_credential(account: str | None, password: str | None) -> bool:
     """Return True for the one public 4399 news credential allowed in this repo."""
     return (
@@ -88,16 +92,14 @@ def login_ptlogin_session(username: str, password: str) -> requests.Session | No
     try:
         frame_response = session.get(_LOGIN_FRAME, timeout=20)
         if frame_response.status_code != 200:
-            logger.warning("news 4399: loginFrame %s", frame_response.status_code)
-            return None
+            raise News4399LoginError(f"4399 登录页请求失败（HTTP {frame_response.status_code}）。")
 
         verify_response = session.get(
             f"{_VERIFY_DO}?username={requests.utils.quote(username)}&appId=&t={int(time.time() * 1000)}",
             timeout=15,
         )
         if verify_response.status_code != 200:
-            logger.warning("news 4399: verify.do %s", verify_response.status_code)
-            return None
+            raise News4399LoginError(f"4399 登录验证请求失败（HTTP {verify_response.status_code}）。")
         if (verify_response.text or "").strip() not in ("0", ""):
             logger.debug("news 4399: verify.do requested captcha; trying direct login.do anyway")
 
@@ -129,19 +131,25 @@ def login_ptlogin_session(username: str, password: str) -> requests.Session | No
             allow_redirects=True,
         )
         response.encoding = response.apparent_encoding or "utf-8"
-        if response.status_code >= 400:
-            logger.warning("news 4399: login.do HTTP %s", response.status_code)
-            return None
+        # 202 may contain only "please try later" and initialization cookies, not a login.
+        if response.status_code != 200:
+            if response.status_code in (202, 429):
+                raise News4399LoginError(
+                    f"4399 暂未接受自动登录（HTTP {response.status_code}），请稍后重试，或在浏览器中打开论坛原文。"
+                )
+            raise News4399LoginError(f"4399 自动登录请求失败（HTTP {response.status_code}）。")
         error = _ptlogin_form_error_message(response.text)
         if error:
-            logger.warning("news 4399: login.do error: %s", error)
-            return None
+            raise News4399LoginError("4399 未完成登录，请在浏览器中确认账号状态或完成验证码。")
         if not session.cookies.get_dict():
-            return None
+            raise News4399LoginError("4399 登录未返回会话，请稍后重试。")
         return session
-    except Exception as e:
-        logger.exception("news 4399: login exception: %s", e)
-        return None
+    except News4399LoginError:
+        session.close()
+        raise
+    except requests.RequestException as error:
+        session.close()
+        raise News4399LoginError("连接 4399 登录服务失败，请检查网络后重试。") from error
 
 
 def get_cached_session(cache_token: str, username: str) -> requests.Session | None:

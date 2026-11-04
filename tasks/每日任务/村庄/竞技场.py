@@ -4,6 +4,7 @@ from AutoScriptor.logging.logger import logger
 
 
 @register_task(
+    ensure_in=["村庄", "仙盟"],
     description="执行每日竞技场挑战。",
     deprecated=True,
     reschedule="daily",

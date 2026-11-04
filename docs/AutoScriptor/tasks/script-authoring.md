@@ -2,6 +2,8 @@
 
 任务脚本可以继续使用 `from AutoScriptor import *`；造梦导航、登录、战斗和任务公共符号优先使用 `from ZmxyOL import *`。只有聚合 API 尚未提供的内部能力才直达子模块，同时应评估是否应补到公共出口。任务仍须遵守当前注册、状态、调度和 WebUI 投影规则。
 
+**识别目标在哪里用，就在哪里写。** 在任务/业务脚本的 `click`、`seq_click`、`ui_T/ui_F`、等待和提取调用中直接写 `T(...)`、`I(...)`、`B(...)` 及其区域，不在函数开头预定义按钮/入口变量，也不为复用搬到常量、字典或辅助函数。即使同一目标使用多次，也在各调用处展开；识别结果、计算次数和业务状态仍使用有意义的变量。
+
 独立脚本可直接 `init()`。操作配置游戏以外的 App 时用 `init(launch_app=False)`，并通过 `launch_app()`、`close_app()`、`go_home()` 操作当前设备。竖屏脚本可调用 `setFrameSize(MUMU_SIZE_720_1280)`，随后统一使用 `Box(...).margin()`；共享 WebUI/调度进程中的任务更适合继续为每个区域显式传入 `frame_size`，避免改变其他任务的默认裁剪尺寸。
 
 独立脚本选择多开实例时直接传 `init(emulator_index=0)`，地址也可通过 `adb_addr` 显式传入；不要为了初始化临时修改全局 `cfg`。默认地址推导和手填地址优先级见 [API 速查](../reference/API.md#公共导入)。
@@ -23,11 +25,12 @@
 | 自定义任务 | `data/custom_task/` | 显示路径 = `自定义任务/` + 它在 `custom_task/` 下的相对路径 |
 
 ```python
-from tasks.task_register import register_task   # 或 from ZmxyOL import *
+from ZmxyOL import register_task, ensure_in     # 或 from ZmxyOL import *
 from AutoScriptor import *
 
-@register_task(description="示例任务")
+@register_task(ensure_in="村庄", description="示例任务")
 def 每日签到(count: int = 1):
+    ensure_in("村庄")
     for _ in range(count):
         click(T("开始"), if_exist=True)
 ```
@@ -47,8 +50,9 @@ tasks/每日任务/村庄/宠物培养.py   →  每日任务/村庄/宠物培�
 自定义任务的形态和内置任务完全一样：
 
 ```python
-@register_task(description="示例任务")
+@register_task(ensure_in="村庄", description="示例任务")
 def task(count: int = 1):
+    ensure_in("村庄")
     for _ in range(count):
         click(T("开始"), if_exist=True)
 ```
@@ -58,19 +62,38 @@ def task(count: int = 1):
 「脚本名称」既是列表里的名字，也是它落在哪个子目录。需要跟随项目维护的内置流程应放在 `tasks/`，
 不要只放在用户 `data/custom_task/`。
 
-WebUI Editor 的“保存脚本”接口 `/api/editor/save-custom-task` 也生成同样形态的自定义任务文件：按「脚本名称」在 `data/custom_task/` 下建好子目录，写入 UTF-8 Python 文件，装饰器只带 `description`，补充说明写成函数 docstring。保存弹窗只有 `脚本名称` 一个命名入口（默认前缀 `自定义任务/`，最后一段就是文件名与任务身份）、`description`、`task_docs` 和参数设置；参数字段包括字段名称、字段类型、字段解释，字段类型支持 `Enum(单选)` 和 `Enum(多选)`，enum 选项使用 `["普通","困难"]` 这类 JSON 数组填写。
+WebUI Editor 的“保存脚本”接口 `/api/editor/save-custom-task` 也生成同样形态的自定义任务文件：按「脚本名称」在 `data/custom_task/` 下建好子目录，写入 UTF-8 Python 文件，装饰器带必填 `ensure_in` 和 `description`，补充说明写成函数 docstring。裸片段保存时必须从注册导航地点中选择起点，不默认填村庄；生成函数在片段前调用同值的 `ensure_in(...)`。保存弹窗只有 `脚本名称` 一个命名入口（默认前缀 `自定义任务/`，最后一段就是文件名与任务身份），以及起点、`description`、`task_docs` 和参数设置；参数字段包括字段名称、字段类型、字段解释，字段类型支持 `Enum(单选)` 和 `Enum(多选)`，enum 选项使用 `["普通","困难"]` 这类 JSON 数组填写。
 
 Editor 操作录制区的“工具 > 导航到...”按 `ZmxyOL.nav.envs` 的环境和位置层级展示导航目标。点击环境或位置会在当前代码目标中插入 `ensure_in("目标名称")`；位置名可包含 `天庭#1` 等索引后缀。
 
+同级“地图位置”复用同一列表，只在光标处插入 `mm.locs["目标名称"].identifier`，例如 `ui_T(mm.locs["村庄"].identifier)`。引用执行时读取当前识别定义，不把 T/I/B 的值复制进脚本；即时执行、函数窗口和保存任务均有 `mm`。该菜单不触控设备，序列列表内只自动补逗号。主窗口与函数窗口的菜单都支持边缘避让、长列表滚动和多级目录。
+
 Editor 操作录制区的“定位 > 区域识别 > 匹配目标（match）”会根据当前选区生成 `B/T/I` 目标，并在当前代码目标中插入 `match(...)`。复杂的 tuple（OR）或 list（AND）目标可在插入后继续编辑。
+
+文字提取统一在“操作 > 提取”：依次为“文字、前缀文本、后缀文本、前缀数字、后缀数字、颜色”，“定位 > 区域识别”不再放文字。四个预设生成 `extract_info(B(...), post_process=pretext/posttext/prenum/postnum, mode="text")`，先 strip 再首尾正则匹配，数字转 int；预览使用同一函数。即时执行、函数编辑窗口与保存脚本均可直接引用这些公共函数，无需在片段里定义或额外 import。它们只处理单个字符串，匹配失败沿用 extract_info 重试/None 语义，不能用 0 代替失败；规则见 [API 速查](../reference/API.md#ocr-与数字)。
 
 图片编辑器顶部的“生成对象”会将当前选区生成的 `B/T/I` 目标插入录制区或函数编辑窗口的当前光标/选区。“判断存在/判断不在”同样在光标处生成；“操作 > 点击 > 直到出现/直到消失”先生成带空 `ui_T()` / `ui_F()` 的 `until=lambda:` 条件并将光标放在括号内，可重新框选条件目标后点击“生成对象”补入。“下一步直到”使用当前目标生成 `click(B(0,0), until=lambda: ui_T(...))`。
 
-编辑器保存裸片段时会按表单生成 `@register_task(description=...)` 加函数 docstring（补充说明正文），并把参数设置转换为函数签名、本地 `enum.Enum` 类和默认值；路径由文件写入位置决定。如果传入的是完整自定义任务文件，它自己的装饰器元数据由文件负责。只落盘未注册的 Python 片段不会出现在 WebUI 任务树中。
+依次出现的界面目标使用 `seq_click([T("入口"), T("领取"), T("确定")])`，每步默认最多 10 秒，点击直到下一步可见；末项完成条件另传 `until=lambda: ui_T(...)`，参数与边界见 [API 速查](../reference/API.md#操作-api)。Editor“操作 > 序列点击”生成 `seq_click([])` 并把光标放在 `[]` 内；在列表内点击“生成对象”会自动补逗号并留在列表中，同时点击选区中心一次、成功后刷新截图，便于框选下一项，不额外追加 `click(...)` 代码。模拟模式只标红点，真实模式沿用安全解锁和执行闸门；其他表达式（含 until 条件）仅插入对象、不点击。纯坐标 `ui_T(B(...))` 恒为 True，不能用于确认页面已更新。
+
+编辑器保存裸片段时会按表单生成 `@register_task(ensure_in=..., description=...)` 加函数 docstring（补充说明正文），并把参数设置转换为函数签名、本地 `enum.Enum` 类和默认值；路径由文件写入位置决定。如果传入的是完整自定义任务文件，它自己的装饰器元数据由文件负责，缺少 `ensure_in` 时保存前报错。只落盘未注册的 Python 片段不会出现在 WebUI 任务树中。
 
 自定义任务导入失败会记录到 WebUI 公开配置的 `custom_task_load_errors`，并在本轮加载中跳过 stale 任务条目清理和 `cfg.save_config()`。修复脚本语法或导入错误后重新加载即可恢复；不要因为任务临时消失就手动清空 `自定义任务` 配置分支。
 
 例如兑换码礼品兑换是内置任务，显示路径为 `其他任务/活动脚本/兑换豪礼礼品兑换`，源码位于 `tasks/其他任务/活动脚本/兑换豪礼礼品兑换.py`。
+
+领取邮件同样是内置任务，位于 `tasks/其他任务/特殊功能/领取邮件.py`，id 保持 `领取邮件`；沿用一次性、`debug=True` 默认设置，不自动开启。排查任务消失时先确认源文件是否仍被 catalog 发现，再检查注册与投影，不要通过手写配置伪造缺失任务。
+
+邮件流程先 `ensure_in("村庄")`，再打开邮件循环一键领取。每次点击后等待 `claim_interval`
+秒（默认 3）；完整页码确认为 `1/1` 后额外领取 5 次，再确认仍为 `1/1` 才关闭邮件。
+补领期间页码变化或未识别到页码会重置计数；不能用子串命中把 `1/10` 当作末页。
+`timeout` 默认 600 秒，仅限制领取循环；超时抛异常，不把未确认的领取标为成功。
+这两个参数可在任务参数中调整，等待可被停止操作取消。
+
+天道树任务位于 `tasks/每日任务/村庄/天道树.py`，声明 `ensure_in="村庄"` 和每日调度，
+沿用录制的天道树/天道觉/觉醒入口。浇水档位只接受 1、5、10；切档后等待实际读到 10，
+再执行两次浇水确认，每次等待确认框消失。正常结束关闭两层面板并 `ensure_in("村庄")`。
+识别或确认失败向执行层抛错，不伪装成功；新任务默认关闭，不替用户启用或执行消耗。
 
 ## 排序与路径身份
 
@@ -85,7 +108,7 @@ Editor 操作录制区的“定位 > 区域识别 > 匹配目标（match）”�
 
 ```python
 # 文件从 每日任务/村庄/宠物培养.py 改名为 每日任务/村庄/灵宠培养.py 后：
-@register_task(id="宠物培养")
+@register_task(id="宠物培养", ensure_in="村庄")
 def task():
     ...
 ```
@@ -101,10 +124,11 @@ def task():
 
 ## register_task 元数据
 
-作者的声明只有五个字段，其余都属于用户数据或运行时数据：
+作者的正式声明字段如下，其余属于用户数据或运行时数据：
 
 | 参数 | 类型与取值 | 说明 |
 |------|-----------|------|
+| `ensure_in` | 必填 str / 非空 list[str] / tuple[str, ...] | 真实导航起点，必须是已注册地点；多入口表达可在其中任一地点开始。仅保留现场/非地图的 debug 任务可显式写 `None`。遗漏、空列表、未知地点注册前报错；不会从源码路径或业务函数 AST 猜测 |
 | `id` | str | 任务身份，`cfg["tasks"]` 和 `task_ordering` 的键。不传时取任务名（文件名去掉 `.py`）；换目录不用写，重命名文件时写 `id="旧任务名"` 就能保住用户配置、拖拽顺序和运行状态 |
 | `reschedule` | `None` / `"daily"` / `"weekly"` / int / dict | 下次什么时候再来，取值见下节。不写 = 一次性。用户在 WebUI 里可以覆盖 |
 | `debug` | bool | 调试直跑的默认值：跳过自动登录、失败恢复和本轮 post_execution。用户可以在 WebUI 里覆盖 |
@@ -118,14 +142,26 @@ def task():
 跨角色登录、任务前重启、失败恢复、本轮重试与 post_execution 都以它为准，录屏和运行期抓帧也由它开启。
 `cfg["app"]` 里没有 debug 开关，任务是否放在 `data/custom_task/` 下也不影响判定。
 
-## reschedule：唯一的调度字段
+## 必填起点、推荐地点与前置任务
+
+`@register_task(ensure_in=["村庄", "极北村庄"], after_tasks=["前置任务ID"])`
+必须声明任务真正使用的入口，不要把流程中最后一次返回地点误写成起点。声明只保存在注册表，实际导航仍由任务在正确业务位置调用 `ensure_in(...)`，不插入额外预导航。索引位置直接写导航全名，如 `"天庭#-1"`；常量 `HAS_SHEZHI` 可用于多入口。
+
+没有地图入口的现场调试、设备控制、外部 App 任务须显式 `@register_task(ensure_in=None, debug=True)`，而非省略字段或伪填地图。`None` 不参与叠牌；普通任务不允许 `None`。已有自定义脚本需补上该声明后再完整重载，加载失败保留用户数据并显示错误，不静默猜测迁移。
+
+`preferred_locations` 未另行声明时默认来自 `ensure_in`，可选地另写调度偏好。`preferred_locations` 和 `after_tasks` 支持 WebUI 角色覆盖；缺失继承作者默认，`[]` 明确清空，**不会清掉源码入口**。计算图以直接依赖为主干，独立任务按源码入口的最近有向距离附牌，与可选偏好分离；附牌不是新增依赖或执行顺序承诺。
+多个前置为 AND，只阻塞当前仍待执行的前置；关闭、延期也解除约束，不是永久成功凭据。
+地点取自导航注册表，只作就近排序参考，任务仍要自行 `ensure_in(...)`。不要按目录猜地点或自动生成业务依赖。
+手动直跑不受约束。未知引用、自依赖和环在保存时拒绝；完整算法见 [依赖就近调度](task-ordering-graph-plan.md)。
+
+## reschedule：唯一的执行时间字段
 
 ```python
-@register_task()                                   # 不写 = 一次性：执行成功后关闭 on
-@register_task(reschedule="daily")                 # 下一个 05:00（当天 5 点前算今天）
-@register_task(reschedule="weekly")                # 下周一 05:00
-@register_task(reschedule=10)                      # 10 小时后
-@register_task(reschedule={"mode": "daily", "window": (10, 22), "weekdays": [5, 6, 7]})
+@register_task(ensure_in="村庄")                         # 不写 reschedule = 一次性
+@register_task(ensure_in="村庄", reschedule="daily")     # 下一个 05:00（当天 5 点前算今天）
+@register_task(ensure_in="村庄", reschedule="weekly")    # 下周一 05:00
+@register_task(ensure_in="村庄", reschedule=10)          # 10 小时后
+@register_task(ensure_in="村庄", reschedule={"mode": "daily", "window": (10, 22), "weekdays": [5, 6, 7]})
 ```
 
 - `window` 是本地时间可执行时段 `[start, end)`；到点但不在时段内会推迟到时段起点。
@@ -183,7 +219,7 @@ class Difficulty(str, enum.Enum):
     困难 = "困难"
 
 
-@register_task
+@register_task(ensure_in="村庄")
 def task(
     plan: TableParam = TableParam(
         {"第一关": {"difficulty": Difficulty.不打, "revive": False}},
@@ -193,7 +229,7 @@ def task(
     for level, row in plan.items():
         ...
 ```
-WebUI 保存任务时会剥离运行时字段，只保存用户配置。调度只由 `reschedule` 决定——作者在 `@register_task(...)` 里声明默认值，用户在 WebUI 里可以覆盖；任务位于哪个目录不影响它的调度。
+WebUI 保存任务时会剥离运行时字段，只保存用户配置。执行时间由 `reschedule` 决定；依赖和地点偏好只决定自动选择顺序。作者在 `@register_task(...)` 里声明默认值，用户可在 WebUI 覆盖，目录不改变时间语义。
 
 ## Sleep 与取消
 
@@ -243,7 +279,7 @@ progress = get_task_status("progress")
 | 临时 UI 未出现、网络波动 | 抛 `TaskRequireReTry` 或普通异常，让 retry 处理 |
 | 需要人工介入、材料不足、账号状态不满足 | 抛 `RequestHumanTakeover` |
 | 自身能力不足但有可观测进度 | 写 `progress`，让执行层在 retry 耗尽后转人工接管 |
-| debug 现场验证 | `@register_task(debug=True)` |
+| debug 现场验证 | `@register_task(ensure_in=None, debug=True)` 明确保留现场；需要导航时填真实入口 |
 
 普通失败没有未完成进度时不会自动变红，只会按 retry 和连续错误计数处理。
 
@@ -261,13 +297,13 @@ progress = get_task_status("progress")
 
 ## 设备和识别
 
-- 普通任务只调用 `click/click_all/locate/match/swipe/input/key_event/extract_info/get_colors/coloris`。同屏多个相同按钮使用 `click_all(target)`；`click(..., repeat=N)` 只用于重复点击同一个命中位置。
+- 普通任务只调用 `click/seq_click/click_all/locate/match/swipe/input/key_event/extract_info/get_colors/coloris`。依次出现的目标使用 `seq_click([...])`，同屏多个相同按钮使用 `click_all(target)`；`click(..., repeat=N)` 只用于重复点击同一个命中位置。
 - 需要实时盯进度条/走条时用 `screenshot_region(target)` 只取目标区域，配合 `finger_down/finger_move/finger_up` 做「按住升、松开降」闭环；不要在全帧截图上循环做 OCR。多指同按用 `multi_finger_down([(1, x, y), (2, x, y)])`。
 - `finger_*` 使用编号手指（1..10），与 `click/swipe` 的触点互相独立；实时循环只在状态翻转时发按下/松开边沿，且必须在 `finally` 里调用 `release_all_fingers()` 兜底，避免任务失败后手指保持按住。
 - 内置游戏任务的截图、模板、`B/Box` 和点击坐标都按 `1280x720` 横屏绝对像素编写；`B(x, y, width, height)` 使用左上角与宽高，不编写相对坐标或静默缩放逻辑。
 - 内置游戏截图尺寸不符合合同时运行时只会节流 warning 并继续任务，不会自动缩放；应修正 MuMu 分辨率。明确操作竖屏外部应用时可使用其原生坐标；独立脚本先调用 `setFrameSize(...)` 后可直接使用 `.margin()`，共享进程任务则应显式传 `frame_size=(width, height)`。执行方向必须与录制方向一致。
 - 任务脚本只依赖现有公共识别 API，不导入或依赖内部 `RecognitionResult` 追踪结构。
-- `extract_info(..., mode=...)` 使用 `digital_only`（仅数字）、`text`（仅 OCR 文本）、`img`（仅返回 `ui_map` 图片 key）或 `both`（逐格优先图片，未命中再 OCR）；Box 列表和二维网格会保持返回形状。`post_process` 解析失败会继续重试，最终仍失败时返回 `None`，任务逻辑不要把原始 OCR 文本当作已解析业务值使用。
+- `extract_info(..., mode=...)` 使用 `text`（OCR 文本）、`img`（仅返回 `ui_map` 图片 key）或 `both`（逐格优先图片，未命中再 OCR）；数字转换使用 `post_process=prenum/postnum`，不增加 mode。Box 列表和二维网格会保持返回形状；四个首尾处理预设只接收单个字符串。`post_process` 解析失败会继续重试，最终仍失败时返回 `None`，任务逻辑不要把原始 OCR 文本当作已解析业务值使用。
 - 不直接调用 MuMuManager subprocess；设备会话由调度器、WebUI 或 runtime context 管。
 - 纯坐标点击用 `B(x, y, w, h)`；OCR 语义和业务语义分开处理。
 - 多个识别目标必须包成 tuple/list：`(T("A"), T("B"))` 表示任一命中，`[T("A"), T("B")]` 表示全部命中；`locate()`、`match()`、`coloris()` 均沿用这套组合语义。不要写 `wait_for_appear(T("A"), T("B"))`，第二个位置参数是 `timeout`。

@@ -6,6 +6,7 @@ from ZmxyOL.character.hero import h
 
 
 @register_task(
+    ensure_in=["村庄", "极北村庄"],
     description="完成本命空间每日流程，领取任务奖励，合成本命法宝。",
     reschedule="daily",
 )

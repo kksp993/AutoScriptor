@@ -3,6 +3,7 @@ from AutoScriptor import *
 from AutoScriptor.logging.logger import logger
 
 @register_task(
+    ensure_in="仙盟",
     description="完成仙盟建设并领取每日任务奖励。",
     reschedule="daily",
 )
@@ -36,4 +37,3 @@ def daily_alliance_task():
     click(B(1200,30,30,30))
     wait_for_appear(T("活跃任务"))
     click(B(1200,30,30,30))
-

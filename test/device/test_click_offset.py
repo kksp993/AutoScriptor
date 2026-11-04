@@ -1,3 +1,4 @@
+import logging
 import unittest
 from unittest.mock import MagicMock, call, patch
 
@@ -101,6 +102,44 @@ class BoxOffsetCompatibilityTest(unittest.TestCase):
     def test_box_add_accepts_named_offset_resize_delta(self):
         delta = {"offset": (5, -7), "resize": (12, 13)}
         self.assertEqual(Box(10, 20, 30, 40) + delta, Box(15, 13, 12, 13))
+
+
+class ClickLoggingTest(unittest.TestCase):
+    def test_repeat_and_until_keep_one_log_record_per_input(self):
+        from AutoScriptor.core import api, control
+
+        self.addCleanup(control.clear_action_history)
+        for click_options in ({"repeat": 3}, {"until": MagicMock(side_effect=[False, False, True])}):
+            with self.subTest(options=click_options), \
+                 patch.object(control, "NemuIpcControl"), \
+                 patch.object(control.time, "monotonic", return_value=1000.0), \
+                 patch.object(api, "cancellable_sleep"):
+                controller = control.MixControl(MagicMock())
+                control.clear_action_history()
+                with patch.object(api, "mixctrl", controller), \
+                     self.assertLogs("AutoScriptor", level="DEBUG") as captured:
+                    api.click(B(10, 20, 1, 1), **click_options)
+
+                self.assertEqual(controller.nemu_control.click.call_count, 3)
+                self.assertEqual(len(control.get_action_history()), 3)
+                self.assertEqual(
+                    [record.levelno for record in captured.records],
+                    [logging.INFO, logging.DEBUG, logging.DEBUG],
+                )
+
+    def test_locate_polling_uses_debug_for_single_or_and_targets(self):
+        from AutoScriptor.core import api
+
+        target = T("button")
+        for search_target in (target, (target,), [target]):
+            with self.subTest(target=search_target), \
+                 patch.object(api, "_locate_all", return_value=[[Box(10, 20, 30, 40)]]), \
+                 self.assertLogs("AutoScriptor", level="DEBUG") as captured:
+                for _attempt in range(3):
+                    self.assertIsNotNone(api.locate(search_target, timeout=0, assure_stable=False))
+
+            self.assertEqual(len(captured.records), 3)
+            self.assertTrue(all(record.levelno == logging.DEBUG for record in captured.records))
 
 
 if __name__ == "__main__":

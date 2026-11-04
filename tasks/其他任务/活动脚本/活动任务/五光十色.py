@@ -12,6 +12,7 @@ tasks =[
 ]
 
 @register_task(
+    ensure_in="天庭",
     description="完成五光十色活动流程。",
     reschedule="daily",
 )

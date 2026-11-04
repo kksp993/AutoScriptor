@@ -399,6 +399,15 @@ class TestTaskTreeServiceContract(unittest.TestCase):
             def get_reschedule_default(self, path):
                 return None
 
+            def get_ensure_in(self, path):
+                return None
+
+            def get_planning_defaults(self, path):
+                return {"preferred_locations": [], "after_tasks": []}
+
+            def items(self):
+                return [(path, {"id": path}) for path in ordered_paths]
+
             def get_description(self, path):
                 return ""
 
@@ -1682,7 +1691,7 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertIn("restart_required: '需要重启'", component)
         self.assertIn("grid-template-columns: minmax(0, 112px) minmax(0, 1fr)", style)
         self.assertIn("overflow-wrap: anywhere", style)
-        self.assertIn("style.css?v=47", index)
+        self.assertIn("style.css?v=48", index)
         self.assertIn("DiagnosticsPanel.js?v=3", index)
 
 
@@ -2168,7 +2177,7 @@ print("OK")
         self.assertIn("function insertSnippetAtActiveCursor", frontend)
         self.assertIn("input.getSelectionRange()", frontend)
         self.assertIn("input.replaceRange", frontend)
-        self.assertIn("insertSnippetAtActiveCursor(target)", frontend)
+        self.assertIn("insertSnippetAtActiveCursor(target, null, { targetObject: true })", frontend)
         self.assertIn("insertSnippetAtActiveCursor(line", frontend)
 
         self.assertIn("key: 'click-once'", frontend)
@@ -2190,10 +2199,9 @@ print("OK")
         self.assertIn("key: 'region-recognition'", frontend)
         self.assertIn("key: 'match'", frontend)
         self.assertIn("label: '匹配目标（match）'", frontend)
-        self.assertLess(
-            frontend.index("key: 'match'"),
-            frontend.index("key: 'extract-text'"),
-        )
+        region_menu = frontend.split("key: 'region-recognition'", 1)[1].split("key: 'ui-t'", 1)[0]
+        self.assertIn("key: 'match'", region_menu)
+        self.assertNotIn("key: 'extract-text'", region_menu)
 
     def test_editor_custom_executor_supports_grid_templates_stop_and_indent(self):
         frontend = (ROOT / "backend/webui/static/js/components/editor/EditorPanel.js").read_text(encoding="utf-8")
@@ -2273,7 +2281,8 @@ print("OK")
         self.assertNotIn("recorded_code: recordedCode.value || ''", frontend)
         self.assertNotIn("custom_exec_code: customExecCode.value || ''", frontend)
         self.assertIn("PythonCodeEditor.js?v=3", index)
-        self.assertIn("EditorPanel.js?v=36", index)
+        self.assertIn("EditorMenuBar.js?v=1", index)
+        self.assertRegex(index, r"EditorPanel\.js\?v=\d+")
 
         self.assertIn('@router.post("/save-custom-task")', backend)
         self.assertIn("def _normalize_editor_custom_task_filename", backend)
@@ -2283,7 +2292,7 @@ print("OK")
         self.assertIn("os.replace(tmp_path, target_path)", backend)
         self.assertIn("api_ok(", backend)
         self.assertIn("api_error(", backend)
-        # 装饰器里只有 description；长说明回到函数 docstring，路径由文件位置决定。
+        # 起点必填；长说明回到函数 docstring，路径由文件位置决定。
         self.assertIn("description={description!r}", backend)
         self.assertIn("docstring = f'    \"\"\"{escaped}\"\"\"", backend)
         self.assertNotIn("path_cn=", backend)
@@ -2331,7 +2340,9 @@ print("OK")
         self.assertLess(frontend.index("key: 'navigation'"), frontend.index("key: 'grid'"))
         self.assertIn("appendEnsureInAction", frontend)
         self.assertIn("ensure_in(${JSON.stringify", frontend)
-        self.assertIn("recorderNestedSubmenuOpen", frontend)
+        self.assertEqual(frontend.count("<editor-menu-bar "), 2)
+        self.assertIn("label: '地图位置'", frontend)
+        self.assertIn("mm.locs[${JSON.stringify(targetName)}].identifier", frontend)
         self.assertIn("GET /api/editor/navigation-options", api_contract)
 
         options = editor._build_editor_navigation_options()
@@ -2348,6 +2359,7 @@ print("OK")
             "click(T('确定'))",
             {
                 "task_path": "自定义任务/示例/操作设置",
+                "ensure_in": ["村庄"],
                 "description": "一句话描述",
                 "task_doc": "补充说明正文",
                 "params": [
@@ -2367,6 +2379,8 @@ print("OK")
         self.assertIn("@register_task(", source)
         # 路径不在装饰器里：显示路径由文件写到 custom_task/ 的哪个位置决定。
         self.assertNotIn("path_cn", source)
+        self.assertIn("ensure_in=['村庄']", source)
+        self.assertIn("ensure_in(['村庄'])", source)
         self.assertIn("description='一句话描述'", source)
         # 长说明就是函数 docstring。
         self.assertIn('"""补充说明正文', source)
@@ -2722,7 +2736,8 @@ class TestSourceDistributionContract(unittest.TestCase):
         self.assertIn("Git.Git", install)
         self.assertIn("OpenJS.NodeJS.LTS", install)
         self.assertIn("astral-sh.uv", install)
-        self.assertIn("Set-ExecutionPolicy", install)
+        self.assertNotIn("Set-ExecutionPolicy", install)
+        self.assertIn("Microsoft.VCRedist.2015+.x64", install)
         self.assertIn("uv venv --python", install)
         self.assertIn("uv pip install", install)
         self.assertIn("npm install", install)
@@ -3331,9 +3346,13 @@ class TestTaskOrderingStaticContract(unittest.TestCase):
         self.assertIn("<task-panel v-if=\"activeTab==='tasks'\"", index_html)
         self.assertNotIn("activeTab==='tasks' || activeTab==='task-graph'", index_html)
         self.assertIn("AppSidebar.js?v=18", index_html)
-        self.assertIn("style.css?v=47", index_html)
-        self.assertIn("TaskPanel.js?v=23", index_html)
-        self.assertIn("app.js?v=44", index_html)
+        self.assertIn("style.css?v=48", index_html)
+        self.assertRegex(index_html, r"TaskPanel\.js\?v=\d+")
+        self.assertRegex(index_html, r"app\.js\?v=\d+")
+        self.assertIn("TaskPlanningGraph.js", index_html)
+        self.assertIn("taskPlanningLayout.js", index_html)
+        self.assertIn("task-hierarchy.css", index_html)
+        self.assertIn("task-planning.css", index_html)
         self.assertIn('@run-task-range="runTaskRange"', index_html)
         self.assertIn(':runtime-status="runtimeStatus"', index_html)
         self.assertNotIn("TaskDagCanvas.js", index_html)
@@ -3356,7 +3375,7 @@ class TestTaskOrderingStaticContract(unittest.TestCase):
         self.assertIn("已启用任务", task_panel_js)
         self.assertIn("拖到上/下边缘可排序", task_panel_js)
         self.assertIn("拖到中部创建分组", task_panel_js)
-        self.assertIn("分组顺序说明", task_panel_js)
+        self.assertIn("执行顺序与调度", task_panel_js)
         self.assertIn("orderedTaskRows()", task_panel_js)
         self.assertIn("visibleOrderingNodes()", task_panel_js)
         self.assertIn("enabledTaskRows()", task_panel_js)
@@ -3396,9 +3415,11 @@ class TestTaskOrderingStaticContract(unittest.TestCase):
         self.assertIn("renameOrderingGroup", task_panel_js)
         self.assertIn("ungroupOrderingGroup", task_panel_js)
         self.assertIn("按住任务或分组拖到想要的位置", task_panel_js)
-        self.assertIn("松开后会自动保存", task_panel_js)
-        self.assertIn("执行时会按当前列表从上到下运行", task_panel_js)
-        self.assertIn("拖进分组、拖出分组", task_panel_js)
+        self.assertIn("松开后自动保存", task_panel_js)
+        self.assertIn("自动调度先满足前置约束", task_panel_js)
+        self.assertIn("selection_policy", task_panel_js)
+        self.assertIn("nearest_ready", task_panel_js)
+        self.assertIn("list_ready", task_panel_js)
         self.assertNotIn("当前保存一个可嵌套的全局顺序列表", task_panel_js)
         self.assertIn("runTaskRange", app_js)
         self.assertIn("activate_scheduler: false", app_js)

@@ -66,7 +66,7 @@ WebUI 后端是 FastAPI；静态前端位于 `backend/webui/static/`，源码 El
 
 设置页保存采用防抖自动保存（约 0.5 秒）：`filteredConfig` 深度 watcher 先按 `app/emulator/ocr/scheduler` 快照比对，并只在 `config_version` 未变化（即非服务端刷新）且快照与基线不同时才发出 `settings-change`。保存成功后服务端刷新只更新基线，不能再次触发保存，否则会形成保存回环。请求在途期间的改动由回调按快照差补发一次，保证界面与 `data/config.json` 收敛。执行中（runtime busy）字段禁用且暂停自动保存。
   
-保存任务时必须通过 `TaskTreeService.flatten_payload_tasks()`：它按每个叶子的 `id` 把 WebUI 树拼回 `cfg["tasks"]` 平表，并剥离投影字段。名单只有一份：`ZmxyOL.accounts.account_store.INJECTED_TASK_FIELDS`（`param_meta`、`param_keys`、`custom`、`debug_effective`、`reschedule_effective`、`task_description`、`task_doc_flow`、`fn`、`id`、`progress`、`progress_display`、`_due`）。读取方向由 `build_task_tree()` 负责，它按显示路径现拼树并给每个叶子写回 `id`。
+保存任务时必须通过 `TaskTreeService.flatten_payload_tasks()`：它按每个叶子的 `id` 把 WebUI 树拼回 `cfg["tasks"]` 平表，并剥离投影字段。名单只有一份：`ZmxyOL.accounts.account_store.INJECTED_TASK_FIELDS`，包括 `ensure_in`、`planning_*`、`param_meta`、`param_keys`、`custom`、`debug_effective`、`reschedule_effective`、说明、进度、`fn`、`id`、`_due` 等。读取方向由 `build_task_tree()` 负责，它按显示路径现拼树并给每个叶子写回 `id`。
 
 任务显示和执行顺序由全局 `task_ordering` 覆盖层控制，存放在 `data/config.json`，不写入账号 JSON，也不改变 `cfg["tasks"]` 的平表键。存储以任务 `id` 为键，而 `id` 就是任务名（文件名去掉 `.py`）：
 
@@ -94,7 +94,17 @@ WebUI 后端是 FastAPI；静态前端位于 `backend/webui/static/`，源码 El
 
 任务树和排序覆盖层是两个独立持久化域。`POST /api/tasks` 保存当前角色任务树，成功后可返回完整公开配置；`POST /api/task-ordering` 只返回 `config_version`、`projection`、`generations` 和轻量 `runtime` 状态。前端应用排序响应时只能更新 `task_ordering`、`task_ordering_projection` 及对应版本，不得替换 `configData.tasks`。
 
+自动调度策略为 `task_ordering.selection_policy=nearest_ready|list_ready`（默认前者），归一、换键和拖拽保存都必须保留。每角色任务可覆盖 `preferred_locations`（导航名称列表）和 `after_tasks`（稳定 ID 列表）；缺失继承作者声明，空列表清空。`POST /api/tasks` 与 `/api/characters/task` 在变更内存/落盘前校验完整候选图，未知名称、自依赖和环返回 400。
+
+公开配置增加 `task_planning_options={tasks:[{id,path}],locations:[name]}`。任务叶子只读投影 `ensure_in`（源码必填起点，归一为非空地点数组；显式保留现场的 debug 任务为 `null`）、`planning_defaults`、`planning_effective`、`planning_status={ready,blocked_by,error}`，必须通过共享 `INJECTED_TASK_FIELDS` 剥离，不能通过任务配置保存修改源码入口。默认 `preferred_locations` 来自 `ensure_in`，清空角色偏好不会清掉起点。`_due` 保持时间语义。调度状态 `last_selection` 提供最近一次的角色、位置、策略、排序结果、地点/步数和诊断；它不是未来预测，页面轮询不触发识别。手动 `/api/run` 不应用依赖排序。
+
+`GET /api/task-planning/locations` 为计算图提供只读 `{locations:[name], costs:{origin:{target:number|null}}}`。基于已注册导航图，多个所属环境取最小有向步数，不可达为 `null`；不识别设备、不更改当前位置、不写配置，仅图加载/刷新时按需请求。失败显示 API 错误，不伪装空距离矩阵正常。
+
+任务页默认按路径分层浏览，三视图共用任务搜索。计算图以直接依赖为横向主干，仅展示省略传递冗余边，不删保存约束；独立任务按主干入口到自身 `ensure_in` 的最近有向距离自动附牌，可跨展示层，不读取可选偏好、不生成额外 `after_tasks`。无可达主干时仅共同零距离独立任务合堆。新增/移除分别写 `on=true/false`，不创建或删除脚本；编辑复用 `POST /api/tasks` 完整候选图校验。搜索定位、缩放、归堆和坐标不落盘，不增加 API。`nearest_ready` 同距内先有前序且已就绪任务，再列表和稳定 ID；`list_ready` 维持列表决胜。
+
 前端任务保存和排序保存必须进入同一个 FIFO 提交序列，并在入队时深拷贝请求数据，保证服务端看到的是用户点击保存时的快照。`runtime/snapshot` 判断是否需要 `/api/refresh` 前必须等待该提交序列稳定排空，并与响应处理时的当前 `config_version` 比较；只有响应版本更大时才允许全量配置回填，不能让旧版本轮询覆盖本地草稿。
+
+图编辑同样复用该 FIFO，保存前不修改公开任务投影；错误保留草稿。排队中的图操作发送前再次检查 runtime idle 与账号/角色身份，防止旧角色草稿写入新角色。
 
 Reload 边界：所有 reload 类操作都会清 `bg`；纯配置同步 `POST /api/config/sync` 不属于 reload，不清 `bg`。保存任务、切换账号/角色、账号解锁、更新账号凭据和普通配置导入只保存或同步配置并刷新 WebUI 投影，不做职业脚本和任务注册表完整重载。Editor 保存自定义任务脚本、启动初始化、调度器安全边界处理脚本变更，以及兑换码任务注册缺失兜底，仍使用完整 reload。
 
@@ -140,11 +150,11 @@ QQ API 遵守主站认证，不属于 `/api/deploy` 豁免面。公开配置/导
 | `GET /api/device/diagnostics?screenshot=false` | 默认不截图，不初始化 OCR/UI Map；附带只读 MuMu 路径发现建议 |
 | `GET /api/device/discover?probe_adb=true` | 只读发现 MuMu 安装目录、MuMuManager、adb.exe 和可用 ADB 设备，不写配置 |
 | `POST /api/device/discover/apply` | 运行空闲时应用已确认的发现结果到 `emulator` 全局配置并刷新 `config_version` |
-| `GET /api/editor/navigation-options` | 不需要设备会话；返回已注册的环境及其位置名称，供 Editor“工具 > 导航到...”生成 `ensure_in(...)` 代码 |
+| `GET /api/editor/navigation-options` | 不需要设备会话；“工具 > 导航到...”与“工具 > 地图位置”共用环境/位置名称，分别生成导航代码和识别对象引用 |
 | `/api/editor/ingest-image`、`ocr`、`color`、`save`、`store-template`、`locate-image` | 使用缓存截图/导入图，不启动模拟器 |
 | `/api/editor/screenshot`、无缓存 `locate`、`remote/click`、`remote/swipe`、真实 `execute-code`、无缓存 `preview-extract` | 需要 `runtime_ctx.ensure_device_session()` |
 | `POST /api/editor/execute-code/stop` | Editor 自定义代码执行中的终止入口；前端“终止执行”按钮只发送该请求，不再调用语法校验 |
-| `POST /api/editor/save-custom-task` | Editor 保存脚本入口；不需要设备会话，接收保存表单和编辑器合并后的代码内容，写入 `data/custom_task` 并注册为 `自定义任务/...` |
+| `POST /api/editor/save-custom-task` | Editor 保存脚本入口；不需要设备会话。裸片段必须提交非空注册起点 `metadata.ensure_in`，生成必填注册声明和同值的入口导航；完整任务文件须自行声明 `ensure_in`，漏填保存前报错。写入 `data/custom_task` 并注册为 `自定义任务/...` |
 
 `GET /api/device/diagnostics` 的 OCR 段将配置意图、进程快照和实际引擎分开返回：
 
@@ -162,7 +172,15 @@ Editor 真实设备动作需要 credential unlock；模拟执行且已有缓存�
 
 Editor `execute-code` 的受限命名空间直接提供运行时全局角色对象 `h`，因此角色技能片段可直接写 `h.skill(1)` 或链式调用。Editor 包装并保存自定义任务时须生成 `from ZmxyOL.battle import h`，保证同一代码在即时执行和后续任务执行中都有效。
 
+录制区与函数编辑窗口共用 `EditorMenuBar`：每级面板独立 Teleport 到 body，按视口边界翻转/限位，长列表内部滚动，不受编辑区 overflow 裁剪，也不限制目录深度。异步选项更新后已展开菜单同步更新；外部点击、Escape、窗口缩放或组件卸载会关闭面板。遥控器、画布和序列录制的真实操作完成后统一等待 1.5 秒再取截图；这是渲染缓冲，不是页面切换成功的识别条件。
+
+“操作 > 提取”提供文字、前缀文本、后缀文本、前缀数字、后缀数字和颜色；文字已从“定位 > 区域识别”移出。四个文字后处理函数 `pretext/posttext/prenum/postnum` 同时注入 `execute-code` 的全局命名空间，并由 `from AutoScriptor import *` 导出，确保函数体与保存脚本可用。`POST /api/editor/preview-extract` 的 `post_process` 仅接受 `strip`（省略时默认）、`pretext`、`posttext`、`prenum`、`postnum` 五个名称，服务端映射至同一公共实现，不执行客户端传来的表达式；非法名称在申请设备前返回 `400 invalid_text_processor`。有缓存图时固定使用该帧，不申请设备，预览中的数字保持 int（含 0）。
+
+Editor `execute-code` 同时直接提供 `seq_click`（`timeout` 默认每项 10 秒），共享 `click` 的真实/虚拟控制器、取消与执行闸门；保存脚本通过 `from AutoScriptor import *` 获得同一 API。“操作 > 序列点击”插入 `seq_click([])` 并定位到列表内；生成目标仅在该列表上下文自动补逗号，同时复用 `/api/editor/remote/click` 点击当前选区中心一次、成功后刷新截图，不追加独立 click 代码。模拟模式只标记、不请求设备；请求在途防重复生成，拒绝/失败不自动重试或刷新截图。普通对象和 until 条件生成不触发点击，不保留跨代码窗口的插入模式。
+
 `GET /api/editor/navigation-options` 只读取 `ZmxyOL.nav.envs` 已注册到 `mm` 的名称，不执行导航、识别或设备初始化。响应按注册顺序返回 `items: [{"name": "村庄", "locations": ["法相", "背包"]}]`；环境自身的同名根位置不重复列入 `locations`。导入或注册异常返回 `500 editor_navigation_options_failed`，前端不得把失败伪装成空菜单。
+
+“工具 > 地图位置”与“导航到...”使用完全相同的列表和顺序，但在当前代码光标处插入 `mm.locs["目标名称"].identifier`，不展开为固定 T/I/B 值、不导航或点击设备。该表达式在执行时读取地图当前识别目标，可用于 `ui_T(...)`、`wait_for_appear(...)` 和 until；序列列表内沿用对象插入的自动逗号规则。即时执行的导航命名空间与保存脚本的 `from ZmxyOL import *` 都提供 `mm`。
 
 MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和常见安装目录，并从安装目录推导 `mumu_folder`、`emu_path`、`adb_path`，可选探测已连接 ADB 设备。推导是版本自适应的（`AutoScriptor/utils/mumu_discovery.py` 是布局知识的唯一出处）：NemuIpc 库按 `nx_device/<Android 大版本>` 通配并从大到小取（MuMu 6.0 = 15.0、MuMu 5.0/12 = 12.0，未来新版本不用改代码），回退 `nx_main/sdk` 与旧的 `shell/sdk`；MuMuManager 认 `nx_main`（v5+）与 `shell`（v4 及更早）两代位置，adb 额外兼容 `vmonitor\bin\adb_server.exe`；安装根以含 `nx_main`/`nx_device` 子目录的那一级为准，配成子目录时向上修正、配成上级目录时按 NemuIpc 库的位置反推回安装根，版本目录不会冒充安装根，限深查找只在与 MuMu 相关的目录里做（不会一路扫到盘根）。探测到设备后 `index` 按真实实例号落定，`adb_addr` 只在两种情况下跟随设备：值本身没信息量（空、`YOUR_` 占位、`:0` 结尾），或它恰好等于 `default_mumu_adb_addr(原 index)`——后者只是实例号的镜像，跟着新的实例号走才不会两个字段各说一个实例。手填地址（局域网主机、自定义端口、`localhost` 写法）与推导结果永不相等，照旧保留。`mumu_discovery` 是端口推导的唯一出处（`MUMU_ADB_BASE_PORT`/`MUMU_ADB_PORT_STEP`、`default_mumu_adb_addr`、`is_derived_adb_addr`），`orchestrator.projection` 从中导入而不是各存一份。运行热路径仍依赖已持久化配置，不能在任务执行时临时扫盘。
 
@@ -170,19 +188,27 @@ MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和�
 
 ```json
 {
-  "task_path": "自定义任务/示例/操作设置",
-  "description": "一句话描述",
-  "task_doc": "补充说明正文",
-  "params": [
-    {"name": "times", "type": "int", "description": "执行次数"},
-    {"name": "mode", "type": "enum", "description": "模式", "enum_options": ["普通", "困难"]},
-    {"name": "areas", "type": "enum_multi", "description": "区域", "enum_options": ["普通", "困难"]}
-  ],
+  "filename": "操作设置.py",
+  "metadata": {
+    "task_path": "自定义任务/示例/操作设置",
+    "ensure_in": ["村庄"],
+    "description": "一句话描述",
+    "task_doc": "补充说明正文",
+    "params": [
+      {"name": "times", "type": "int", "description": "执行次数"},
+      {"name": "mode", "type": "enum", "description": "模式", "enum_options": ["普通", "困难"]},
+      {"name": "areas", "type": "enum_multi", "description": "区域", "enum_options": ["普通", "困难"]}
+    ]
+  },
   "code": "click(T(\"确定\"))"
 }
 ```
 
-后端以 `task_path` 决定文件位置：`自定义任务/<目录...>/<名字>.py`，要做安全归一化并禁止路径穿越（旧 `filename`、`name` 字段只作为兼容 fallback）。保存产物是 UTF-8 Python 文件，位于 `data/custom_task/`，同目录临时文件写入后通过 `os.replace` 原子替换。裸片段会被包装为 `@register_task(description=...)` 加函数 docstring；`params` 会生成函数签名、字段说明，以及本地 `enum.Enum` 类型默认值，`enum` 表示单选，`enum_multi` 表示多选选项列表。完整自定义任务文件自己负责装饰器元数据，不再写 `param_meta/task_doc_flow` 等运行期字段。脚本路径不在装饰器里：后端按 `task_path` 在 `custom_task/` 下建好子目录并把文件写进去，显示路径因此是 `自定义任务/` 加该相对路径，例如保存到 `custom_task/背包清空/进阶仙宝.py` 就注册为 `自定义任务/背包清空/进阶仙宝`。语法、模板生成、写入或完整重载失败必须返回结构化错误，不能静默成功；保存成功后通过 lifecycle service 触发完整 reload 并返回 `config_version`。
+后端以 `metadata.task_path` 决定文件位置：`自定义任务/<目录...>/<名字>.py`，安全归一化并禁止路径穿越；旧平铺元数据仍兼容，`filename`、`name` 仅作路径 fallback。保存产物为 UTF-8 Python 文件，同目录临时写入后通过 `os.replace` 原子替换。
+
+裸片段包装为 `@register_task(ensure_in=..., description=...)`、函数 docstring 和同起点的入口 `ensure_in(...)`；`params` 生成函数签名、说明及本地 `enum.Enum` 默认值（`enum` 单选、`enum_multi` 多选）。完整自定义任务文件保持原文，但保存前须检查每个注册声明：起点为字符串/非空列表/元组字面量，显式 `debug=True, ensure_in=None` 可保留现场；不能静态校验的动态表达式明确拒绝，不执行作者代码来猜地点。
+
+脚本路径不在装饰器里；例如 `custom_task/背包清空/进阶仙宝.py` 注册为 `自定义任务/背包清空/进阶仙宝`。语法、起点、模板生成、写入或完整重载失败必须返回结构化错误。保存成功后通过 lifecycle service 完整 reload 并返回 `config_version`，不把 `param_meta/task_doc_flow/ensure_in` 等投影字段写进账号数据。
 
 ## 源码更新
 
@@ -202,6 +228,8 @@ MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和�
 | `/api/news/*` | 4399 资讯、礼包码、代理页面 |
 
 错误归档路径必须经过安全文件名校验，zip 导入解压到新目录，不覆盖任意路径。
+调度管线的设备启动异常也通过同一套接口展示，归档名称为“设备启动失败”，日志上下文含
+`stage=device_startup`。该阶段没有可靠游戏帧，图片列表为空是正常情况，不应为了补图初始化设备。
 
 资讯页约定：
 
@@ -211,6 +239,7 @@ MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和�
 - 兑换码刷新由 iframe 的 load 事件驱动，而不是和打开弹窗并行：弹窗打开即进刷新态，`giftLoading` 遮罩全程压住 iframe（不透明且拦点击），等那次加载完成才发 `/api/news/gift_codes?refresh=1`，采集成功后换 key 重载 iframe，由重载的 load 收掉遮罩。刷新失败自己收遮罩并提示。任何情况下都不能先把上一次采集的表格展示出来让人读或点——那是过期兑换码。
 - `/api/news/redeem_targets` 只返回账号名和 `服务器:角色名` 选择项；`POST /api/news/gift_codes/redeem` 需要 credential unlock 或安全密码，接受 `redeem_code` 或 `redeem_codes`，先切到所选账号/角色并强制自动登录，再按顺序以临时 `redeem_code` 参数执行内置任务 `其他任务/活动脚本/兑换豪礼礼品兑换`。
 - `/api/news/proxy` 遇到 4399 登录墙时会使用可用资讯通行证重试一次；缓存通行证失效时应重登后再拉取正文。
+- 4399 登录返回 HTTP 202/429（暂不接受登录）或其他失败时，不能把初始化 Cookie 缓存为成功会话；代理返回 HTTP 502 说明页，显示明确原因并提供手动重试与论坛原文链接。正文和说明页均禁缓存。`bbs_session_eligible` 仅代表允许尝试登录，不代表登录成功；上游限制未解除时不能保证窗口内阅读全文。
 - `news.account = "85rwm3janyyc"` 与 `news.password = "123456"` 是唯一允许明文模板保留的公开资讯通行证，仅用于 4399 news/forum/gift-code 代理。
 - 旧配置若没有 `news` 段，资讯代理按该公开通行证兜底；显式配置其他 `news.*` 时按敏感凭据处理。
 - 其他 `news.*`、`game.*`、账号文件、token、证书、私钥、deploy 密码都按敏感信息处理；非公开 news/game 凭据用于论坛代拉前仍需要 credential unlock。
@@ -218,6 +247,7 @@ MuMu 自动定位只在设置/诊断层运行：发现逻辑检查注册表和�
 ## 日志
 
 - 实时日志使用 WebSocket `/ws/logs`。
+- 推送级别由 `deploy.log_level` 控制，缺失或无效时默认 INFO；显式 DEBUG 保留定位轮询和逐次输入明细。`logs/webui.log` 固定记录 INFO 及以上，不随浏览器级别变化。
 - 不使用 Socket.IO。
 - 静态资源缓存：`/vendor` 和 `/fonts` 可缓存，`/static/*.js/css` no-cache。
 

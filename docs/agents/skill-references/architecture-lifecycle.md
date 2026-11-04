@@ -41,6 +41,7 @@ Useful docs:
 - Do not patch stale global controls directly when runtime refresh is required.
 - Scheduler and direct execution paths should use `runtime_ctx.refresh()` or the established lifecycle service.
 - Treat `MuMuManager launch` success as command acceptance only; wait for the configured ADB device and Android boot completion before package resolution, App launch, or other Android-side checks.
+- Check selected-instance `launch_err_code/launch_err_msg` before and during Android readiness polling: a failed Android VM can still report `is_process_started=true` and `player_state=start_finished`. Preserve `MuMuStartupError` without nested launch retries; stopped/booted instances must not inherit stale failures. Startup archives must disable runtime-context providers and previous-run screenshots instead of probing a broken or stale device session.
 - NemuIpc is two lanes: `NemuIpcImpl.io_lock` guards connect/disconnect/reconnect and the reused capture buffer, while `NemuIpc._ipc_lock` serialises compound gestures only. Screenshots and input can run concurrently (verified), so keep background screenshots, task clicks, touch release, and connection release on the `NemuIpc` wrapper methods, but do not add a global cross-instance lock or extra fallback sleeps.
 - Do not reintroduce host-level boost for runtime stability. Source execution must not change Windows power state, CPU affinity, process priority, thread priority, or MuMu process priority, and must not restore `AutoScriptor.utils.perf` as a compatibility shell.
 - Use `RuntimeController.guard_idle()` before config/task/account writes that cannot happen during execution.
@@ -70,10 +71,14 @@ Useful docs:
 
 ## Scheduler And Progress
 
+- Automatic selection is existing due rules -> dynamic dependency-ready set -> nearest navigation-step cost/list tie-break. `after_tasks` references stable IDs; a due but retry-exhausted predecessor still blocks. A disabled/deferred predecessor does not. Newly unlocked successors start at attempt 1; manual direct runs bypass dependencies. Keep policies in global `task_ordering.selection_policy` and declarations/overrides per task, with explicit empty lists distinct from inheritance.
+- Cost queries never navigate or change position. Recognition-only `probe_region()` belongs inside the execution gate after readiness, not WebUI polling; mixed debug/normal candidates must not inherit another candidate's login/restart policy. Share dependency readiness with role availability and waits to prevent busy loops.
+
 - Red human-takeover state is a cooldown, not a permanent block; once `next_exec_time` expires, automatic scheduling can collect the task again.
 - A task function returning normally is only success when observable `progress` is complete or absent.
 - Incomplete progress after retry exhaustion should become `human_takeover_error`, preserving the progress display.
 - `MAX_CONSECUTIVE_ERRORS = 3` is a scheduler-level error pause for ordinary repeated failures, not a replacement for per-task progress/human-takeover semantics.
+- Startup failures must check that limit inside the active pipeline, not only `state == ERROR`: `record_result()` defers ordinary task-error transitions until pipeline exit. Archive startup exceptions at the scheduler boundary, preserve pending retry entries, and test the actual refresh loop plus cancellation, not just isolated counter increments.
 - Automatic cross-character scheduling should return to the first valid `dispatch_queue` character and confirm login after the full pipeline finishes; direct runs and debug-only runs skip this.
 
 Useful docs:

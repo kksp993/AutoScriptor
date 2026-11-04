@@ -58,6 +58,7 @@ def make_more_for_destroy(nums: int=1):
 
 
 @register_task(
+    ensure_in="炼器师",
     description="执行仙宝炼化 A/B。",
     reschedule="daily",
 )
@@ -79,4 +80,3 @@ def lianqishi_destroy():
         else:
             make_more_for_destroy((limit-cur)*2)
     click(B(890,50,30,30))
-

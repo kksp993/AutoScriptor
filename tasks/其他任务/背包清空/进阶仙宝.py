@@ -7,6 +7,7 @@ from AutoScriptor import *
 
 
 @register_task(
+    ensure_in="法相",
     description="一键吞噬仙宝，以清空背包",
     reschedule='daily',
 )

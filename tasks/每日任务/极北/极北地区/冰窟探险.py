@@ -1,6 +1,7 @@
 from ZmxyOL import *
 from AutoScriptor import *
 @register_task(
+    ensure_in="极北#-1",
     description="执行极北冰窟扫荡。",
     reschedule="daily",
 )
@@ -24,5 +25,4 @@ def bingkuTanXian():
         wait_for_disappear(I("加载中"))
     else:
         click(B(1122,34,30,30))
-
 

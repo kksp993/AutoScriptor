@@ -234,15 +234,15 @@ def _make_task_ordering_node(path: str) -> dict[str, Any]:
     return {"type": "task", "path": path}
 
 
-def _flatten_ordering_items(items: Iterable[dict[str, Any]]) -> list[str]:
+def _flatten_ordering_items(items: Iterable[dict[str, Any]], leaf_key: str = "path") -> list[str]:
     paths: list[str] = []
     for item in items or []:
         if not isinstance(item, dict):
             continue
-        if item.get("type") == "group":
-            paths.extend(_flatten_ordering_items(item.get("items") or []))
+        if item.get("type") == "group" or isinstance(item.get("items"), list):
+            paths.extend(_flatten_ordering_items(item.get("items") or [], leaf_key))
             continue
-        path = normalize_task_path(item.get("path"))
+        path = normalize_task_path(item.get(leaf_key))
         if path:
             paths.append(path)
     return paths
@@ -315,6 +315,8 @@ def normalize_task_ordering_overlay(raw_overlay: Any) -> dict[str, Any]:
     overlay = raw_overlay if isinstance(raw_overlay, dict) else {}
     seen_paths: set[str] = set()
     group_counter = [0]
+    from orchestrator.planning import normalize_selection_policy
+    policy = normalize_selection_policy(overlay.get("selection_policy", "nearest_ready"))
 
     if isinstance(overlay.get("items"), list):
         items = _normalize_ordering_items(overlay.get("items") or [], seen_paths, group_counter)
@@ -327,6 +329,7 @@ def normalize_task_ordering_overlay(raw_overlay: Any) -> dict[str, Any]:
         "schema_version": TASK_ORDERING_SCHEMA_VERSION,
         "user_order": user_order,
         "items": items,
+        "selection_policy": policy,
     }
 
 
@@ -368,9 +371,11 @@ def retarget_ordering_overlay(
 
     raw_items = overlay.get("items")
     if isinstance(raw_items, list):
+        items = [item for item in (retarget_item(raw) for raw in raw_items) if item]
         return {
             **overlay,
-            "items": [item for item in (retarget_item(raw) for raw in raw_items) if item],
+            "items": items,
+            "user_order": _flatten_ordering_items(items, leaf_key),
         }
     return {
         **overlay,
@@ -500,6 +505,49 @@ def summarize_ordering_generations(projection: TaskOrderingProjection) -> list[l
     if not projection.effective_order:
         return []
     return [list(projection.effective_order)]
+
+
+def resolve_planning_specs(task_table: dict, *, locations: set[str] | None = None, strict: bool = False):
+    """Resolve author defaults/user overrides without persisting derived fields."""
+    from tasks.task_register import task_registry
+    from orchestrator.planning import PlanningSpec, diagnose_specs
+
+    specifications = {}
+    errors = {}
+    for path, metadata in task_registry.items():
+        task_id = metadata["id"]
+        entry = task_table.get(task_id) or {}
+        try:
+            defaults = task_registry.get_planning_defaults(path)
+            specifications[task_id] = PlanningSpec.from_values(entry, defaults)
+        except ValueError as exception:
+            specifications[task_id] = PlanningSpec()
+            errors[task_id] = str(exception)
+    errors.update(diagnose_specs(specifications, locations))
+    if strict and errors:
+        raise ValueError("; ".join(f"{task_id}: {error}" for task_id, error in errors.items()))
+    return specifications, errors
+
+
+def plan_task_table(task_table: dict, raw_overlay: dict, now_ts: float, *, eligible_paths=None, costs=None):
+    """Adapt registry/config snapshots to the pure planner; never change due times."""
+    from tasks.task_register import task_registry
+    from orchestrator.planning import plan_tasks
+    from ZmxyOL.nav.map_manager import mm
+
+    specifications, errors = resolve_planning_specs(task_table, locations=set(mm.locs))
+    due_ids = {
+        task_id for task_id, entry in task_table.items()
+        if isinstance(entry, dict) and is_task_due(entry, task_registry.get_path(task_id) or "", now_ts)
+    }
+    eligible_ids = due_ids if eligible_paths is None else {task_registry.id_of(path) for path in eligible_paths}
+    ordering = sort_paths_by_task_ordering(collect_task_paths(task_table), task_table, raw_overlay)
+    decision = plan_tasks(
+        specifications, due_ids, eligible_ids,
+        [task_registry.id_of(path) for path in ordering], costs=costs,
+        policy=raw_overlay.get("selection_policy", "nearest_ready"), errors=errors,
+    )
+    return decision, specifications
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -3,6 +3,7 @@ from AutoScriptor import *
 
 
 @register_task(
+    ensure_in="法相",
     description="自动进行两个遗迹的仙宝挖掘。",
     reschedule="daily",
 )

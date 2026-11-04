@@ -50,6 +50,7 @@ def bingku_battle():
     switch_base("mumu")
 
 @register_task(
+    ensure_in="背包",  # 开场先通过 wear_shizhuang_choice / wear_item 换装。
     description="完成幽冥冰窟每周流程。",
     reschedule="weekly",
 )

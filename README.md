@@ -7,6 +7,10 @@ AutoScriptor 是面向安卓模拟器的 Python 自动化任务编排项目。�
 
 ## 快速开始
 
+新电脑没有 Git 时，可在仓库网页 **Code → Download ZIP** 后完整解压到用户可写目录，
+双击 `scripts\install.bat`。安装器会按需准备工具链和 VC++ x64 运行库；需要联网并允许系统授权。
+ZIP 不支持 Git 自动更新，要自动更新请在 Git 装好后使用下面的 clone 方式。
+
 ```powershell
 git clone https://github.com/kksp993/AutoScriptor.git
 cd AutoScriptor
@@ -44,7 +48,10 @@ cd AutoScriptor
 | 直接跑后端　　　　 | `.\.venv\Scripts\python.exe -X utf8 backend\webui\gui.py` |
 | 源码更新　　　　　 | `.\scripts\update.bat`　　　　　　　　　　　　　　　　　　|
 
-安装脚本会按需准备 Git、Node.js LTS、uv、Python 3.10.15 `.venv`、`requirements.txt` 和 `frontend\electron\node_modules`。直接进入 `frontend\electron` 执行 `npm start` 前，必须先运行 `.\scripts\install.bat electron` 或手动 `npm install`。
+安装脚本会按需准备 winget、Git、Node.js LTS、uv、VC++ x64、Python 3.10.15 `.venv`、
+Python 依赖和 Electron，并校验实际导入/可执行性。不永久修改 PowerShell 执行策略。
+直接进入 `frontend\electron` 执行 `npm start` 前，先运行 `.\scripts\install.bat electron`。
+OCR 模型首次使用时联网下载；MuMu 和游戏另行安装。完整边界见 [安装手册](docs/AutoScriptor/INSTALL.md)。
 
 ## 目录
 

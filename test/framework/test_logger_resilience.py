@@ -4,7 +4,10 @@ import io
 import logging
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 import AutoScriptor
 from AutoScriptor.control.NemuIpc.device.method.nemu_ipc import CaptureStd
@@ -24,6 +27,41 @@ def _record(message: str) -> logging.LogRecord:
 
 
 class LoggerResilienceTest(unittest.TestCase):
+    def test_default_console_filters_debug_without_disabling_diagnostics(self):
+        console_handlers = [
+            handler for handler in logger_module.logger.handlers
+            if isinstance(handler, (logger_module._SafeRichHandler, logger_module._SafeStreamHandler))
+        ]
+        self.assertEqual(len(console_handlers), 1)
+        console_handler = console_handlers[0]
+
+        with patch.object(logger_module.logger, "handlers", [console_handler]), \
+             patch.object(console_handler, "emit") as emit:
+            logger_module.logger.debug("locate detail")
+            logger_module.logger.info("click action")
+            logger_module.logger.warning("device warning")
+
+        self.assertEqual(
+            [record_call.args[0].levelno for record_call in emit.call_args_list],
+            [logging.INFO, logging.WARNING],
+        )
+        self.assertTrue(logger_module.logger.isEnabledFor(logging.DEBUG))
+
+    def test_file_log_keeps_debug_details(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(logger_module.logger, "handlers", []), \
+             patch.object(logger_module, "_file_handler", None):
+            log_path = Path(directory) / "actions.log"
+            logger_module.setup_logfile(str(log_path))
+            self.addCleanup(logger_module._file_handler.close)
+            logger_module.logger.debug("locate detail")
+            logger_module.logger.info("click action")
+            logger_module._file_handler.close()
+
+            log_text = log_path.read_text(encoding="utf-8")
+            self.assertEqual(log_text.count("locate detail"), 1)
+            self.assertEqual(log_text.count("click action"), 1)
+
     def test_logger_is_available_from_public_autoscriptor_api(self):
         self.assertIn("logger", AutoScriptor.__all__)
         self.assertIs(AutoScriptor.logger, logger_module.logger)

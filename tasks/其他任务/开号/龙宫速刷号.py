@@ -11,6 +11,7 @@ from tasks.其他任务.开号._创号战斗流程 import register_account_battl
 
 
 @register_task(
+    ensure_in="天庭#4",
     description="按速刷1流程把龙宫角色练到 91 级",
 )
 def task():

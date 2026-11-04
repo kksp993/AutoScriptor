@@ -30,6 +30,8 @@ def logger_stub():
 
 
 def import_power_for_test():
+    from AutoScriptor.control.MumuAdaptor.device_facade import MuMuStartupError
+
     autoscriptor = types.ModuleType("AutoScriptor")
     utils_pkg = types.ModuleType("AutoScriptor.utils")
     control_pkg = types.ModuleType("AutoScriptor.control")
@@ -39,10 +41,12 @@ def import_power_for_test():
     direct = types.ModuleType("AutoScriptor.control.MumuAdaptor.api.adb.direct")
     direct.adb_device_ready = lambda: False
     facade = SimpleNamespace(
-        adb_device_ready=lambda: False, last_adb_error="offline", adb_addr="127.0.0.1:16448"
+        adb_device_ready=lambda: False, last_adb_error="offline", adb_addr="127.0.0.1:16448",
+        get_player_info=lambda: {"index": "1"},
     )
     device_facade = types.ModuleType("AutoScriptor.control.MumuAdaptor.device_facade")
     device_facade.get_device_facade = lambda vm_index=None: facade
+    device_facade.MuMuStartupError = MuMuStartupError
     cancel = types.ModuleType("AutoScriptor.utils.cancel")
     cancel.TaskCancelled = Cancelled
     cancel.check_cancel_raise = lambda: None

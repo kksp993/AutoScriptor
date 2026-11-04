@@ -2,6 +2,7 @@ from ZmxyOL import *
 from AutoScriptor import *
 
 @register_task(
+    ensure_in="仙盟",
     description="找小龙女消耗仙气。",
     deprecated=True,
     reschedule="daily",

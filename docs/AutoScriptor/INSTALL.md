@@ -11,19 +11,25 @@ scripts\run.bat        启动 WebUI 或 Electron
 scripts\update.bat     快进更新当前 Git 分支
 ```
 
-两个脚本都会把失败写成一段可照做的说明（哪一步、为什么、你可以怎么做、等价命令），
-并把完整输出留在 `logs\install_*.log`；它们也可以反复运行，已装好的部分自动跳过。
+安装失败会给出步骤、原因和处理建议，完整输出留在 `logs\install_*.log`。
+无参数运行 `install.bat` 会在结束时等待按键，双击也能看清结果。安装可以重复运行，
+不会删除现有 `.venv` 或覆盖账号配置；损坏/版本不匹配的虚拟环境需按提示手工处理。
 
 ## 环境
 
-- Windows 10/11 x64
-- winget / App Installer
-- PowerShell
-- MuMu 或 MuMu12
+- Windows 10（17763 或更高）/11 x64；不支持 ARM64 或 32 位系统
+- 系统自带的 64 位 PowerShell 5.1 或更高版本
+- 可访问软件源的网络，以及安装系统组件时的授权权限
+- MuMu 和游戏需自行安装；不属于本脚本下载范围
 
-安装脚本会按需准备 Git、Node.js LTS、uv、Python 3.10.15 `.venv`、Python 依赖和 `frontend\electron\node_modules`。
+安装脚本按需准备 winget、Git、Node.js LTS、uv、VC++ x64 运行库、Python 3.10.15
+`.venv`、Python 依赖和 Electron。下载、权限或组织策略阻止安装时会停止并报错，不绕过策略。
 
 ## 获取源码
+
+全新电脑尚无 Git 时，在仓库网页选择 **Code → Download ZIP**，完整解压到用户可写的本地目录，
+再双击 `scripts\install.bat`。不要在压缩包内运行，或直接放进 Program Files。
+ZIP 没有 `.git`，可以运行但不能使用 Git 自动更新；需要自动更新时，在 Git 装好后重新 clone：
 
 ```powershell
 git clone https://github.com/kksp993/AutoScriptor.git
@@ -39,19 +45,23 @@ git branch --show-current
 
 脚本流程：
 
-1. 设置当前用户执行策略：
+1. 检查系统架构、源码是否完整、目录能否写入。BAT 选择 64 位 PowerShell，
+   只对本次进程使用 `-ExecutionPolicy Bypass`，不永久修改用户执行策略。
+
+2. 按需安装工具链。没有 winget 时，先通过 PSGallery 的微软官方
+   `Microsoft.WinGet.Client` 模块和 `Repair-WinGetPackageManager` 为当前用户准备；
+   NuGet provider 和模块也只安装在当前用户范围，不改变 PSGallery 信任设置。
+   已有 winget 则跳过引导；所有软件包明确使用 `--source winget`：
 
    ```powershell
-   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+   winget install Git.Git -e --source winget --accept-source-agreements --accept-package-agreements
+   winget install OpenJS.NodeJS.LTS -e --source winget --accept-source-agreements --accept-package-agreements
+   winget install astral-sh.uv -e --source winget --accept-source-agreements --accept-package-agreements
+   winget install "Microsoft.VCRedist.2015+.x64" -e --source winget --accept-source-agreements --accept-package-agreements
    ```
 
-2. 按需安装工具链：
-
-   ```powershell
-   winget install Git.Git -e --accept-source-agreements --accept-package-agreements
-   winget install OpenJS.NodeJS.LTS -e --accept-source-agreements --accept-package-agreements
-   winget install astral-sh.uv -e --accept-source-agreements --accept-package-agreements
-   ```
+   VC++ x64 运行库基线为 14.40，已有兼容版本则保留。单独安装 Python 也检查运行库，
+   避免全新电脑在 `import paddle` / `import cv2` 时才发现缺 DLL。系统组件可能要求 UAC 授权或重启。
 
 3. 刷新当前进程 PATH，并重新检测：
 
@@ -85,13 +95,23 @@ git branch --show-current
    `ModuleNotFoundError: No module named 'distutils.util'`，重新运行
    `scripts\install.bat python` 恢复依赖合同。
 
+   最后执行 `uv pip check`，校验所选 Paddle 的 CUDA 状态，并实际导入
+   PaddleOCR、OpenCV、FastAPI、Uvicorn、multipart、密码学和图像依赖。
+   表单解析与 WebUI 一样使用 `python_multipart`，不依赖旧版 `multipart` 兼容模块的包结构。
+   这些校验不启动模拟器、不写账号配置；OCR 模型仍在首次使用时联网下载，不能据此声称离线可运行。
+
 5. 准备 Electron：
 
    ```powershell
    cd frontend\electron
-   npm install
-   cd ..
+   npm install --include=dev --ignore-scripts=false
+   cd ..\..
    ```
+
+   显式包含 Electron 所在的 devDependencies 并执行安装脚本；临时清除
+   `ELECTRON_SKIP_BINARY_DOWNLOAD`，结束后恢复。已有包但缺二进制时重新执行 Electron
+   自带的 `install.js`。必须实际启动 Electron 二进制的 Node 模式、核对版本后才算成功，
+   不以 `node_modules/electron/package.json` 存在为准。校验不会打开应用窗口。
 
 只修复某一类依赖：
 
@@ -102,7 +122,11 @@ git branch --show-current
 .\scripts\install.bat python gpu
 .\scripts\install.bat electron
 .\scripts\install.bat qq
+.\scripts\install.bat all -NonInteractive
 ```
+
+`-NonInteractive` 跳过可选 QQ 提问（默认不新增 QQ 机器人），但不绕过系统 UAC。
+显式 `-WithQQ` 或维护已安装的机器人时仍执行 QQ 安装步骤。
 
 ## 可选 QQ 机器人
 
@@ -283,6 +307,12 @@ MuMu TCP ADB 地址不会因为 `adb start-server` 自动出现在 `adb devices`
 
 ## 排错
 
+winget 引导失败：检查网络能否访问 PSGallery 和微软下载服务，或在 Microsoft Store
+安装/修复“应用安装程序”后重试。受组织管理的电脑请联系管理员，不要放宽全局执行策略。
+
+出现 DLL load failed：先运行 `scripts\install.bat python` 补齐 VC++ x64 运行库并执行
+实际导入校验；安装器要求重启时先重启，不要自行从 DLL 下载网站拷贝文件。
+
 Python 版本不对：
 
 ```powershell
@@ -305,6 +335,14 @@ npm -v
 Electron 找不到可执行文件：
 
 ```powershell
+.\scripts\install.bat electron
+```
+
+Electron 的 npm 包和可执行文件来自不同下载地址。仅换 npm registry 不能修复二进制下载。
+网络需要镜像时可以在当前 PowerShell 设置后重试（不写全局 npm 配置）：
+
+```powershell
+$env:ELECTRON_MIRROR = 'https://npmmirror.com/mirrors/electron/'
 .\scripts\install.bat electron
 ```
 
@@ -354,7 +392,9 @@ WebUI 启动但模拟器不可用：先修正 `data/config.json` 中的 MuMu 和
 
 ## 验收
 
-- `scripts\install.bat` 能校验 Git、Node.js LTS、uv、Python `.venv` 和 Electron 依赖。
+- 在无 Git/Node/uv/Python/VC++ 的干净 Windows x64 环境运行完整安装；额外覆盖没有 winget 的情况。
+- `scripts\install.bat` 能校验工具链、VC++、Python x64、依赖一致性和 Electron 实际可执行性。
+- 重复安装保留账号/配置，`tools/python/electron/qq` 只报告对应目标完成。
 - `scripts\install.bat` 失败时输出「哪一步 / 为什么 / 你可以怎么做」并把完整输出写进 `logs\install_*.log`。
 - `scripts\run.bat electron` 或 `start.bat` 能打开 Electron。
 - `scripts\run.bat webui` 或 `webui.bat` 能启动 WebUI。
@@ -362,3 +402,7 @@ WebUI 启动但模拟器不可用：先修正 `data/config.json` 中的 MuMu 和
 - 首选端口被占用时自动顺延并说明；端口上已有 AutoScriptor 时提示「已经在运行」而不是重复启动。
 - 日志页通过原生 WebSocket `/ws/logs` 显示日志。
 - 任务树能加载、保存、刷新。
+
+离线回归：`python -m unittest test.framework.test_source_installer`。这些测试用 PowerShell
+执行真实函数、替换外部安装命令，不下载软件或改系统配置；**不能代替干净 VM 的在线安装验收**。
+开发机导入成功同样不能证明新电脑的下载、UAC、首次模型初始化和桌面界面已通过验收。

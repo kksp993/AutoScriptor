@@ -26,6 +26,24 @@ from AutoScriptor.utils.mumu_discovery import resolve_mumu_adb_addr, validate_mu
 CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
 
 
+class MuMuStartupError(RuntimeError):
+    """The selected host process explicitly reports an Android launch failure."""
+
+    def __init__(self, player: dict[str, Any], adb_addr: str):
+        self.player_info = {
+            key: player.get(key) for key in (
+                "index", "is_process_started", "is_android_started", "player_state",
+                "launch_err_code", "launch_err_msg", "adb_host_ip", "adb_port",
+            )
+        }
+        super().__init__(
+            f"MuMu 安卓设备启动失败: index={player['index']}, adb_addr={adb_addr!r}；"
+            f"launch_err_code={player.get('launch_err_code')}, "
+            f"launch_err_msg={player.get('launch_err_msg')!r}；"
+            "模拟器进程存在不代表 Android 启动成功，请检查该实例的启动错误。"
+        )
+
+
 def _text(result: subprocess.CompletedProcess[str]) -> str:
     return (result.stderr or result.stdout or "").strip()
 
@@ -202,12 +220,11 @@ class DeviceFacade:
             return None
         return host, port
 
-    def verify_mumu_endpoint(self, *, allow_stopped: bool = False) -> dict[str, Any]:
-        """Verify identity using Manager's report, not port arithmetic alone."""
+    def get_player_info(self) -> dict[str, Any]:
+        """Read the selected instance and reject explicit Android launch errors."""
         if not self.vm_index.isdigit():
             raise ValueError(f"连接核验需要单个实例编号，收到 index={self.vm_index!r}")
         instance_index = int(self.vm_index)
-        validate_mumu_connection_parameters(instance_index, self.adb_addr)
         context = f"index={self.vm_index}, adb_addr={self.adb_addr!r}"
         command = self.manager_base_args("info")
         try:
@@ -229,6 +246,23 @@ class DeviceFacade:
                 "请检查实例是否存在及管理器路径。"
             )
         player = players[0]
+        launch_error_code = player.get("launch_err_code")
+        launch_error_message = str(player.get("launch_err_msg") or "").strip()
+        if (
+            player.get("is_process_started") is True
+            and player.get("is_android_started") is False
+            and (launch_error_code not in (None, 0, "", "0") or launch_error_message)
+        ):
+            raise MuMuStartupError(player, self.adb_addr)
+        return player
+
+    def verify_mumu_endpoint(self, *, allow_stopped: bool = False) -> dict[str, Any]:
+        """Verify identity using Manager's report, not port arithmetic alone."""
+        if not self.vm_index.isdigit():
+            raise ValueError(f"连接核验需要单个实例编号，收到 index={self.vm_index!r}")
+        validate_mumu_connection_parameters(int(self.vm_index), self.adb_addr)
+        player = self.get_player_info()
+        context = f"index={self.vm_index}, adb_addr={self.adb_addr!r}"
         explicitly_stopped = (
             player.get("is_process_started") is False
             and player.get("is_android_started") is False

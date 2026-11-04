@@ -2,8 +2,12 @@
 
 import sys
 import os
+import asyncio
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+import requests
+from starlette.requests import Request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -12,7 +16,9 @@ from backend.webui.routes.news import (
     _forum_iframe_placeholder,
     _is_login_wall_response,
     _strip_document_domain_assignments,
+    proxy_page,
 )
+from backend.webui.routes import news_4399_session
 from backend.webui.routes.news_4399_session import encrypt_password_for_ptlogin, _ptlogin_form_error_message
 
 
@@ -23,6 +29,63 @@ class _FakeResp:
 
 
 class TestNewsLoginWall(unittest.TestCase):
+    def test_login_rejection_with_initial_cookies_is_not_cached(self):
+        session = Mock(spec=requests.Session)
+        session.headers = {}
+        session.cookies = requests.cookies.RequestsCookieJar()
+        session.cookies.set("USESSIONID", "initial-session", domain=".4399.com")
+        session.get.side_effect = [Mock(status_code=200), Mock(status_code=200, text="0")]
+        response = requests.Response()
+        response._content = "请稍后再试~".encode("utf-8")
+        response.encoding = "utf-8"
+        session.post.return_value = response
+
+        for status_code in (202, 429, 500):
+            with self.subTest(status_code=status_code):
+                response.status_code = status_code
+                session.get.side_effect = [Mock(status_code=200), Mock(status_code=200, text="0")]
+                session.close.reset_mock()
+                with patch.object(news_4399_session.requests, "Session", return_value=session), patch.dict(
+                    news_4399_session._session_cache, {}, clear=True
+                ):
+                    with self.assertRaisesRegex(news_4399_session.News4399LoginError, str(status_code)):
+                        news_4399_session.get_cached_or_login_session("test", "account", "password")
+                    self.assertEqual(news_4399_session._session_cache, {})
+                session.close.assert_called_once()
+
+    def test_successful_login_session_is_cached(self):
+        session = Mock(spec=requests.Session)
+        session.headers = {}
+        session.cookies = requests.cookies.RequestsCookieJar()
+        session.cookies.set("Pauth", "authenticated-session", domain=".4399.com")
+        session.get.side_effect = [Mock(status_code=200), Mock(status_code=200, text="0")]
+        response = requests.Response()
+        response.status_code = 200
+        response._content = b"<html><body>Login complete</body></html>"
+        session.post.return_value = response
+        with patch.object(news_4399_session.requests, "Session", return_value=session), patch.dict(
+            news_4399_session._session_cache, {}, clear=True
+        ):
+            self.assertIs(
+                news_4399_session.get_cached_or_login_session("test", "account", "password"), session
+            )
+            self.assertIs(news_4399_session.get_cached_session("test", "account"), session)
+        session.close.assert_not_called()
+
+    def test_proxy_shows_login_rejection_without_caching(self):
+        request = Request({"type": "http", "headers": []})
+        with patch("backend.webui.routes.news._news_credentials_for_request", return_value=(
+            "account", "password", "token"
+        )), patch("backend.webui.routes.news._fetch_proxy_with_adaptive_login", side_effect=(
+            news_4399_session.News4399LoginError("HTTP 202 <retry>")
+        )):
+            response = asyncio.run(proxy_page(request, "https://bbs.4399.cn/thread-tid-1"))
+        body = response.body.decode("utf-8")
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("HTTP 202 &lt;retry&gt;", body)
+        self.assertIn("重新加载正文", body)
+        self.assertIn("no-store", response.headers["cache-control"])
+
     def test_login_redirect_detected(self):
         self.assertTrue(
             _is_login_wall_response(

@@ -32,6 +32,7 @@ LINGPAI_MAP = {
 
 
 @register_task(
+    ensure_in="联盟#1",
     description="完成联盟悬赏任务。",
     deprecated=True,
     reschedule="daily",

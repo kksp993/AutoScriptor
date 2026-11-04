@@ -6,6 +6,7 @@ from tasks.其他任务.活动脚本.活动任务._活动流程 import run_activ
 
 
 @register_task(
+    ensure_in="村庄",
     description="领取成长活动的冲级、战力、飞升奖励",
     reschedule="daily",
 )

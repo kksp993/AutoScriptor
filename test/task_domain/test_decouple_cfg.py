@@ -96,6 +96,7 @@ class TestCfgNodeShape(unittest.TestCase):
             with patch("inspect.getfile", return_value=fake_file):
                 task_register_mod.register_task(
                     fn,
+                    ensure_in="村庄",
                     description="无映射任务",
                 )
 
@@ -119,7 +120,7 @@ class TestCfgNodeShape(unittest.TestCase):
                 os.path.dirname(__file__), "..", "..", "custom_task", "背包清空", "进阶仙宝.py"
             )
             with patch("inspect.getfile", return_value=fake_file):
-                task_register_mod.register_task(fn, description="进阶仙宝")
+                task_register_mod.register_task(fn, ensure_in="法相", description="进阶仙宝")
 
             self.assertTrue(task_registry.has_task("自定义任务/背包清空/进阶仙宝"))
             self.assertIn("进阶仙宝", cfg._config["tasks"])
@@ -142,7 +143,7 @@ class TestCfgNodeShape(unittest.TestCase):
                 os.path.dirname(__file__), "..", "..", "tasks", "每日任务", "村庄", "仙盟建设.py"
             )
             with patch("inspect.getfile", return_value=fake_file):
-                task_register_mod.register_task(fn, deprecated=True, description="旧任务")
+                task_register_mod.register_task(fn, ensure_in="仙盟", deprecated=True, description="旧任务")
 
             # 注册只声明「不写 cfg」，已存在的旧条目留给加载末尾的 prune 统一清理。
             self.assertIn("每日任务/村庄/仙盟建设", cfg._config["tasks"])
@@ -207,6 +208,7 @@ class TestCfgNodeShape(unittest.TestCase):
             with patch("inspect.getfile", return_value=fake_file):
                 task_register_mod.register_task(
                     fn,
+                    ensure_in="洪荒遗境",
                     description="遗境副本",
                 )
         finally:

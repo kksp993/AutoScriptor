@@ -1,5 +1,6 @@
 const TaskPanel = {
   name: 'TaskPanel',
+  components: { TaskPlanningGraph },
   props: {
     activeTab: { type: String, default: '' },
     currentTasks: { type: Object, required: true },
@@ -15,20 +16,24 @@ const TaskPanel = {
     'edit-task', 'expanded-change', 'start-run', 'stop-dispatch',
     'save-tasks', 'restart-task',
     'clear-logs', 'refresh-config', 'reset-scheduler', 'run-task', 'run-task-range',
-    'save-task-ordering',
+    'save-task-ordering', 'save-task-graph',
     'reorder-task',
   ],
   data() {
     return {
+      taskViewMode: 'hierarchy',
+      expandedTaskCategoryPaths: [],
       showOnlyEnabledOrderingItems: false,
       orderingDropHint: null,
       selectedEnabledTaskPath: '',
       guidedOrderingTaskPath: '',
       guidedOrderingTaskTimer: null,
       transientExpandedOrderingGroupIds: [],
+      transientCollapsedOrderingGroupIds: [],
       taskSearchQuery: '',
       taskSearchFocused: false,
       taskSearchHighlightedIndex: 0,
+      taskSearchBlurTimer: null,
     };
   },
   computed: {
@@ -47,6 +52,45 @@ const TaskPanel = {
       };
       visit(this.currentTasks || {});
       return rows;
+    },
+    taskHierarchy() {
+      const rootNodes = [];
+      const categoriesByPath = new Map();
+      // Native directories are a display projection, never a manual ordering input.
+      for (const row of this.taskRows) {
+        const pathParts = row.path.split('/');
+        const taskSummary = this.summarizeHierarchyTasks([row]);
+        let children = rootNodes;
+        for (let depth = 0; depth < pathParts.length - 1; depth += 1) {
+          const categoryPath = pathParts.slice(0, depth + 1).join('/');
+          let category = categoriesByPath.get(categoryPath);
+          if (!category) {
+            category = {
+              type: 'category', key: categoryPath, path: categoryPath,
+              name: pathParts[depth], depth, children: [],
+              summary: { total: 0, enabled: 0, pending: 0, errors: 0 },
+            };
+            categoriesByPath.set(categoryPath, category);
+            children.push(category);
+          }
+          for (const countName of Object.keys(taskSummary)) category.summary[countName] += taskSummary[countName];
+          children = category.children;
+        }
+        children.push({ type: 'task', key: row.path, row, depth: pathParts.length - 1 });
+      }
+      return rootNodes;
+    },
+    taskHierarchySummary() {
+      return this.summarizeHierarchyTasks(this.taskRows);
+    },
+    visibleTaskHierarchyNodes() {
+      return this.flattenTaskHierarchyForDisplay(this.taskHierarchy);
+    },
+    taskHierarchyCategoryPaths() {
+      const collectPaths = (nodes) => nodes.flatMap((node) => node.type === 'category'
+        ? [node.path, ...collectPaths(node.children)]
+        : []);
+      return collectPaths(this.taskHierarchy);
     },
     orderedTaskRows() {
       const rowByPath = new Map(this.taskRows.map((row) => [row.path, row]));
@@ -88,6 +132,9 @@ const TaskPanel = {
     orderingDiagnostics() {
       return Array.isArray(this.orderingProjection?.diagnostics) ? this.orderingProjection.diagnostics : [];
     },
+    planningBlockedRows() {
+      return this.enabledTaskRows.filter((row) => row.item.planning_status?.error || row.item.planning_status?.blocked_by?.length);
+    },
     taskSearchMatches() {
       const normalizedQuery = this.normalizeTaskSearchText(this.taskSearchQuery);
       if (!normalizedQuery) return [];
@@ -95,14 +142,93 @@ const TaskPanel = {
       if (!queryTokens.length) return [];
       return this.orderedTaskRows
         .map((row) => ({ row, searchableText: this.buildTaskSearchText(row) }))
-        .filter((match) => queryTokens.every((token) => this.doesTaskSearchTextMatch(match.searchableText, token)))
-        .slice(0, 20);
+        .filter((match) => queryTokens.every((token) => this.doesTaskSearchTextMatch(match.searchableText, token)));
     },
     taskSearchDropdownVisible() {
       return this.taskSearchFocused && !!this.normalizeTaskSearchText(this.taskSearchQuery);
     },
   },
+  beforeUnmount() {
+    if (this.guidedOrderingTaskTimer) window.clearTimeout(this.guidedOrderingTaskTimer);
+    if (this.taskSearchBlurTimer) window.clearTimeout(this.taskSearchBlurTimer);
+  },
   methods: {
+    async setTaskViewMode(viewMode) {
+      if (!['hierarchy', 'ordering', 'graph'].includes(viewMode)) return;
+      const graphEditor = this.$refs.taskPlanningGraph;
+      if (viewMode !== 'graph' && graphEditor?.savePending) return;
+      if (viewMode !== 'graph' && graphEditor?.dirty) {
+        try {
+          await ElementPlus.ElMessageBox.confirm('计算图有未保存的关系修改，放弃修改并切换视图？', '未保存的修改', {
+            confirmButtonText: '放弃修改', cancelButtonText: '继续编辑', type: 'warning',
+          });
+        } catch { return; }
+      }
+      this.taskViewMode = viewMode;
+      this.taskSearchFocused = false;
+      if (this.selectedEnabledTaskPath) this.scrollTaskIntoView(this.selectedEnabledTaskPath);
+    },
+    summarizeHierarchyTasks(rows) {
+      const summary = { total: rows.length, enabled: 0, pending: 0, errors: 0 };
+      for (const row of rows) {
+        if (row.item?.on) summary.enabled += 1;
+        if (row.item?.on && row.item?._due) summary.pending += 1;
+        if (this.getTaskIssueText(row.item)) summary.errors += 1;
+      }
+      return summary;
+    },
+    getTaskIssueText(taskItem) {
+      return [taskItem?.error, taskItem?.human_takeover_error, taskItem?.planning_status?.error]
+        .filter(Boolean).join('；') || (taskItem?.human_takeover ? '需要人工接管' : '');
+    },
+    flattenTaskHierarchyForDisplay(nodes) {
+      const visibleNodes = [];
+      for (const node of nodes) {
+        if (node.type === 'category') {
+          if (this.showOnlyEnabledOrderingItems && !node.summary.enabled) continue;
+          visibleNodes.push(node);
+          if (this.isTaskCategoryExpanded(node)) visibleNodes.push(...this.flattenTaskHierarchyForDisplay(node.children));
+        } else if (!this.showOnlyEnabledOrderingItems || node.row.item?.on) {
+          visibleNodes.push(node);
+        }
+      }
+      return visibleNodes;
+    },
+    isTaskCategoryExpanded(category) {
+      return this.expandedTaskCategoryPaths.includes(category.path);
+    },
+    toggleTaskCategory(category) {
+      this.expandedTaskCategoryPaths = this.isTaskCategoryExpanded(category)
+        ? this.expandedTaskCategoryPaths.filter((path) => path !== category.path)
+        : [...this.expandedTaskCategoryPaths, category.path];
+    },
+    expandAllTaskCategories() {
+      this.expandedTaskCategoryPaths = [...this.taskHierarchyCategoryPaths];
+    },
+    collapseAllTaskCategories() {
+      this.expandedTaskCategoryPaths = [];
+    },
+    revealTaskCategoryPath(taskPath) {
+      const pathParts = String(taskPath || '').split('/');
+      const expandedPaths = new Set(this.expandedTaskCategoryPaths);
+      for (let depth = 1; depth < pathParts.length; depth += 1) {
+        expandedPaths.add(pathParts.slice(0, depth).join('/'));
+      }
+      this.expandedTaskCategoryPaths = Array.from(expandedPaths);
+    },
+    getHierarchyNodeIndentStyle(node) {
+      return { '--task-hierarchy-depth': Math.min(node.depth || 0, 6) };
+    },
+    scrollTaskIntoView(taskPath) {
+      if (this.taskViewMode === 'hierarchy') {
+        this.revealTaskCategoryPath(taskPath);
+        this.guideTaskIntoView(taskPath, 'hierarchyTaskList', 'data-hierarchy-task-path');
+      } else if (this.taskViewMode === 'ordering') {
+        this.scrollOrderingTaskIntoView(taskPath);
+      } else if (this.taskViewMode === 'graph') {
+        return this.$nextTick(() => this.$refs.taskPlanningGraph?.revealTask(taskPath));
+      }
+    },
     getTaskStatus(taskItem) {
       return window.TaskStatusTheme?.getTaskStatus(taskItem) || (taskItem?.on ? 'pending' : 'disabled');
     },
@@ -148,7 +274,7 @@ const TaskPanel = {
     selectTaskForRange(row, options = {}) {
       if (!row?.path) return;
       this.selectedEnabledTaskPath = row.path;
-      if (options.reveal !== false) this.scrollOrderingTaskIntoView(row.path);
+      if (options.reveal !== false) this.scrollTaskIntoView(row.path);
     },
     selectEnabledTask(row) {
       this.selectTaskForRange(row);
@@ -234,9 +360,16 @@ const TaskPanel = {
       }
       return false;
     },
+    focusTaskSearch() {
+      if (this.taskSearchBlurTimer) window.clearTimeout(this.taskSearchBlurTimer);
+      this.taskSearchBlurTimer = null;
+      this.taskSearchFocused = true;
+    },
     hideTaskSearchDropdown() {
-      window.setTimeout(() => {
+      if (this.taskSearchBlurTimer) window.clearTimeout(this.taskSearchBlurTimer);
+      this.taskSearchBlurTimer = window.setTimeout(() => {
         this.taskSearchFocused = false;
+        this.taskSearchBlurTimer = null;
       }, 120);
     },
     clearTaskSearch() {
@@ -382,6 +515,7 @@ const TaskPanel = {
     },
     isOrderingGroupExpanded(groupItem) {
       const groupId = String(groupItem?.id || '').trim();
+      if (this.transientCollapsedOrderingGroupIds.includes(groupId)) return false;
       return groupItem?.expanded !== false || (!!groupId && this.transientExpandedOrderingGroupIds.includes(groupId));
     },
     isOrderingTaskGuided(node) {
@@ -407,6 +541,7 @@ const TaskPanel = {
     revealOrderingTaskPath(taskPath) {
       const groupIds = this.findOrderingGroupIdsContainingTask(this.orderingItems, taskPath);
       if (!groupIds.length) return;
+      this.transientCollapsedOrderingGroupIds = this.transientCollapsedOrderingGroupIds.filter((groupId) => !groupIds.includes(groupId));
       const nextGroupIds = new Set(this.transientExpandedOrderingGroupIds.map((groupId) => String(groupId)));
       let changed = false;
       for (const groupId of groupIds) {
@@ -421,6 +556,11 @@ const TaskPanel = {
       const normalizedTaskPath = String(taskPath || '').trim();
       if (!normalizedTaskPath) return;
       this.revealOrderingTaskPath(normalizedTaskPath);
+      this.guideTaskIntoView(normalizedTaskPath, 'orderingTaskList', 'data-ordering-task-path');
+    },
+    guideTaskIntoView(taskPath, containerRef, pathAttribute) {
+      const normalizedTaskPath = String(taskPath || '').trim();
+      if (!normalizedTaskPath) return;
       this.guidedOrderingTaskPath = normalizedTaskPath;
       if (this.guidedOrderingTaskTimer) window.clearTimeout(this.guidedOrderingTaskTimer);
       this.guidedOrderingTaskTimer = window.setTimeout(() => {
@@ -428,10 +568,10 @@ const TaskPanel = {
         this.guidedOrderingTaskTimer = null;
       }, 1400);
       this.$nextTick(() => {
-        const container = this.$refs.orderingTaskList;
+        const container = this.$refs[containerRef];
         if (!container?.querySelectorAll) return;
-        const targetElement = Array.from(container.querySelectorAll('[data-ordering-task-path]'))
-          .find((element) => element.getAttribute('data-ordering-task-path') === normalizedTaskPath);
+        const targetElement = Array.from(container.querySelectorAll(`[${pathAttribute}]`))
+          .find((element) => element.getAttribute(pathAttribute) === normalizedTaskPath);
         if (targetElement?.scrollIntoView) targetElement.scrollIntoView({ block: 'center', behavior: 'smooth' });
       });
     },
@@ -573,24 +713,47 @@ const TaskPanel = {
       return null;
     },
     emitOrderingItems(items) {
+      if (this.executionBusy || this.orderingSaving) return;
       const normalizedItems = this.collapseSingletonGroups(items);
       this.$emit('save-task-ordering', {
         schema_version: 1,
         user_order: this.flattenOrderingPaths(normalizedItems),
         items: normalizedItems,
+        selection_policy: this.orderingProjection?.overlay?.selection_policy || 'nearest_ready',
       });
     },
+    setSelectionPolicy(policy) {
+      if (this.executionBusy || this.orderingSaving) return;
+      this.$emit('save-task-ordering', { ...this.orderingProjection?.overlay, selection_policy: policy });
+    },
     toggleOrderingGroup(groupItem) {
+      const groupId = String(groupItem?.id || '').trim();
+      if (this.executionBusy || this.orderingSaving) {
+        const wasExpanded = this.isOrderingGroupExpanded(groupItem);
+        this.transientExpandedOrderingGroupIds = this.transientExpandedOrderingGroupIds.filter((id) => id !== groupId);
+        this.transientCollapsedOrderingGroupIds = this.transientCollapsedOrderingGroupIds.filter((id) => id !== groupId);
+        if (wasExpanded) this.transientCollapsedOrderingGroupIds.push(groupId);
+        else this.transientExpandedOrderingGroupIds.push(groupId);
+        return;
+      }
       const nextItems = this.cloneOrderingItems();
       const record = this.findOrderingNodeByRef(nextItems, `group:${groupItem.id}`);
       if (!record) return;
-      const groupId = String(groupItem?.id || '').trim();
+      const wasExpanded = this.isOrderingGroupExpanded(groupItem);
       if (groupId) this.transientExpandedOrderingGroupIds = this.transientExpandedOrderingGroupIds.filter((id) => id !== groupId);
-      record.node.expanded = record.node.expanded === false;
+      this.transientCollapsedOrderingGroupIds = this.transientCollapsedOrderingGroupIds.filter((id) => id !== groupId);
+      record.node.expanded = !wasExpanded;
       this.emitOrderingItems(nextItems);
     },
     collapseAllOrderingGroups() {
-      if (this.orderingSaving) return;
+      if (this.executionBusy || this.orderingSaving) {
+        const collectGroupIds = (items) => items.flatMap((item) => item.type === 'group'
+          ? [item.id, ...collectGroupIds(item.items || [])]
+          : []);
+        this.transientExpandedOrderingGroupIds = [];
+        this.transientCollapsedOrderingGroupIds = collectGroupIds(this.orderingItems);
+        return;
+      }
       const nextItems = this.cloneOrderingItems();
       const hadTransientExpandedGroups = this.transientExpandedOrderingGroupIds.length > 0;
       let persistedStateChanged = false;
@@ -605,6 +768,7 @@ const TaskPanel = {
         }
       };
       this.transientExpandedOrderingGroupIds = [];
+      this.transientCollapsedOrderingGroupIds = [];
       collapseGroupItems(nextItems);
       if (persistedStateChanged) {
         this.emitOrderingItems(nextItems);
@@ -621,7 +785,7 @@ const TaskPanel = {
           cancelButtonText: '取消',
         });
         const nextName = String(value || '').trim();
-        if (!nextName) return;
+        if (!nextName || this.executionBusy || this.orderingSaving) return;
         const nextItems = this.cloneOrderingItems();
         const record = this.findOrderingNodeByRef(nextItems, `group:${groupItem.id}`);
         if (!record) return;
@@ -673,72 +837,174 @@ const TaskPanel = {
     </button>
   </div>
 
-  <div v-if="activeTab === 'tasks'" class="task-workbench-main task-list-page grid grid-cols-1 xl:grid-cols-12 gap-4 flex-1 min-h-0">
-    <section class="xl:col-span-8 min-w-0 bg-white rounded-xl shadow-md p-4 flex flex-col overflow-hidden min-h-0">
-      <div class="flex justify-between items-start gap-3 mb-3 flex-shrink-0">
-        <div>
-          <h2 class="page-panel-title">任务顺序</h2>
+  <div v-if="activeTab === 'tasks'" class="task-view-bar">
+    <div class="task-view-switcher" role="group" aria-label="任务视图">
+      <button type="button" :class="{ 'is-active': taskViewMode === 'hierarchy' }"
+              :aria-pressed="taskViewMode === 'hierarchy'" @click="setTaskViewMode('hierarchy')">
+        <i class="fa fa-folder-open-o" aria-hidden="true"></i>分层管理
+      </button>
+      <button type="button" :class="{ 'is-active': taskViewMode === 'ordering' }"
+              :aria-pressed="taskViewMode === 'ordering'" @click="setTaskViewMode('ordering')">
+        <i class="fa fa-list-ol" aria-hidden="true"></i>顺序编排
+      </button>
+      <button type="button" :class="{ 'is-active': taskViewMode === 'graph' }"
+              :aria-pressed="taskViewMode === 'graph'" @click="setTaskViewMode('graph')">
+        <i class="fa fa-share-alt" aria-hidden="true"></i>计算图
+      </button>
+    </div>
+    <div class="task-panel-search relative">
+      <div class="relative">
+        <i class="fa fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
+        <input v-model="taskSearchQuery"
+               type="text"
+               class="w-full h-8 pl-8 pr-8 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
+               placeholder="搜索任务/属性/参数"
+               aria-label="搜索并定位任意层级任务"
+               title="模糊搜索所有任务字段、属性、参数和任务名称"
+               @focus="focusTaskSearch"
+               @blur="hideTaskSearchDropdown"
+               @input="taskSearchHighlightedIndex = 0"
+               @keydown.down.prevent="moveTaskSearchHighlight(1)"
+               @keydown.up.prevent="moveTaskSearchHighlight(-1)"
+               @keydown.enter.prevent="confirmTaskSearchHighlightedMatch"
+               @keydown.esc.prevent="taskSearchFocused = false">
+        <button v-if="taskSearchQuery"
+                type="button"
+                class="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                title="清空搜索"
+                aria-label="清空搜索"
+                @mousedown.prevent
+                @click="clearTaskSearch">
+          <i class="fa fa-times text-[10px]"></i>
+        </button>
+      </div>
+      <div v-if="taskSearchDropdownVisible"
+           class="absolute left-0 right-0 top-[calc(100%+0.35rem)] z-30 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+        <div v-if="taskSearchMatches.length" class="max-h-72 overflow-y-auto py-1">
+          <button v-for="(match, matchIndex) in taskSearchMatches"
+                  :key="match.row.path"
+                  type="button"
+                  class="w-full px-3 py-2 text-left transition-colors"
+                  :class="matchIndex === taskSearchHighlightedIndex ? 'bg-primary/10 text-primary' : 'text-slate-700 hover:bg-slate-50'"
+                  @mousedown.prevent
+                  @click="selectTaskSearchMatch(match)">
+            <div class="text-xs font-semibold truncate">{{ match.row.path }}</div>
+            <div class="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-400 min-w-0">
+              <span class="truncate">{{ taskStatusLabel(match.row.item) }}</span>
+              <span v-if="match.row.item.custom" class="task-custom-tag">自定义</span>
+            </div>
+          </button>
         </div>
-        <div class="flex items-center gap-3 shrink-0">
-          <div class="relative w-72 max-w-full min-w-[12rem]">
-            <div class="relative">
-              <i class="fa fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
-              <input v-model="taskSearchQuery"
-                     type="text"
-                     class="w-full h-8 pl-8 pr-8 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-colors"
-                     placeholder="搜索任务/属性/参数"
-                     title="模糊搜索所有任务字段、属性、参数和任务名称"
-                     @focus="taskSearchFocused = true"
-                     @blur="hideTaskSearchDropdown"
-                     @input="taskSearchHighlightedIndex = 0"
-                     @keydown.down.prevent="moveTaskSearchHighlight(1)"
-                     @keydown.up.prevent="moveTaskSearchHighlight(-1)"
-                     @keydown.enter.prevent="confirmTaskSearchHighlightedMatch"
-                     @keydown.esc.prevent="taskSearchFocused = false">
-              <button v-if="taskSearchQuery"
-                      type="button"
-                      class="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-                      title="清空搜索"
-                      @mousedown.prevent
-                      @click="clearTaskSearch">
-                <i class="fa fa-times text-[10px]"></i>
-              </button>
-            </div>
-            <div v-if="taskSearchDropdownVisible"
-                 class="absolute left-0 right-0 top-[calc(100%+0.35rem)] z-30 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
-              <div v-if="taskSearchMatches.length" class="max-h-72 overflow-y-auto py-1">
-                <button v-for="(match, matchIndex) in taskSearchMatches"
-                        :key="match.row.path"
-                        type="button"
-                        class="w-full px-3 py-2 text-left transition-colors"
-                        :class="matchIndex === taskSearchHighlightedIndex ? 'bg-primary/10 text-primary' : 'text-slate-700 hover:bg-slate-50'"
-                        @mousedown.prevent
-                        @click="selectTaskSearchMatch(match)">
-                  <div class="text-xs font-semibold truncate">{{ match.row.path }}</div>
-                  <div class="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-400 min-w-0">
-                    <span class="truncate">{{ taskStatusLabel(match.row.item) }}</span>
-                    <span v-if="match.row.item.custom" class="task-custom-tag">自定义</span>
-                  </div>
-                </button>
-              </div>
-              <div v-else class="px-3 py-2 text-xs text-slate-400">没有匹配任务</div>
-            </div>
-          </div>
-          <button type="button"
+        <div v-else class="px-3 py-2 text-xs text-slate-400">没有匹配任务</div>
+      </div>
+    </div>
+    <span v-if="executionBusy" class="task-view-readonly"><i class="fa fa-lock" aria-hidden="true"></i>执行中：可浏览，不可修改</span>
+  </div>
+
+  <div v-if="activeTab === 'tasks'" class="task-workbench-main task-list-page grid grid-cols-1 xl:grid-cols-12 gap-4 flex-1 min-h-0"
+       :class="{ 'task-workbench-graph-mode': taskViewMode === 'graph' }">
+    <task-planning-graph v-if="taskViewMode === 'graph'"
+                         ref="taskPlanningGraph"
+                         :rows="orderedTaskRows"
+                         :ordering-projection="orderingProjection"
+                         :execution-busy="executionBusy"
+                         :saving="orderingSaving"
+                         @edit-task="openTaskEditor"
+                         @save-graph="(payload) => $emit('save-task-graph', payload)" />
+    <section v-else class="task-management-panel xl:col-span-8 min-w-0 bg-white rounded-xl shadow-md p-4 flex flex-col overflow-hidden min-h-0">
+      <div class="task-panel-view-heading flex justify-between items-start gap-3 mb-3 flex-shrink-0">
+        <div class="min-w-0">
+          <h2 class="page-panel-title">{{ taskViewMode === 'hierarchy' ? '分层管理' : '任务顺序' }}</h2>
+          <p class="task-panel-view-description">{{ taskViewMode === 'hierarchy' ? '按原生目录浏览；分类展开仅保留在本页，不改变手动执行顺序。' : '拖拽调整手动执行顺序与分组，修改后自动保存。' }}</p>
+        </div>
+        <div class="task-panel-view-controls flex items-center gap-3">
+          <template v-if="taskViewMode === 'hierarchy'">
+            <button type="button" class="task-panel-text-action" @click="expandAllTaskCategories">展开全部</button>
+            <button type="button" class="task-panel-text-action" @click="collapseAllTaskCategories">折叠全部</button>
+          </template>
+          <button v-else type="button"
                   class="text-xs text-slate-600 hover:text-primary transition-colors cursor-pointer select-none disabled:opacity-40 disabled:pointer-events-none"
-                  :disabled="orderingSaving"
                   title="折叠任务顺序里的所有分组"
                   @click="collapseAllOrderingGroups">
             折叠全部分组
           </button>
-          <label class="inline-flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
+          <label class="inline-flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none"
+                 title="仅过滤显示；目录汇总仍包含全部任务，不改变执行顺序">
             <input type="checkbox" v-model="showOnlyEnabledOrderingItems" class="rounded border-slate-300 text-primary focus:ring-primary">
-            仅显示执行任务
+            仅显示启用任务
           </label>
-          <span class="text-xs text-slate-500">{{ enabledTaskRows.length }} / {{ orderedTaskRows.length }} 个启用</span>
+          <span v-if="taskViewMode === 'ordering'" class="text-xs text-slate-500">{{ enabledTaskRows.length }} / {{ orderedTaskRows.length }} 个启用</span>
         </div>
       </div>
-      <div ref="orderingTaskList" class="task-panel-tasklist flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden space-y-2 pr-1">
+      <template v-if="taskViewMode === 'hierarchy'">
+        <div class="task-hierarchy-summary" aria-label="全部任务概览">
+          <div><span>任务总数</span><strong>{{ taskHierarchySummary.total }}</strong></div>
+          <div><span>已启用</span><strong>{{ taskHierarchySummary.enabled }}</strong></div>
+          <div title="启用且当前到期的任务，包含等待前置的任务"><span>待执行</span><strong>{{ taskHierarchySummary.pending }}</strong></div>
+          <div :class="{ 'has-errors': taskHierarchySummary.errors > 0 }" title="包含任务错误、人工接管与前置约束配置错误；等待前置不算异常">
+            <span>异常任务</span><strong>{{ taskHierarchySummary.errors }}</strong>
+          </div>
+        </div>
+        <div ref="hierarchyTaskList" class="task-hierarchy-list task-panel-tasklist flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden">
+          <div v-for="node in visibleTaskHierarchyNodes" :key="node.type + ':' + node.key"
+               class="task-hierarchy-node" :style="getHierarchyNodeIndentStyle(node)">
+            <button v-if="node.type === 'category'" type="button" class="task-hierarchy-category"
+                    :aria-expanded="isTaskCategoryExpanded(node)" :title="displayPath(node.path)"
+                    @click="toggleTaskCategory(node)">
+              <span class="task-hierarchy-category-name">
+                <i :class="isTaskCategoryExpanded(node) ? 'fa fa-chevron-down' : 'fa fa-chevron-right'" class="task-hierarchy-chevron" aria-hidden="true"></i>
+                <i :class="isTaskCategoryExpanded(node) ? 'fa fa-folder-open' : 'fa fa-folder'" class="task-hierarchy-folder" aria-hidden="true"></i>
+                <span>{{ node.name }}</span>
+              </span>
+              <span class="task-hierarchy-counts">
+                <span>任务 <b>{{ node.summary.total }}</b></span>
+                <span>启用 <b>{{ node.summary.enabled }}</b></span>
+                <span>待执行 <b>{{ node.summary.pending }}</b></span>
+                <span :class="{ 'has-errors': node.summary.errors > 0 }">异常 <b>{{ node.summary.errors }}</b></span>
+              </span>
+            </button>
+            <div v-else class="task-hierarchy-task"
+                 :class="{ 'is-selected': isEnabledTaskSelected(node.row), 'is-current': isEnabledTaskCurrent(node.row), 'task-order-row-guided': isOrderingTaskGuided(node) }"
+                 :data-hierarchy-task-path="node.row.path"
+                 @click="selectTaskForRange(node.row, { reveal: false })">
+              <button type="button" class="task-hierarchy-select" :aria-pressed="isEnabledTaskSelected(node.row)"
+                      :aria-label="'设为手动执行起点：' + node.row.path" title="选择手动执行起点；执行范围按右侧列表，不按目录"
+                      @click.stop="selectTaskForRange(node.row, { reveal: false })">
+                <i :class="isEnabledTaskSelected(node.row) ? 'fa fa-dot-circle-o' : 'fa fa-circle-o'" aria-hidden="true"></i>
+              </button>
+              <div class="task-hierarchy-task-details">
+                <div class="task-hierarchy-task-title">
+                  <span class="task-status-dot" :style="taskStatusDotStyle(node.row.item)" :title="taskStatusLabel(node.row.item)"></span>
+                  <button type="button" :disabled="executionBusy" :title="node.row.path" @click.stop="openTaskEditor(node.row)">{{ node.row.key }}</button>
+                  <span v-if="node.row.item.custom" class="task-custom-tag">自定义</span>
+                  <span v-if="isEnabledTaskCurrent(node.row)" class="task-current-badge">当前</span>
+                  <span v-if="getTaskIssueText(node.row.item)" class="task-hierarchy-issue" :title="getTaskIssueText(node.row.item)">异常</span>
+                  <span v-else-if="node.row.item.planning_status?.blocked_by?.length" class="task-hierarchy-waiting"
+                        :title="node.row.item.planning_status.blocked_by.join('、')">等待前置</span>
+                </div>
+                <div class="task-hierarchy-task-path" :title="displayPath(node.row.path)">{{ rowSubtitle(node.row) }}</div>
+                <div v-if="formatParamChips(node.row.item.params).length" class="task-hierarchy-param-chips">
+                  <span v-for="(chip, chipIndex) in formatParamChips(node.row.item.params)" :key="chipIndex">{{ chip }}</span>
+                </div>
+              </div>
+              <div class="task-hierarchy-task-actions">
+                <button type="button" :disabled="executionBusy" :class="['task-hierarchy-status', statusTheme(node.row.item).badgeClass]"
+                        :title="executionBusy ? '执行中不能修改任务状态' : '点击切换启用状态'" @click.stop="toggleTask(node.row)">
+                  {{ taskStatusLabel(node.row.item) }}
+                </button>
+                <button type="button" class="task-hierarchy-run" :disabled="executionBusy"
+                        :aria-label="'运行此任务：' + node.row.path" title="运行此任务" @click.stop="$emit('run-task', node.row.path)">
+                  <i class="fa fa-play" aria-hidden="true"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div v-if="!visibleTaskHierarchyNodes.length" class="task-hierarchy-empty">
+            {{ taskRows.length ? '当前没有启用任务，可关闭“仅显示启用任务”查看全部。' : '当前没有任务。' }}
+          </div>
+        </div>
+      </template>
+      <div v-else ref="orderingTaskList" class="task-panel-tasklist flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden space-y-2 pr-1">
         <div v-for="node in visibleOrderingNodes" :key="node.type + ':' + node.key"
              class="task-order-row px-4 py-3 rounded-xl border transition-colors flex items-center gap-3 min-w-0"
              :style="orderingNodeIndentStyle(node)"
@@ -767,9 +1033,9 @@ const TaskPanel = {
           <template v-if="node.type === 'group'">
             <button type="button"
                     class="w-9 h-9 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-sm font-bold shrink-0 hover:bg-slate-300 transition-colors"
-                    :title="node.item.expanded === false ? '展开分组' : '折叠分组'"
+                    :title="isOrderingGroupExpanded(node.item) ? '折叠分组' : '展开分组'"
                     @click.stop="toggleOrderingGroup(node.item)">
-              <i :class="node.item.expanded === false ? 'fa fa-folder' : 'fa fa-folder-open'"></i>
+              <i :class="isOrderingGroupExpanded(node.item) ? 'fa fa-folder-open' : 'fa fa-folder'"></i>
             </button>
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2 min-w-0">
@@ -778,7 +1044,7 @@ const TaskPanel = {
                 </button>
                 <span class="inline-flex items-center px-2 py-0.5 rounded bg-slate-200 text-slate-600 text-xs whitespace-nowrap shrink-0">{{ node.childCount }} 个任务</span>
               </div>
-              <div class="text-xs text-slate-500 truncate mt-0.5">{{ node.item.expanded === false ? '已折叠；执行时仍按组内顺序展开' : '轮到此分组时，按组内顺序展开执行' }}</div>
+              <div class="text-xs text-slate-500 truncate mt-0.5">{{ isOrderingGroupExpanded(node.item) ? '手动执行时，按组内顺序展开' : '已折叠；手动执行时仍按组内顺序展开' }}</div>
             </div>
             <button type="button"
                     class="w-8 h-8 flex items-center justify-center rounded-full bg-white/70 hover:bg-white text-slate-600 transition-colors shrink-0 disabled:opacity-40 disabled:pointer-events-none"
@@ -825,12 +1091,38 @@ const TaskPanel = {
       </div>
     </section>
 
-    <section class="xl:col-span-4 min-w-0 flex flex-col gap-4 min-h-0">
+    <section v-if="taskViewMode !== 'graph'" class="task-execution-sidebar xl:col-span-4 min-w-0 flex flex-col gap-4 min-h-0">
       <div class="bg-white rounded-xl shadow-md p-4 flex flex-col gap-3 shrink-0">
-        <h2 class="page-panel-title"><i class="fa fa-list-ol mr-2 text-primary"></i>分组顺序说明</h2>
-        <p class="text-sm text-slate-600 leading-relaxed">
-          按住任务或分组拖到想要的位置，松开后会自动保存。执行时会按当前列表从上到下运行。你可以调整任务顺序，也可以把任务拖进分组、拖出分组，或移动整个分组。
+        <h2 class="page-panel-title"><i class="fa fa-list-ol mr-2 text-primary"></i>执行顺序与调度</h2>
+        <p v-if="taskViewMode === 'hierarchy'" class="text-sm text-slate-600 leading-relaxed">
+          分类只用于浏览，不改变任务路径和执行顺序。范围执行沿用下方列表，单跑只执行所选任务；调整顺序请切换“顺序编排”。
         </p>
+        <p v-else class="text-sm text-slate-600 leading-relaxed">
+          按住任务或分组拖到想要的位置，松开后自动保存。下方列表是手动执行顺序，不是自动调度的整轮预测。
+        </p>
+        <p class="text-xs text-slate-500 leading-relaxed">
+          自动调度先满足前置约束，再按所选策略选择任务。就近策略：同距先前序就绪，再按列表；未知距离之间也按此规则决胜，排在已知可达距离之后。
+        </p>
+        <label class="text-xs text-slate-600">自动调度策略</label>
+        <el-select :model-value="orderingProjection?.overlay?.selection_policy || 'nearest_ready'"
+                   :disabled="executionBusy || orderingSaving" @change="setSelectionPolicy">
+          <el-option label="依赖就绪后，就近优先" value="nearest_ready"></el-option>
+          <el-option label="依赖就绪后，列表优先" value="list_ready"></el-option>
+        </el-select>
+        <details v-if="planningBlockedRows.length" class="text-xs text-amber-700 max-h-36 overflow-auto">
+          <summary>等待前置 / 配置异常（{{ planningBlockedRows.length }}）</summary>
+          <p v-for="row in planningBlockedRows" :key="row.path" class="mt-1 break-words">
+            {{ row.key }}：{{ row.item.planning_status.error || row.item.planning_status.blocked_by.join('、') }}
+          </p>
+        </details>
+        <details v-if="schedulerStatus.last_selection?.ranked_paths?.length" class="text-xs text-slate-500 max-h-36 overflow-auto">
+          <summary>最近一次实际决策（非整轮预测）</summary>
+          <p>位置：{{ schedulerStatus.last_selection.position?.filter(Boolean).join(' / ') || '未知（未定位）' }}</p>
+          <p>选择：{{ schedulerStatus.last_selection.ranked_paths[0] }}</p>
+          <p v-for="(cost, taskId) in schedulerStatus.last_selection.costs" :key="taskId">
+            {{ taskId }}：{{ schedulerStatus.last_selection.destinations[taskId] }}，{{ cost == null ? '不可达 / 未知' : cost + ' 步' }}
+          </p>
+        </details>
         <div v-if="orderingDiagnostics.length"
              class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
           <div class="font-semibold mb-1">排序诊断</div>
@@ -846,12 +1138,13 @@ const TaskPanel = {
                     class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-white text-xs font-semibold hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:pointer-events-none"
                     :disabled="executionBusy || !selectedEnabledTaskRows.length"
                     @click="runSelectedEnabledTaskRange"
-                    title="从右侧选中的任务开始，一直执行到列表末尾">
+                    title="从选中任务开始，按此手动执行列表运行到末尾，不按目录顺序">
               <i class="fa fa-play text-[10px]"></i>
               从选中处执行
             </button>
           </div>
         </div>
+        <p class="text-xs text-slate-500 mb-2 shrink-0">手动执行顺序，不随目录展开或视图切换改变</p>
         <div class="flex-1 min-h-0 overflow-y-auto pr-1">
           <ol class="space-y-1 text-xs text-slate-600">
             <li v-for="(row, index) in enabledTaskRows"

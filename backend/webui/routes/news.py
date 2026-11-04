@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from html import escape
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 import requests
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -40,6 +40,7 @@ from backend.webui.security import (
 )
 from orchestrator import RuntimeExecutionBusyError, current_version, orchestrator
 from backend.webui.routes.news_4399_session import (
+    News4399LoginError,
     get_cached_or_login_session,
     get_cached_session,
     get_news_4399_credentials_from_server,
@@ -421,11 +422,13 @@ def _fetch_proxy_with_adaptive_login(
     return _fetch_proxy_upstream(url, retry_session)
 
 
-def _forum_iframe_placeholder(original_url: str) -> str:
+def _forum_iframe_placeholder(original_url: str, reason: str | None = None) -> str:
     """iframe 内展示的占位页：说明需浏览器登录后查看，并提供与弹层一致的原文链接。"""
     from html import escape
 
     safe = escape(original_url, quote=True)
+    failure_detail = f'<p role="alert">{escape(reason)}</p>' if reason else ""
+    retry_url = escape("/api/news/proxy?" + urlencode({"url": original_url}), quote=True)
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -442,9 +445,11 @@ def _forum_iframe_placeholder(original_url: str) -> str:
 </head>
 <body>
   <h1>无法在窗口内嵌中显示全文</h1>
+  {failure_detail}
   <p>4399 论坛在无登录会话时会跳转到通行证/游戏吧页面。</p>
   <p>若配置中使用项目公开 news 通行证，本站会直接尝试自动登录后再拉取正文；若改为其他 news 或游戏账号密码，则必须先在 WebUI 验证<strong>安全密码</strong>。若仍失败（如需验证码），请使用<strong>「论坛原文」</strong>在浏览器中打开。</p>
   <p><a href="{safe}" target="_blank" rel="noopener noreferrer">在新标签页打开帖子</a></p>
+  <p><a href="{retry_url}">重新加载正文</a>（若提示稍后重试，请勿连续点击。）</p>
 </body>
 </html>"""
 
@@ -821,7 +826,14 @@ async def proxy_page(request: Request, url: str = Query(..., description="要代
         resp = _fetch_proxy_with_adaptive_login(url, acc, pwd, cache_token)
         resp.encoding = "utf-8"
         if _is_login_wall_response(resp):
-            return HTMLResponse(_forum_iframe_placeholder(url))
+            reason = (
+                "自动登录后，论坛仍要求登录；当前会话未能取得正文，请在浏览器中确认账号状态。"
+                if cache_token else "当前没有可用于论坛代拉的已授权凭据，请先在 WebUI 验证安全密码。"
+            )
+            return HTMLResponse(
+                _forum_iframe_placeholder(url, reason),
+                headers={"Cache-Control": "no-store"},
+            )
         # 站内 AJAX（如 profile/notice-profile）走 JSON，必须原样返回，否则会破坏 JSON 且无法去 document.domain
         if _upstream_is_json_like(resp):
             mt = resp.headers.get("Content-Type") or "application/json; charset=utf-8"
@@ -839,7 +851,14 @@ async def proxy_page(request: Request, url: str = Query(..., description="要代
         else:
             content = content.replace("<head>", "<head>" + _head_bundle, 1)
         content = content.replace("</body>", _NAV_INTERCEPTOR_JS + "</body>", 1)
-        return HTMLResponse(content)
+        return HTMLResponse(content, headers={"Cache-Control": "no-store"})
+    except News4399LoginError as error:
+        logger.warning("news 4399: %s", error)
+        return HTMLResponse(
+            _forum_iframe_placeholder(url, str(error)),
+            status_code=502,
+            headers={"Cache-Control": "no-store"},
+        )
     except Exception as e:
         return HTMLResponse(f"<h3>加载失败: {e}</h3>", status_code=502)
 

@@ -151,6 +151,8 @@ async def save_tasks_api(request: Request):
         with orchestrator.tasks.config_operation():
             orchestrator.tasks.save_tasks(tasks)
             return public_config_unlocked()
+    except ValueError as exception:
+        return api_error(400, str(exception), code="invalid_task_planning")
     except Exception as e:
         logger.error("save_tasks error: %s", e)
         return api_error(
@@ -159,6 +161,17 @@ async def save_tasks_api(request: Request):
             code="save_tasks_failed",
             diagnostics=persistence_diagnostics(),
         )
+
+
+@router.get("/api/task-planning/locations")
+async def task_planning_locations_api():
+    """On-demand registered graph projection; no runtime or device observation."""
+    try:
+        with orchestrator.tasks.config_operation():
+            return api_ok(**orchestrator.tree.task_planning_locations())
+    except Exception as exception:
+        logger.error("task_planning locations error: %s", exception, exc_info=True)
+        return api_error(500, str(exception), code="task_planning_locations_failed")
 
 
 @router.get("/api/task-ordering")

@@ -5,10 +5,15 @@
     [ValidateSet("auto", "cpu", "gpu")]
     [string]$PaddleVariant = "auto",
 
-    [switch]$WithQQ
+    [switch]$WithQQ,
+
+    [switch]$NonInteractive
 )
 
 $ErrorActionPreference = "Stop"
+$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+$env:PYTHONIOENCODING = "utf-8"
+$env:PYTHONUTF8 = "1"
 
 # 这个脚本的目标是「用户只要会双击就能装完」。所以：
 #   - 每一步都先说明正在做什么；
@@ -87,6 +92,7 @@ $RuntimeConfig = Join-Path $Root "data\config.json"
 $ElectronDir = Join-Path $Root "frontend\electron"
 $PythonVersion = "3.10.15"
 $NodeMinimumVersion = [version]"22.12.0"
+$VisualCppMinimumVersion = [version]"14.40.0.0"
 $SetuptoolsUpperBound = "81"
 $SetuptoolsRequirement = "setuptools<$SetuptoolsUpperBound"
 # Set by Install-PythonDeps so the completion line reports the variant that was
@@ -94,6 +100,30 @@ $SetuptoolsRequirement = "setuptools<$SetuptoolsUpperBound"
 $ResolvedPaddleVariant = $null
 
 Initialize-InstallLog
+
+function Test-InstallPrerequisites {
+    Set-Step "检查系统与源码目录" @(
+        "需要 Windows 10/11 x64 和 64 位 PowerShell 5.1 或更高版本",
+        "请先完整解压源码到当前用户可写的本地目录，不要在压缩包内直接运行"
+    )
+    $architecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+    if ($architecture -ne "AMD64" -or -not [Environment]::Is64BitProcess -or
+        [Environment]::OSVersion.Version.Build -lt 17763 -or $PSVersionTable.PSVersion -lt [version]"5.1") {
+        throw "Unsupported system. Windows 10 build 17763+ / Windows 11 x64 and 64-bit PowerShell 5.1+ are required."
+    }
+
+    foreach ($relativePath in @("requirements.txt", "requirements-cpu.txt", "requirements-gpu.txt", "data\config.template.json", "backend\webui\gui.py", "frontend\electron\package.json")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $Root $relativePath) -PathType Leaf)) {
+            throw "Incomplete source tree: missing $relativePath"
+        }
+    }
+    $writeProbe = Join-Path $Root (".install-write-" + [Guid]::NewGuid().ToString("N"))
+    try {
+        [System.IO.File]::WriteAllText($writeProbe, "")
+    } finally {
+        if (Test-Path -LiteralPath $writeProbe) { Remove-Item -LiteralPath $writeProbe -Force }
+    }
+}
 
 function Refresh-ProcessPath {
     # 用户把工具装在哪儿都可能：winget、官网安装包、Scoop、Chocolatey、nvm、fnm、
@@ -103,6 +133,7 @@ function Refresh-ProcessPath {
         [Environment]::GetEnvironmentVariable("Path", "Machine"),
         [Environment]::GetEnvironmentVariable("Path", "User"),
         $env:Path,
+        (Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps"),
         (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links"),
         (Join-Path $env:LOCALAPPDATA "Programs\Python\Launcher"),
         (Join-Path $env:USERPROFILE ".local\bin"),
@@ -139,7 +170,7 @@ function Resolve-CommandPath {
 
     Refresh-ProcessPath
     foreach ($name in $Names) {
-        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        $cmd = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($null -ne $cmd) {
             return $cmd.Source
         }
@@ -150,14 +181,25 @@ function Resolve-CommandPath {
 function Require-Winget {
     $winget = Resolve-CommandPath @("winget.exe", "winget")
     if (-not $winget) {
-        Fail-Install `
-            -Step "检查 winget" `
-            -Reason "这台电脑上没有 winget（应用安装程序），它用来自动装 Git / Node.js / uv" `
-            -Actions @(
-                "打开「Microsoft Store」，搜索并安装「应用安装程序」(App Installer)，然后重新打开 PowerShell 再运行一次本脚本",
-                "装不了商店时也可以手动装这三个软件，然后重新运行本脚本（脚本会自动跳过已装好的）"
-            ) `
-            -ManualCommand "Git for Windows: https://git-scm.com/download/win     Node.js LTS: https://nodejs.org/     uv: 在 PowerShell 里执行 irm https://astral.sh/uv/install.ps1 | iex"
+        Set-Step "准备 winget（应用安装程序）" @(
+            "正在使用微软官方 Microsoft.WinGet.Client 模块为当前用户安装 winget",
+            "若网络或组织策略阻止安装，请在 Microsoft Store 安装「应用安装程序」，再重试",
+            "系统可能弹出权限确认；拒绝授权时安装会停止，不会绕过组织策略"
+        )
+        # Fresh Windows PowerShell may negotiate TLS 1.0 with PSGallery.
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        Install-PackageProvider -Name NuGet -Scope CurrentUser -Force | Out-Null
+        Install-Module -Name Microsoft.WinGet.Client -Repository PSGallery -Scope CurrentUser -Force | Out-Null
+        Import-Module Microsoft.WinGet.Client
+        Repair-WinGetPackageManager | Out-Null
+        $winget = Resolve-CommandPath @("winget.exe", "winget")
+    }
+    if (-not $winget) {
+        throw "winget is still unavailable after bootstrap. Install App Installer from Microsoft Store and reopen the installer."
+    }
+    & $winget --version | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "winget is present but cannot run (exit $LASTEXITCODE). Repair App Installer and rerun the installer."
     }
     return $winget
 }
@@ -169,32 +211,16 @@ function Invoke-WingetInstall {
     )
 
     $winget = Require-Winget
+    Set-Step "安装 $Name" @(
+        "请允许系统弹出的安装授权；安装完成后脚本会重新检查工具是否可用",
+        "如提示需要重启，请重启电脑后重新运行安装脚本"
+    )
     Write-Host "Installing $Name with winget package $Id ..."
-    & $winget install --id $Id -e --accept-source-agreements --accept-package-agreements
+    & $winget install --id $Id -e --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity | Out-Host
     if ($LASTEXITCODE -ne 0) {
         throw "winget install failed for $Id with exit code $LASTEXITCODE"
     }
     Refresh-ProcessPath
-}
-
-function Ensure-ExecutionPolicy {
-    Write-Host "Setting CurrentUser PowerShell execution policy to RemoteSigned ..."
-    $processPolicy = $env:PSExecutionPolicyPreference
-    if ($processPolicy) {
-        Remove-Item Env:\PSExecutionPolicyPreference -ErrorAction SilentlyContinue
-    }
-    try {
-        Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
-    } finally {
-        if ($processPolicy) {
-            $env:PSExecutionPolicyPreference = $processPolicy
-        }
-    }
-
-    $policy = Get-ExecutionPolicy -Scope CurrentUser
-    if ($policy -ne "RemoteSigned") {
-        throw "Failed to set CurrentUser execution policy to RemoteSigned. CurrentUser is $policy."
-    }
 }
 
 function Ensure-Git {
@@ -209,7 +235,9 @@ function Ensure-Git {
     if (-not $git) {
         throw "Git was installed but git.exe is still not visible in PATH. Reopen PowerShell and rerun scripts\install.bat."
     }
-    Write-Host "Git ready: $(& $git --version)"
+    $gitVersion = & $git --version
+    if ($LASTEXITCODE -ne 0) { throw "git --version failed with exit code $LASTEXITCODE" }
+    Write-Host "Git ready: $gitVersion"
 }
 
 function Get-NodeVersion {
@@ -218,8 +246,8 @@ function Get-NodeVersion {
         return $null
     }
 
-    $raw = (& $node -v).Trim()
-    if ($LASTEXITCODE -ne 0 -or $raw -notmatch "^v?(\d+\.\d+\.\d+)") {
+    $raw = & $node -v
+    if ($LASTEXITCODE -ne 0 -or "$raw".Trim() -notmatch "^v?(\d+\.\d+\.\d+)") {
         return $null
     }
     return [version]$Matches[1]
@@ -231,24 +259,21 @@ function Ensure-Node {
     )
     $version = Get-NodeVersion
     $npm = Resolve-CommandPath @("npm.cmd", "npm")
-    if ($version -and $version -ge $NodeMinimumVersion -and $npm) {
-        Write-Host "Node ready: v$version"
-        Write-Host "npm ready: $(& $npm -v)"
-        return
+    if (-not $version -or $version -lt $NodeMinimumVersion -or -not $npm) {
+        Invoke-WingetInstall -Id "OpenJS.NodeJS.LTS" -Name "Node.js LTS"
+        $version = Get-NodeVersion
+        $npm = Resolve-CommandPath @("npm.cmd", "npm")
     }
-
-    Invoke-WingetInstall -Id "OpenJS.NodeJS.LTS" -Name "Node.js LTS"
-
-    $version = Get-NodeVersion
-    $npm = Resolve-CommandPath @("npm.cmd", "npm")
     if (-not $version -or $version -lt $NodeMinimumVersion) {
         throw "Node.js >= $NodeMinimumVersion is required. Reopen PowerShell and rerun scripts\install.bat."
     }
     if (-not $npm) {
         throw "npm was not found after Node.js install. Reopen PowerShell and rerun scripts\install.bat."
     }
+    $npmVersion = & $npm -v
+    if ($LASTEXITCODE -ne 0) { throw "npm --version failed with exit code $LASTEXITCODE. Repair Node.js LTS and retry." }
     Write-Host "Node ready: v$version"
-    Write-Host "npm ready: $(& $npm -v)"
+    Write-Host "npm ready: $npmVersion"
 }
 
 function Ensure-Uv {
@@ -261,18 +286,39 @@ function Ensure-Uv {
     if (-not $uv) {
         throw "uv was installed but uv.exe is still not visible in PATH. Reopen PowerShell and rerun scripts\install.bat."
     }
-    Write-Host "uv ready: $(& $uv --version)"
+    $uvVersion = & $uv --version
+    if ($LASTEXITCODE -ne 0) { throw "uv --version failed with exit code $LASTEXITCODE" }
+    Write-Host "uv ready: $uvVersion"
     return $uv
 }
 
-function Install-Tools {
-    Set-Step "准备 PowerShell 执行策略" @(
-        "这一步只影响当前用户，不需要管理员权限"
+function Test-VisualCppRuntime {
+    $runtimeRecord = Get-ItemProperty -LiteralPath "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" -ErrorAction SilentlyContinue
+    if ($null -eq $runtimeRecord -or $runtimeRecord.Installed -ne 1) { return $false }
+    $runtimeVersion = $null
+    return [version]::TryParse(([string]$runtimeRecord.Version).TrimStart("v"), [ref]$runtimeVersion) -and
+        $runtimeVersion -ge $VisualCppMinimumVersion
+}
+
+function Ensure-VisualCppRuntime {
+    Set-Step "检查 Microsoft Visual C++ x64 运行库" @(
+        "Python、Paddle 和 OpenCV 的原生 DLL 需要 VC++ 运行库；缺失时会自动安装",
+        "安装需要系统授权；如要求重启，重启后重新运行本脚本"
     )
-    Ensure-ExecutionPolicy
+    if (-not (Test-VisualCppRuntime)) {
+        Invoke-WingetInstall -Id "Microsoft.VCRedist.2015+.x64" -Name "Microsoft Visual C++ x64 Runtime"
+    }
+    if (-not (Test-VisualCppRuntime)) {
+        throw "Visual C++ x64 runtime >= $VisualCppMinimumVersion is still missing. Restart Windows if requested and rerun the installer."
+    }
+}
+
+function Install-Tools {
+    # install.bat uses process-only Bypass; never change the user's stored policy.
     Ensure-Git
     Ensure-Node
     Ensure-Uv | Out-Null
+    Ensure-VisualCppRuntime
 }
 
 function Test-VenvPython {
@@ -283,7 +329,7 @@ function Test-VenvPython {
     # A venv can exist with a broken interpreter (moved folder, missing DLLs).
     # Probing it must report "not usable" instead of aborting the installer.
     try {
-        $version = & $VenvPy -c "import sys; print('.'.join(map(str, sys.version_info[:3])))" 2>$null
+        $version = & $VenvPy -c "import struct, sys; assert struct.calcsize('P') == 8, '64-bit Python required'; print('.'.join(map(str, sys.version_info[:3])))" 2>$null
     } catch {
         return $false
     }
@@ -334,7 +380,10 @@ function Resolve-PaddleVariant {
 
     $configuredUseGpu = $false
     if ($null -ne $configDocument.ocr -and $null -ne $configDocument.ocr.use_gpu) {
-        $configuredUseGpu = [bool]$configDocument.ocr.use_gpu
+        if ($configDocument.ocr.use_gpu -isnot [bool]) {
+            throw "ocr.use_gpu must be a JSON boolean (true or false), not a string or number: $RuntimeConfig"
+        }
+        $configuredUseGpu = $configDocument.ocr.use_gpu
     }
 
     if ($configuredUseGpu) {
@@ -355,7 +404,28 @@ function Test-PaddleRuntime {
 }
 
 function Test-PythonRuntimeCompatibility {
-    $probe = "from importlib.metadata import version; from packaging.version import Version; setuptools_version = Version(version('setuptools')); assert setuptools_version < Version('$SetuptoolsUpperBound'), f'$SetuptoolsRequirement is required, got {setuptools_version}'; import pkg_resources; import packaging.tags; import distutils.util; import adbutils; import uiautomator2; print(f'python runtime compatibility ready: setuptools={setuptools_version}')"
+    $probe = @"
+from importlib.metadata import version
+from packaging.version import Version
+setuptools_version = Version(version('setuptools'))
+assert setuptools_version < Version('$SetuptoolsUpperBound'), f'$SetuptoolsRequirement is required, got {setuptools_version}'
+import pkg_resources
+import packaging.tags
+import distutils.util
+import adbutils
+import uiautomator2
+import cv2
+import numpy
+import fastapi
+import uvicorn
+import lxml.etree
+import Levenshtein
+from python_multipart.multipart import parse_options_header
+from PIL import Image
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from paddleocr import PaddleOCR
+print(f'python runtime compatibility ready: setuptools={setuptools_version}')
+"@
     & $VenvPy -X utf8 -W "ignore:pkg_resources is deprecated as an API:UserWarning" -c $probe
     if ($LASTEXITCODE -ne 0) {
         throw "Python runtime compatibility validation failed with exit code $LASTEXITCODE. Re-run scripts\install.bat python."
@@ -363,6 +433,7 @@ function Test-PythonRuntimeCompatibility {
 }
 
 function Install-PythonDeps {
+    Set-Step "选择 Paddle 运行时" @("缺少配置时使用 CPU；已有配置的 ocr.use_gpu 必须是 true 或 false")
     $selectedPaddleVariant = Resolve-PaddleVariant
     $script:ResolvedPaddleVariant = $selectedPaddleVariant
     $variantRequirements = if ($selectedPaddleVariant -eq "gpu") { $GpuRequirements } else { $CpuRequirements }
@@ -373,6 +444,7 @@ function Install-PythonDeps {
         }
     }
 
+    Ensure-VisualCppRuntime
     Set-Step "准备 Python 虚拟环境（.venv）" @(
         "Python 版本固定为 $PythonVersion；重新安装不会影响 data\ 里的账号和配置"
     )
@@ -381,7 +453,7 @@ function Install-PythonDeps {
     $uv = Ensure-Uv
     Set-Step "安装 Python 依赖（第一次会比较慢，视网速可能十几分钟）" @(
         "装不上通常是网络问题：换成手机热点或稍后重试"
-        "国内网络可以先执行：$env:UV_DEFAULT_INDEX = https://pypi.tuna.tsinghua.edu.cn/simple 再重跑本脚本"
+        '国内网络可以先执行：$env:UV_DEFAULT_INDEX = "https://pypi.tuna.tsinghua.edu.cn/simple" 再重跑本脚本'
     )
     Write-Host "Installing common Python dependencies from requirements.txt ..."
     & $uv pip install --python $VenvPy -r $CommonRequirements
@@ -408,8 +480,34 @@ function Install-PythonDeps {
         throw "Failed to install $SetuptoolsRequirement with exit code $LASTEXITCODE"
     }
 
+    Set-Step "校验 Python 依赖与原生运行库" @(
+        "此步骤会实际导入 WebUI、OpenCV 和 PaddleOCR，但不会连接模拟器或写入账号配置",
+        "GPU 校验失败时检查 NVIDIA 驱动；无 NVIDIA GPU 的电脑请使用 CPU 配置"
+    )
+    & $uv pip check --python $VenvPy
+    if ($LASTEXITCODE -ne 0) { throw "Python dependency consistency check failed with exit code $LASTEXITCODE" }
     Test-PaddleRuntime -SelectedVariant $selectedPaddleVariant
     Test-PythonRuntimeCompatibility
+}
+
+function Test-ElectronRuntime {
+    $node = Resolve-CommandPath @("node.exe", "node")
+    $probe = @'
+const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
+const electronPath = require('electron');
+const expectedVersion = require('electron/package.json').version;
+const result = spawnSync(electronPath, ['-e', 'process.stdout.write(process.versions.electron)'], {
+  env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+  encoding: 'utf8', timeout: 30000, windowsHide: true,
+});
+if (result.error) throw result.error;
+assert.equal(result.status, 0, result.stderr || 'Electron executable failed to start');
+assert.equal(result.stdout.trim(), expectedVersion, 'Electron executable/package version mismatch');
+console.log(`Electron runtime ready: ${expectedVersion}`);
+'@
+    & $node -e $probe
+    if ($LASTEXITCODE -ne 0) { throw "Electron executable validation failed with exit code $LASTEXITCODE" }
 }
 
 function Install-ElectronDeps {
@@ -419,24 +517,39 @@ function Install-ElectronDeps {
 
     Ensure-Node
     $npm = Resolve-CommandPath @("npm.cmd", "npm")
+    $node = Resolve-CommandPath @("node.exe", "node")
 
     Set-Step "安装 Electron 依赖（只影响桌面窗口）" @(
-        "npm 慢或失败可以换淘宝镜像：npm config set registry https://registry.npmmirror.com"
+        "npm 包与 Electron 可执行文件是两次下载；npm registry 不会改变 Electron 二进制下载地址",
+        '二进制下载失败可设置：$env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/" 后重试'
     )
     Write-Host "Installing Electron dependencies in frontend\electron with npm install ..."
+    $previousSkipDownload = $env:ELECTRON_SKIP_BINARY_DOWNLOAD
     Push-Location $ElectronDir
     try {
-        & $npm install
+        Remove-Item Env:\ELECTRON_SKIP_BINARY_DOWNLOAD -ErrorAction SilentlyContinue
+        & $npm install --include=dev --ignore-scripts=false
         if ($LASTEXITCODE -ne 0) {
             throw "npm install failed with exit code $LASTEXITCODE"
         }
+        $electronPackage = Join-Path $ElectronDir "node_modules\electron"
+        if (-not (Test-Path -LiteralPath (Join-Path $electronPackage "dist\electron.exe") -PathType Leaf) -or
+            -not (Test-Path -LiteralPath (Join-Path $electronPackage "path.txt") -PathType Leaf)) {
+            $binaryInstaller = Join-Path $electronPackage "install.js"
+            if (-not (Test-Path -LiteralPath $binaryInstaller -PathType Leaf)) {
+                throw "Electron install.js is missing after npm install: $binaryInstaller"
+            }
+            & $node $binaryInstaller
+            if ($LASTEXITCODE -ne 0) { throw "Electron binary download failed with exit code $LASTEXITCODE" }
+        }
+        Test-ElectronRuntime
     } finally {
+        if ($null -eq $previousSkipDownload) {
+            Remove-Item Env:\ELECTRON_SKIP_BINARY_DOWNLOAD -ErrorAction SilentlyContinue
+        } else {
+            $env:ELECTRON_SKIP_BINARY_DOWNLOAD = $previousSkipDownload
+        }
         Pop-Location
-    }
-
-    $electronPackage = Join-Path $ElectronDir "node_modules\electron\package.json"
-    if (-not (Test-Path -LiteralPath $electronPackage -PathType Leaf)) {
-        throw "Electron dependency is missing after npm install: $electronPackage"
     }
 }
 
@@ -453,6 +566,7 @@ try {
     Write-Head "AutoScriptor 安装（目标：$Target）"
     Write-Host "    源码目录：$Root"
     Write-Host "    日志文件：$InstallLogPath"
+    Test-InstallPrerequisites
 
     if ($Target -eq "tools" -or $Target -eq "all") {
         Install-Tools
@@ -469,7 +583,7 @@ try {
     if ($Target -eq "all" -and -not $WithQQ) {
         if (Test-Path -LiteralPath (Join-Path $Root ".autoscriptor\qq-bot\autoscriptor.json")) {
             $WithQQ = $true
-        } else {
+        } elseif (-not $NonInteractive) {
             Write-Host ""
             Write-Host "可选：QQ 通知机器人（第三方 NapCat，约 112 MB）。" -ForegroundColor DarkGray
             Write-Host "      需要手机扫码登录一个 QQ 小号；不装也完全不影响任务执行。" -ForegroundColor DarkGray
@@ -491,6 +605,8 @@ $paddleSummary = if ($null -ne $script:ResolvedPaddleVariant) { $script:Resolved
 Write-Host ""
 Write-Host "================ 安装完成 ================" -ForegroundColor Green
 Write-Host "  Paddle 运行时：$paddleSummary"
+Write-Host "  本次目标：$Target（tools / python / electron / qq 仅安装各自部分）"
+Write-Host "  MuMu 和游戏需另行安装；OCR 模型在首次使用时联网下载。"
 Write-Host ""
 Write-Host "  下一步：" -ForegroundColor Cyan
 Write-Host "    1) 启动（二选一）"

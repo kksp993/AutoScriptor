@@ -24,6 +24,7 @@ def get_weekday_number():
 
 
 @register_task(
+    ensure_in="荒古万界",
     description="双周领取荒古巨兽的每日任务奖励。",
     reschedule="daily",
 )

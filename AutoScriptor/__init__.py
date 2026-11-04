@@ -18,6 +18,7 @@ if TYPE_CHECKING:
         go_home as go_home,
         init as init,
         launch_app as launch_app,
+        seq_click as seq_click,
         swipe_precise as swipe_precise,
     )
     from AutoScriptor.core.api import (
@@ -27,6 +28,12 @@ if TYPE_CHECKING:
         setFrameSize as setFrameSize,
     )
     from AutoScriptor.logging.logger import logger as logger
+    from AutoScriptor.utils.text import (
+        postnum as postnum,
+        posttext as posttext,
+        prenum as prenum,
+        pretext as pretext,
+    )
 
 
 _ERROR_EXPORTS = [
@@ -68,10 +75,14 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "BgSignals": ("AutoScriptor.core.background", "BgSignals"),
 }
 
+for _name in ["pretext", "posttext", "prenum", "postnum"]:
+    _EXPORTS[_name] = ("AutoScriptor.utils.text", _name)
+
 
 for _name in [
     "init",
     "click",
+    "seq_click",
     "click_all",
     "locate",
     "match",
@@ -133,6 +144,10 @@ __all__ = [
     "log_flush",
     "make_box_grid",
     "indexof",
+    "pretext",
+    "posttext",
+    "prenum",
+    "postnum",
     "setFrameSize",
     "getFrameSize",
     "MUMU_SIZE_1280_720",
@@ -140,6 +155,7 @@ __all__ = [
     # api
     "init",
     "click",
+    "seq_click",
     "click_all",
     "locate",
     "match",

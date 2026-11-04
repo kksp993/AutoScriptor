@@ -15,6 +15,7 @@ def buy(item):
 
 
 @register_task(
+    ensure_in="幽冥冰窟",
     description="处理冰窟商店每周兑换。",
     reschedule="weekly",
 )

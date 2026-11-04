@@ -4,9 +4,10 @@
 character, under which retry policy and on which device session. The backend
 talks to :data:`orchestrator.orchestrator` instead of wiring the parts itself.
 
-Seven modules, each answering one question:
+Eight modules, each answering one question:
 
 - ``model``      -- what the task set looks like, and when each task is due (pure).
+- ``planning``   -- which dependency-ready task to choose from a snapshot (pure).
 - ``catalog``    -- where the task set comes from: discovery, registration, startup.
 - ``task_manager`` -- how one task is executed, retried and recovered.
 - ``scheduler``  -- when tasks run, in which order, and on which device session.

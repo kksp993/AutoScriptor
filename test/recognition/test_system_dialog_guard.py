@@ -191,6 +191,11 @@ class SystemDialogRecognitionTest(unittest.TestCase):
         self.assertFalse(dismissed)
         self.assertEqual(clicked_boxes, [], "屏幕上没有弹窗，却发出了点击")
 
+    def test_check_only_detects_without_clicking(self):
+        with emulator_showing(self.dialog_frame), captured_click() as clicked_boxes:
+            self.assertTrue(nav_api.dismiss_system_dialogs(check_only=True))
+        self.assertEqual(clicked_boxes, [])
+
 
 class SystemDialogSingleOcrPassTest(unittest.TestCase):
     """所有锚点共用搜索区，只允许 OCR 跑一遍。"""
@@ -276,19 +281,19 @@ class TryCloseViaXIntegrationTest(unittest.TestCase):
         order = []
         remaining = [True]                      # 第一次说「关掉了一个」，之后说「没有了」
 
-        def fake_dismiss():
+        def fake_dismiss(*, check_only=False):
             order.append("dismiss")
             if remaining:
                 remaining.pop()
                 return True
             return False
 
-        def fake_ui_idx(_targets):
+        def fake_locate(targets, **options):
             order.append("close_targets")
-            return -1
+            return [None] * len(targets)
 
         with patch.object(nav_api, "dismiss_system_dialogs", fake_dismiss), \
-                patch.object(nav_api, "ui_idx", fake_ui_idx), \
+                patch.object(nav_api, "locate", fake_locate), \
                 patch.object(nav_api, "ui_T", lambda *a, **kw: False), \
                 patch.object(nav_api, "click", lambda *a, **kw: None), \
                 patch.object(nav_api, "sleep", lambda *a, **kw: None):

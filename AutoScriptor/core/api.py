@@ -364,6 +364,7 @@ def stable(boxes1: list[list[Box]], boxes2: list[list[Box]])->bool:
     assert len(boxes1) == len(boxes2)
     for i in range(len(boxes1)):
         list1, list2 = boxes1[i], boxes2[i]
+        if bool(list1) != bool(list2): return False
         if not list1 or not list2: continue
         for b1, b2 in zip(list1, list2):
             if not b1.sim_box(b2): return False
@@ -622,12 +623,14 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
     _validate_timeout(timeout, "locate")
     _validate_target(target, "locate")
     check_cancel_raise()
+    if isinstance(target, BoxTarget) and not target.color:
+        return target.box
     first_attempt = True
     _stable_retry = False
     t = time.time()
     # 元组任一满足
     if isinstance(target, tuple):
-        logger.info(f"Locate: {target}")
+        logger.debug("Locate: %s", target)
         # Use image-first short circuit when tuple contains both I() and T() targets
         _has_img = any(isinstance(t, ImageTarget) for t in target)
         _has_txt = any(isinstance(t, TextTarget) for t in target)
@@ -660,7 +663,7 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
     
     # 列表需全满足
     if isinstance(target, list):
-        logger.info(f"Locate: {target}")
+        logger.debug("Locate: %s", target)
         _stable_retry = False
         while first_attempt or _stable_retry or (delta := time.time() - t) < timeout:
             check_cancel_raise()
@@ -764,7 +767,7 @@ def click(
         
         until: 可调用对象，返回True时停止点击循环
             - 示例: until=lambda: ui_F(T("确定")) 表示点击直到"确定"按钮消失
-            - 如果指定until，会忽略timeout参数，持续点击直到until返回True或超时
+            - 如果指定until，持续点击直到until返回True或达到timeout
         
         assure_stable: 是否保证定位稳定，True时会连续两次定位结果一致才认为成功
         
@@ -792,27 +795,52 @@ def click(
         # 点击直到条件满足
         click(T("确定"), until=lambda: ui_F(T("确定")))
     """
+    return _click(
+        target, long_click_duration_s, timeout=timeout, if_exist=if_exist,
+        repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize,
+        until=until, assure_stable=assure_stable, save_screenshot=save_screenshot,
+    )
+
+
+def _click(
+    target, long_click_duration_s=0, *, timeout=30, if_exist=False,
+    repeat=1, delay=0, interval=None, offset=(0, 0), resize=(-1, -1),
+    until=None, assure_stable=True, save_screenshot=True, located_box=None,
+):
+    """Shared click pipeline; a transition box is consumed by the first input only."""
     _validate_target(target, "click")
     check_cancel_raise()
-    click_interval = 0 if interval is None else interval
-    until_interval = 0.5 if interval is None else interval
+    click_interval = (0.5 if until else 0) if interval is None else interval
     if until:
-        t = time.time()
-        click(target, long_click_duration_s, timeout=timeout, if_exist=False, repeat=repeat, delay=delay, interval=until_interval, offset=offset, resize=resize,assure_stable=assure_stable)
+        started_at = time.monotonic()
+        click_options = dict(
+            repeat=repeat, delay=delay, interval=click_interval, offset=offset, resize=resize,
+            assure_stable=assure_stable, save_screenshot=save_screenshot,
+        )
+        if not _click(
+            target, long_click_duration_s, timeout=timeout, if_exist=if_exist,
+            located_box=located_box, **click_options,
+        ):
+            return False
         while not until():
             check_cancel_raise()
-            click(target, long_click_duration_s, timeout=0, if_exist=True, repeat=repeat, delay=delay, interval=until_interval, offset=offset, resize=resize,assure_stable=assure_stable)
-            if time.time() - t > timeout:
+            if time.monotonic() - started_at >= timeout:
+                condition_name = getattr(until, "__name__", type(until).__name__)
                 try:
                     save_debug_screenshot(
                         target, mixctrl.screenshot(), prefix="s",
-                        extra_info=_diag_info(until=until.__name__, elapsed=f"{time.time()-t:.1f}s"))
+                        extra_info=_diag_info(until=condition_name, elapsed=f"{time.monotonic()-started_at:.1f}s"))
                 except Exception:
                     pass
-                raise RuntimeError(f"Click {target} until {until.__name__} failed, for until function not satisfied in {timeout} seconds")
+                raise RuntimeError(f"Click {target} until {condition_name} failed, for until function not satisfied in {timeout} seconds")
+            _click(
+                target, long_click_duration_s, timeout=0, if_exist=True,
+                **click_options,
+            )
         return True
     if isinstance(target, list): target = tuple(target)
-    if isinstance(target, BoxTarget): box = target.box
+    if located_box is not None: box = located_box
+    elif isinstance(target, BoxTarget): box = target.box
     else:
         box = locate(target, timeout if not if_exist else max(1, timeout) if timeout != 30 else 2, assure_stable)    # 至少1s
     if if_exist and first(box) is None: return False
@@ -826,6 +854,7 @@ def click(
     pre_click_frame = mixctrl.screenshot() if save_screenshot and not isinstance(target, BoxTarget) else None
     pt = None
     for i in range(repeat):
+        check_cancel_raise()
         pt=b2p(box, offset, resize)
         if long_click_duration_s:
             mixctrl.long_click(*pt, duration=long_click_duration_s)
@@ -841,6 +870,54 @@ def click(
         _box_click_trace.clear()
         save_debug_screenshot(target, pre_click_frame, box, pt, prefix="c", prior_clicks=prior)
     return True  
+
+
+def seq_click(
+    target: list[Target | tuple[Target, ...]],
+    long_click_duration_s: int = 0,
+    *,
+    timeout: float = 10,
+    if_exist: bool = False,
+    repeat: int = 1,
+    delay: float = 0,
+    interval: float | None = None,
+    offset: tuple = (0, 0),
+    resize: tuple = (-1, -1),
+    until: callable = None,
+    assure_stable: bool = True,
+    save_screenshot: bool = True,
+):
+    """依次点击，每项直到下一项出现；until 仅作用于末项，空列表成功返回。
+
+    参数沿用 click，timeout 是每项的时间上限（默认 10 秒），不是整条序列。
+    衔接检测保留 Box，下一项首次点击
+    不再定位；assure_stable=True 时在衔接检测中完成两次稳定检查。
+    """
+    if not isinstance(target, list):
+        raise TypeError("seq_click 的 target 必须是列表")
+    _validate_timeout(timeout, "seq_click")
+    for step_target in target:
+        _validate_target(step_target, "seq_click")
+        if not isinstance(step_target, (Target, tuple)):
+            raise TypeError("seq_click 的每一项必须是 Target 或目标元组")
+    check_cancel_raise()
+    next_box = None
+
+    def locate_next():
+        nonlocal next_box
+        next_box = locate(target[step_index + 1], timeout=0, assure_stable=assure_stable)
+        return next_box is not None
+
+    for step_index, step_target in enumerate(target):
+        step_until = locate_next if step_index + 1 < len(target) else until
+        if not _click(
+            step_target, long_click_duration_s, timeout=timeout, if_exist=if_exist,
+            repeat=repeat, delay=delay, interval=interval, offset=offset, resize=resize,
+            until=step_until, assure_stable=assure_stable, save_screenshot=save_screenshot,
+            located_box=next_box,
+        ):
+            return False
+    return True
 
 
 def click_all(

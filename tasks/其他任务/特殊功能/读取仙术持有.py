@@ -112,6 +112,7 @@ def scan_all_skills() -> set:
 
 
 @register_task(
+    ensure_in="村庄",
     description="扫描仙术书并生成仙术持有表",
     debug=True,
 )

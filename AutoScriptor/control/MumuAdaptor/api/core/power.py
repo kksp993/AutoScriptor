@@ -10,6 +10,7 @@ import json
 import subprocess
 from typing import Callable
 
+from AutoScriptor.control.MumuAdaptor.device_facade import MuMuStartupError
 from AutoScriptor.utils.cancel import TaskCancelled, check_cancel_raise, sleep_with_cancel
 from AutoScriptor.logging.logger import logger
 
@@ -30,6 +31,13 @@ class Power:
         deadline = time.monotonic() + timeout
         facade = self.utils.get_device_facade()
         while time.monotonic() < deadline:
+            cancel_check()
+            # A failed Android VM can still report a running host process.
+            try:
+                facade.get_player_info()
+            except MuMuStartupError as error:
+                self.last_readiness_error = str(error)
+                raise
             cancel_check()
             if facade.adb_device_ready():
                 self.last_readiness_error = ""
@@ -105,7 +113,7 @@ class Power:
                 if attempt < max_retries:
                     logger.warning(f"模拟器启动失败 (尝试 {attempt+1}/{max_retries+1}): {retval}")
                     sleep_with_cancel(5, cancel_check)
-            except TaskCancelled:
+            except (TaskCancelled, MuMuStartupError):
                 raise
             except Exception as e:
                 last_error = e

@@ -3,6 +3,7 @@ from AutoScriptor import *
 import getpass
 
 @register_task(
+    ensure_in="村庄",
     description="进入登录流程并选择当前配置的角色。",
 )
 def task():

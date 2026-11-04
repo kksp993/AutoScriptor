@@ -157,12 +157,12 @@ class MixControl(BaseMumuControl):
 
     def _log_action(self, action: str, detail: str) -> None:
         msg = f"【{self.mode}】{action}: {detail}"
-        logger.debug(msg)
         # 历史不节流：日志少一行只说明被合并，不说明没执行。
         _action_history.append(f"{datetime.now().strftime('%H:%M:%S.%f')[:-3]} {msg}")
         now = time.monotonic()
         key = (self.mode, action)
-        if now - self._last_action_log[key] >= self._action_log_interval:
+        last_logged_at = self._last_action_log.get(key)
+        if last_logged_at is None or now - last_logged_at >= self._action_log_interval:
             suppressed = self._action_suppressed[key]
             self._action_suppressed[key] = 0
             self._last_action_log[key] = now
@@ -172,6 +172,8 @@ class MixControl(BaseMumuControl):
             logger.info(msg)
         else:
             self._action_suppressed[key] += 1
+            # 每个动作只写一次；INFO 未放行的明细仍保留在 DEBUG 日志。
+            logger.debug(msg)
 
     def switch_to_mumu(self)->None:
         logger.info("切换到mumu")

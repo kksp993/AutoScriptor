@@ -3,6 +3,7 @@ from AutoScriptor import *
 
 
 @register_task(
+    ensure_in="极北#-1",
     description="执行极北一键碾压。",
     reschedule="daily",
 )

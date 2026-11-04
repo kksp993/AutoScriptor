@@ -21,9 +21,9 @@
 | WebUI 验收 | [webui/user-trajectories.md](webui/user-trajectories.md) |
 | 调度器 | [schedule/scheduler.md](schedule/scheduler.md) |
 | 主机性能策略 | [schedule/README.md](schedule/README.md)、[schedule/perf.md](schedule/perf.md) |
-| 任务编写 | [tasks/script-authoring.md](tasks/script-authoring.md) |
+| 任务编写与必填 ensure_in 起点 | [tasks/script-authoring.md](tasks/script-authoring.md) |
 | 任务安全 | [tasks/script-authoring-safety.md](tasks/script-authoring-safety.md) |
-| 任务列表交互与排序持久化 | [tasks/task-ordering-graph-plan.md](tasks/task-ordering-graph-plan.md) |
+| 分层任务管理、依赖主干归堆计算图与就近调度 | [tasks/task-ordering-graph-plan.md](tasks/task-ordering-graph-plan.md) |
 | 安装位写脚本（两个 wheel） | [operations/library-packages.md](operations/library-packages.md) |
 | OCR 模型实验 | [reference/ocr-model-experiment.md](reference/ocr-model-experiment.md) |
 | Cocos 游戏组件读取结论（临时检查已移除） | [reference/cocos-runtime-inspection.md](reference/cocos-runtime-inspection.md) |

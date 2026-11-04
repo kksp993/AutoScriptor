@@ -30,13 +30,13 @@ from orchestrator.model import (
     calc_next_allowed_weekday_ts,
     calc_effective_next_time,
     clamp_to_sched_window,
-    collect_active_times_from_all_characters,
     is_human_takeover_blocked,
     is_task_debug_mode,
     iter_dispatch_characters,
     next_display_timestamp_from_times,
     resolve_reschedule,
     sort_paths_by_task_ordering,
+    plan_task_table,
 )
 
 
@@ -125,6 +125,8 @@ class Scheduler:
         self._last_failed_task: str | None = None
         # 进入 ERROR 的时刻，供冷却自动恢复用。
         self._error_at: float | None = None
+        self._planning_attempted: set[tuple[str, str, str]] = set()
+        self.last_selection: dict = {}
 
     # ── 注入 ──
 
@@ -351,7 +353,7 @@ class Scheduler:
         self._consecutive_errors = 0
         self._clear_retry_exhaustion()
 
-    def _is_retry_exhausted(self, char_key: tuple[str, str], task_key: str) -> bool:
+    def _is_retry_exhausted(self, char_key: tuple[str, str], task_key: str, *, task_table: dict | None = None) -> bool:
         """这个任务在本轮计划里是否已耗尽重试。
 
         标记只在「同一份计划」内有效。任务被排到比标记时刻更晚的时间点，说明它
@@ -366,14 +368,14 @@ class Scheduler:
         marked_at = self._retry_exhausted_tasks.get(key)
         if marked_at is None:
             return False
-        if self._next_exec_time_of(task_key) > marked_at:
+        if self._next_exec_time_of(task_key, task_table) > marked_at:
             self._retry_exhausted_tasks.pop(key, None)
             logger.info("📅 任务已排入新一轮计划，解除 retry 跳过: %s", task_key)
             return False
         return True
 
     @staticmethod
-    def _next_exec_time_of(task_key: str) -> float:
+    def _next_exec_time_of(task_key: str, task_table: dict | None = None) -> float:
         """任务当前的 next_exec_time；查不到时返回 0（视为仍在原计划内）。"""
         from AutoScriptor.utils.app_config import cfg
         from tasks.task_register import task_registry
@@ -382,7 +384,8 @@ class Scheduler:
             task_id = task_registry.id_of(task_key)
         except Exception:
             return 0.0
-        entry = (cfg.get("tasks") or {}).get(task_id)
+        table = (cfg.get("tasks") or {}) if task_table is None else task_table
+        entry = table.get(task_id)
         if not isinstance(entry, dict):
             return 0.0
         return float(entry.get("next_exec_time", 0) or 0)
@@ -403,10 +406,10 @@ class Scheduler:
             key[2],
         )
 
-    def _filter_retry_available(self, char_key: tuple[str, str], tasks: list[str]) -> list[str]:
+    def _filter_retry_available(self, char_key: tuple[str, str], tasks: list[str], *, task_table: dict | None = None) -> list[str]:
         available = []
         for task_key in tasks:
-            if self._is_retry_exhausted(char_key, task_key):
+            if self._is_retry_exhausted(char_key, task_key, task_table=task_table):
                 logger.info("📅 跳过本调度周期已耗尽 retry 的任务: %s/%s %s", char_key[0], char_key[1], task_key)
                 continue
             available.append(task_key)
@@ -419,9 +422,6 @@ class Scheduler:
         from AutoScriptor.utils.app_config import cfg
         from tasks.task_register import task_registry
 
-        if not self._retry_exhausted_tasks:
-            return collect_active_times_from_all_characters(cfg, dispatch_only=True)
-
         now_ts = time.time()
         result: list[float] = []
         active = cfg.active_character()
@@ -429,6 +429,8 @@ class Scheduler:
         chars = cfg._account_data.get("characters", {}) or {}
 
         def _collect_from_table(task_table: dict, char_key: tuple[str, str]) -> None:
+            decision, _specifications = plan_task_table(task_table, cfg.get("task_ordering") or {}, now_ts)
+            ready_ids = set(decision.ranked_ids)
             for task_id, val in (task_table or {}).items():
                 if not isinstance(val, dict) or not val.get("on"):
                     continue
@@ -437,9 +439,13 @@ class Scheduler:
                     continue
                 if not task_registry.has_task(path):
                     continue
-                if self._is_retry_exhausted(char_key, path):
+                marked_at = self._retry_exhausted_tasks.get(self._retry_key(char_key, path))
+                if marked_at is not None and float(val.get("next_exec_time", 0) or 0) <= marked_at:
                     continue
-                result.append(calc_effective_next_time(val, now_ts, resolve_reschedule(path, val)))
+                effective_time = calc_effective_next_time(val, now_ts, resolve_reschedule(path, val))
+                if effective_time <= now_ts and task_id not in ready_ids:
+                    continue
+                result.append(effective_time)
 
         for server, name in self._iter_characters_schedule_order():
             char_key = (server, name)
@@ -585,6 +591,49 @@ class Scheduler:
             cfg._config.get("task_ordering", {}),
         )
 
+    def _rank_ready_paths(self, paths: list[str], *, observe: bool = False) -> list[str]:
+        from AutoScriptor.utils.app_config import cfg
+        from tasks.task_register import task_registry
+        from ZmxyOL.nav.map_manager import mm
+        from math import isfinite
+
+        table = cfg.get("tasks") or {}
+        overlay = cfg.get("task_ordering") or {}
+        decision, specifications = plan_task_table(table, overlay, time.time(), eligible_paths=paths)
+        position = (None, None)
+        costs = {}
+        destinations = {}
+        if observe and overlay.get("selection_policy", "nearest_ready") == "nearest_ready" and any(
+            specifications[task_id].preferred_locations for task_id in decision.ranked_ids
+        ):
+            from ZmxyOL.nav.api import probe_region
+            try:
+                position = probe_region()
+            except TaskCancelled:
+                raise
+            except Exception as exception:
+                # Recognition is an operational boundary; retain the failure in the decision log.
+                logger.warning("调度定位失败，按同距规则决胜: %s", exception, exc_info=True)
+        for task_id in decision.ranked_ids:
+            locations = specifications[task_id].preferred_locations
+            if locations and all(position):
+                destination = min(locations, key=lambda location: mm.estimate_route_cost(position, location))
+                distance = mm.estimate_route_cost(position, destination)
+                costs[task_id] = distance if isfinite(distance) else None
+                destinations[task_id] = destination
+        decision, _specifications = plan_task_table(table, overlay, time.time(), eligible_paths=paths, costs=costs)
+        ranked = [task_registry.get_path(task_id) for task_id in decision.ranked_ids]
+        if observe:
+            self.last_selection = {
+                "character": cfg.active_character(), "position": list(position),
+                "policy": overlay.get("selection_policy", "nearest_ready"),
+                "ranked_paths": ranked, "costs": costs, "destinations": destinations,
+                "blocked_by": decision.blocked_by, "errors": decision.errors,
+                "observed_at": time.time(),
+            }
+            logger.info("调度选择: %s", self.last_selection)
+        return ranked
+
     def _iter_characters_schedule_order(self):
         """调度顺序：优先账号内 dispatch_queue，其余按服务器名、角色名排序。"""
         from AutoScriptor.utils.app_config import cfg
@@ -606,6 +655,7 @@ class Scheduler:
         与总览多角色统计一致，避免「全角色调度」后活动角色停在队列末尾时其他角色永不执行。
         """
         from AutoScriptor.utils.app_config import cfg
+        from tasks.task_register import task_registry
 
         original = cfg.active_character()
         original_key = (original.get("server", ""), original.get("name", ""))
@@ -617,6 +667,15 @@ class Scheduler:
         for server, name in dispatch_order:
             ac = cfg.active_character()
             cur = (ac.get("server", ""), ac.get("name", ""))
+            if (server, name) != cur:
+                # Inspect inactive tables before switching: blocked/completed roles must
+                # not discard the current role's login and live-position context.
+                table = cfg._account_data.get("characters", {}).get(server, {}).get(name, {}).get("tasks") or {}
+                decision, _specifications = plan_task_table(table, cfg.get("task_ordering") or {}, time.time())
+                candidates = [task_registry.get_path(task_id) for task_id in decision.ranked_ids]
+                candidates = [path for path in candidates if (server, name, path) not in self._planning_attempted]
+                if not self._filter_retry_available((server, name), candidates, task_table=table):
+                    continue
             if (server, name) == cur:
                 due = self._collect_due(cfg.get("tasks") or {}, time.time())
             else:
@@ -629,7 +688,8 @@ class Scheduler:
                 self.invalidate_login()
                 due = self._collect_due(cfg.get("tasks") or {}, time.time())
             due = self._filter_retry_available((server, name), due)
-            due = self._sort_due_paths(due)
+            due = [path for path in due if (server, name, path) not in self._planning_attempted]
+            due = self._rank_ready_paths(due)
             if due:
                 if switched:
                     self._tasks_updated.set()
@@ -710,6 +770,8 @@ class Scheduler:
         pipeline_completed = False
         self._pipeline_active.set()
         scheduled_mode = explicit_tasks is None and explicit_task_runs is None
+        self._planning_attempted = set()
+        attempt_counts: dict[tuple[str, str, str], int] = {}
 
         if explicit_task_runs is None and explicit_tasks is not None:
             explicit_task_runs = [
@@ -777,7 +839,30 @@ class Scheduler:
                 if scheduled_mode and self.state != SchedulerState.RUNNING:
                     break
 
-                if retry_queue:
+                if scheduled_mode:
+                    collected_due = self._collect_due_cross_character()
+                    char_key = _active_char_key()
+                    due = [path for path in collected_due if (*char_key, path) not in self._planning_attempted
+                           and not self._is_retry_exhausted(char_key, path)]
+                    if not due and failed_next_round:
+                        # First attempts keep their opportunity; retries are ranked within each role.
+                        earliest_attempt = min(attempt_counts[(*character, _run_task(run))] for character, run in failed_next_round)
+                        retry_candidates = [(character, run) for character, run in failed_next_round
+                                            if attempt_counts[(*character, _run_task(run))] == earliest_attempt]
+                        dispatch_indices = {character: index for index, character in enumerate(self._iter_characters_schedule_order())}
+                        pending_characters = sorted(dict.fromkeys(character for character, _run in retry_candidates),
+                                                    key=lambda character: dispatch_indices.get(character, len(dispatch_indices)))
+                        for retry_character in pending_characters:
+                            if not _switch_to_char_if_needed(retry_character):
+                                continue
+                            candidates = [_run_task(run) for character, run in retry_candidates if character == retry_character]
+                            due = self._rank_ready_paths(candidates)
+                            if due:
+                                char_key = retry_character
+                                break
+                    if due:
+                        retry_round = attempt_counts.get((*char_key, str(due[0])), 0)
+                elif retry_queue:
                     char_key, task_run = retry_queue.pop(0)
                     if not _switch_to_char_if_needed(char_key):
                         continue
@@ -809,7 +894,7 @@ class Scheduler:
                 if not due:
                     # retry_round=0 是主跑（第 1 次尝试），所以还有余量当且仅当
                     # 「已经用掉的尝试数 retry_round+1」小于上限。
-                    if failed_next_round and retry_round + 1 < max_attempts:
+                    if not scheduled_mode and failed_next_round and retry_round + 1 < max_attempts:
                         retry_round += 1
                         retry_queue = failed_next_round
                         failed_next_round = []
@@ -828,12 +913,12 @@ class Scheduler:
                 task_key = _run_task(task_run)
                 run_id = _run_id(task_run)
                 param_override = _run_param_override(task_run)
-                character_reports.record(char_key, run_id, task_key, "pending")
                 task_debug_mode = is_task_debug_mode(task_key)
                 skip_login_for_debug = task_debug_mode and not force_login
                 skip_login_for_task = skip_character_login or skip_login_for_debug
-                if not task_debug_mode:
-                    only_debug_tasks_executed = False
+                mixed_lifecycle = scheduled_mode and any(
+                    is_task_debug_mode(str(path)) != task_debug_mode for path in due
+                )
 
                 logger.info("📅 发现 %d 个待执行任务: %s", len(due), [
                     _run_task(run) if isinstance(run, dict) else run for run in due
@@ -844,20 +929,65 @@ class Scheduler:
                     logger.info("📅 debug_mode: 跳过自动登录与任务前重启: %s", task_key)
                 elif task_debug_mode:
                     logger.info("📅 debug_mode: 跳过任务前重启，但按本次请求执行自动登录: %s", task_key)
-                elif not skip_character_login:
+                elif not skip_character_login and not mixed_lifecycle:
                     self._maybe_daily_restart(cfg)
 
                 try:
                     # 与 api.init() 不同：ensure_app_running 的返回值必须写入 runtime_ctx，
                     # 否则 mixctrl 仅存在于栈上，runtime_ctx.mixctrl 仍为 None（例如关机清理后）。
                     runtime_ctx.refresh(cancel_check=self._check_cancel_requested)
+                    if not skip_login_for_task and not mixed_lifecycle:
+                        self._ensure_character_logged_in(cfg)
+                    if scheduled_mode:
+                        # For mixed candidates, commit the live-scene choice before
+                        # task-specific login/restart. A discarded normal candidate
+                        # must never change the scene of the chosen debug task.
+                        ranked = self._rank_ready_paths([str(path) for path in due], observe=True)
+                        if not ranked:
+                            continue
+                        task_key = ranked[0]
+                        task_run = {"id": task_key, "task": task_key}
+                        run_id = task_key
+                        task_debug_mode = is_task_debug_mode(task_key)
+                        if mixed_lifecycle:
+                            if not task_debug_mode and not skip_character_login:
+                                previous_restart = self._daily_restart_day
+                                self._maybe_daily_restart(cfg)
+                                if previous_restart != self._daily_restart_day:
+                                    runtime_ctx.refresh(cancel_check=self._check_cancel_requested)
+                            if force_login or not (skip_character_login or task_debug_mode):
+                                self._ensure_character_logged_in(cfg)
                 except TaskCancelled:
                     logger.info("⏹ 检测到取消请求，停止执行")
                     break
                 except Exception as e:
+                    if self._is_cancel_requested():
+                        logger.info("⏹ 用户终止后的设备启动失败不计入错误，停止执行")
+                        break
                     logger.error("📅 模拟器启动失败: %s", e, exc_info=True)
                     self.record_result(0, 1)
-                    if self.state == SchedulerState.ERROR:
+                    from AutoScriptor.logging.log_archiver import archive_error
+
+                    archive_error(
+                        "设备启动失败", e,
+                        include_run_screenshots=False,
+                        include_runtime_context=False,
+                        extra_context={
+                            "stage": "device_startup",
+                            "pending_task": task_key,
+                            "emulator_index": cfg["emulator"].get("index"),
+                            "adb_addr": cfg["emulator"].get("adb_addr"),
+                            "consecutive_errors": self._consecutive_errors,
+                            "mumu_info": getattr(e, "player_info", None),
+                        },
+                    )
+                    # record_result defers task-error pausing until pipeline exit;
+                    # startup cannot reach that exit unless we enforce its limit here.
+                    if self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                        if self.state == SchedulerState.RUNNING:
+                            self.mark_error()
+                        break
+                    if self.state != SchedulerState.RUNNING or self._is_cancel_requested():
                         break
                     delay = min(30, 10 * self._consecutive_errors)
                     logger.info("📅 %d 秒后重试 (%d/%d)",
@@ -867,11 +997,19 @@ class Scheduler:
                     if self._task_manager._cancel_event.is_set() or self.state != SchedulerState.RUNNING:
                         logger.info("⏹ 检测到取消请求，停止执行")
                         break
+                    if retry_round > 0 and not scheduled_mode:
+                        retry_queue.insert(0, (char_key, task_run))
                     continue
 
-                if not skip_login_for_task:
-                    self._ensure_character_logged_in(cfg)
+                if scheduled_mode:
+                    retry_round = attempt_counts.get((*char_key, task_key), 0)
+                    self._planning_attempted.add((*char_key, task_key))
+                    attempt_counts[(*char_key, task_key)] = retry_round + 1
+                    failed_next_round = [(character, run) for character, run in failed_next_round
+                                         if character != char_key or _run_task(run) != task_key]
 
+                character_reports.record(char_key, run_id, task_key, "pending")
+                only_debug_tasks_executed = only_debug_tasks_executed and task_debug_mode
                 attempted_this_round.add((*char_key, run_id))
                 try:
                     success, failed = _execute_task_attempt(task_key, retry_round, param_override)
@@ -929,11 +1067,17 @@ class Scheduler:
                     logger.error("📅 配置保存失败（将在下一轮重新收集任务）: %s", e)
 
         finally:
+            self._planning_attempted = set()
             self._pipeline_active.clear()
             character_reports.finish(
                 interrupted=not pipeline_completed or self._task_manager._cancel_event.is_set()
             )
-        if scheduled_mode and self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS: self.mark_error()
+        if (
+            scheduled_mode
+            and self.state == SchedulerState.RUNNING
+            and self._consecutive_errors >= MAX_CONSECUTIVE_ERRORS
+        ):
+            self.mark_error()
 
         if total_success > 0 or total_failed > 0:
             logger.info("📅 执行完成: 成功 %d, 失败 %d", total_success, total_failed)
@@ -1141,6 +1285,7 @@ class Scheduler:
     def invalidate_login(self):
         """外部通知角色已切换，下次执行前需重新登录。"""
         self._logged_in_character = None
+        self.last_selection = {}
 
     # ── 状态查询 ──
 
@@ -1159,6 +1304,7 @@ class Scheduler:
             "busy": scheduled_execution,
             "enabled": self.state == SchedulerState.RUNNING,
             "reload_deferred": self._reload_deferred.is_set(),
+            "last_selection": self.last_selection,
         }
 
 

@@ -1,0 +1,97 @@
+.task-planning-graph {
+  --planning-ink: #253b39;
+  --planning-accent: #13856b;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #e0e9e6;
+  border-radius: 14px;
+  background: #fff;
+  color: var(--planning-ink);
+}
+.task-planning-graph button { cursor: pointer; }
+.task-planning-graph button:disabled { opacity: .45; cursor: not-allowed; }
+.task-planning-graph button:focus-visible,
+.task-planning-graph select:focus-visible { outline: 2px solid var(--planning-accent); outline-offset: 3px; }
+.planning-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 18px 22px 12px; }
+.planning-toolbar h2 { font-size: 16px; font-weight: 700; margin: 0; }
+.planning-toolbar h2 span { font-size: 11px; color: #738781; margin-left: 12px; font-weight: 400; }
+.planning-actions { display: flex; gap: 8px; }
+.planning-actions button, .planning-add button, .planning-inspector > button,
+.planning-inspector-secondary button { padding: 8px 12px; border-radius: 7px; font-size: 12px; border: 1px solid #dce5e1; background: white; }
+.task-planning-graph .planning-primary { color: white; border-color: var(--planning-accent); background: var(--planning-accent); }
+.planning-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; padding: 10px 22px; border-bottom: 1px solid #e4ebe8; font-size: 11px; color: #617770; }
+.planning-controls label { display: inline-flex; align-items: center; gap: 6px; }
+.planning-zoom { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.planning-zoom button { border: 1px solid #dce5e1; border-radius: 5px; min-width: 26px; min-height: 26px; padding: 2px 6px; }
+.planning-alert { margin: 6px 14px; padding: 9px 12px; border-radius: 7px; background: #fff0ed; color: #b74435; font-size: 12px; overflow-wrap: anywhere; }
+.planning-alert button { text-decoration: underline; margin-left: 8px; }
+.planning-add { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 22px; background: #f0f9f5; font-size: 12px; }
+.planning-add .el-select { width: 270px; }
+.planning-body { display: grid; grid-template-columns: minmax(0, 1fr) 290px; flex: 1; min-height: 0; }
+.planning-viewport { position: relative; overflow: auto; min-width: 0; min-height: 300px; background-color: #f7faf8; background-image: radial-gradient(#d6e2db .8px, transparent .8px); background-size: 18px 18px; }
+.planning-scale-space { position: relative; margin: 12px auto 60px; }
+.planning-board { position: absolute; transform-origin: top left; }
+.planning-edges { position: absolute; inset: 0; overflow: visible; }
+.planning-edge { fill: none; stroke: #92b3a7; stroke-width: 1.6; }
+.planning-edge.is-secondary { opacity: .5; }
+.planning-edge.is-selected { stroke: var(--planning-accent); stroke-width: 2.8; opacity: 1; }
+.planning-deck { position: absolute; width: var(--planning-card-width); min-height: var(--planning-card-height); z-index: 1; }
+.planning-deck.is-expanded { z-index: 20; }
+.planning-deck-back { position: absolute; inset: 0; height: var(--planning-card-height); border: 1px solid #bad4c8; background: #e5efe9; border-radius: 10px; pointer-events: none; transition: transform .2s ease; }
+.planning-deck-back-second { transform: translate(5px, 5px) rotate(2deg); z-index: -1; }
+.planning-deck-back-third { transform: translate(9px, 10px) rotate(4deg); z-index: -2; }
+.planning-deck-count { position: absolute; right: -7px; top: -16px; z-index: 6; padding: 3px 7px; border-radius: 7px; color: #43826d; border: 1px solid #c9e0d3; background: #edf7f1; font-size: 10px; box-shadow: 0 2px 5px #264a3710; }
+.planning-deck-count i { margin-left: 4px; }
+.planning-deck-cards { position: relative; }
+.task-planning-graph .planning-task-card { box-sizing: border-box; position: absolute; width: var(--planning-card-width); height: var(--planning-card-height); padding: 12px; display: flex; flex-direction: column; justify-content: center; text-align: left; gap: 9px; border: 1px solid #d4e0d9; border-radius: 10px; background: #fff; box-shadow: 0 4px 12px #214d3210; transition: box-shadow .2s ease; }
+.planning-task-card:not(:first-child) { opacity: 0; pointer-events: none; }
+.planning-deck.is-expanded .planning-deck-cards { box-sizing: border-box; max-height: 432px; overflow-y: auto; overflow-x: hidden; padding: 4px; width: calc(var(--planning-card-width) + 24px); margin: -4px; border-radius: 10px; background: #f2f7f4; box-shadow: 0 12px 28px #284d342b; }
+.planning-deck.is-expanded .planning-task-card { position: relative; transform: none; opacity: 1; pointer-events: auto; margin-bottom: 7px; }
+.planning-deck.is-expanded .planning-task-card:last-child { margin-bottom: 0; }
+.task-planning-graph .planning-task-card:hover { border-color: #6fa58e; box-shadow: 0 4px 12px #214d3220; }
+.task-planning-graph .planning-task-card.is-selected { border-color: var(--planning-accent); box-shadow: 0 0 0 2px #13856b26; background: #f5fcf8; }
+.task-planning-graph .planning-task-card.is-disabled { border-style: dashed; background: #f5f6f6; color: #87928e; }
+.planning-card-heading { display: flex; align-items: center; gap: 8px; justify-content: space-between; min-width: 0; }
+.planning-card-heading strong { font-size: 13px; line-height: 18px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.planning-status-dot { display: inline-block; width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; }
+.planning-card-location { font-size: 11px; color: #587769; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.planning-card-location i { margin-right: 3px; }
+.planning-inspector { display: flex; flex-direction: column; gap: 10px; padding: 18px; overflow-y: auto; min-width: 0; border-left: 1px solid #e0e9e3; background: #fff; }
+.planning-inspector-title { display: flex; justify-content: space-between; gap: 4px; font-size: 10px; color: #789085; }
+.planning-inspector h3 { font-size: 16px; font-weight: 650; }
+.planning-inspector-path { font-size: 10px; color: #96a29b; overflow-wrap: anywhere; margin-top: -5px; }
+.planning-inspector label { font-size: 12px; font-weight: 600; margin-top: 8px; display: flex; justify-content: space-between; }
+.planning-inspector .el-select { width: 100%; }
+.planning-inspector .planning-text-button { border: 0; padding: 0; color: var(--planning-accent); font-size: 10px; align-self: flex-end; }
+.planning-apply { margin-top: 8px; }
+.planning-inspector-secondary { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; margin-top: 5px; border-top: 1px solid #edf2ee; }
+.planning-inspector-secondary .planning-danger { color: #b35d52; }
+.planning-note { padding: 8px; font-size: 11px; border-radius: 6px; color: #a88345; background: #fcf6e9; }
+.planning-dependents { display: flex; flex-direction: column; gap: 6px; }
+.planning-dependents button { text-align: left; font-size: 11px; color: #638773; padding: 5px 0; }
+.planning-dependents i { float: right; }
+.planning-inspector-empty { padding: 32px 3px; color: #81958a; text-align: center; }
+.planning-inspector-empty > i { display: block; font-size: 28px; margin-bottom: 16px; color: #b5cbbf; }
+.planning-inspector-empty h3 { font-size: 14px; }
+.planning-invalid { margin: 16px; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: #fff1ee; border: 1px solid #f2cec8; border-radius: 10px; color: #b85c50; font-size: 12px; }
+.planning-invalid button { text-align: left; overflow-wrap: anywhere; }
+.planning-empty { position: absolute; top: 100px; width: 100%; text-align: center; color: #829689; font-size: 13px; }
+@media (max-width: 1000px) {
+  .planning-body { grid-template-columns: minmax(0, 1fr) 250px; }
+  .planning-toolbar { padding: 12px; }
+  .planning-controls { padding: 10px 12px; gap: 8px; }
+  .planning-inspector { padding: 12px; }
+}
+@media (max-width: 700px) {
+  .planning-body { display: flex; flex-direction: column; overflow: auto; }
+  .planning-viewport { flex: 0 0 420px; }
+  .planning-inspector { overflow: visible; border-left: 0; border-top: 1px solid #e0e9e3; }
+  .planning-zoom { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-planning-graph *, .task-planning-graph *::before { transition: none !important; }
+}

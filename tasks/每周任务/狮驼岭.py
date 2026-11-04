@@ -24,6 +24,7 @@ class ShituolingDiff(IntEnum):
 
 
 @register_task(
+    ensure_in="村庄",
     description="在周末执行狮驼岭任务。",
     reschedule={"mode": "weekly", "weekdays": [6, 7]},
 )

@@ -75,10 +75,11 @@ go_home()
 | 类别 | 名称 |
 | --- | --- |
 | 目标 | `B`、`I`、`T`、`Box`、`box_cell_in_grid`、`Target`、`ui` |
-| 操作 | `click`、`click_all`、`swipe`、`swipe_precise`、`input`、`key_event`、`sleep` |
+| 操作 | `click`、`seq_click`、`click_all`、`swipe`、`swipe_precise`、`input`、`key_event`、`sleep` |
 | 定位 | `locate`、`match`、`ui_T`、`ui_F`、`ui_idx`、`wait_for_appear`、`wait_for_disappear`、`wait_for_signal` |
 | 结果处理 | `first`、`simple`、`full`、`count` |
 | 识别 | `extract_info`、`get_colors`、`coloris` |
+| 文字后处理 | `pretext`、`posttext`、`prenum`、`postnum` |
 | 实时与多指 | `screenshot_region`、`finger_down`、`finger_move`、`finger_up`、`multi_finger_down`、`release_all_fingers`、`replay` |
 | 输入通道 | `switch_base`、`ctrl_nemu`、`ctrl_mumu` |
 | 初始化与 App | `init`、`launch_app`、`close_app`、`go_home`、`ensure_app_running`、`ensure_all_environment_ready` |
@@ -93,7 +94,9 @@ go_home()
 
 - `locate()` 的三种形态：单个 `Target` 查一个；`tuple[Target, ...]` 是 **OR**（任一命中即成功）；`list[Target]` 是 **AND**（全部命中才算）。`match()` 在同样语义上返回带 `box`/`index`/`path` 的 dict。
 - `click(..., if_exist=True)` 找不到目标返回 `False`，不抛错；`click_all(target)` 点一帧内该目标的**全部**命中框并返回数量；`click(..., repeat=N)` 是反复点同一个框。
+- `seq_click([T("入口"), T("确认")])` 按顺序点击，每项点击到下一项出现，外层 `until` 只用于最后一项；空列表返回 `True`。参数沿用 `click`，但 `timeout` 默认 **每项 10 秒**，不是整条序列共用。衔接检测得到的 Box 直接交给下一次点击，只有 `assure_stable=True` 时额外检测稳定性；重试仍重新定位，不持续点击旧框。无颜色条件的 `B(...)` 自身视为已存在，`ui_T(B(...))` 恒为 `True`，不表示页面已切换。
 - `sleep()` 是可取消等待，任务里不要用 `time.sleep()`。
+- `extract_info(B(...), post_process=prenum)` 可直接提取前缀整数；`postnum` 提取后缀整数，`pretext/posttext` 提取首尾连续非数字文本。四个函数先 `strip()` 再做首尾锚定正则，数字转 `int`（含 0）；无匹配抛 `ValueError`，由提取流程重试，耗尽返回 `None`，不补 0。它们也可直接调用，无需设备初始化。
 - `click()` 返回只表示输入事件已发送，**不表示画面已更新**；要紧跟着读取数据时，先等可观察状态变化。
 - **`mixctrl` / `mumu` 是运行态对象，别存星号导入的快照。** `from AutoScriptor import *` 在导入时就把这两个名字绑成了当时的值（通常是 `None`），`init()` 之后那个名字不会变。要拿当前设备控制，用 `import AutoScriptor.core.api as core_api; core_api.mixctrl.screenshot()`，或 `from AutoScriptor.core.runtime_context import runtime_ctx; runtime_ctx.mixctrl`。任务脚本不受影响：它们是在设备会话建立之后才导入的。
 

@@ -3,6 +3,7 @@ from AutoScriptor import *
 
 
 @register_task(
+    ensure_in="地狱#1",
     description="【弃用】可以扫荡。依次挑战地狱混沌关卡。",
     deprecated=True,
     reschedule="daily",

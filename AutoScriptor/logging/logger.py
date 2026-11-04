@@ -230,13 +230,13 @@ if not logger.handlers:
             markup=False,
             log_time_format="%H:%M:%S",
         )
-        rich_handler.setLevel(logging.DEBUG)
+        rich_handler.setLevel(logging.INFO)
         rich_handler.addFilter(_TaskFilter())
         rich_handler.addFilter(_ExternalCallerFilter())
         logger.addHandler(rich_handler)
     except (OSError, RuntimeError, TypeError, ValueError):
         plain_handler = _SafeStreamHandler(stream=_safe_stderr())
-        plain_handler.setLevel(logging.DEBUG)
+        plain_handler.setLevel(logging.INFO)
         plain_handler.setFormatter(
             logging.Formatter(_CONSOLE_PLAIN_FMT, datefmt=_CONSOLE_DATEFMT)
         )

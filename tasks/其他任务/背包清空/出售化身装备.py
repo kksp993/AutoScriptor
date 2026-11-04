@@ -7,6 +7,7 @@ from AutoScriptor import *
 
 
 @register_task(
+    ensure_in=["村庄", "极北村庄"],
     description="一键清空化身装备背包",
     reschedule='daily',
 )

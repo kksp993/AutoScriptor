@@ -11,7 +11,7 @@ const EDITOR_DRAFT_CACHE = {
 
 const EditorPanel = {
   name: 'EditorPanel',
-  components: { EditorCanvas, EditorControls, PythonCodeEditor },
+  components: { EditorCanvas, EditorControls, PythonCodeEditor, EditorMenuBar },
   props: {
     /** 由错误汇总等页设置：切换到编辑器后从此 URL 拉取图片并走 /ingest-image */
     pendingImportUrl: { type: String, default: '' },
@@ -42,7 +42,7 @@ const EditorPanel = {
         <el-button type="primary" size="small" class="!flex-1 min-w-0" @click="refreshScreenshot" :loading="loadingScreenshot">
           <i class="fa fa-camera mr-0.5"></i><span class="truncate">刷新截图</span>
         </el-button>
-        <el-button type="success" size="small" class="!flex-1 min-w-0" @click="insertCurrentTargetObject" :disabled="!optimizedSel">
+        <el-button type="success" size="small" class="!flex-1 min-w-0" @click="insertCurrentTargetObject" :loading="remoteLoading" :disabled="!optimizedSel || remoteLoading">
           <i class="fa fa-code mr-0.5"></i><span class="truncate">生成对象</span>
         </el-button>
         <el-button size="small" class="!flex-1 min-w-0" @click="saveSelection" :disabled="!selection">
@@ -207,48 +207,7 @@ const EditorPanel = {
           <h2 class="text-sm font-semibold text-dark shrink-0 editor-recorder-title">
             <i class="fa fa-circle text-red-400 mr-1" style="font-size:8px"></i>操作录制
           </h2>
-          <nav class="editor-menubar" ref="recorderMenuRef">
-            <div v-for="group in recorderMenuGroups" :key="group.label" class="editor-menu-wrap">
-              <button type="button" class="editor-menubar-item"
-                      :class="{ 'is-open': recorderOpenGroup === group.label }"
-                      @click.stop="toggleRecorderGroup(group.label)">
-                {{ group.label }}
-              </button>
-              <div v-if="recorderOpenGroup === group.label" class="editor-menu-panel editor-menu-panel--down">
-                <template v-for="item in group.items" :key="item.key">
-                  <div v-if="item.children" class="editor-menu-subwrap">
-                    <button type="button" class="editor-menu-item" @click.stop="toggleRecorderSubmenu(item.key)">
-                      <i :class="item.icon"></i><span>{{ item.label }}</span><i class="fa fa-angle-right ml-auto"></i>
-                    </button>
-                    <div v-if="recorderSubmenuOpen === item.key" class="editor-menu-panel editor-menu-subpanel">
-                      <template v-for="child in item.children" :key="child.key">
-                        <div v-if="child.children" class="editor-menu-subwrap">
-                          <button type="button" class="editor-menu-item" @click.stop="toggleRecorderNestedSubmenu(child.key)">
-                            <i :class="child.icon"></i><span>{{ child.label }}</span><i class="fa fa-angle-right ml-auto"></i>
-                          </button>
-                          <div v-if="recorderNestedSubmenuOpen === child.key" class="editor-menu-panel editor-menu-subpanel">
-                            <button v-for="nestedChild in child.children" :key="nestedChild.key" type="button"
-                                    class="editor-menu-item" @click="runRecorderMenuAction(nestedChild)">
-                              <i :class="nestedChild.icon"></i><span>{{ nestedChild.label }}</span>
-                            </button>
-                          </div>
-                        </div>
-                        <button v-else type="button" class="editor-menu-item"
-                                :class="{ 'is-disabled': child.disabled && child.disabled() }"
-                                :disabled="child.disabled && child.disabled()" @click="runRecorderMenuAction(child)">
-                          <i :class="child.icon"></i><span>{{ child.label }}</span>
-                        </button>
-                      </template>
-                    </div>
-                  </div>
-                  <button v-else type="button" class="editor-menu-item" :class="{ 'is-disabled': item.disabled && item.disabled() }"
-                          :disabled="item.disabled && item.disabled()" @click="runRecorderMenuAction(item)">
-                    <i :class="item.icon"></i><span>{{ item.label }}</span>
-                  </button>
-                </template>
-              </div>
-            </div>
-          </nav>
+          <editor-menu-bar v-if="!functionEditorDialogVisible" :groups="recorderMenuGroups" @action="runRecorderMenuAction" />
           <div class="editor-recorder-quick-actions">
             <el-tooltip placement="top" :show-after="0">
               <template #content>
@@ -286,6 +245,26 @@ const EditorPanel = {
           <template #prepend>自定义任务/</template>
         </el-input>
       </el-form-item>
+    </div>
+    <el-form-item v-if="!saveScriptSelfRegistered" label="任务起点（ensure_in）" required>
+      <div class="w-full space-y-2">
+        <el-cascader v-model="saveScriptForm.ensureIn" :options="saveScriptStartOptions"
+          :props="{ multiple: true, emitPath: false, checkStrictly: true }"
+          :disabled="navigationOptionsLoading" filterable clearable collapse-tags class="w-full"
+          placeholder="请选择已注册的环境或位置，可多选" />
+        <div class="text-xs text-slate-500">
+          保存时同步生成起点声明和函数开头的 ensure_in(...)，运行时先导航再执行片段；多个起点满足任意一个即可。
+        </div>
+        <div v-if="navigationOptionsError" class="text-xs text-red-600">{{ navigationOptionsError }}</div>
+        <el-button v-if="!saveScriptStartOptions.length" size="small" :loading="navigationOptionsLoading" @click="loadNavigationOptions">
+          重新加载导航选项
+        </el-button>
+      </div>
+    </el-form-item>
+    <div v-else class="text-xs text-slate-600 leading-relaxed">
+      完整任务文件保持原样：每个 @register_task 必须直接填写 ensure_in 起点名称（字符串或非空列表/元组）。
+      代码自行负责真实导航；仅现场/外部 App 调试可显式使用 debug=True, ensure_in=None。
+      保存表单只决定脚本名称，其他声明沿用原文件。
     </div>
     <el-form-item label="description（描述）">
       <el-input v-model="saveScriptForm.description" placeholder="一句话描述" />
@@ -332,48 +311,7 @@ const EditorPanel = {
 <el-dialog v-model="functionEditorDialogVisible" :title="functionEditorDialogTitle" width="min(900px, calc(100vw - 32px))" append-to-body>
   <div class="flex flex-col gap-3 min-h-[520px]">
     <div class="flex items-center justify-between gap-2 flex-wrap">
-      <nav class="editor-menubar">
-        <div v-for="group in recorderMenuGroups" :key="'function-' + group.label" class="editor-menu-wrap">
-          <button type="button" class="editor-menubar-item"
-                  :class="{ 'is-open': recorderOpenGroup === group.label }"
-                  @click.stop="toggleRecorderGroup(group.label)">
-            {{ group.label }}
-          </button>
-          <div v-if="recorderOpenGroup === group.label" class="editor-menu-panel editor-menu-panel--down">
-            <template v-for="item in group.items" :key="'function-' + item.key">
-              <div v-if="item.children" class="editor-menu-subwrap">
-                <button type="button" class="editor-menu-item" @click.stop="toggleRecorderSubmenu(item.key)">
-                  <i :class="item.icon"></i><span>{{ item.label }}</span><i class="fa fa-angle-right ml-auto"></i>
-                </button>
-                <div v-if="recorderSubmenuOpen === item.key" class="editor-menu-panel editor-menu-subpanel">
-                  <template v-for="child in item.children" :key="'function-' + child.key">
-                    <div v-if="child.children" class="editor-menu-subwrap">
-                      <button type="button" class="editor-menu-item" @click.stop="toggleRecorderNestedSubmenu(child.key)">
-                        <i :class="child.icon"></i><span>{{ child.label }}</span><i class="fa fa-angle-right ml-auto"></i>
-                      </button>
-                      <div v-if="recorderNestedSubmenuOpen === child.key" class="editor-menu-panel editor-menu-subpanel">
-                        <button v-for="nestedChild in child.children" :key="'function-' + nestedChild.key" type="button"
-                                class="editor-menu-item" @click="runRecorderMenuAction(nestedChild)">
-                          <i :class="nestedChild.icon"></i><span>{{ nestedChild.label }}</span>
-                        </button>
-                      </div>
-                    </div>
-                    <button v-else type="button" class="editor-menu-item"
-                            :class="{ 'is-disabled': child.disabled && child.disabled() }"
-                            :disabled="child.disabled && child.disabled()" @click="runRecorderMenuAction(child)">
-                      <i :class="child.icon"></i><span>{{ child.label }}</span>
-                    </button>
-                  </template>
-                </div>
-              </div>
-              <button v-else type="button" class="editor-menu-item" :class="{ 'is-disabled': item.disabled && item.disabled() }"
-                      :disabled="item.disabled && item.disabled()" @click="runRecorderMenuAction(item)">
-                <i :class="item.icon"></i><span>{{ item.label }}</span>
-              </button>
-            </template>
-          </div>
-        </div>
-      </nav>
+      <editor-menu-bar v-if="functionEditorDialogVisible" :groups="recorderMenuGroups" @action="runRecorderMenuAction" />
       <span class="text-xs text-slate-500">菜单会插入到当前函数草稿；点击保存后替换主录制区中的函数块。</span>
     </div>
     <python-code-editor v-model="functionEditorCode" ref="functionEditorCodeInput" class="flex-1 editor-code-textarea"
@@ -387,7 +325,7 @@ const EditorPanel = {
 </div>`,
 
   setup(props, { emit }) {
-    const { ref, computed, watch, onMounted, onBeforeUnmount } = Vue;
+    const { ref, computed, watch, onMounted } = Vue;
 
     // ── state ──
     const imageSrc = ref('');
@@ -432,6 +370,7 @@ const EditorPanel = {
     const saveScriptDialogVisible = ref(false);
     const saveScriptForm = ref({
       taskPathTail: '',
+      ensureIn: [],
       description: '',
       taskDoc: '',
       params: [],
@@ -444,12 +383,16 @@ const EditorPanel = {
       { label: 'Enum(单选)', value: 'enum' },
       { label: 'Enum(多选)', value: 'enum_multi' },
     ];
-    const recorderMenuRef = ref(null);
-    const recorderOpenGroup = ref('');
-    const recorderSubmenuOpen = ref('');
-    const recorderNestedSubmenuOpen = ref('');
     const navigationOptions = ref([]);
     const navigationOptionsLoading = ref(false);
+    const navigationOptionsError = ref('');
+    const saveScriptStartOptions = computed(() => navigationOptions.value.map((environment) => {
+      const option = { value: environment.name, label: environment.name };
+      if (Array.isArray(environment.locations) && environment.locations.length) {
+        option.children = environment.locations.map(location => ({ value: location, label: location }));
+      }
+      return option;
+    }));
     const functionEditorDialogVisible = ref(false);
     const functionEditorDialogTitle = ref('编辑监听函数');
     const functionEditorCode = ref('');
@@ -463,6 +406,14 @@ const EditorPanel = {
     const saveScriptDisabled = computed(
       () => saveScriptLoading.value || (!recordedCode.value.trim() && !customExecCode.value.trim()),
     );
+    // Only selects the form mode; the backend validates Python decorators before writing.
+    const saveScriptSelfRegistered = computed(() => {
+      const code = buildSaveScriptCode();
+      if (/^\s*@(?:[\w]+\.)*register_task\b/m.test(code)) return true;
+      return Array.from(code.matchAll(/\bregister_task\s+as\s+([A-Za-z_]\w*)/g)).some(
+        match => new RegExp(`^\\s*@${match[1]}\\b`, 'm').test(code),
+      );
+    });
 
     watch(recordedCode, (value) => {
       EDITOR_DRAFT_CACHE.recordedCode = value || '';
@@ -681,7 +632,29 @@ const EditorPanel = {
       appendSnippetToActiveCode(line, cursorOffset);
     }
 
-    function insertSnippetAtActiveCursor(snippet, cursorOffset = null) {
+    function isSequenceTargetPosition(code, position) {
+      const prefix = code.slice(0, position);
+      const openings = [];
+      // Ignore Python strings/comments so brackets in target names cannot change the context.
+      const tokens = /"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|#[^\n]*|[()[\]{}"']/g;
+      for (const token of prefix.matchAll(tokens)) {
+        const text = token[0];
+        if (text.startsWith('#')) {
+          if (token.index + text.length === prefix.length) return false;
+        } else if (text.startsWith('"') || text.startsWith("'")) {
+          if (text.length === 1) return false;
+        } else if ('([{'.includes(text)) {
+          openings.push(token.index);
+        } else {
+          openings.pop();
+        }
+      }
+      const opening = openings[openings.length - 1];
+      return prefix[opening] === '['
+        && /\bseq_click\s*\(\s*(?:target\s*=\s*)?$/.test(prefix.slice(0, opening));
+    }
+
+    function insertSnippetAtActiveCursor(snippet, cursorOffset = null, options = {}) {
       if (!snippet) return false;
       const target = activeCodeTarget();
       const input = target.input.value;
@@ -705,8 +678,14 @@ const EditorPanel = {
       const rawStart = selectionRange ? selectionRange.start : current.length;
       const rawEnd = selectionRange ? selectionRange.end : rawStart;
       const insertionStart = Math.max(0, Math.min(rawStart, current.length));
-      const insertionEnd = Math.max(insertionStart, Math.min(rawEnd, current.length));
-      const replacement = String(snippet);
+      let insertionEnd = Math.max(insertionStart, Math.min(rawEnd, current.length));
+      let replacement = String(snippet);
+      const sequenceTarget = options.targetObject && isSequenceTargetPosition(current, insertionStart);
+      if (sequenceTarget) {
+        const existingComma = current.slice(insertionEnd).match(/^[ \t]*,[ \t]*/);
+        if (existingComma) insertionEnd += existingComma[0].length;
+        replacement += ', ';
+      }
 
       if (input && typeof input.replaceRange === 'function') {
         input.replaceRange(insertionStart, insertionEnd, replacement);
@@ -716,17 +695,19 @@ const EditorPanel = {
 
       const nextCursor = insertionStart + (cursorOffset == null ? replacement.length : cursorOffset);
       focusCodeTargetAt(target, nextCursor);
-      return true;
+      return { sequenceTarget };
     }
 
-    function insertCurrentTargetObject() {
+    async function insertCurrentTargetObject() {
+      if (remoteLoading.value) return;
       const target = buildTarget();
       if (!target) {
         ElementPlus.ElMessage.warning('请先框选区域');
         return;
       }
-      insertSnippetAtActiveCursor(target);
+      const insertion = insertSnippetAtActiveCursor(target, null, { targetObject: true });
       ElementPlus.ElMessage.success('已在光标处生成目标对象');
+      if (insertion.sequenceTarget) await remoteClick({ record: false });
     }
 
     function appendEnsureInAction(targetName) {
@@ -734,18 +715,26 @@ const EditorPanel = {
       ElementPlus.ElMessage.success(`已添加「导航到 ${targetName}」`);
     }
 
+    function insertMapLocationObject(targetName) {
+      insertSnippetAtActiveCursor(`mm.locs[${JSON.stringify(targetName)}].identifier`, null, { targetObject: true });
+      ElementPlus.ElMessage.success(`已插入「地图位置 ${targetName}」`);
+    }
+
     async function loadNavigationOptions() {
       if (navigationOptionsLoading.value || navigationOptions.value.length) return;
       navigationOptionsLoading.value = true;
+      navigationOptionsError.value = '';
       try {
         const response = await apiGet('/navigation-options');
         if (!response || response.ok === false || !Array.isArray(response.items)) {
-          ElementPlus.ElMessage.error(apiErrorMessage(response, '加载导航选项失败'));
+          navigationOptionsError.value = apiErrorMessage(response, '加载导航选项失败');
+          ElementPlus.ElMessage.error(navigationOptionsError.value);
           return;
         }
         navigationOptions.value = response.items;
       } catch (error) {
-        ElementPlus.ElMessage.error('加载导航选项失败: ' + error);
+        navigationOptionsError.value = '加载导航选项失败: ' + error;
+        ElementPlus.ElMessage.error(navigationOptionsError.value);
       } finally {
         navigationOptionsLoading.value = false;
       }
@@ -835,6 +824,11 @@ const EditorPanel = {
       ElementPlus.ElMessage.success('已添加「点击」');
     }
 
+    function appendSequenceClick() {
+      const snippet = 'seq_click([])';
+      insertSnippetAtActiveCursor(snippet, snippet.indexOf('[') + 1);
+    }
+
     function appendClickUntilAppear() {
       const target = buildTarget();
       if (!target) { ElementPlus.ElMessage.warning('请先框选点击目标'); return; }
@@ -892,19 +886,21 @@ const EditorPanel = {
     }
 
     /** extract_info 需 BoxTarget，代码使用当前选区 B（与 T/I 区域一致）；并请求预览结果 */
-    async function appendExtractInfo() {
+    async function appendExtractInfo(processor = 'strip') {
       const b = effectiveBox();
       if (!b) {
         ElementPlus.ElMessage.warning('请先框选区域');
         return;
       }
-      const line = `info = extract_info(B(${b.left},${b.top},${b.width},${b.height}), post_process=lambda s: s.strip(), ensure_not_empty=True, mode="text")`;
+      const postProcess = processor === 'strip' ? 'lambda text: text.strip()' : processor;
+      const line = `info = extract_info(B(${b.left},${b.top},${b.width},${b.height}), post_process=${postProcess}, ensure_not_empty=True, mode="text")`;
       appendCode(line);
       ElementPlus.ElMessage.success('已添加「提取信息」');
       extractPreviewLoading.value = true;
       try {
         const res = await apiPost('/preview-extract', {
           left: b.left, top: b.top, width: b.width, height: b.height,
+          post_process: processor,
         });
         if (!res || res.ok === false) {
           ElementPlus.ElMessage.error('预览提取失败: ' + ((res && res.error) || '?'));
@@ -1102,10 +1098,10 @@ const EditorPanel = {
       ElementPlus.ElMessage.success('已保存函数');
     }
 
-    const navigationMenuItems = computed(() => {
+    function buildNavigationMenuItems(prefix, onChoose) {
       if (navigationOptionsLoading.value) {
         return [{
-          key: 'navigation-loading',
+          key: `${prefix}-loading`,
           label: '正在加载...',
           icon: 'fa fa-spinner fa-spin',
           action: async () => {},
@@ -1114,7 +1110,7 @@ const EditorPanel = {
       }
       if (!navigationOptions.value.length) {
         return [{
-          key: 'navigation-reload',
+          key: `${prefix}-reload`,
           label: '重新加载',
           icon: 'fa fa-refresh',
           action: loadNavigationOptions,
@@ -1125,33 +1121,36 @@ const EditorPanel = {
         const locationNames = Array.isArray(environment.locations) ? environment.locations : [];
         if (!locationNames.length) {
           return {
-            key: `navigation-env-${environmentName}`,
+            key: `${prefix}-env-${environmentName}`,
             label: environmentName,
             icon: 'fa fa-map-o',
-            action: () => appendEnsureInAction(environmentName),
+            action: () => onChoose(environmentName),
           };
         }
         return {
-          key: `navigation-env-${environmentName}`,
+          key: `${prefix}-env-${environmentName}`,
           label: environmentName,
           icon: 'fa fa-map-o',
           children: [
             {
-              key: `navigation-env-root-${environmentName}`,
+              key: `${prefix}-env-root-${environmentName}`,
               label: `进入 ${environmentName}`,
               icon: 'fa fa-map-marker',
-              action: () => appendEnsureInAction(environmentName),
+              action: () => onChoose(environmentName),
             },
             ...locationNames.map((locationName) => ({
-              key: `navigation-location-${environmentName}-${locationName}`,
+              key: `${prefix}-location-${environmentName}-${locationName}`,
               label: String(locationName),
               icon: 'fa fa-location-arrow',
-              action: () => appendEnsureInAction(locationName),
+              action: () => onChoose(locationName),
             })),
           ],
         };
       });
-    });
+    }
+
+    const navigationMenuItems = computed(() => buildNavigationMenuItems('navigation', appendEnsureInAction));
+    const mapLocationMenuItems = computed(() => buildNavigationMenuItems('map-location', insertMapLocationObject));
 
     const recorderMenuGroups = computed(() => [
       { label: '文件', items: [
@@ -1166,6 +1165,7 @@ const EditorPanel = {
           { key: 'click-until-disappear', label: '直到消失', icon: 'fa fa-eye-slash', action: appendClickUntilDisappear, disabled: () => !optimizedSel.value },
           { key: 'click-next-until', label: '下一步直到', icon: 'fa fa-step-forward', action: appendClickNextUntil, disabled: () => !optimizedSel.value },
         ] },
+        { key: 'seq-click', label: '序列点击', icon: 'fa fa-list-ol', action: appendSequenceClick },
         { key: 'swipe', label: '滑动', icon: 'fa fa-hand-pointer-o', action: appendSwipeAction, disabled: () => !optimizedSel.value },
         { key: 'long-click', label: '长按', icon: 'fa fa-hand-rock-o', action: appendLongClickAction, disabled: () => !optimizedSel.value },
         { key: 'input', label: '输入', icon: 'fa fa-keyboard-o', action: appendInputTextAction },
@@ -1175,6 +1175,15 @@ const EditorPanel = {
           { key: 'wait-disappear', label: '等待消失', icon: 'fa fa-eye-slash', action: appendWaitDisappear, disabled: () => !optimizedSel.value },
         ] },
         { key: 'extract', label: '提取', icon: 'fa fa-scissors', children: [
+          { key: 'extract-text', label: '文字', icon: 'fa fa-font', action: () => appendExtractInfo(), disabled: () => !optimizedSel.value || extractPreviewLoading.value },
+          ...[
+            ['pretext', '前缀文本'], ['posttext', '后缀文本'],
+            ['prenum', '前缀数字'], ['postnum', '后缀数字'],
+          ].map(([processor, label]) => ({
+            key: `extract-${processor}`, label, icon: 'fa fa-font',
+            action: () => appendExtractInfo(processor),
+            disabled: () => !optimizedSel.value || extractPreviewLoading.value,
+          })),
           { key: 'extract-color', label: '颜色', icon: 'fa fa-eyedropper', action: appendExtractColor, disabled: () => !optimizedSel.value },
         ] },
       ] },
@@ -1182,7 +1191,6 @@ const EditorPanel = {
         { key: 'locate', label: '定位坐标', icon: 'fa fa-crosshairs', action: appendLocate, disabled: () => !optimizedSel.value },
         { key: 'region-recognition', label: '区域识别', icon: 'fa fa-search-plus', children: [
           { key: 'match', label: '匹配目标（match）', icon: 'fa fa-object-ungroup', action: appendMatchAction, disabled: () => !optimizedSel.value },
-          { key: 'extract-text', label: '文字', icon: 'fa fa-font', action: appendExtractInfo, disabled: () => !optimizedSel.value || extractPreviewLoading.value },
         ] },
         { key: 'ui-t', label: '判断存在', icon: 'fa fa-check-circle-o', action: appendUiExists },
         { key: 'ui-f', label: '判断不在', icon: 'fa fa-times-circle-o', action: appendUiNotExists },
@@ -1240,48 +1248,18 @@ const EditorPanel = {
       ] },
       { label: '工具', items: [
         { key: 'navigation', label: '导航到...', icon: 'fa fa-map', children: navigationMenuItems.value },
+        { key: 'map-location', label: '地图位置', icon: 'fa fa-map-marker', children: mapLocationMenuItems.value },
         { key: 'grid', label: '数字网格', icon: 'fa fa-th', action: appendExtractGridInfo, disabled: () => !optimizedSel.value },
         { key: 'log', label: '打印日志（log）', icon: 'fa fa-commenting-o', action: appendLogAction },
       ] },
     ]);
 
-    function closeRecorderMenu() {
-      recorderOpenGroup.value = '';
-      recorderSubmenuOpen.value = '';
-      recorderNestedSubmenuOpen.value = '';
-    }
-
-    function toggleRecorderGroup(label) {
-      recorderOpenGroup.value = recorderOpenGroup.value === label ? '' : label;
-      recorderSubmenuOpen.value = '';
-      recorderNestedSubmenuOpen.value = '';
-    }
-
-    function toggleRecorderSubmenu(key) {
-      recorderSubmenuOpen.value = recorderSubmenuOpen.value === key ? '' : key;
-      recorderNestedSubmenuOpen.value = '';
-    }
-
-    function toggleRecorderNestedSubmenu(key) {
-      recorderNestedSubmenuOpen.value = recorderNestedSubmenuOpen.value === key ? '' : key;
-    }
-
     async function runRecorderMenuAction(item) {
       if (item.disabled && item.disabled()) return;
-      closeRecorderMenu();
       await item.action();
     }
 
-    function onRecorderDocumentClick(e) {
-      const el = recorderMenuRef.value;
-      if (el && !el.contains(e.target)) closeRecorderMenu();
-    }
-
-    onMounted(() => {
-      document.addEventListener('click', onRecorderDocumentClick);
-      loadNavigationOptions();
-    });
-    onBeforeUnmount(() => document.removeEventListener('click', onRecorderDocumentClick));
+    onMounted(loadNavigationOptions);
 
     // ── actions ──
     /** 与 GET /screenshot、POST /ingest-image 返回结构一致时更新画布与校验状态 */
@@ -1395,9 +1373,9 @@ const EditorPanel = {
       ElementPlus.ElMessage.warning('请拖入图片文件');
     }
 
-    /** 遥控器/画布远程操作后：等待 0.5s 再刷新，避免截到过渡态 */
+    /** 输入完成不代表页面渲染完成；给遥控器、画布和序列录制统一留出 1.5s。 */
     async function refreshScreenshotAfterRemote() {
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
       await refreshScreenshot();
     }
 
@@ -1535,13 +1513,14 @@ const EditorPanel = {
     }
 
     // ── remote control actions ──
-    async function remoteClick() {
+    async function remoteClick({ record = true } = {}) {
+      if (remoteLoading.value) return;
       const s = optimizedSel.value;
       if (!s) { ElementPlus.ElMessage.warning('请先框选区域'); return; }
       const cx = Math.floor((s.left + s.right) / 2);
       const cy = Math.floor((s.top + s.bottom) / 2);
 
-      appendCode(buildClickCodeAt(cx, cy));
+      if (record) appendCode(buildClickCodeAt(cx, cy));
 
       if (virtualRemoteOnly.value) {
         virtualClickMarkers.value = [...virtualClickMarkers.value, { x: cx, y: cy }];
@@ -1552,14 +1531,15 @@ const EditorPanel = {
       remoteLoading.value = true;
       try {
         const res = await apiPost('/remote/click', { x: cx, y: cy });
-        if (res.error) { ElementPlus.ElMessage.error(res.error); }
-        else { ElementPlus.ElMessage.success(`已点击 (${cx}, ${cy})`); }
+        if (!res || res.ok === false || res.error) {
+          ElementPlus.ElMessage.error(apiErrorMessage(res, '点击失败'));
+          return;
+        }
+        ElementPlus.ElMessage.success(`已点击 (${cx}, ${cy})`);
+        await refreshScreenshotAfterRemote();
       } catch (e) {
         ElementPlus.ElMessage.error('点击失败: ' + e);
       } finally {
-        try {
-          await refreshScreenshotAfterRemote();
-        } catch (_) { /* ignore */ }
         remoteLoading.value = false;
       }
     }
@@ -1690,8 +1670,8 @@ const EditorPanel = {
       const hasRecordedCode = !!(recordedCode.value || '').trim();
       const hasCustomExecCode = !!(customExecCode.value || '').trim();
       const sections = [];
-      if (hasRecordedCode) sections.push((recordedCode.value || '').trim());
-      if (hasCustomExecCode) sections.push((customExecCode.value || '').trim());
+      if (hasRecordedCode) sections.push(recordedCode.value);
+      if (hasCustomExecCode) sections.push(customExecCode.value);
       return sections.join('\n\n');
     }
 
@@ -1763,6 +1743,7 @@ const EditorPanel = {
         return;
       }
       saveScriptDialogVisible.value = true;
+      if (!saveScriptSelfRegistered.value) await loadNavigationOptions();
     }
 
     async function submitSaveCustomScript() {
@@ -1773,20 +1754,37 @@ const EditorPanel = {
       }
       const taskPath = normalizeSaveScriptTaskPath();
       if (!taskPath) return;
-      const params = buildSaveScriptParamPayload();
+      const params = saveScriptSelfRegistered.value ? [] : buildSaveScriptParamPayload();
       if (params === null) return;
+      const form = saveScriptForm.value;
+      const metadata = {
+        task_path: taskPath,
+        description: String(form.description || '').trim(),
+        task_doc: String(form.taskDoc || '').trim(),
+        params: params,
+      };
+      if (!saveScriptSelfRegistered.value) {
+        if (!Array.isArray(form.ensureIn) || !form.ensureIn.length) {
+          ElementPlus.ElMessage.warning('请选择任务起点（ensure_in），不能根据脚本目录自动推断');
+          return;
+        }
+        const registeredNames = new Set(navigationOptions.value.flatMap(
+          environment => [environment.name, ...(environment.locations || [])],
+        ));
+        if (form.ensureIn.some(location => !registeredNames.has(location))) {
+          ElementPlus.ElMessage.warning('ensure_in 必须选择已注册的导航名称，请重新选择起点');
+          return;
+        }
+        metadata.ensure_in = [...form.ensureIn];
+      }
 
       // 文件名由脚本名称的最后一段决定：位置就是身份，没有第二个命名入口。
       const filename = `${taskPath.split('/').pop()}.py`;
       saveScriptLoading.value = true;
       try {
-        const form = saveScriptForm.value;
         const payload = {
           filename: filename,
-          task_path: taskPath,
-          description: String(form.description || '').trim(),
-          task_doc: String(form.taskDoc || '').trim(),
-          params: params,
+          metadata,
           code,
         };
         const res = await apiPost('/save-custom-task', payload);
@@ -1937,11 +1935,12 @@ const EditorPanel = {
       swipeDir, remoteLoading, customExecCode, execCustomLoading, stopCustomLoading, extractPreviewLoading,
       saveScriptLoading, saveScriptDisabled, saveScriptDialogVisible, saveScriptForm, saveScriptParamTypes,
       saveScriptParamIsEnum, addSaveScriptParam, removeSaveScriptParam, submitSaveCustomScript,
+      saveScriptSelfRegistered, saveScriptStartOptions, navigationOptionsLoading, navigationOptionsError, loadNavigationOptions,
       functionEditorDialogVisible, functionEditorDialogTitle, functionEditorCode, functionEditorCodeInput,
       openRecordedFunctionDialog, applyFunctionEditorChanges,
       virtualRemoteOnly, virtualClickMarkers, virtualSwipeLines,
       recordedCodeInput, recordedCode, recordedLines, isLandscape, canvasCellStyle,
-      recorderMenuRef, recorderOpenGroup, recorderSubmenuOpen, recorderNestedSubmenuOpen, recorderMenuGroups,
+      recorderMenuGroups,
       canvasDropActive, clearVirtualOverlays,
       refreshScreenshot,
       onCanvasDragOver, onCanvasDragLeave, onCanvasDrop,
@@ -1949,7 +1948,7 @@ const EditorPanel = {
       saveSelection, insertCurrentTargetObject, onCopy, remoteClick, remoteSwipe,
       onCanvasRemoteClick, onCanvasRemoteSwipe,
       copyRecordedCode, saveCustomScript, stopCustomCodeExecution, onCustomExecKeydown, executeCustomCode,
-      closeRecorderMenu, toggleRecorderGroup, toggleRecorderSubmenu, toggleRecorderNestedSubmenu, runRecorderMenuAction,
+      runRecorderMenuAction,
       appendLocate, appendUiExists, appendUiNotExists, appendWaitAppear, appendWaitDisappear, appendSleepWait,
       appendClickUntilAppear, appendClickUntilDisappear, appendClickNextUntil,
       appendExtractInfo, appendExtractColor, appendExtractGridInfo,

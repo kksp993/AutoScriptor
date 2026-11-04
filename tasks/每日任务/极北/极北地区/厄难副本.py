@@ -4,6 +4,7 @@ from AutoScriptor.logging.logger import logger
 
 
 @register_task(
+    ensure_in="极北#-1",
     description="挑战极北厄难副本。",
     reschedule=12,
 )

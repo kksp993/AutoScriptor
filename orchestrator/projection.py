@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from contextlib import contextmanager
+from math import isfinite
 import logging
 import time
 from threading import Lock, RLock, local
@@ -30,6 +31,8 @@ from orchestrator.model import (
     project_task_ordering,
     retarget_ordering_overlay,
     summarize_ordering_generations,
+    plan_task_table,
+    resolve_planning_specs,
 )
 
 logger = logging.getLogger(__name__)
@@ -128,6 +131,26 @@ class TaskTreeService:
         source = self.task_table() if task_table is None else (task_table or {})
         return project_task_ordering(source, raw_overlay)
 
+    def task_planning_locations(self) -> dict[str, Any]:
+        """Static directed distances, without observing or changing the current region."""
+        from ZmxyOL.nav.map_manager import mm
+
+        locations = list(mm.locs)
+        costs: dict[str, dict[str, float | None]] = {}
+        for origin in locations:
+            destination_costs: dict[str, float | None] = {}
+            for target in locations:
+                minimum_cost = min(
+                    (
+                        mm.estimate_route_cost((environment.name, origin), target)
+                        for environment in mm.locs[origin].envs
+                    ),
+                    default=float("inf"),
+                )
+                destination_costs[target] = minimum_cost if isfinite(minimum_cost) else None
+            costs[origin] = destination_costs
+        return {"locations": locations, "costs": costs}
+
     def read_order_map(self) -> dict[str, int]:
         return self.task_ordering_projection().order_map
 
@@ -220,6 +243,12 @@ class TaskTreeService:
         config_data["characters_summary"] = self.characters_summary()
         config_data["game_professions_by_character"] = self.game_professions_by_character()
         config_data["game_profession_options"] = list(GAME_PROFESSIONS)
+        from tasks.task_register import task_registry
+        from ZmxyOL.nav.map_manager import mm
+        config_data["task_planning_options"] = {
+            "tasks": [{"id": metadata["id"], "path": path} for path, metadata in task_registry.items()],
+            "locations": list(mm.locs),
+        }
         try:
             from orchestrator.catalog import get_custom_task_load_errors
 
@@ -232,11 +261,13 @@ class TaskTreeService:
             config_data.pop("custom_task_load_errors", None)
         return config_data
 
-    def inject_public_task_fields(self, node: dict, prefix: str = "") -> None:
+    def inject_public_task_fields(self, node: dict, prefix: str = "", planning=None) -> None:
         from tasks.task_register import task_registry
         from orchestrator.model import TaskTree
 
         now_ts = time.time()
+        if planning is None:
+            planning = plan_task_table(self.task_table(), cfg._config.get("task_ordering") or {}, now_ts)
         for key, val in list(node.items()):
             if not isinstance(val, dict):
                 continue
@@ -245,13 +276,13 @@ class TaskTreeService:
                 if not task_registry.has_task(path):
                     del node[key]
                     continue
-                self.inject_public_task_leaf(val, path, now_ts)
+                self.inject_public_task_leaf(val, path, now_ts, planning=planning)
             else:
-                self.inject_public_task_fields(val, path)
+                self.inject_public_task_fields(val, path, planning=planning)
                 if not val:
                     del node[key]
 
-    def inject_public_task_leaf(self, leaf: dict, path: str, now_ts: float | None = None) -> None:
+    def inject_public_task_leaf(self, leaf: dict, path: str, now_ts: float | None = None, *, planning=None) -> None:
         """Add the runtime-derived fields one WebUI leaf carries.
 
         Everything here is computed from the registry and cfg, never stored: the
@@ -279,6 +310,7 @@ class TaskTreeService:
         # 生效值单独投影：cfg 里存的仍是用户覆盖值，作者改默认不会被这次投影固化。
         leaf["debug_effective"] = is_task_debug_mode(path)
         leaf["reschedule_effective"] = resolve_reschedule(path, leaf)
+        leaf["ensure_in"] = task_registry.get_ensure_in(path)
         leaf["task_description"] = task_registry.get_description(path)
         leaf["task_doc_flow"] = task_registry.get_doc_flow(path)
         task_status = ((cfg._config.get("status") or {}).get("tasks") or {}).get(path, {})
@@ -292,6 +324,22 @@ class TaskTreeService:
             leaf.pop("progress", None)
             leaf.pop("progress_display", None)
         leaf["_due"] = is_task_due(leaf, path, now_ts)
+        if planning is None:
+            planning = plan_task_table(self.task_table(), cfg._config.get("task_ordering") or {}, now_ts)
+        decision, specifications = planning
+        task_id = task_registry.id_of(path)
+        defaults = task_registry.get_planning_defaults(path)
+        leaf["planning_defaults"] = defaults
+        specification = specifications.get(task_id)
+        leaf["planning_effective"] = {
+            "preferred_locations": list(specification.preferred_locations) if specification else [],
+            "after_tasks": list(specification.after_tasks) if specification else [],
+        }
+        leaf["planning_status"] = {
+            "ready": task_id in decision.ranked_ids,
+            "blocked_by": decision.blocked_by.get(task_id, []),
+            "error": decision.errors.get(task_id),
+        }
 
     def strip_runtime_fields(self, node: dict) -> dict:
         cleaned = deepcopy(node)
@@ -364,7 +412,8 @@ class TaskTreeService:
         if not isinstance(leaf, dict) or "on" not in leaf:
             return None
         public_leaf = {**deepcopy(leaf), "id": task_id}
-        self.inject_public_task_leaf(public_leaf, path)
+        planning = plan_task_table(self._character_task_table(server, char_name), cfg._config.get("task_ordering") or {}, time.time())
+        self.inject_public_task_leaf(public_leaf, path, planning=planning)
         return public_leaf
 
     def apply_character_task_leaf(self, task_table: dict, task_path: str, task_data: dict) -> dict:
@@ -380,6 +429,9 @@ class TaskTreeService:
             for field in self.RUNTIME_TASK_FIELDS:
                 cleaned.pop(field, None)
         next_leaf = {**old_leaf, **cleaned}
+        for field in ("preferred_locations", "after_tasks"):
+            if field not in cleaned:
+                next_leaf.pop(field, None)
         task_table[task_id] = next_leaf
         return next_leaf
 
@@ -679,6 +731,8 @@ class WebUILifecycleService:
         with self.config_operation():
             # The WebUI sends the tree it was shown; storage is the flat table.
             cleaned = self.task_tree_service.flatten_payload_tasks(tasks)
+            from ZmxyOL.nav.map_manager import mm
+            resolve_planning_specs(cleaned, locations=set(mm.locs), strict=True)
             old_tasks = deepcopy(self.cfg._config.get("tasks", {}))
             reset_paths = self.task_tree_service.collect_task_reset_paths(old_tasks, cleaned)
             self.cfg._config["tasks"] = cleaned
@@ -697,7 +751,11 @@ class WebUILifecycleService:
         with self.config_operation():
             if not isinstance(raw_overlay, dict):
                 raise ValueError("invalid task ordering payload")
-            next_overlay = normalize_task_ordering_overlay(raw_overlay)
+            current_overlay = self.cfg._config.get("task_ordering") or {}
+            next_overlay = normalize_task_ordering_overlay({
+                "selection_policy": current_overlay.get("selection_policy", "nearest_ready"),
+                **raw_overlay,
+            })
 
             current_tasks = self.cfg._config.get("tasks", {})
             projection = self.task_tree_service.task_ordering_projection(current_tasks)
@@ -743,6 +801,8 @@ class WebUILifecycleService:
             task_id = task_registry.id_of(task_path)
             old_leaf = deepcopy(task_table.get(task_id))
             new_leaf = self.task_tree_service.apply_character_task_leaf(task_table, task_path, task_data)
+            from ZmxyOL.nav.map_manager import mm
+            resolve_planning_specs(task_table, locations=set(mm.locs), strict=True)
             reset_paths = [task_path] if self.task_tree_service.task_leaf_needs_reset(old_leaf, new_leaf) else []
             if reset_paths:
                 for key in ("human_takeover", "human_takeover_error", "human_takeover_at", "error"):

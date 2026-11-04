@@ -137,6 +137,7 @@ def _buy_shop_items() -> int:
 
 
 @register_task(
+    ensure_in="联盟",
     description="领取混沌炼妖塔挂机奖励并按周期购买商店物品。",
     last_buy_time=0,
     reschedule="daily",

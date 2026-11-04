@@ -4,6 +4,7 @@ from ZmxyOL.character.hero import h
 
 
 @register_task(
+    ensure_in="天庭",
     description="【弃用】可以扫荡。依次挑战天庭混沌关卡。",
     deprecated=True,
     reschedule="daily",

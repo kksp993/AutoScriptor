@@ -1,6 +1,6 @@
 """The WebUI log stream: what goes to the browser, and at which level.
 
-The file log keeps everything; this module owns the second sink the WebUI reads
+The rotating file log keeps INFO and above; this module also owns the sink the WebUI reads
 over ``/ws/logs``. Two callers need it -- the socket endpoint and the routes that
 apply a changed ``deploy.log_level`` -- so the level policy lives here rather
 than in whichever module happens to define the queue.
@@ -103,7 +103,7 @@ logger.addHandler(queue_handler)
 
 def apply_log_level() -> None:
     """Limit what the browser receives to ``deploy.log_level`` (template default info)."""
-    raw = (cfg._config.get("deploy") or {}).get("log_level", "debug")
+    raw = (cfg._config.get("deploy") or {}).get("log_level", "info")
     name = raw.strip().upper() if isinstance(raw, str) else "INFO"
     level = getattr(logging, name, None)
     queue_handler.setLevel(level if isinstance(level, int) else logging.INFO)

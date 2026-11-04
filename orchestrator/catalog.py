@@ -441,6 +441,11 @@ def load_tasks() -> None:
     load_custom_task_modules()
     reconcile_task_identities()
     prune_stale_tasks()
+    from orchestrator.model import resolve_planning_specs
+    from ZmxyOL.nav.map_manager import mm
+    _specifications, planning_errors = resolve_planning_specs(cfg.get("tasks") or {}, locations=set(mm.locs))
+    for task_id, message in planning_errors.items():
+        logger.error("任务规划无效，受影响任务暂停自动调度: %s: %s", task_id, message)
     if has_custom_task_load_errors():
         logger.warning("任务加载存在自定义任务导入错误，跳过本轮配置保存")
         return

@@ -6,6 +6,7 @@ from AutoScriptor.logging.logger import logger
 _KLS_DEFAULT_FLOW = BattleFlowName["昆仑山循环"]
 
 @register_task(
+    ensure_in="天庭#1",
     description="挑战夺回昆仑山并领取奖励。",
     reschedule="daily",
 )

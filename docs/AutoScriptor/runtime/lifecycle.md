@@ -2,6 +2,8 @@
 
 本文记录 WebUI、调度器、设备会话、配置和热重载的当前边界。任何改动这些模块的任务都要同步更新本文档。
 
+自动调度通过 `orchestrator/planning.py` 选择依赖就绪任务，前置是否阻塞完全沿用当前到期状态，不增加成功有效期。普通候选先完成设备就绪/登录，再用只读 `probe_region()` 定位；成本查询不触控、不改变导航缓存。混合 debug/普通候选尚未确认角色时按列表决胜，仅最终任务应用自己的重启/登录策略。角色切换或热重载后不复用位置判断，页面只投影决策记录。重试成功后重新收集后继，等待与角色可用性共用就绪判定；详见 [调度器](../schedule/scheduler.md)。
+
 ## 启动边界
 
 - Source Electron configures Chromium render mode before `app.whenReady()`. `AUTOSCRIPTOR_ELECTRON_RENDER_MODE` supports `software` (default, hardware acceleration disabled plus GPU composition/raster/zero-copy switches), `d3d11` (GPU kept with ANGLE D3D11), and `default` (no Electron render switches for comparison). The shell logs the render mode and GPU feature status; browser access to the WebUI is unchanged.
@@ -52,6 +54,18 @@
 4. 创建 `MixControl` 并只读获取一帧 IPC 截图，记录实例名称及帧尺寸；失败或取消时释放新建 IPC，不发布半初始化的会话。初始化不发送测试点击。
 5. 校验通过后才按 `launch_app` 解析并启动 App，按 `run_in_background` 隐藏窗口。包名解析器仍可按原规则写回包名配置。
 
+主机进程存活甚至 `player_state=start_finished` 也可能伴随 Android 启动失败。
+`DeviceFacade.get_player_info()` 在核对实例身份后检查 `launch_err_code/launch_err_msg`：进程
+已启动但 Android 未启动且有明确错误时，抛出 `MuMuStartupError`，保留实例、ADB 地址和原始
+错误信息（例如 `VERR_NEM_MAP_PAGES_FAILED` / `-2147467259`）。`Power` 在每次 Android 就绪
+轮询前执行同一检查，不再把这种故障拖成 90 秒后的泛化 ADB 超时，也不在 `Power.start()` 内
+重复 launch。已停机或 Android 已启动时不沿用残留错误；没有明确主机错误时仍按原规则等待
+ADB 和 `sys.boot_completed`，超时保留最后的 ADB 原因。不会自动点击修复、重装或修改 Hyper-V。
+
+调度启动失败由调度器单独计错和归档，达到连续错误上限时立即结束本轮；30 分钟后的自动恢复
+策略保持不变，详见 [scheduler.md](../schedule/scheduler.md#重试与错误状态)。启动失败时没有可靠
+的游戏截图，归档只保存本次异常与上下文，不调用旧会话的截图/OCR/导航探针。
+
 连接核验不证明目标页面或 OCR 区域正确。`extract_info` 读空返回 `None` 时，应检查实际页面、帧尺寸、区域及后处理，不能直接判断为 IP/端口故障。已有会话的输入/App 运行期回退仍保留，但新会话不能绕过身份核验。
 
 任务失败恢复（`TaskManager._try_recover_app`）只在 `app.restart_on_error=true` 时执行：关闭 App，
@@ -60,6 +74,10 @@
 `runtime_ctx.release_session()` 释放旧 NemuIpc，再 `mumu.power.restart()`，然后用
 `runtime_ctx.refresh(launch_app=False)` 重建会话并重新 launch 游戏。两次 MuMu 重启之间至少间隔
 10 分钟，任务成功会清零连续失败计数，避免无人值守时把坏会话变成反复关模拟器的重启风暴。
+
+导航恢复 `try_close_via_x()` 单次调用最多关闭 20 次：系统模态框优先，游戏 X
+按实际命中位置轮换尝试并逐次重新识别；加载等待最多 30 秒。次数耗尽仍有目标时抛出带
+目标/位置的异常，交给上述任务归档与恢复，而不是困在内部循环使任务重试计数永远无法推进。
 
 自动调度和需要登录的直接执行入口还会在每天 05:00 后的第一次执行前主动重启 MuMu 实例
 （`Scheduler._maybe_daily_restart()`）：关闭实例后由随后的 `runtime_ctx.refresh()` 重新启动，

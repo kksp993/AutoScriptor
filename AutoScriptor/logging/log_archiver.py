@@ -239,9 +239,11 @@ def _write_error_log(
     error_name: str,
     exc: Exception,
     extra_context: Optional[Dict[str, Any]],
+    *,
+    include_runtime_context: bool = True,
 ) -> None:
     log_path, recent_lines = _recent_log_lines()
-    context = collect_default_context()
+    context = collect_default_context() if include_runtime_context else {}
     if extra_context:
         context.update(extra_context)
 
@@ -324,19 +326,26 @@ def archive_error(
     include_run_screenshots: bool = True,
     extra_context: Optional[Dict[str, Any]] = None,
     video_path: str | Path | None = None,
+    *,
+    include_runtime_context: bool = True,
 ) -> Optional[str]:
     """Archive a task error with recent logs, context, screenshots and video.
 
     ``mixctrl`` is optional: without it the archive still carries logs, context
     and the run screenshots collected by the tracer, only missing the frame
     taken at the moment of the error.
+    Startup errors disable runtime context and run screenshots: no task has
+    started, and providers must not probe a failed or previous device session.
     """
     try:
         ts = datetime.now().strftime("%y%m%d_%H%M%S")
         archive_dir = get_error_archives_dir() / f"{ts}_{_safe_archive_name(error_name)}"
         archive_dir.mkdir(parents=True, exist_ok=True)
 
-        _write_error_log(archive_dir, ts, error_name, exc, extra_context)
+        _write_error_log(
+            archive_dir, ts, error_name, exc, extra_context,
+            include_runtime_context=include_runtime_context,
+        )
         _save_current_frame(archive_dir, mixctrl)
         if include_run_screenshots:
             _collect_run_screenshots(archive_dir)

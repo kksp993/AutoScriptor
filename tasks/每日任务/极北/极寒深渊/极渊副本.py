@@ -58,6 +58,7 @@ _DEFAULT_BATTLE_CONFIG = TableParam(
 
 
 @register_task(
+    ensure_in="极寒深渊",
     description="根据配置挑战极寒深渊副本。",
     reschedule="daily",
 )

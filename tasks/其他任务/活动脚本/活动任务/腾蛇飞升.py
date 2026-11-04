@@ -2,6 +2,7 @@ from AutoScriptor import *
 from ZmxyOL import *
 
 @register_task(
+    ensure_in="村庄",
     description="完成腾蛇飞升活动流程。",
     reschedule="daily",
 )

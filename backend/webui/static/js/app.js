@@ -10,6 +10,7 @@ const app = createApp({
     const characterName = ref('');
     const schedulerStatus = reactive({ state: 'pending', label: '待运行', color: 'green', consecutive_errors: 0 });
     const taskOrderingSaving = ref(false);
+    const taskGraphSaving = ref(false);
     let taskPersistenceOperationTail = Promise.resolve();
     let pendingTaskOrderingOperations = 0;
 
@@ -49,6 +50,12 @@ const app = createApp({
     const overviewEditContext = ref(null);
     const activeGroupPath = ref('');
     const paramEnumOptions = reactive({});
+    function editPlanningValue(field) {
+      return editTaskData.value[field] ?? editTaskData.value.planning_defaults?.[field] ?? [];
+    }
+    function resetPlanningValue(field) {
+      delete editTaskData.value[field];
+    }
     const PARAM_KEY_LABELS = {
       battle_config: '战斗配置',
       battle_flow: '战斗招式',
@@ -930,6 +937,9 @@ const app = createApp({
       }
       const previous = slot.parent[slot.key];
       const next = { ...previous, ...payload };
+      for (const field of ['preferred_locations', 'after_tasks']) {
+        if (!Object.prototype.hasOwnProperty.call(payload, field)) delete next[field];
+      }
       if (next.on && !previous.on) {
         resetTaskActivationFields(next);
       } else if (!next.on) {
@@ -958,7 +968,10 @@ const app = createApp({
 
     async function saveTaskOrdering(overlay) {
       if (!ensureIdle('执行中不能修改任务排序规则，请先终止当前任务')) return false;
-      const overlaySnapshot = _deepClone(overlay);
+      const overlaySnapshot = _deepClone({
+        selection_policy: taskOrderingProjection.value.overlay?.selection_policy || 'nearest_ready',
+        ...overlay,
+      });
       pendingTaskOrderingOperations += 1;
       taskOrderingSaving.value = true;
       try {
@@ -1105,9 +1118,13 @@ const app = createApp({
       return { parent, key: parts[parts.length - 1] };
     }
 
-    async function persistTasks(tasks, successMessage = '任务已保存') {
+    async function persistTasks(tasks, successMessage = '任务已保存', expectedIdentity = null) {
       const tasksSnapshot = _deepClone(tasks);
       return queueTaskPersistenceOperation(async () => {
+        if (expectedIdentity && expectedIdentity !== taskEditingIdentity()) {
+          throw new Error('账号或角色已经切换，请在当前角色重新编辑');
+        }
+        if (!ensureIdle('执行中不能保存任务配置，请稍后重试')) return false;
         const { ok, data } = await API.request('POST', '/tasks', { tasks: tasksSnapshot });
         if (!ok) {
           ElementPlus.ElMessage.error('保存失败: ' + API.errorMessage(data, '未知错误'));
@@ -1121,6 +1138,47 @@ const app = createApp({
         fetchRuntimeSnapshot({ refreshConfigIfChanged: false });
         return true;
       });
+    }
+
+    function taskEditingIdentity() {
+      return JSON.stringify([currentAccount.value, activeCharacter.server, activeCharacter.name]);
+    }
+
+    async function saveTaskGraph(payload) {
+      const complete = typeof payload?.onComplete === 'function' ? payload.onComplete : () => {};
+      if (taskGraphSaving.value || !ensureIdle('执行中不能编辑计算图，请稍后重试')) {
+        complete(false, '当前正在执行或保存，请稍后重试');
+        return false;
+      }
+      const tasksDraft = _deepClone(configData.tasks || {});
+      const slot = _taskSlotByPath(tasksDraft, payload?.path);
+      const task = slot?.parent[slot.key];
+      if (!task || String(task.id || payload.path) !== payload.id) {
+        complete(false, '任务已变更或不再注册，请刷新后重试');
+        return false;
+      }
+      const wasEnabled = task.on;
+      for (const field of ['on', 'after_tasks', 'preferred_locations']) {
+        if (Object.prototype.hasOwnProperty.call(payload.changes || {}, field)) {
+          task[field] = JSON.parse(JSON.stringify(payload.changes[field]));
+        }
+      }
+      for (const field of payload.inheritFields || []) {
+        if (field === 'after_tasks' || field === 'preferred_locations') delete task[field];
+      }
+      if (task.on && !wasEnabled) resetTaskActivationFields(task);
+      else if (!task.on) task._due = false;
+      taskGraphSaving.value = true;
+      try {
+        const success = await persistTasks(tasksDraft, '计算图已保存并重新排列', taskEditingIdentity());
+        complete(success, success ? '' : '保存未成功，草稿已保留；请检查错误提示后重试');
+        return success;
+      } catch (error) {
+        const message = String(error.message || error);
+        ElementPlus.ElMessage.error('计算图保存失败: ' + message);
+        complete(false, message);
+        return false;
+      } finally { taskGraphSaving.value = false; }
     }
 
     async function saveTaskFromDialog() {
@@ -1528,6 +1586,7 @@ const app = createApp({
       configData, activeTab, newsRefreshKey, logs, characterName, filteredConfig, currentTasks,
       customTaskLoadErrors,
       rescheduleModeLabels, editTaskRescheduleMode, editTaskRescheduleHours,
+      editPlanningValue, resetPlanningValue,
       setEditTaskRescheduleMode, setEditTaskRescheduleHours,
       editTaskDebug, setEditTaskDebug,
       schedulerStatus, runtimeStatus, overviewData, activeGroupPath, pageTitle,
@@ -1539,8 +1598,8 @@ const app = createApp({
       gameProfessionsByCharacter, gameProfessionOptions, setGameProfession,
       dispatchQueue, allTasksSummary, isDispatchRunning,
       executionBusy,
-      taskOrderingSaving, taskOrderingProjection,
-      saveTaskOrdering, reorderTaskByDrop,
+      taskOrderingSaving, taskOrderingProjection, taskGraphSaving,
+      saveTaskOrdering, saveTaskGraph, reorderTaskByDrop,
       handleAccountCommand, switchAccount, addAccount, deleteAccount,
       openCharacterDialog, switchCharacter, addCharacter, deleteCharacter,
       addToDispatch, removeFromDispatch, reorderDispatchQueue, runAllDispatchTasks, stopDispatch, unifiedStop,
@@ -1549,7 +1608,7 @@ const app = createApp({
       currentTheme,
       setActiveGroup: path => { activeGroupPath.value = path; },
       refreshOverviewPanel,
-      startRun, runSingleTask, verifyAccount, resetScheduler,
+      startRun, runSingleTask, runTaskRange, verifyAccount, resetScheduler,
       openEditModal, openOverviewTaskEditor, enumParamIsMultiple, saveTaskFromDialog, saveTask,
       editTaskStatusLabel, editTaskStatusClass, getEditTaskStatusKey, handleEditTaskStatusClick,
       onEditModalClose, onEditModalClosed,

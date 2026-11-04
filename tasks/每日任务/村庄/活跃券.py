@@ -10,6 +10,7 @@ def buy_item(item_name: str):
         sleep(4)
 
 @register_task(
+    ensure_in="村庄",
     description="通过荣耀商店购置并使用活跃福利券。",
     reschedule="daily",
 )
@@ -40,4 +41,3 @@ def task():
     click(T("使用",color="红色"), if_exist=True, delay=0.5, timeout=2)
     sleep(3)
     ensure_in(LOC_ENV)
-

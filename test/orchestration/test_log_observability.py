@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import os
 import sys
 import tempfile
@@ -16,7 +17,7 @@ import unittest
 from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -67,10 +68,32 @@ class ActionHistoryTest(unittest.TestCase):
             self._log(recorder, x, 100)
 
         self.assertEqual(len(recorder.infos), 1, "1 秒内重复点击只应写一行 INFO")
+        self.assertEqual(len(recorder.debugs), 2, "已写 INFO 的动作不应再重复写 DEBUG")
         history = self.control.get_action_history()
         self.assertEqual(len(history), 3)
         self.assertIn("100, 100", history[0])
         self.assertIn("300, 100", history[2])
+
+    def test_single_device_click_emits_one_action_record(self):
+        with patch.object(self.control, "NemuIpcControl"), \
+             patch.object(self.control, "logger") as recorder:
+            controller = self.control.MixControl(Mock())
+            controller.click(100, 200)
+
+        controller.nemu_control.click.assert_called_once_with(100, 200)
+        controller.mumu.adb.click.assert_not_called()
+        recorder.info.assert_called_once()
+        recorder.debug.assert_not_called()
+        self.assertEqual(len(self.control.get_action_history()), 1)
+
+    def test_first_action_is_visible_even_when_monotonic_clock_is_near_zero(self):
+        self.clock["now"] = 0.1
+        recorder = _LogRecorder()
+
+        self._log(recorder, 100, 200)
+
+        self.assertEqual(len(recorder.infos), 1)
+        self.assertEqual(recorder.debugs, [])
 
     def test_suppressed_count_is_reported_on_the_next_log_line(self):
         """被节流掉多少条必须写在日志里，否则读日志会以为没执行。"""
@@ -361,6 +384,22 @@ class NavDiagnosticTest(unittest.TestCase):
 
 
 class WebUILogRotationTest(unittest.TestCase):
+    def test_browser_defaults_to_info_but_respects_explicit_levels(self):
+        from backend.webui import log_stream
+
+        original_level = log_stream.queue_handler.level
+        self.addCleanup(log_stream.queue_handler.setLevel, original_level)
+        for deploy_config, expected_level in (
+            ({}, logging.INFO),
+            ({"log_level": "debug"}, logging.DEBUG),
+            ({"log_level": "warning"}, logging.WARNING),
+            ({"log_level": "invalid"}, logging.INFO),
+        ):
+            with self.subTest(deploy=deploy_config), \
+                 patch.object(log_stream.cfg, "_config", {"deploy": deploy_config}):
+                log_stream.apply_log_level()
+                self.assertEqual(log_stream.queue_handler.level, expected_level)
+
     def test_webui_log_file_is_bounded(self):
         from logging.handlers import RotatingFileHandler
 

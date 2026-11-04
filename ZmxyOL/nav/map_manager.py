@@ -4,6 +4,7 @@
 """
 
 from typing import Dict, Optional, Callable, Any, List
+from math import inf
 import numpy as np
 from scipy.sparse.csgraph import floyd_warshall
 from AutoScriptor.logging.logger import logger
@@ -103,19 +104,22 @@ class MapManager:
         self.locs[loc.name] = loc
         for env in loc.envs:
             self.envs[env.name].add_loc(loc)
+        self.env_predecessors = None
 
     def register_path(self, from_loc: str, to_loc: str):
         """路径装饰器"""
         def decorator(path_func: Callable):
             self.paths[(from_loc, to_loc)] = path_func
+            self.env_predecessors = None
             return path_func
         return decorator
     
     def get_envs_path_matrix(self):
-        matrix = np.zeros((len(mm.envs), len(mm.envs)))
+        environment_names = list(self.envs)
+        matrix = np.zeros((len(self.envs), len(self.envs)))
         for way in self.paths.keys():
             if all(way[i] in self.envs.keys() for i in range(2)):
-                matrix[get_env_id(way[0]), get_env_id(way[1])] = 1
+                matrix[environment_names.index(way[0]), environment_names.index(way[1])] = 1
         return matrix
 
     def get_locs_path_matrix(self, env_str:str):
@@ -138,15 +142,37 @@ class MapManager:
         from ZmxyOL.nav.api import locate_region
         if self.env_predecessors is None: self.prepare_route()
         if not isinstance(envs, list): return envs
+        if not envs:
+            raise ValueError("导航目标不能为空")
         if not self.cur_env: locate_region()
-        cur_env_id = get_env_id(self.cur_env)
-        idx = 0
-        for i, env in enumerate(envs):
-            if env not in self.envs.keys(): env = mm.locs[env].env().name
-            env_id = get_env_id(env)
-            if self.env_matrix[cur_env_id, env_id] < self.env_matrix[cur_env_id, idx]:
-                idx = i
-        return envs[idx]
+        return min(envs, key=lambda target: self.estimate_route_cost(self.get_region(), target))
+
+    def estimate_route_cost(self, start: tuple, target: str) -> float:
+        """Directed navigation steps, including exit/entry legs. No recognition or movement."""
+        start_environment, start_location = start
+        if start_environment not in self.envs or start_location not in self.locs or target not in self.locs:
+            return inf
+        if start_location not in self.envs[start_environment].locs:
+            return inf
+        if self.env_predecessors is None:
+            self.prepare_route()
+        environment_names = list(self.envs)
+
+        def local_cost(environment: str, origin: str, destination: str) -> float:
+            location_names = list(self.envs[environment].locs)
+            return float(self.loc_matrix[environment][location_names.index(origin), location_names.index(destination)])
+
+        costs = []
+        for environment in self.locs[target].envs:
+            if environment.name == start_environment:
+                costs.append(local_cost(start_environment, start_location, target))
+            else:
+                costs.append(
+                    local_cost(start_environment, start_location, start_environment)
+                    + float(self.env_matrix[environment_names.index(start_environment), environment_names.index(environment.name)])
+                    + local_cost(environment.name, environment.name, target)
+                )
+        return min(costs, default=inf)
 
     def _find_route(self, predecessors, from_id, to_id) -> Optional[list[int]]:
         """
@@ -278,4 +304,4 @@ def path(from_locs: str|list[str], to_locs: str|list[str]):
                     mm.register_path(from_loc, to_loc)(path_func)
         
         return path_func
-    return decorator 
+    return decorator

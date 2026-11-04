@@ -1,7 +1,7 @@
 import copy
 import unittest
 from threading import Event, Thread
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
 from AutoScriptor.utils.app_config import cfg
 
@@ -124,6 +124,10 @@ class TestSchedulerExecutionGate(unittest.TestCase):
 
 class TestSchedulerRetryRounds(unittest.TestCase):
     def setUp(self):
+        # These lifecycle tests stub collection with symbolic paths, not registered tasks.
+        planning_patch = patch("orchestrator.scheduler.Scheduler._rank_ready_paths", side_effect=lambda paths, **kwargs: list(paths))
+        planning_patch.start()
+        self.addCleanup(planning_patch.stop)
         self._cfg_backup = copy.deepcopy(cfg._config)
         cfg._config = {
             "app": {
@@ -231,7 +235,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         selections = iter([("s1", "first", ["A"]), ("s2", "second", ["B"]), ("s2", "second", [])])
 
         def collect_due():
-            server, character, paths = next(selections)
+            server, character, paths = next(selections, (current["server"], current["name"], []))
             current.update(server=server, name=character)
             return paths
 
@@ -291,6 +295,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
 
     def test_collect_due_cross_character_uses_lightweight_switch(self):
         from orchestrator.scheduler import Scheduler
+        from tasks.task_register import task_registry
 
         current = {"server": "s1", "name": "first"}
 
@@ -307,12 +312,18 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         sched = Scheduler()
         sched.set_task_manager(tm)
         dispatch_order = [("s1", "first"), ("s2", "second")]
+        account_data = {"characters": {"s2": {"second": {
+            "tasks": {"A": {"on": True, "next_exec_time": 0}},
+        }}}}
 
         with (
+            patch.object(task_registry, "_tasks", {}),
+            patch.object(type(cfg), "_account_data", new_callable=PropertyMock, return_value=account_data),
             patch.object(cfg, "active_character", side_effect=lambda: dict(current)),
             patch.object(sched, "_iter_characters_schedule_order", return_value=iter(dispatch_order)),
             patch.object(sched, "_collect_due", side_effect=[[], ["A"]]),
         ):
+            task_registry.register("A", lambda: None, task_id="A")
             due = sched._collect_due_cross_character()
 
         self.assertEqual(due, ["A"])

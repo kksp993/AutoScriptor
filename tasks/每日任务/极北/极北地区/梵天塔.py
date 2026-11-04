@@ -52,6 +52,7 @@ def FTT_battle_one_round():
 
 
 @register_task(
+    ensure_in="极北#-1",
     description="领取梵天塔每日 5 张度牒并扫荡梵天塔。",
     reschedule="daily",
 )

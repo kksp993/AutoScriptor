@@ -4,6 +4,7 @@ from AutoScriptor import *
 
 
 @register_task(
+    ensure_in="村庄",
     description="购买灵力滴液和灵力真酿",
     reschedule="daily",
 )

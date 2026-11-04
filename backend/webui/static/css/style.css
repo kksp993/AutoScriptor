@@ -595,16 +595,13 @@ html.light .app-body {
 .editor-menubar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 2px;
   flex: 1;
   min-width: 0;
 }
-.editor-menu-wrap {
-  position: relative;
-  width: auto;
-  flex: 0 0 auto;
-}
 .editor-menubar-item {
+  flex: 0 0 auto;
   padding: 4px 11px;
   border: 0;
   border-radius: 5px;
@@ -644,18 +641,25 @@ html.light .app-body {
   color: #15803d;
 }
 .editor-menu-panel {
-  position: absolute;
-  z-index: 30;
-  min-width: 160px;
+  position: fixed;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: min(160px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  overscroll-behavior: contain;
   padding: 5px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
 }
-.editor-menu-panel--down {
-  left: 0;
-  top: calc(100% + 4px);
+.editor-menu-item span {
+  overflow-wrap: anywhere;
+}
+.editor-menu-arrow {
+  margin-left: auto;
 }
 .editor-menu-item i:first-child {
   width: 14px;
@@ -670,14 +674,6 @@ html.light .app-body {
 .editor-menu-item.is-disabled i,
 .editor-menu-item:disabled i {
   color: #cbd5e1;
-}
-.editor-menu-subwrap {
-  position: relative;
-}
-.editor-menu-subpanel {
-  position: absolute;
-  top: 0;
-  left: calc(100% + 6px);
 }
 .editor-recorder-quick-actions {
   display: flex;

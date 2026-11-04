@@ -3,6 +3,7 @@ from AutoScriptor import *
 
 
 @register_task(
+    ensure_in="村庄",
     description="执行荣耀之战每周流程。",
     reschedule="weekly",
 )

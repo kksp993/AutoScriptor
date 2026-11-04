@@ -30,6 +30,7 @@ from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.logging.logger import logger
 from AutoScriptor.core.box import b2p
 from AutoScriptor.utils.cancel import TaskCancelled, check_cancel_raise, suppress_cancel_checks
+from AutoScriptor.utils.text import postnum, posttext, prenum, pretext
 from AutoScriptor.core.targets import B
 from backend.webui.api_response import api_error, api_ok
 
@@ -41,6 +42,13 @@ _last_screenshot: np.ndarray | None = None
 _last_template: np.ndarray | None = None
 
 _LOCATE_SCALES = [0.5, 0.75, 1.0]
+_EDITOR_TEXT_PROCESSORS = {
+    "strip": str.strip,
+    "pretext": pretext,
+    "posttext": posttext,
+    "prenum": prenum,
+    "postnum": postnum,
+}
 _UI_MAP_COLUMNS = ["key", "text", "left", "top", "width", "height", "img"]
 _EDITOR_IMPORT_ALLOWLIST = (
     "AutoScriptor",
@@ -532,22 +540,68 @@ def _decorator_ref_is_register_task(expr: ast.expr) -> bool:
     return False
 
 
-def _register_task_decorator_info(tree: ast.AST) -> bool:
-    """Whether the snippet already registers a task itself.
+def _normalize_editor_task_start(value: object) -> str | list[str]:
+    """Validate save metadata against the same registry that supplies the editor menu."""
+    location_names = [value] if isinstance(value, str) else value
+    if not isinstance(location_names, (list, tuple)) or not location_names or any(
+        not isinstance(location_name, str) or not location_name.strip()
+        for location_name in location_names
+    ):
+        raise ValueError("ensure_in 必填：请选择已注册的起点名称（字符串或非空列表/元组）")
+    normalized_names = [location_name.strip() for location_name in location_names]
+    registered_names = set()
+    for environment in _build_editor_navigation_options():
+        registered_names.add(environment["name"])
+        registered_names.update(environment["locations"])
+    unknown_names = [location_name for location_name in normalized_names if location_name not in registered_names]
+    if unknown_names:
+        raise ValueError(f"ensure_in 包含未注册的导航名称: {', '.join(unknown_names)}")
+    if isinstance(value, str):
+        return normalized_names[0]
+    # The runtime navigation API accepts lists, not tuples, for alternative destinations.
+    return list(dict.fromkeys(normalized_names))
 
-    路径不写在装饰器里：自定义任务的显示路径由文件在 ``custom_task/`` 下的位置决定，
-    所以这里只需要判断「是不是完整任务文件」，不再检查 ``path_cn``。
-    """
+
+def _register_task_decorator_info(tree: ast.AST) -> bool:
+    """Check every authored task declaration before saving, without executing the file."""
+    registration_aliases = {
+        imported_name.asname
+        for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
+        for imported_name in node.names
+        if imported_name.name == "register_task" and imported_name.asname
+    }
+    has_registered_task = False
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         for decorator in node.decorator_list:
-            if isinstance(decorator, ast.Call):
-                if _decorator_ref_is_register_task(decorator.func):
-                    return True
-            elif _decorator_ref_is_register_task(decorator):
-                return True
-    return False
+            reference = decorator.func if isinstance(decorator, ast.Call) else decorator
+            is_registration_alias = isinstance(reference, ast.Name) and reference.id in registration_aliases
+            if not is_registration_alias and not _decorator_ref_is_register_task(reference):
+                continue
+            has_registered_task = True
+            arguments = (
+                {argument.arg: argument.value for argument in decorator.keywords}
+                if isinstance(decorator, ast.Call) else {}
+            )
+            if "ensure_in" not in arguments:
+                raise ValueError(
+                    f"任务 {node.name} 的 @register_task 缺少必填 ensure_in；"
+                    "请声明起点，现场/外部 App 调试例外需显式写 debug=True, ensure_in=None"
+                )
+            try:
+                start = ast.literal_eval(arguments["ensure_in"])
+            except (ValueError, TypeError) as exception:
+                raise ValueError(
+                    f"任务 {node.name} 的 ensure_in 无法在保存前验证；请直接填写导航名称字符串或非空列表/元组"
+                ) from exception
+            if start is None:
+                debug = arguments.get("debug")
+                if not isinstance(debug, ast.Constant) or debug.value is not True:
+                    raise ValueError(f"任务 {node.name} 仅在显式 debug=True 时允许 ensure_in=None（现场/外部 App 调试）")
+            else:
+                _normalize_editor_task_start(start)
+    return has_registered_task
 
 
 def _editor_enum_class_source(class_name: str, enum_options: list[str]) -> str:
@@ -603,10 +657,13 @@ def _build_wrapped_custom_task_source(name: str, code: str, metadata: dict | Non
     description = str(metadata.get("description") or "").strip() or "从编辑器保存的自定义脚本"
     task_doc = str(metadata.get("task_doc") or metadata.get("task_docs") or "").strip()
     params = _normalize_editor_param_specs(metadata.get("params"))
+    if any(param["name"] == "ensure_in" for param in params):
+        raise ValueError("参数名称不能是 ensure_in，否则会覆盖任务开头的导航函数")
     final_task_doc = _editor_task_doc_with_param_descriptions(task_doc, params)
+    start = _normalize_editor_task_start(metadata.get("ensure_in"))
 
     signature, enum_sources = _editor_task_signature(params)
-    body = textwrap.indent(code.rstrip() or "pass", "    ")
+    body = f"    ensure_in({start!r})\n" + textwrap.indent(code.rstrip() or "pass", "    ")
     imports = [
         "from AutoScriptor import *",
         "from ZmxyOL.battle import h",
@@ -617,7 +674,7 @@ def _build_wrapped_custom_task_source(name: str, code: str, metadata: dict | Non
     if enum_sources:
         imports.insert(0, "import enum")
     # 装饰器里没有路径：自定义任务的显示路径由文件在 custom_task/ 下的位置决定。
-    decorator = "@register_task(\n" f"    description={description!r},\n" ")"
+    decorator = "@register_task(\n" f"    ensure_in={start!r},\n" f"    description={description!r},\n" ")"
     # 长说明回到函数 docstring，也就是它本该在的地方。
     docstring = ""
     if final_task_doc:
@@ -630,16 +687,17 @@ def _build_wrapped_custom_task_source(name: str, code: str, metadata: dict | Non
 
 
 def _prepare_editor_custom_task_source(name: str, code: str, metadata: dict | None = None) -> tuple[str, bool, str | None]:
-    code = (code or "").strip()
-    if not code:
+    if not isinstance(code, str):
+        raise ValueError("代码必须是字符串")
+    if not code.strip():
         raise ValueError("代码为空")
     if len(code) > _MAX_SNIPPET_LEN:
         raise ValueError(f"代码过长（上限 {_MAX_SNIPPET_LEN} 字符）")
     tree = ast.parse(code)
     if _register_task_decorator_info(tree):
         # 完整任务文件自己负责声明内容；路径仍然由它被写到哪里决定。
-        return code.rstrip() + "\n", False, None
-    source, task_path = _build_wrapped_custom_task_source(name, code, metadata)
+        return code, False, None
+    source, task_path = _build_wrapped_custom_task_source(name, code.strip(), metadata)
     ast.parse(source)
     return source, True, task_path
 
@@ -1353,6 +1411,7 @@ def _run_editor_snippet(
         "T": T,
         "I": I,
         "click": api_mod.click,
+        "seq_click": api_mod.seq_click,
         "swipe": api_mod.swipe,
         "input": api_mod.input,
         "locate": api_mod.locate,
@@ -1361,6 +1420,10 @@ def _run_editor_snippet(
         "wait_for_appear": api_mod.wait_for_appear,
         "wait_for_disappear": api_mod.wait_for_disappear,
         "extract_info": api_mod.extract_info,
+        "pretext": pretext,
+        "posttext": posttext,
+        "prenum": prenum,
+        "postnum": postnum,
         "sleep": getattr(api_mod, "sleep", time_mod.sleep),
     }
     ns.update(_editor_nav_namespace())
@@ -1518,7 +1581,14 @@ async def editor_save_custom_task(request: Request):
         raw_filename = str(data.get("filename") or data.get("name") or "editor_custom_task.py")
         filename = _normalize_editor_custom_task_filename(raw_filename)
         raw_name = str(data.get("name") or os.path.splitext(filename)[0])
-        source, wrapped, task_path = _prepare_editor_custom_task_source(raw_name, code, data)
+        metadata = data.get("metadata", data)
+        if not isinstance(metadata, dict):
+            return api_error(400, "metadata 必须是对象", code="invalid_payload")
+        source, wrapped, task_path = _prepare_editor_custom_task_source(raw_name, code, metadata)
+        script_path = task_path or _normalize_editor_task_path(
+            metadata.get("task_path"), f"自定义任务/{os.path.splitext(filename)[0]}",
+        )
+        compile(source, filename, "exec")
 
         from ZmxyOL.accounts import get_custom_task_dir
 
@@ -1527,7 +1597,6 @@ async def editor_save_custom_task(request: Request):
         root_resolved = root.resolve()
         # 显示路径决定文件位置：自定义任务/<目录...>/<名字>.py。
         # 位置就是身份，所以「脚本名称」既是列表里的名字，也是它落在哪。
-        script_path = task_path or f"自定义任务/{os.path.splitext(filename)[0]}"
         path_parts = [part for part in script_path.split("/") if part][1:]
         if not path_parts:
             return api_error(400, "脚本名称不能为空", code="invalid_filename")
@@ -1538,7 +1607,6 @@ async def editor_save_custom_task(request: Request):
         target_path = (target_directory / f"{path_parts[-1]}.py").resolve()
         if target_path.parent != target_directory:
             return api_error(400, "脚本文件名非法", code="invalid_filename")
-        compile(source, str(target_path), "exec")
 
         tmp_path = target_path.with_name(f".{target_path.name}.tmp")
         with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
@@ -1620,13 +1688,11 @@ async def editor_preview_extract(request: Request):
         data = await request.json()
         left, top = int(data["left"]), int(data["top"])
         width, height = int(data["width"]), int(data["height"])
+        processor_name = data.get("post_process", "strip")
+        if not isinstance(processor_name, str) or processor_name not in _EDITOR_TEXT_PROCESSORS:
+            return api_error(400, "不支持的文字提取预设", code="invalid_text_processor")
         from AutoScriptor.core.api import extract_info
         from AutoScriptor.core.targets import B
-
-        def _pp(s):
-            if isinstance(s, str):
-                return s.strip()
-            return s
 
         frame = _last_screenshot
         if frame is None:
@@ -1637,7 +1703,7 @@ async def editor_preview_extract(request: Request):
         with suppress_cancel_checks():
             info = extract_info(
                 B(left, top, width, height),
-                post_process=_pp,
+                post_process=_EDITOR_TEXT_PROCESSORS[processor_name],
                 ensure_not_empty=True,
                 screenshot_frame=frame,
             )

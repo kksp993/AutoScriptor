@@ -30,7 +30,7 @@ webui.bat / scripts\run.bat webui
 | 运行产物 | `logs/` | 日志、错误归档、截图、礼包码缓存 |
 | 维护脚本 | `scripts/` | 安装、运行、更新、构建 import wheel 和少量当前主线需要的维护脚本 |
 
-编排层内部再分七个模块，各回答一个问题，依赖单向：
+编排层内部模块各回答一个问题；`planning.py` 独立处理快照上的依赖与成本选择：
 
 | 模块 | 回答的问题 |
 | --- | --- |
@@ -81,8 +81,11 @@ backend -> orchestrator -> tasks -> ZmxyOL -> AutoScriptor
 - `cfg["tasks"]` 是注册集的镜像：注册按 id 写条目，加载末尾 prune 掉没有任务认领的条目（`catalog.prune_stale_tasks()`）。UI 树由 `TaskTreeService.build_task_tree()` 按显示路径拼出、叶子带 `id`，保存时 `flatten_payload_tasks()` 拼回平表；**存储从不依赖树的形状**。
 - 保存配置前必须剥离 `fn`、`order`、`param_meta`、`param_keys`、`_due`、`progress_display`、`id` 等运行时字段；`param_meta` 由 spec 现算，`id` 只活在线上的 payload 里，由键本身表达。
 - 调度器收集到期任务时必须通过 `task_registry.has_task(path)` 过滤未注册残留条目。
-- 内置任务的默认顺序来自源码路径排序；用户显示和执行顺序由全局 `task_ordering` 投影决定，不在运行时反写源码。
+- 内置任务的默认顺序来自源码路径排序；全局 `task_ordering` 决定显示/手动执行和自动决胜顺序，不在运行时反写源码。
 - 有效任务顺序通过确定性总排序计算：先把存储里的 id 键 overlay 换成显示路径，再递归展开用户拖拽保存的 `items` 分组顺序，最后回退到当前注册顺序和路径字典序。旧版 `hard_edges`、`layout`、`group_order` 会被规范化忽略，不再参与显示或执行顺序。
+- 自动选择由纯模块 `orchestrator/planning.py` 负责：现有到期集合 -> 前置就绪 -> 就近/列表决胜。就近模式仅同距离内优先有前序且已就绪的任务，再按列表与 ID；列表模式不加该优先级。任务 `after_tasks` 和 `preferred_locations` 以注册默认 + 角色覆盖解析，前者引用稳定 ID；不增加完成有效期，不修改时间逻辑。地图成本查询不操作设备，位置识别只在执行闸门内进行，歧义返回未知。
+- 任务注册必填 `ensure_in` 真实入口（少量保留现场/外部 App 的 debug 任务显式为 `None`）；未另行声明的 `preferred_locations` 默认取入口，用户偏好不覆盖源码入口。入口经注册表投影，不落账号配置，也不自动提前导航。
+- 任务页默认分层管理，可切到顺序编排或 `TaskPlanningGraph`；三个视图共用顶部搜索。计算图先以直接依赖构建横向思维导图主干，传递冗余边只在展示中省略，完整约束不变。独立任务按主干 `ensure_in` 到自身入口的最近有向距离附到牌后，可跨展示层，不继承依赖；无可达主干时仅按共同零距离合并。紧凑卡片只含任务名、状态点和地点，不设虚拟登录或叠牌开关。搜索固定展开并定位具体卡片；布局/展开/缩放不落盘。关系与启停编辑复用保存 FIFO 和全图校验；静态距离由 `/api/task-planning/locations` 按需读取，不使用可选偏好冒充起点，轮询不操作设备。
 
 ## 任务重载边界
 
@@ -139,7 +142,7 @@ backend -> orchestrator -> tasks -> ZmxyOL -> AutoScriptor
 - 安装器、wheelhouse、发布包验收流程。两个 import wheel 是开发产物，见
   [两个可安装 wheel](operations/library-packages.md)。
 - 旧 CLI 菜单。
-- Canvas/Drawflow 脚本画布。
+- Canvas/Drawflow 脚本画布（任务页的依赖计算图是独立的只读布局投影与任务配置编辑，不是脚本画布）。
 - Socket.IO 日志通道。
 - Nuitka/冻结运行时兜底。
 - VLM 实验链路。

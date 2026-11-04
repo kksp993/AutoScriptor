@@ -54,6 +54,38 @@ def check_env_idx(env_list: list[str]) -> int:
     return _check_idx(lambda name: mm.envs.get(name).identifier, env_list)
 
 
+def probe_region() -> tuple[str | None, str | None]:
+    """识别一次当前位置；不启动 App、不清弹窗、不导航，也不修改导航缓存。"""
+    names = [name for name, location in mm.locs.items() if location.identifier is not None]
+    identifiers, groups = _flatten_identifiers([mm.locs[name].identifier for name in names])
+    if not identifiers:
+        return None, None
+    # 列表模式保留所有识别结果，避免图片命中后跳过文字地点。
+    matches = locate(identifiers, assure_stable=False, is_simplify=False) or []
+    visible = set()
+    offset = 0
+    for name, group in zip(names, groups):
+        if any(matches[offset:offset + len(group)]):
+            visible.add(name)
+        offset += len(group)
+    environments = [name for name in mm.envs if name in visible]
+    visible_locations = [name for name in names if name in visible and name not in mm.envs]
+    if len(visible_locations) > 1:
+        return None, None
+    if visible_locations:
+        location_name = visible_locations[0]
+        owners = {environment.name for environment in mm.locs[location_name].envs}
+        matching_environments = [environment for environment in environments if environment in owners]
+        if len(matching_environments) == 1:
+            return matching_environments[0], location_name
+        if not environments and len(owners) == 1:
+            return next(iter(owners)), location_name
+        return None, None
+    if len(environments) == 1:
+        return environments[0], environments[0]
+    return None, None
+
+
 def locate_region(cnt = 0, check_only = False) -> tuple[str, str]:
     if cnt == 0:
         _core_api.mixctrl.app.launch(cfg["app"]["app_to_start"])
@@ -123,7 +155,7 @@ _SYSTEM_DIALOG_BUTTON_GAP = 35
 _SYSTEM_DIALOG_BUTTON_SIZE = (80, 45)
 
 
-def dismiss_system_dialogs() -> bool:
+def dismiss_system_dialogs(*, check_only: bool = False) -> bool:
     """点掉会吞掉点击的系统模态框，返回是否点掉了一个。
 
     MuMu 在应用启动失败时弹的「App 启动失败 / 启动超时」是**模态**的：不点掉它，
@@ -132,6 +164,7 @@ def dismiss_system_dialogs() -> bool:
 
     只搜屏幕中央区域：这类框由模拟器居中弹出，而全帧 OCR 每次要多花好几秒，
     这段代码跑在「已经卡住」的恢复路径上，不值得为边缘位置付这个代价。
+    check_only=True 只确认弹窗是否存在，用于耗尽关闭次数后的最终检查。
     """
     frame_width, frame_height = getFrameSize()
     center_region = Box(
@@ -154,6 +187,8 @@ def dismiss_system_dialogs() -> bool:
     ]
     if not hits:
         return False
+    if check_only:
+        return True
 
     # 取最靠下的那一行：它离按钮最近，标题行点不到按钮。
     _, anchor_text, anchor_box = max(hits, key=lambda hit: hit[0])
@@ -170,47 +205,66 @@ def dismiss_system_dialogs() -> bool:
 
 
 def try_close_via_x():
-    """
-    尝试关闭各种弹窗和等待加载完成
-    """
+    """动态定位关闭目标，最多尝试 20 次；清理失败交给任务异常恢复。"""
+    max_attempts = 20
+    search_region = Box(0, 0, *getFrameSize())
 
-    # 关闭目标列表
+    # None 表示点击本轮识别到的 Box，避免重新定位又选回背景里的第一个 X。
     close_targets = [
-        (I("极北之地-取消"), I("极北之地-取消")),
+        (I("极北之地-取消"), None),
         (T("我的队伍",box=Box(434,15,439,119)), B(1060,30,30,30)),
-        (I("x"), I("x")),
-        (I("x-in"), B(1061,178,39,47)),
+        (I("x", box=search_region), None),
+        (I("x-in", box=search_region), None),
         (I("菜单-宠物"), B(10,10)),
-        # (T("回家", box=Box(29,656,77,54).margin()), T("回家", box=Box(29,656,77,54).margin())),
-        (T("确认"), T("确认")),
-        (T("返回地图"), T("返回地图")),
-        (T("返回大厅"), T("返回大厅")),
+        (T("确认"), None),
+        (T("返回地图"), None),
+        (T("返回大厅"), None),
         (T("副本奖励"), B(1061,172,47,50)),
     ]
-    
-    # 等待消失目标列表
-    wait_for_disappear_targets = [
+    loading_targets = (
         I("加载中"),
         I("极北-加载中"),
         I("进入游戏中")
-    ]
-    
-    click(B(0,0,))
-    found = True
-    while found:
-        found = False
-        # 模态框优先：它挡着底下所有东西，不先点掉，后面的关闭目标一个都点不动。
-        if dismiss_system_dialogs():
-            found = True
-        tgts = tuple(target for target, _ in close_targets)
-        idx = ui_idx(tgts)
-        if idx >= 0:
-            click(close_targets[idx][1], if_exist=True)
-            found = True
-            sleep(0.5)
-        for target in wait_for_disappear_targets:
-            while(ui_T(target)): 
-                sleep(0.5)
-                found = True
-    
-    return True 
+    )
+    attempted_boxes: list[Box] = []
+    _core_api.check_cancel_raise()
+    click(B(0, 0))
+    # 最后一轮只检查，不再点击，允许第 20 次恰好关闭成功。
+    for attempt in range(max_attempts + 1):
+        _core_api.check_cancel_raise()
+        exhausted = attempt == max_attempts
+        if dismiss_system_dialogs(check_only=exhausted):
+            if exhausted:
+                raise RuntimeError(f"关闭弹窗失败：已尝试 {max_attempts} 次，系统弹窗仍存在")
+            continue
+        if ui_T(loading_targets):
+            wait_for_disappear(loading_targets, timeout=30)
+
+        matches = locate(
+            tuple(target for target, _ in close_targets),
+            assure_stable=False, is_simplify=False,
+        )
+        candidates = [
+            (target, box, action)
+            for (target, action), boxes in zip(close_targets, matches or [])
+            for box in (boxes or [])
+        ]
+        if not candidates:
+            return True
+
+        # 背景按钮可能被前景弹窗挡住；优先尝试尚未点过的位置，不永久屏蔽旧按钮。
+        target, selected_box, action = min(
+            candidates,
+            key=lambda candidate: sum(
+                candidate[1].overlaps_with(previous_box)
+                for previous_box in attempted_boxes
+            ),
+        )
+        if exhausted:
+            raise RuntimeError(
+                f"关闭弹窗失败：已尝试 {max_attempts} 次，仍检测到 {target}，位置 {selected_box}"
+            )
+        logger.info("关闭弹窗 %d/%d：%s，位置 %s", attempt + 1, max_attempts, target, selected_box)
+        click(B(selected_box) if action is None else action)
+        attempted_boxes.append(selected_box)
+        sleep(0.5)

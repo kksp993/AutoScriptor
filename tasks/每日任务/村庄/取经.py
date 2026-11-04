@@ -2,6 +2,7 @@ from ZmxyOL import *
 from AutoScriptor import *
 from AutoScriptor.logging.logger import logger
 @register_task(
+    ensure_in="村庄",
     description="完成每日取经流程。",
     deprecated=True,
     reschedule="daily",
@@ -27,5 +28,4 @@ def daily_qujing_task():
     wait_for_appear(I("挑战-取经"))
     sleep(0.5)
     click(B(1200,30,30,30))
-
 

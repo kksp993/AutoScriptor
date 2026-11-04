@@ -6,6 +6,7 @@ from ZmxyOL import *
 
 
 @register_task(
+    ensure_in="村庄",
     description="输入兑换码并记录兑换返回提示。",
     debug=True,
 )

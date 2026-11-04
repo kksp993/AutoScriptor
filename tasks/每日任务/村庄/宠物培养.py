@@ -3,6 +3,7 @@ from AutoScriptor import *
 from AutoScriptor.logging.logger import logger
 
 @register_task(
+    ensure_in=["村庄", "仙盟", "极北村庄"],
     description="执行宠物培养相关日常操作。",
     deprecated=True,
     reschedule="daily",

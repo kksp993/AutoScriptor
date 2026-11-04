@@ -61,11 +61,12 @@ from AutoScriptor import *
 | 类型　　　　　| 名称　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
 | ---------------| ----------------------------------------------------------------------------|
 | 目标　　　　　| `B`、`I`、`T`、`Box`、`Target`、`ui`　　　　　　　　　　　　　　　　　　　 |
-| 操作　　　　　| `click`、`click_all`、`swipe`、`swipe_precise`、`input`、`key_event`、`sleep` |
+| 操作　　　　　| `click`、`seq_click`、`click_all`、`swipe`、`swipe_precise`、`input`、`key_event`、`sleep` |
 | 实时检测/多指 | `screenshot_region`、`finger_down`、`finger_move`、`finger_up`、`multi_finger_down`、`release_all_fingers` |
 | 录制回放　　　| `replay`　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　|
 | 定位/区域识别 | `locate`、`match`、`ui_T`、`ui_F`、`wait_for_appear`、`wait_for_disappear` |
 | OCR/提取颜色　| `extract_info`、`get_colors`、`coloris`　　　　　　　　　　　　　　　　　　|
+| 文字后处理 | `pretext`、`posttext`、`prenum`、`postnum` |
 | 后台　　　　　| `bg`、`BG_SIGNALS`　　　　　　　　　　　　　　　　　　　　　　　　　　　　 |
 | 配置/日志　　 | `cfg`、`logger`、`log_flush`　　　　　　　　　　　　　　　　　　　　　　　|
 | 初始化/App　　| `init`、`launch_app`、`close_app`、`go_home`　　　　　　　　　　　　　　　|
@@ -114,6 +115,8 @@ box = B(100, 200, 120, 60)              # 直接坐标区域，参数为 x, y, w
 
 混合 `I()` 与 `T()` 的 tuple 会优先尝试图片，图片命中时跳过 OCR，降低弹窗类 OR 查询延迟。
 
+单个无颜色条件的 `B(...)` 是固定坐标，不需要识别或稳定检测；`locate(B(...))` 直接返回其 Box，`ui_T(B(...))` 为 `True`，`ui_F(B(...))` 为 `False`。所以 `until=lambda: ui_T(B(...))` 首次检查即满足，序列的下一项为纯 B 时也可直接衔接；要确认页面变化必须用 T/I 或其他可观察条件。带 `color=` 的 B 仍须检测颜色。
+
 ### 区域识别
 
 `match()` 是定位里的结构化区域识别入口，沿用同一套 `Target` / `tuple` / `list` 语义：
@@ -141,6 +144,7 @@ if hit:
 click(T("确定"), timeout=10)
 click((T("知道了"), T("取消")), if_exist=True)
 click(B(100, 200, 40, 40), repeat=2, interval=0.2)
+seq_click([T("入口"), T("领取"), T("确定")], until=lambda: ui_T(T("完成")))
 click_all(T("领取", box=Box(900, 400, 120, 220)), if_exist=True)
 swipe(B(600, 600, 1, 1), B(600, 200, 1, 1), duration_s=1)
 swipe_precise(B(600, 600, 1, 1), B(600, 200, 1, 1), duration_s=1)
@@ -156,8 +160,11 @@ sleep(1)
 - `click_all(target)` 固定当前一帧内单个目标的全部命中框，按从上到下、同一行从左到右各点一次并返回点击数量；`click(..., repeat=N)` 仍是重复点击同一个命中框。
 - `swipe()` 保留随机偏移和 Nemu IPC 的拟人化轨迹；需要稳定起止坐标时使用 `swipe_precise()`，它取目标框中心并通过 Nemu IPC 发送固定直线和指定时长的触摸轨迹。
 - `click(..., until=callable)` 会循环点击直到条件满足或超时；未传 `interval` 时循环间隔默认 0.5 秒，普通 `click()` 默认仍为 0 秒。
+- `seq_click(target=[...])` 的参数名和位置沿用 `click`，`target` 为有序列表，`timeout` 改为默认 **每项 10 秒**；空列表返回 `True`，单项行为等价于 `click`（默认超时不同）。每项点击直到下一项出现，用户传入的 `until` 仅作用于末项；`timeout=5` 表示每项最多 5 秒，序列不共享总时限，超时后不会再补发一次重试点击。中途失败或取消立即终止，不跳过断链。`if_exist=True` 时首项缺失返回 `False`，但下一项始终未出现仍属衔接超时。
+- 序列内部复用衔接检测得到的 Box，下一项首次点击不再重复定位；`assure_stable=True` 时检测两次，一帧有目标而另一帧消失不算稳定。重试当前项会重新定位。`delay/repeat/interval/offset/resize/long_click_duration_s/save_screenshot` 均保留 `click` 语义，保存点击截图并不会被省略。
 - `offset` / `resize` 和 `Box + {"offset": ..., "resize": ...}` 使用同一坐标语义。
 - `click()`、`locate()` 超时较长时会保存失败截图到调试截图目录。
+- 定位请求只写 DEBUG；普通控制台默认 INFO，输入动作按同一模式和动作类型每秒汇总，单次动作不重复写 DEBUG/INFO。这不影响点击次数或等待语义；逐次诊断见 [日志分层与动作历史](../operations/log-archiver.md#日志分层)。
 
 ### 实时检测与多指输入
 
@@ -219,12 +226,23 @@ executed = replay(EVENTS, speed=1.5, recording_size=(1080, 1920))
 
 ```python
 text_value = extract_info(B(100, 100, 80, 30), mode="text")
-digits = extract_info(B(100, 100, 80, 30), mode="digital_only")
+digits = extract_info(B(100, 100, 80, 30), post_process=prenum, mode="text")
 image_keys = extract_info(box_grid, mode="img")
 values = extract_info(box_grid, mode="both")
 ```
 
-`extract_info` 的 `mode` 只接受 `digital_only`、`text`、`img`、`both`：分别表示仅数字、仅 OCR 文本、仅匹配 `ui_map` 已登记图片并返回条目 key，以及逐格优先图片、未命中时再 OCR。单个 Box、Box 列表和二维 Box 网格会保持对应的返回形状；未识别的格子保留 `None` 或空字符串。`post_process` 解析失败会记录为本次识别失败并继续重试，重试耗尽后返回 `None`，不会把原始 OCR 文本当作处理后结果返回。`extract_info(..., screenshot_frame=frame)` 会固定使用同一帧，适合在线截图测试、Editor 导入图和批量识别，避免 UI 漂移。OCR 层应保留识别语义，业务层再决定是否转成数量 `0` 或 `1`。
+`extract_info` 的 `mode` 只接受 `text`、`img`、`both`：分别表示 OCR 文本、仅匹配 `ui_map` 已登记图片并返回条目 key，以及逐格优先图片、未命中时再 OCR。数字通过 `post_process` 转换，不增加识别模式。单个 Box、Box 列表和二维 Box 网格会保持对应的返回形状；未识别的格子保留 `None` 或空字符串。`post_process` 解析失败会记录为本次识别失败并继续重试，重试耗尽后返回 `None`，不会把原始 OCR 文本当作处理后结果返回。`extract_info(..., screenshot_frame=frame)` 会固定使用同一帧，适合在线截图测试、Editor 导入图和批量识别，避免 UI 漂移。OCR 层应保留识别语义，业务层再决定是否转成数量 `0` 或 `1`。
+
+预设后处理函数来自 `AutoScriptor.utils.text`，由 `from AutoScriptor import *` 导出，也已内置于 Editor 即时执行的全局命名空间（函数体和 lambda 内同样可用）。它们处理单个 OCR 字符串，不自动遍历网格：
+
+```python
+pretext(" 体力12 ")    # "体力"，正则 ^\D+
+posttext(" 12次 ")     # "次"，正则 \D+$
+prenum(" 007/120 ")    # 7，正则 ^\d+ 后转 int
+postnum(" 007/120 ")   # 120，正则 \d+$ 后转 int
+```
+
+先对输入 `strip()`，匹配到的文本也去除首尾空白；文本指连续非数字字符（包含标点），数字指连续无符号整数，不解析负号、小数、千位分隔符或单位倍率。匹配只看指定首尾，不在中间搜索；无匹配/空白抛 `ValueError`，非字符串抛 `TypeError`，交给 `extract_info` 重试，耗尽返回 `None`，合法的 `0` 则直接成功。
 
 OCR 短时缓存按完整图像内容摘要区分帧，不能用稀疏像素采样代替，否则相同背景上的不同文字可能误命中旧结果。`click()` 返回只表示输入事件已经发送，不表示游戏已经渲染下一帧；点击后立即读取会遇到旧画面时，应等待名称、模板或目标区域等可观察状态发生变化，再识别变化后的帧，而不是依赖 `ensure_not_empty` 接受仍非空的旧值。
 
@@ -236,6 +254,18 @@ is_green = coloris(B(100, 100, 80, 30), "绿色")
 ```
 
 `coloris(targets, color, timeout=0, offset=(0, 0), resize=(-1, -1))` 用于直接判断颜色是否匹配：单个目标判断自身颜色，tuple 表示任一目标颜色匹配即可，list 表示全部目标都要匹配。需要读取具体颜色列表时仍使用 `get_colors()`。
+
+## 游戏导航弹窗清理
+
+`ZmxyOL.try_close_via_x()` 在 `locate_region()` 无法确认场景时清理遮挡。两种关闭图案
+`x` / `x-in` 均在当前帧全屏定位，不固定关闭坐标。保留全部候选，优先尝试点击次数较少的
+位置；每次只点击一个本轮识别到的 Box，等待后重新识别，避免背景 X 挡住前景 X 的处理机会。
+已尝试的位置不永久屏蔽，前景关闭后仍可关闭背景页面。
+
+一次调用最多进行 **20 次关闭尝试**（系统弹窗也计入，不含原有起始角落点击）。第 20 次后
+只检查结果：已清理则返回 `True`，仍有目标则抛带次数和目标位置的 `RuntimeError`，交给任务
+错误归档和恢复。加载标识使用 `wait_for_disappear(..., timeout=30)`，不再无限等待。
+`dismiss_system_dialogs(check_only=True)` 只检测系统模态框，不点击，用于最终检查。
 
 ## 配置与任务状态
 

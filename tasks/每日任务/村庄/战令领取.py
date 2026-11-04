@@ -4,6 +4,7 @@ from AutoScriptor import *
 @register_task(
     description="每隔一段时间领取可完成的战令任务奖励。",
     reschedule=10,
+    ensure_in="村庄",
 )
 def task():
     """每隔一段时间完成战令任务（仅领取不帮助完成）。"""

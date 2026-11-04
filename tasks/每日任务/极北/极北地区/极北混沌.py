@@ -6,6 +6,7 @@ from AutoScriptor import *
 from AutoScriptor.logging.logger import logger
 
 @register_task(
+    ensure_in="极北#-1",
     description="按灵气和难度选择极北混沌并挑战。",
     reschedule="daily",
 )

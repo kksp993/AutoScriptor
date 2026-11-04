@@ -15,6 +15,7 @@ def reset_task():
 
 
 @register_task(
+    ensure_in="村庄",
     description="处理天选阁每日领取或挑战。",
     reschedule="daily",
 )

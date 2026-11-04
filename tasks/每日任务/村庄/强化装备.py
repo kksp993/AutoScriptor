@@ -3,6 +3,7 @@ from AutoScriptor import *
 
 
 @register_task(
+    ensure_in="村庄",
     description="打开炼器炉并按配置强化装备。",
     deprecated=True,
     reschedule="daily",

@@ -4,6 +4,13 @@
 
 源码终端使用 Rich 显示调用文件和行号。Windows 文件超链接必须转换为标准 `file:///D:/...` URI，并对空格和非 ASCII 路径做 URL 编码；日志文字和落盘日志仍保留本机路径，避免终端把 `file://D:\\...` 错误解析为根目录 `\\`。
 
+## 日志分层
+
+- 源码终端默认显示 INFO 及以上；`locate()` 的查找请求属于 DEBUG，不随轮询刷普通日志。
+- `MixControl` 每次离散输入尝试只发出一条动作记录：同一模式、同一动作类型首次及距上次 INFO 满 1 秒时写 INFO，其余写 DEBUG。下一条 INFO 附上期间被合并的次数，不再对同一次动作同时写 DEBUG 和 INFO。
+- `init()` 建立的 `logs/log/*.log` 保留 DEBUG 明细；`logs/webui.log` 保持 INFO 及以上、8 MB × 3 轮转。WebUI 按 `deploy.log_level` 显示，未配置时默认 INFO，显式 DEBUG 仍可查看定位和逐次动作。
+- 节流只影响展示，不减少真实点击、重试或动作历史。动作记录不是页面已响应的证明，失败仍按原有异常/错误归档路径处理。
+
 ## 产生位置
 
 `TaskManager._execute_single_task()` 捕获普通异常时调用 `archive_error()`。以下情况不作为普通错误归档：
@@ -12,6 +19,14 @@
 - `TaskRequireReTry`：属于 retry 分支。
 - `TaskCancelled`：用户停止。
 - debug mode 失败恢复会跳过归档，但普通异常仍会先归档。
+
+`Scheduler._run_task_pipeline()` 还会单独归档 `runtime_ctx.refresh()` 的启动异常，名称为
+`设备启动失败`。这时任务还没进入 `TaskManager`，不能指望任务内的捕获逻辑生效。
+上下文包含 `stage=device_startup`、待执行任务、实例号、ADB 地址和连续错误次数；MuMu 明确
+报告 Android 启动失败时，异常信息保留 `launch_err_code/launch_err_msg`。
+该路径使用 `include_runtime_context=False`、`include_run_screenshots=False` 且不传 `mixctrl`：
+不调用上下文 provider、导航/OCR 探针，不搬入上一任务截图，也不尝试对坏掉的 Android 补拍。
+因此仅有 `error.log` 是有效启动故障归档，不是缺图错误。任务内归档的默认行为不变。
 
 ## 归档内容
 
@@ -78,7 +93,7 @@ YYMMDD_HHMMSS_micro_r.png   # debug 运行中每 5 秒一张的例行抓帧
 需要追加业务信息时，在调用 `archive_error()` 时传入 `extra_context`，或用
 `register_context_provider()` 注册一个零参数取数函数。
 
-`action_history` 是最近 120 条输入动作（点击、滑动、按键…），带毫秒时间戳，每轮任务开始时清空。它存在的理由是**日志里的重复动作有节流**：`MixControl._log_action` 对同类动作按 1 秒合并，只在放行时写一行 INFO，并把期间被合并的条数附在后面（`（另有 N 次同类操作未逐条记录）`）。所以「日志里没有这一行」只说明被合并，不说明没执行；要判断某一步到底点没点，看 `action_history`。
+`action_history` 是最近 120 条离散输入尝试（点击、滑动、长按），带毫秒时间戳，每轮任务开始时清空；不收集高频 `finger_*` 或可能含凭据的输入文本。它存在的理由是**INFO 里的重复动作有节流**：`MixControl._log_action` 对同类动作按 1 秒合并，只在放行时写一行 INFO，并把期间仅写 DEBUG 的条数附在后面（`（另有 N 次同类操作未逐条记录）`）。所以「普通日志里没有这一行」只说明被合并，不说明没执行；检查输入尝试的完整顺序看 `action_history`，是否送达及页面是否响应还需结合异常和截图。
 
 `recognition_trace` 是当前任务线程最近识别结果的结构化摘要：运行时环形缓冲最多保留 32 条，归档默认写入最近 16 条。摘要包含操作、成功状态、目标/结果概况、耗时、帧来源和帧形状，不保留截图数组；读取追踪本身不会初始化设备、截图或重跑 OCR/识别。
 

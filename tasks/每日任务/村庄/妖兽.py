@@ -3,6 +3,7 @@ from AutoScriptor import *
 from AutoScriptor.logging.logger import logger
 
 @register_task(
+    ensure_in="村庄",
     description="在开放时段挑战灵域妖兽。",
     reschedule={"mode": "daily", "window": (10, 22), "weekdays": [5, 6, 7]},
 )
