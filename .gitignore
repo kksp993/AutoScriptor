@@ -81,3 +81,55 @@ packaging_dllhost/
 /release_probe/.runtime/
 # 框架把运行日志写在进程的 cwd 下（logs/log/），探针的 cwd 就是自己的目录
 /release_probe/logs/
+# Personal workflows stay local, including source, tests, docs and examples.
+/test/manual/
+/test/manual_*.py
+/scripts/run_safety_education.*
+/test/framework/test_dom_*.py
+/test/framework/test_shuake_*.py
+/test/framework/test_thesis_*.py
+/docs/AutoScriptor/reference/dom-parser.md
+/docs/AutoScriptor/reference/dom-quiz-answering.md
+/.cursor/skills/thesis-topic-entry/
+/.agents/
+*.code-workspace
+
+# User runtime data and backups; retain only public templates and runtime source.
+/data/config.json*
+/data/config_*.json*
+/config.json*
+/config_*.json*
+/data/accounts/*
+!/data/accounts/.gitkeep
+/data/custom_task/
+/data/character/*
+!/data/character/.gitkeep
+!/data/character/hero.py
+
+# Authentication material must not become an accidental source addition.
+**/.env.*
+!**/.env.example
+!**/.env.sample
+!**/.env.template
+**/.auth/
+**/credentials*.json
+**/secrets*.json
+**/cookies*.json
+**/storage_state*.json
+**/id_rsa
+**/id_ed25519
+*.pem
+*.key
+*.p12
+*.pfx
+*.kdbx
+
+# Legacy local entry points and user-maintained exports.
+/_old_profiles_backup/
+/test/test_anquan.py
+/test/*lab_security*.py
+/data/battle_character/*
+!/data/battle_character/.gitkeep
+!/data/battle_character/hero.py
+/*.[xX][lL][sS]
+/*.[xX][lL][sS][xXmM]

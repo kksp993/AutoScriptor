@@ -217,7 +217,7 @@ executed = replay(EVENTS, speed=1.5, recording_size=(1080, 1920))
 - 中止（取消/异常）时只释放**本次回放**按住的手指，不调用 `release_all_fingers()`，
   以免误伤任务在回放之外异步按住的手指；清理失败不会掩盖原始异常。
 - 录制内嵌的 `command`/`vcontrol` 事件默认跳过，需要处理时传 `on_command`。
-- `.mmor` 解析不属于核心：用 外部 `external-tools` 项目的 `recording_converter.py` 把录制转成
+- `.mmor` 解析不属于核心：需先通过独立转换器把录制转成
   事件流（含槽位重映射），核心只认识 `replay(EVENTS)`。
 
 ## OCR、数字与提取颜色

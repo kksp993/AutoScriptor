@@ -1140,7 +1140,7 @@ def _normalize_replay_event(event):
 
     同时接受三种来源，让生成的任务常量与工具侧事件流共用同一个回放器：
     紧凑五元组 ``(t_ms, op, finger, nx, ny)``、dict（JSON 导出）、以及带同名
-    字段的对象（外部 ``external-tools`` 项目 ``recording_converter.py`` 的 ``Event``，其归一化坐标
+    字段的对象（可使用 ``Event`` 风格对象，其归一化坐标
     字段名为 ``x``/``y``）。``up`` 事件没有坐标，缺省按 0 处理。
     """
     if isinstance(event, dict):
@@ -1196,7 +1196,7 @@ def _validate_replay_finger(finger_id, op: str, index: int) -> int:
         raise ValueError(
             f"replay 事件 #{index} 的手指编号 {finger_id} 超出 IPC 支持范围 "
             f"[{REPLAY_MIN_FINGER_ID}, {REPLAY_MAX_FINGER_ID}]；录制槽位号需先"
-            f"重映射为手指编号（见外部 external-tools 项目 recording_converter.py 的 FingerPool）"
+            f"重映射为 IPC 手指编号，不能直接使用录制槽位号"
         )
     return finger_id
 
@@ -1241,7 +1241,7 @@ def replay(
     0.5s 时重新锚定并告警。IPC 交付本身约 0.2ms，所以事件间的时间差就是你
     给的时间差，不要为相邻事件再叠加人为 sleep 凑时序。
 
-    ``.mmor`` 的解析不属于本仓库：用外部 ``external-tools`` 项目的 ``recording_converter.py`` 把录制
+    ``.mmor`` 的解析不属于本仓库：需先通过独立转换器把录制
     转成事件流（含槽位→手指重映射），本函数只负责回放。
 
     Args:

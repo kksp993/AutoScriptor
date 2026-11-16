@@ -526,11 +526,4 @@ finally:
 - BetterGI `TaskTriggerDispatcher.cs`（50ms 调度循环）：https://github.com/babalae/better-genshin-impact/blob/main/BetterGenshinImpact/GameTask/TaskTriggerDispatcher.cs
 - BetterGI 识别单元测试（1080p 回归样例）：https://github.com/babalae/better-genshin-impact/blob/main/Test/BetterGenshinImpact.UnitTest/GameTaskTests/AutoFishingTests/AutoFishingImageRecognitionTests.cs
 
-**本机/工作区一手工件（非 URL）**
-- 本机 MuMu 5.30.1.3586（`C:\Program Files\Netease\MuMu`）：PE 导出表、MuMuManager 版本/帮助文本、
-  `nemu-inputmanager.dll` 字符串分析
-- 本机基准/探针脚本（均位于 `d:\Projects\external-tools\tools\`）：`bench_capture_only.py`、`bench_cv2_detect.py`、
-  `bench_nemu_ipc.py`、`probe_multitouch.py`、`inject_two_fingers.py`、`probe_concurrency.py`、
-  `probe_nemu_latency.py`、`fast_nemu_io.py`、`scroll_driver.py`、`pe_exports.py`
-- 多点实验产物：`d:\Projects\external-tools\refs\getevent.log`（两个 MT slot / move / up）、
-  `refs/mt_0..3_*.png`（pointer_location 覆盖层截图）、`refs/scrcpy*`（scrcpy 镜像与视频测试）
+本机探针及运行工件属于私有资料，不随仓库分发。

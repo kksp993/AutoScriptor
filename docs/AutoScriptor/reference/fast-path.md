@@ -76,7 +76,7 @@ replay(EVENTS, speed=1.5, recording_size=(1080, 1920))
   与 `finger_id` 不是同一编号空间，必须在转换侧重映射，不能夹取或取模。
 - 中止时只释放本次回放按住的手指，不用 `release_all_fingers()`，避免误伤
   任务在回放之外异步按住的手指。
-- 核心不认识 `.mmor`：解析与槽位重映射在外部 `external-tools` 项目的 `recording_converter.py` 里
+- 核心不认识 `.mmor`：解析与槽位重映射由独立转换器
   完成，导出的 timeline JSON（`t_ms`/`op`/`finger`/`x`/`y`）可直接喂给 `replay`。
 
 契约由 `test/runtime/test_replay_events.py` 固化（21 项：坐标换算、同刻多指保序、
