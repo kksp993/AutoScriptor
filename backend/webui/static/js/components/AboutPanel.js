@@ -1,5 +1,5 @@
 /** 与 frontend/electron/package.json version 保持同步。 */
-const APP_DISPLAY_VERSION = '1.0.3';
+const APP_DISPLAY_VERSION = '1.1.0';
 
 const AboutPanel = {
   name: 'AboutPanel',

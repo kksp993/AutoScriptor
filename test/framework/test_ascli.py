@@ -198,6 +198,54 @@ class FlowExecutionTests(unittest.TestCase):
         self.assertNotIn('wait-appear', self.adapter.calls)
         self.assertFalse(self.gate.locked())
 
+    def test_cancellation_takes_precedence_over_a_late_adapter_failure(self):
+        self.adapter.block = threading.Event()
+        self.adapter.fail_click = True
+        run = self.service.submit('click -B 1 2\nwait-appear -T Ready')
+        try:
+            self.assertTrue(self.adapter.entered.wait(2))
+            self.assertEqual(self.service.stop(run['run_id'])['state'], 'stopping')
+            self.assertTrue(self.gate.locked())
+        finally:
+            self.adapter.block.set()
+
+        result = self.service.wait(run['run_id'], timeout=3)
+        self.assertEqual(result['state'], 'cancelled')
+        self.assertEqual(result['steps'][-1]['state'], 'cancelled')
+        self.assertFalse(result['verified'])
+        self.assertNotIn('wait-appear', self.adapter.calls)
+        self.assertFalse(self.gate.locked())
+
+    def test_cancellation_during_cleanup_overrides_success_warnings_and_errors(self):
+        for cleanup_outcome in ('success', 'warning', 'error'):
+            with self.subTest(cleanup_outcome=cleanup_outcome):
+                cleanup_started = threading.Event()
+                cleanup_released = threading.Event()
+
+                def finish(error):
+                    cleanup_started.set()
+                    if not cleanup_released.wait(3):
+                        raise TimeoutError('Test cleanup was not released')
+                    if cleanup_outcome == 'error':
+                        raise RuntimeError('Cleanup failed after cancellation')
+                    return {'warnings': ['video missing'] if cleanup_outcome == 'warning' else []}
+
+                self.adapter.finish = Mock(side_effect=finish)
+                run = self.service.submit('click -B 1 2\nwait-appear -T Ready')
+                try:
+                    self.assertTrue(cleanup_started.wait(2))
+                    self.assertEqual(self.service.stop(run['run_id'])['state'], 'stopping')
+                    self.assertTrue(self.gate.locked())
+                    self.assertTrue(self.service.status()['stopping'])
+                finally:
+                    cleanup_released.set()
+
+                result = self.service.wait(run['run_id'], timeout=3)
+                self.assertEqual(result['state'], 'cancelled')
+                self.assertFalse(result['verified'])
+                self.assertFalse(self.gate.locked())
+                self.assertFalse(self.cancelled.is_set())
+
     def test_busy_runtime_rejects_without_creating_a_second_controller(self):
         self.gate.acquire()
         try:

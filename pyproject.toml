@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "autoscriptor"
-version = "1.0.4"
+version = "1.1.0"
 description = "Android 模拟器游戏自动化的通用层：设备控制、OCR/识别、通用配置与路径。"
 readme = "AutoScriptor/README.md"
 requires-python = ">=3.10,<3.11"

@@ -181,7 +181,12 @@ class AutomationService:
         except BaseException as exception:
             from AutoScriptor.utils.cancel import TaskCancelled
             error = exception
-            state = 'timed_out' if self._timed_out else 'cancelled' if isinstance(exception, (FlowCancelled, TaskCancelled, KeyboardInterrupt)) else 'failed'
+            if self._timed_out:
+                state = 'timed_out'
+            elif self._cancel.is_set() or isinstance(exception, (FlowCancelled, TaskCancelled, KeyboardInterrupt)):
+                state = 'cancelled'
+            else:
+                state = 'failed'
             result.update(error=str(exception), traceback=traceback.format_exc())
             try:
                 if current_step is not None:
@@ -211,10 +216,14 @@ class AutomationService:
                     result['evidence_error'] = str(cleanup_error)
                     if state == 'succeeded':
                         state = 'failed'
-            result.update(state=state, finished_at=time.time(), elapsed=time.monotonic() - started)
             # Keep the occupancy until all device work and evidence finalization are finished.
             with self._lock:
                 try:
+                    # stop() shares this lock: every accepted cancellation must reach the saved terminal state.
+                    if self._cancel.is_set():
+                        state = 'timed_out' if self._timed_out else 'cancelled'
+                        result.update(verified=False, error='Flow timeout requested cancellation' if self._timed_out else 'Flow cancelled')
+                    result.update(state=state, finished_at=time.time(), elapsed=time.monotonic() - started)
                     _write_json(directory / 'result.json', result)
                 finally:
                     try:

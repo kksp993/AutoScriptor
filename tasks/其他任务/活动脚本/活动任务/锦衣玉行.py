@@ -15,7 +15,7 @@ from tasks.其他任务.活动脚本.活动任务._活动流程 import run_activ
 def task():
     def claim_rewards():
         seq_click([T("锦衣玉行", box=Box(678,166,110,44).margin()) ])
-        
+
         click(T("仙游见闻", box=Box(202,370,155,36).margin()))
         click(T("领取", box=Box(927,236,155,363).margin()), if_exist=True, until=lambda x: ui_F(T("领取", box=Box(927,236,155,363).margin())))
         swipe(B(731,526), B(731,294), duration_s=1)
@@ -27,10 +27,10 @@ def task():
             click(T("收获", box=Box(702,552,119,55).margin(), color="绿色"))
             click(T("确定", box=Box(653,373,172,102).margin()))
         info_1 = extract_info(B(665,600,147,39), post_process=postnum, ensure_not_empty=True, mode="text")
-        if info_1>0:  
+        if info_1>0:
             click(T("种植", box=Box(702,552,119,55).margin()))
 
-                
+
         if ui_T(T("收获", box=Box(904,551,114,47).margin())):
             click(T("收获", box=Box(904,551,114,47).margin(), color="绿色"))
             click(T("确定", box=Box(653,373,172,102).margin()))

@@ -31,7 +31,7 @@ wait-disappear -T "Loading" --timeout 10
 
 ## Execution
 
-Persistent AutomationService shares platform gate/cancellation/runtime; no queue. `--detach`=acceptance only. Request IDs deduplicate; disconnects never authorize replay. Restart interrupts unfinished runs. Cancellation retains occupancy through cleanup; native calls cannot be forcibly stopped.
+AutomationService shares gate/cancellation/runtime; no queue. `--detach`=acceptance only. Request IDs deduplicate; disconnects never replay. Restart interrupts unfinished runs. Accepted cancellation overrides cleanup, clears verified, retains occupancy; native calls cannot be forcibly stopped.
 
 Recording required. Success/cancel/failure retain bounded video, traces, source/Python/map/result under `get_logs_root()/ascli/RUN_ID`. Gaps/damage explicit; recording-start failure prevents actions. Limits:3600s/512 commands. No terminal observation: `verified=false`, not business acceptance.
 

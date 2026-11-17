@@ -30,7 +30,7 @@ def _collect_bonus_rewards(expected: int):
     click(B(1100, 30, 68, 56))  # 关闭奖励面板（等于4)猜测是这个
     click(B(1050, 60, 10, 10))  # 关闭奖励面板（小于等于3)
     sleep(1)
-    click(B(840, 115, 66, 61))  
+    click(B(840, 115, 66, 61))
 
 
 @combo

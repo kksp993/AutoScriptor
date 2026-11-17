@@ -1939,11 +1939,11 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("runtime_ctx.refresh(cancel_check=self._check_cancel_requested)", scheduler)
         self.assertIn("_reload_deferred", scheduler)
         self.assertIn("_handle_watched_config_change", scheduler)
-        self.assertIn("join_with_cancel", api)
-        self.assertIn("sleep_with_cancel", api)
-        self.assertIn("intervals = [1, 2, 3, 3, 3, 3, 3, 3]", api)
-        self.assertIn("join_with_cancel(t, 3, cancel_check)", api)
-        self.assertNotIn("join_with_cancel(t, 5, cancel_check)", api)
+        self.assertIn("power.start(None, cancel_check=cancel_check)", api)
+        self.assertIn("power.wait_until_android_ready(cancel_check=cancel_check)", api)
+        self.assertIn("cancel_check = cancel_check or check_cancel_raise", api)
+        self.assertIn("if not initialized:", api)
+        self.assertIn("mixctrl.nemu_control.nemu_ipc.nemu_ipc_release()", api)
 
     def test_electron_startup_reports_stages_before_backend_ready(self):
         main = (ROOT / "frontend/electron/main.js").read_text(encoding="utf-8")
@@ -2018,7 +2018,7 @@ class TestWebUIServerRouteContract(unittest.TestCase):
         self.assertIn("def click", adb_core)
         self.assertIn("Prefer direct adb.exe for high-frequency input", adb_core)
         self.assertIn("return self._direct_shell_or_manager", adb_core)
-        self.assertIn("日常点击输入不会依赖它", settings)
+        self.assertIn("只负责启动、关闭、窗口等官方管理动作", settings)
 
     def test_device_diagnostics_import_does_not_initialize_heavy_runtime(self):
         package_init = (ROOT / "AutoScriptor/__init__.py").read_text(encoding="utf-8")
@@ -2325,12 +2325,10 @@ print("OK")
         self.assertIn('"enum_options": ["普通", "困难"]', api_contract)
         self.assertIn('custom_task/背包清空/进阶仙宝.py', api_contract)
         self.assertIn('POST /api/editor/save-custom-task', api_contract)
-        self.assertIn('/api/editor/save-custom-task', authoring)
         self.assertNotIn('文件名称', authoring)
-        self.assertIn('script name determines path', authoring)
-        self.assertIn('enum/enum_multi payloads', authoring)
-        self.assertIn('params_doc from parameter descriptions', authoring)
-        self.assertIn("自定义任务/", authoring)
+        self.assertIn('Snippets generate declaration/signature/enums/defaults/docstring/params_doc', authoring)
+        self.assertIn('custom_task_load_errors blocks pruning/save', authoring)
+        self.assertIn('task_params.py', authoring)
 
     def test_editor_navigation_menu_contract(self):
         from backend.webui.routes import editor
@@ -2646,10 +2644,20 @@ class TestSourceDistributionContract(unittest.TestCase):
                 self.assertFalse((ROOT / rel).exists())
 
     def test_electron_shell_is_source_only(self):
+        from scripts.build_wheels import read_project_version
+
         main = (ROOT / "frontend/electron/main.js").read_text(encoding="utf-8")
         preload = (ROOT / "frontend/electron/preload.js").read_text(encoding="utf-8")
         start_dev = (ROOT / "frontend/electron/scripts/start-dev.cjs").read_text(encoding="utf-8")
         package_json = json.loads((ROOT / "frontend/electron/package.json").read_text(encoding="utf-8"))
+        package_lock = json.loads((ROOT / "frontend/electron/package-lock.json").read_text(encoding="utf-8"))
+        about_panel = (ROOT / "backend/webui/static/js/components/AboutPanel.js").read_text(encoding="utf-8")
+
+        software_version = read_project_version()
+        self.assertEqual(package_json["version"], software_version)
+        self.assertEqual(package_lock["version"], software_version)
+        self.assertEqual(package_lock["packages"][""]["version"], software_version)
+        self.assertIn(f"const APP_DISPLAY_VERSION = {software_version!r};", about_panel)
 
         self.assertIn("'backend', 'webui', 'gui.py'", main)
         self.assertIn("--electron", main)
@@ -3350,7 +3358,7 @@ class TestTaskOrderingStaticContract(unittest.TestCase):
         self.assertIn("<task-panel v-if=\"activeTab==='tasks'\"", index_html)
         self.assertNotIn("activeTab==='tasks' || activeTab==='task-graph'", index_html)
         self.assertRegex(index_html, r"AppSidebar\.js\?v=\d+")
-        self.assertIn("style.css?v=48", index_html)
+        self.assertRegex(index_html, r"style\.css\?v=\d+")
         self.assertRegex(index_html, r"TaskPanel\.js\?v=\d+")
         self.assertRegex(index_html, r"app\.js\?v=\d+")
         self.assertIn("TaskPlanningGraph.js", index_html)
