@@ -30,7 +30,7 @@ import AutoScriptor.core.api as core_api
 from AutoScriptor.core.background import BG_PRIORITY_BUILTIN_ADVANCE, BG_SIGNALS
 from AutoScriptor.core.targets import Target
 from AutoScriptor.utils.cancel import check_cancel_raise
-from AutoScriptor.logging.logger import logger
+from AutoScriptor.logging.logger import logger, show_webui_logs, summarize_webui_logs
 from ZmxyOL.accounts import get_character_dir
 
 WUSHUANG_SPEED_1X = 0.0175
@@ -197,6 +197,7 @@ class Hero:
 
     # ═══════════════ 战斗 / 赶路 ═══════════════
 
+    @summarize_webui_logs("自动战斗中...")
     def battle(self, combo: str = None, no_cd: str = None):
         """一轮完整战斗: 开场 + 连招。
 
@@ -418,7 +419,11 @@ class Hero:
         )
 
         try:
-            with bg.protect_clear(), bg.scope() as builtin_scope:
+            with (
+                bg.protect_clear(),
+                bg.scope() as builtin_scope,
+                summarize_webui_logs("自动战斗中..."),
+            ):
                 self._setup_builtin_triggers(builtin_scope)
 
                 while not bg.signal(BG_SIGNALS.TRY_EXIT, False):
@@ -430,7 +435,9 @@ class Hero:
                         self.sleep(1)
                         continue
                     if self._check_advance(advance_grace_sec):
-                        self.travel()
+                        with show_webui_logs():
+                            logger.info("检测到前进，开始赶路")
+                            self.travel()
                         continue
 
                     flow_method(self)
@@ -473,6 +480,7 @@ class Hero:
 
     # ═══════════════ 离开关卡 ═══════════════
 
+    @show_webui_logs()
     def way_to_exit(
         self,
         until=None,

@@ -10,10 +10,10 @@ from AutoScriptor import *
     ensure_in="法相",
     description="一键吞噬仙宝，以清空背包",
     reschedule='daily',
+    params_doc={"xianbao_idx": "仙宝栏位索引（从0开始）"},
 )
 def test_task(xianbao_idx=1):
     """【特别注意】：这个过程会吃掉所有B/C级仙宝，此外确保您已经解锁了法相功能"""
-    ensure_in("法相")
     click(T("法宝", box=Box(39,214,132,89).margin()));sleep(1)
     tbs=[B(212,646,84,29),B(311,644,84,33),B(410,644,85,33),B(515,640,84,37)]
     click(tbs[xianbao_idx])

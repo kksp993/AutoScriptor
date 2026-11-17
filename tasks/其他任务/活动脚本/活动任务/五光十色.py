@@ -15,8 +15,9 @@ tasks =[
     ensure_in="天庭",
     description="完成五光十色活动流程。",
     reschedule="daily",
+    params_doc={"battle_flow": "战斗招式"},
 )
 def task(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
     """【未完成】完成五光十色活动流程。"""
     from ZmxyOL.character.hero import h
-    h.battle_tasks(task_table=tasks[0])
+    h.battle_tasks(task_table=tasks[0], entry_ready=True)

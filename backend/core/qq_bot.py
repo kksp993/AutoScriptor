@@ -109,12 +109,14 @@ def cached_accounts(root: Path | None = None) -> list[str]:
 
 def remember_account(account: str, root: Path | None = None) -> None:
     """Record the account to quick-login next time."""
+    from AutoScriptor.utils.json_io import write_json_atomic
+
     root = root or BOT_ROOT
     settings = load_local_settings(root)
     if settings is None:
         raise ValueError("NapCat 尚未安装，无法记录账号")
     settings["account"] = str(account or "").strip()
-    write_document(root / "autoscriptor.json", settings)
+    write_json_atomic(root / "autoscriptor.json", settings)
 
 
 def remembered_account(root: Path | None = None) -> str:
@@ -158,6 +160,14 @@ def running_bot_pid(root: Path | None = None) -> int | None:
         pid = int(path.read_text(encoding="ascii").strip())
     except (OSError, ValueError):
         return None
+    if not _wait_for_process_exit(pid):
+        return pid
+    path.unlink(missing_ok=True)
+    return None
+
+
+def _wait_for_process_exit(process_id: int, timeout_ms: int = 0) -> bool:
+    """Check actual Windows process exit, independently of taskkill's tree result."""
     # Windows can open an exited process while another handle keeps its object
     # alive. Only a non-signaled process handle means it is still running.
     import ctypes
@@ -174,20 +184,21 @@ def running_bot_pid(root: Path | None = None) -> int | None:
     SYNCHRONIZE = 0x00100000
     WAIT_OBJECT_0 = 0x00000000
     WAIT_TIMEOUT = 0x00000102
-    handle = kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+    handle = kernel32.OpenProcess(SYNCHRONIZE, False, process_id)
     if not handle:
-        path.unlink(missing_ok=True)
-        return None
+        error_code = ctypes.get_last_error()
+        if error_code == 87:  # ERROR_INVALID_PARAMETER: the PID no longer exists.
+            return True
+        raise ctypes.WinError(error_code)
     try:
-        wait_result = kernel32.WaitForSingleObject(handle, 0)
+        wait_result = kernel32.WaitForSingleObject(handle, timeout_ms)
         if wait_result == WAIT_TIMEOUT:
-            return pid
+            return False
         if wait_result != WAIT_OBJECT_0:
             raise ctypes.WinError(ctypes.get_last_error())
+        return True
     finally:
         kernel32.CloseHandle(handle)
-    path.unlink(missing_ok=True)
-    return None
 
 
 def _listening_pid(port: int) -> int | None:
@@ -270,11 +281,41 @@ def bot_is_running(root: Path | None = None) -> bool:
     return bot_process_pid(root) is not None
 
 
+def owns_bot_process(process_id: int, root: Path | None = None) -> bool:
+    """Verify the executable path before stopping a login instance, not just node.exe."""
+    if os.name != "nt":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = kernel32.OpenProcess(0x1000, False, process_id)
+    if not handle:
+        return False
+    try:
+        capacity = wintypes.DWORD(32768)
+        buffer = ctypes.create_unicode_buffer(capacity.value)
+        if not kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(capacity)):
+            return False
+        return Path(buffer.value).resolve() == ((root or BOT_ROOT) / "node.exe").resolve()
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def launch_bot(
     root: Path | None = None,
     account: str = "",
     *,
     visible: bool = False,
+    force_qr: bool = False,
 ) -> int:
     """Start the bot in its own process and return immediately.
 
@@ -300,6 +341,19 @@ def launch_bot(
     environment = os.environ.copy()
     # The upstream fork branch passes Electron-only --no-sandbox to Node.
     environment["NAPCAT_DISABLE_MULTI_PROCESS"] = "1"
+    if force_qr:
+        if account:
+            raise ValueError("扫码登录不能同时指定快捷登录账号")
+        # NapCat otherwise reads an independent auto-login selection and password fallback.
+        for name in ("ACCOUNT", "NAPCAT_QUICK_ACCOUNT", "NAPCAT_QUICK_PASSWORD", "NAPCAT_QUICK_PASSWORD_MD5"):
+            environment.pop(name, None)
+        webui_path = root / "napcat" / "config" / "webui.json"
+        configuration = read_document(webui_path)
+        if configuration.get("autoLoginAccount"):
+            from AutoScriptor.utils.json_io import write_json_atomic
+
+            configuration["autoLoginAccount"] = ""
+            write_json_atomic(webui_path, configuration)
 
     creation_flags = subprocess.CREATE_NEW_CONSOLE if visible else subprocess.CREATE_NO_WINDOW
     log_path = _bot_log(root)
@@ -339,10 +393,16 @@ def stop_bot(root: Path | None = None) -> bool:
     pid = bot_process_pid(root)
     if pid is None:
         return False
+    if not owns_bot_process(pid, root):
+        raise OSError("无法核验机器人进程归属，拒绝停止其他程序")
     # /T so the QQ runtime child process goes with it; /F because the bot has no
     # shutdown channel of its own.
-    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
-                   capture_output=True, text=True, encoding="utf-8", errors="replace")
+    completed = subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
+    # taskkill /T may fail for a disappearing child even after stopping the root.
+    # Conversely, exit code zero is not sufficient while the root remains alive.
+    if not _wait_for_process_exit(pid, timeout_ms=5000):
+        raise OSError(f"机器人进程尚未退出，未启动新实例（停止命令退出码 {completed.returncode}）")
     _pid_file(root).unlink(missing_ok=True)
     return True
 

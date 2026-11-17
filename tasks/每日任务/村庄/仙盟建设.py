@@ -10,7 +10,6 @@ from AutoScriptor.logging.logger import logger
 def daily_alliance_task():
     """完成仙盟建设+每日任务【仙盟建设1】。"""
     logger.info("====仙盟贡献====")
-    ensure_in("仙盟")
     sleep(1)
     click(B(544,340,240,140))
     click(T("议事"))

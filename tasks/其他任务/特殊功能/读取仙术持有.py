@@ -24,7 +24,7 @@ SKILL_NAME_REGION = B(714, 173, 345, 51)
 
 
 def enter_skill_book() -> None:
-    ensure_in("村庄")
+    """从注册任务已确认的村庄入口打开仙术书。"""
     click(I("导航-菜单"), delay=1)
     click(T("技能", box=Box(1162, 384, 74, 56).margin()))
     click(T("仙术书", box=Box(96, 250, 54, 142).margin()))

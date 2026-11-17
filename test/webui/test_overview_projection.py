@@ -167,6 +167,17 @@ class OverviewPayloadTest(unittest.TestCase):
         self.assertEqual(payload["upcoming"][0]["status"], "error")
         self.assertEqual(payload["upcoming"][0]["human_takeover_error"], "材料不足")
 
+    def test_future_continuation_remains_pending_in_statistics_and_keeps_time(self):
+        next_execution = time.time() + 180
+        table = {"harvest": enabled_task(next_exec_time=next_execution, continuation_pending=True)}
+        with OverviewPayloadEnvironment(table, {"harvest": "daily/harvest"}):
+            payload = overview_routes._build_overview_payload(time.time())
+        self.assertEqual(payload["stats"]["pending"], 1)
+        self.assertEqual(payload["stats"]["scheduled"], 0)
+        self.assertEqual(payload["upcoming"][0]["status"], "pending")
+        self.assertTrue(payload["upcoming"][0]["continuation_pending"])
+        self.assertEqual(payload["upcoming"][0]["next_exec_time"], next_execution)
+
 
 def iter_reference_call_sites():
     """产出 ``(文件, 行号, 参数个数, 是否带 spec=)``，覆盖生产代码的全部调用点。"""

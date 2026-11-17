@@ -1,21 +1,20 @@
 """玉虚殿回调的倍速处理与出错后重进续跑。"""
 import os
 import sys
+import datetime
+import json
 import unittest
-from unittest.mock import patch
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack, nullcontext
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from AutoScriptor.utils.cancel import TaskCancelled
+from AutoScriptor.utils.app_config import cfg
 from ZmxyOL.battle.procedure import kunlunshan
-
-
-class FakeCfg:
-    def __init__(self):
-        self.writes = {}
-
-    def set(self, key, value):
-        self.writes[key] = value
+from tasks import task_state
+from tasks.task_register import task_registry
 
 
 class FakeBackground:
@@ -31,6 +30,12 @@ class FakeBackground:
 
     def add(self, name, identifier, callback=None, **kwargs):
         self.events.append((name, callback))
+
+    def interval(self, seconds):
+        return nullcontext()
+
+    def scope(self, name):
+        return nullcontext(self)
 
 
 class FakeHero:
@@ -63,6 +68,9 @@ class FakeHero:
     def battle(self):
         return self._record("battle")
 
+    def battle_loop(self, **kwargs):
+        return self
+
     def way_to_exit(self, until=None, exit_loc=0, no_travel=False):
         self._record("way_to_exit")
         if self.way_to_exit_error is not None:
@@ -72,22 +80,21 @@ class FakeHero:
 
 class KunlunshanYuxuDianSpeedTest(unittest.TestCase):
     def _run_callback(self, hero):
-        fake_cfg = FakeCfg()
         fake_registry = FakeBackground()
         # 两次读数相同即结束战斗循环，因此只打一轮 battle()。
         readings = iter([100, 100])
-        with patch.object(kunlunshan, "cfg", fake_cfg), \
+        with patch.object(task_state, "set_task_status") as save_status, \
                 patch.object(kunlunshan, "bg", fake_registry), \
                 patch.object(kunlunshan, "h", hero), \
                 patch.object(kunlunshan, "extract_info", lambda *args, **kwargs: next(readings)), \
                 patch.object(kunlunshan, "wait_for_disappear", lambda *args, **kwargs: None):
-            kunlunshan.kls_yxd_callback(fake_registry)
-        return fake_cfg, fake_registry
+            kunlunshan.kls_yxd_callback(fake_registry, task_path="test/kunlunshan")
+        return save_status, fake_registry
 
     def test_callback_moves_at_one_x_speed_and_restores_afterwards(self):
         hero = FakeHero(has_cd=False, speed_x=3)
 
-        fake_cfg, fake_registry = self._run_callback(hero)
+        save_status, fake_registry = self._run_callback(hero)
 
         self.assertTrue(hero.speed_during_moves, "回调内应发生移动")
         self.assertEqual(
@@ -97,7 +104,7 @@ class KunlunshanYuxuDianSpeedTest(unittest.TestCase):
         )
         self.assertEqual(hero.speed_x, 3, "回调结束后应恢复原倍速")
         self.assertFalse(hero.has_cd, "回调不应改动 has_cd")
-        self.assertEqual(fake_cfg.writes["status.kunlunshan.has_YuxuDian_ticket"], False)
+        save_status.assert_called_once_with("yuxu_ticket_consumed", True, task_path="test/kunlunshan")
         self.assertIn("玉虚殿-战斗结束", [name for name, _ in fake_registry.events])
 
     def test_failure_marks_round_failed_and_restores_speed(self):
@@ -117,6 +124,78 @@ class KunlunshanYuxuDianSpeedTest(unittest.TestCase):
             self._run_callback(hero)
 
         self.assertEqual(hero.speed_x, 3)
+
+
+class KunlunshanTicketCycleTest(unittest.TestCase):
+    """Ticket consumption survives re-entry; a background callback owns a task, not TLS."""
+
+    def setUp(self):
+        patches = ExitStack()
+        self.addCleanup(patches.close)
+        self.addCleanup(task_state.set_current_task_path, None)
+        self.task_path = "test/kunlunshan"
+        patches.enter_context(patch.object(cfg, "_config", {
+            "tasks": {"kunlunshan": {"on": True, "next_exec_time": 0}},
+            "status": {"kunlunshan": {"has_YuxuDian_ticket": False}},
+        }))
+        patches.enter_context(patch.object(task_registry, "_tasks", {}))
+        task_registry.register(self.task_path, lambda: None, task_id="kunlunshan", reschedule="daily")
+        task_state.set_current_task_path(self.task_path)
+        self.saved_statuses = []
+        self.save = patches.enter_context(patch.object(cfg, "save_config", side_effect=lambda: self.saved_statuses.append(json.loads(json.dumps(cfg._config["status"])))))
+        self.clock = patches.enter_context(patch.object(task_state.time, "time", return_value=datetime.datetime(2030, 1, 7, 4, 58).timestamp()))
+        self.background = FakeBackground()
+        self.hero = FakeHero()
+        patches.enter_context(patch.object(kunlunshan, "bg", self.background))
+        patches.enter_context(patch.object(kunlunshan, "h", self.hero))
+        for action in ("click", "sleep", "wait_for_appear", "wait_for_disappear"):
+            patches.enter_context(patch.object(kunlunshan, action, Mock()))
+
+    def run_round(self):
+        self.background.events.clear()
+        kunlunshan._run_kunlunshan_round(1, 7, "test-flow", "test-equipment")
+        return dict(self.background.events)
+
+    def test_consumption_in_background_survives_reload_until_daily_reset(self):
+        callbacks = self.run_round()
+        self.assertIn("玉虚殿", callbacks)
+
+        def consume_in_background():
+            self.assertIsNone(task_state.current_task_path())
+            callbacks["玉虚殿"]()
+
+        with patch.object(kunlunshan, "extract_info", side_effect=[100, 100]):
+            with ThreadPoolExecutor(max_workers=1) as worker:
+                worker.submit(consume_in_background).result(timeout=5)
+        self.assertTrue(task_state.get_task_status("yuxu_ticket_consumed"))
+        cfg._config["status"] = json.loads(json.dumps(self.saved_statuses[-1]))
+        self.clock.return_value = datetime.datetime(2030, 1, 7, 4, 59).timestamp()
+        self.assertNotIn("玉虚殿", self.run_round())
+        self.clock.return_value = datetime.datetime(2030, 1, 7, 5, 1).timestamp()
+        self.assertIn("玉虚殿", self.run_round())
+        self.assertFalse(task_state.get_task_status("yuxu_ticket_consumed", False))
+
+    def test_reentry_never_restores_consumed_ticket(self):
+        task_state.set_task_status("yuxu_ticket_consumed", True)
+        self.save.reset_mock()
+        previous_status = json.loads(json.dumps(cfg._config["status"]))
+        for fresh_challenge in (False, True):
+            with self.subTest(fresh_challenge=fresh_challenge):
+                with patch.object(kunlunshan, "ui_F", return_value=fresh_challenge), patch.object(kunlunshan, "extract_info", return_value=1000):
+                    kunlunshan.enter_kunlunshan()
+                self.assertEqual(cfg._config["status"], previous_status)
+                self.assertNotIn("玉虚殿", self.run_round())
+        self.save.assert_not_called()
+
+    def test_failed_yuxu_flow_keeps_consumption_and_requests_recovery(self):
+        callback = self.run_round()["玉虚殿"]
+        self.hero.way_to_exit_error = RuntimeError("exit failed")
+        with patch.object(kunlunshan, "extract_info", side_effect=[100, 100]):
+            callback()
+        self.assertTrue(task_state.get_task_status("yuxu_ticket_consumed"))
+        self.assertTrue(self.background.signal(kunlunshan._YXD_FAILED_SIGNAL))
+        self.assertTrue(self.background.signal("try_exit"))
+        self.assertEqual(self.hero.speed_x, 3)
 
 
 class KunlunshanRecoveryTest(unittest.TestCase):

@@ -7,6 +7,7 @@ const virtualMachine = require('node:vm');
 const staticDirectory = path.resolve(__dirname, '../../backend/webui/static');
 const source = filesystem.readFileSync(path.join(staticDirectory, 'js/components/TaskPanel.js'), 'utf8');
 const themeSource = filesystem.readFileSync(path.join(staticDirectory, 'js/core/taskStatusTheme.js'), 'utf8');
+const layoutSource = filesystem.readFileSync(path.join(staticDirectory, 'js/core/taskPlanningLayout.js'), 'utf8');
 const vueSource = filesystem.readFileSync(path.resolve(staticDirectory, '../vendor/vue.global.prod.js'), 'utf8');
 
 function createPanel(overrides = {}) {
@@ -17,6 +18,10 @@ function createPanel(overrides = {}) {
   const context = virtualMachine.createContext({
     TaskPlanningGraph: { name: 'TaskPlanningGraph' },
     window: {
+      WebUIApi: {
+        request: async () => ({ ok: true, data: { locations: [], costs: {} } }),
+        errorMessage: data => data.message,
+      },
       setTimeout(callback) {
         const identifier = nextTimerIdentifier++;
         timers.set(identifier, callback);
@@ -40,6 +45,7 @@ function createPanel(overrides = {}) {
   virtualMachine.runInContext(vueSource, context);
   const Vue = virtualMachine.runInContext('Vue', context);
   virtualMachine.runInContext(themeSource, context);
+  virtualMachine.runInContext(layoutSource, context);
   virtualMachine.runInContext(source, context);
   const definition = virtualMachine.runInContext('TaskPanel', context);
   const currentTasks = {
@@ -94,12 +100,56 @@ function createPanel(overrides = {}) {
     const computedValue = Vue.computed(() => getter.call(reactivePanel));
     Object.defineProperty(panel, propertyName, { get: () => computedValue.value });
   }
-  return { panel: reactivePanel, definition, events, notifications, timers, Vue };
+  return { panel: reactivePanel, definition, events, notifications, timers, Vue, api: context.window.WebUIApi };
 }
 
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
+
+test('ordering and enabled lists expand the same complete graph queue before opening the graph view', () => {
+  const currentTasks = { tasks: {
+    after: { id: 'after', on: true, _due: false, ensure_in: ['home'], after_tasks: ['before'] },
+    peer: { id: 'peer', on: true, _due: true, ensure_in: ['home'] },
+    before: { id: 'before', on: true, _due: true, ensure_in: ['far'] },
+    broken: { id: 'broken', on: true, ensure_in: ['home'], after_tasks: ['missing'] },
+    disabled: { id: 'disabled', on: false, ensure_in: null },
+  } };
+  const effectiveOrder = Object.keys(currentTasks.tasks).map(identifier => `tasks/${identifier}`);
+  const orderingProjection = { effective_order: effectiveOrder, overlay: { items: [
+    { type: 'task', path: 'tasks/after' },
+    { type: 'group', id: 'split-group', name: 'Keep stored group', expanded: true, items: [
+      { type: 'task', path: 'tasks/peer' }, { type: 'task', path: 'tasks/before' },
+    ] },
+    { type: 'task', path: 'tasks/broken' }, { type: 'task', path: 'tasks/disabled' },
+  ] } };
+  const { panel, events } = createPanel({ currentTasks, orderingProjection,
+    locationCosts: { home: { home: 0 }, far: { far: 0, home: 5 } },
+  });
+  const snapshot = JSON.stringify([panel.currentTasks, panel.orderingProjection]);
+  const expected = ['tasks/before', 'tasks/after', 'tasks/peer', 'tasks/broken'];
+  assert.deepEqual(plain(panel.enabledTaskRows.map(row => row.path)), expected);
+  assert.deepEqual(plain(panel.flattenOrderingPaths(panel.orderingItems)), [...expected, 'tasks/disabled'],
+    'A manual group must not reorder or hide the graph queue when its members become noncontiguous');
+  assert.deepEqual(plain(panel.cloneOrderingItems()), plain(orderingProjection.overlay.items),
+    'Graph projection must not be saved back as the manual ordering overlay');
+  panel.taskViewMode = 'ordering';
+  panel.showOnlyEnabledOrderingItems = true;
+  assert.deepEqual(plain(panel.visibleOrderingNodes.filter(node => node.type === 'task').map(node => node.row.path)), expected);
+  panel.selectTaskForRange(panel.taskRowByPath('tasks/after'), { reveal: false });
+  panel.runSelectedEnabledTaskRange();
+  assert.deepEqual(plain(events.pop()), ['run-task-range', expected.slice(1)]);
+  panel.taskViewMode = 'graph';
+  assert.deepEqual(plain(panel.enabledTaskRows.map(row => row.path)), expected);
+  panel.currentTasks.tasks.after._due = true;
+  panel.currentTasks.tasks.after.planning_status = { blocked_by: ['before'] };
+  assert.deepEqual(plain(panel.enabledTaskRows.map(row => row.path)), expected,
+    'Due/ready changes must not truncate or reorder the structural queue');
+  delete panel.currentTasks.tasks.after.planning_status;
+  panel.currentTasks.tasks.after._due = false;
+  assert.equal(JSON.stringify([panel.currentTasks, panel.orderingProjection]), snapshot);
+  assert.deepEqual(events, []);
+});
 
 test('refocusing search cancels an earlier graph-card blur timer', () => {
   const { panel, timers, definition } = createPanel({ taskViewMode: 'graph' });
@@ -112,6 +162,39 @@ test('refocusing search cancels an earlier graph-card blur timer', () => {
   panel.hideTaskSearchDropdown();
   definition.beforeUnmount.call(panel);
   assert.equal(timers.size, 0);
+});
+
+test('navigation data loads once for all views and failed loads are visible and retryable', async () => {
+  const { panel, definition, api, events } = createPanel();
+  let finishRequest;
+  let requestCount = 0;
+  api.request = async (method, route) => {
+    assert.equal(method, 'GET');
+    assert.equal(route, '/task-planning/locations');
+    requestCount += 1;
+    return new Promise(resolve => { finishRequest = resolve; });
+  };
+  definition.mounted.call(panel);
+  assert.equal(panel.loadingLocations, true);
+  await panel.loadLocations();
+  assert.equal(requestCount, 1, 'Repeated refreshes must not race');
+  panel.selectedEnabledTaskPath = panel.enabledTaskRows[0].path;
+  panel.runSelectedEnabledTaskRange();
+  assert.deepEqual(events, []);
+  finishRequest({ ok: false, data: { message: 'offline' } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(panel.locationError, 'offline');
+  assert.equal(panel.loadingLocations, false);
+  panel.runSelectedEnabledTaskRange();
+  assert.deepEqual(events, []);
+  api.request = async () => ({ ok: true, data: { locations: ['home'], costs: { home: { home: 0 } } } });
+  await panel.loadLocations();
+  assert.equal(panel.locationError, '');
+  assert.equal(panel.locationCosts.home.home, 0);
+  assert.deepEqual(plain(panel.locations), ['home']);
+  await panel.setTaskViewMode('graph');
+  await panel.setTaskViewMode('ordering');
+  assert.equal(requestCount, 1, 'View switches reuse loaded navigation data, not a second independent graph request');
 });
 
 test('default hierarchy exposes collapsed native directories without changing manual order', () => {
@@ -350,7 +433,9 @@ test('graph integration uses the declared component, props and save event', () =
   const { definition } = createPanel();
   assert.equal(definition.components.TaskPlanningGraph.name, 'TaskPlanningGraph');
   assert.ok(definition.emits.includes('save-task-graph'));
-  assert.match(definition.template, /<task-planning-graph[\s\S]*?:rows="orderedTaskRows"/);
+  assert.match(definition.template, /<task-planning-graph[\s\S]*?:rows="baseOrderedTaskRows"/);
+  assert.match(definition.template, /:location-costs="locationCosts"/);
+  assert.match(definition.template, /@refresh-locations="loadLocations"/);
   assert.match(definition.template, /:ordering-projection="orderingProjection"/);
   assert.match(definition.template, /:execution-busy="executionBusy"/);
   assert.match(definition.template, /:saving="orderingSaving"/);
@@ -412,8 +497,8 @@ test('rendered views preserve task actions and forward graph events without an e
     components: {
       TaskPlanningGraph: {
         name: 'TaskPlanningGraph',
-        props: ['rows', 'orderingProjection', 'executionBusy', 'saving'],
-        emits: ['edit-task', 'save-graph'],
+        props: ['rows', 'orderingProjection', 'executionBusy', 'saving', 'locationCosts', 'locations', 'loadingLocations', 'locationError'],
+        emits: ['edit-task', 'save-graph', 'refresh-locations'],
         setup(props, { emit, expose }) {
           graphProps = props;
           graphEmit = emit;
@@ -482,6 +567,8 @@ test('rendered views preserve task actions and forward graph events without an e
   assert.equal(graphProps.rows[0].path, 'custom/nested/deeper/probe');
   assert.equal(graphProps.executionBusy, true);
   assert.equal(graphProps.orderingProjection, properties.orderingProjection);
+  assert.equal(graphProps.locationCosts, instance.locationCosts);
+  assert.equal(graphProps.locations, instance.locations);
   properties.executionBusy = false;
   await Vue.nextTick();
   const graphPayload = { changes: [{ task_id: 'probe', after_tasks: ['mail'] }] };
@@ -489,6 +576,19 @@ test('rendered views preserve task actions and forward graph events without an e
   assert.deepEqual(events.pop(), ['save-task-graph', graphPayload]);
   graphEmit('edit-task', graphProps.rows[0]);
   assert.equal(events.pop()[3], 'custom/nested/deeper/probe');
+  properties.currentTasks = { queue: {
+    after: { id: 'after', on: true, ensure_in: ['home'], after_tasks: ['before'] },
+    before: { id: 'before', on: true, ensure_in: ['home'] },
+  } };
+  properties.orderingProjection = { effective_order: ['queue/after', 'queue/before'], overlay: {} };
+  instance.selectedEnabledTaskPath = '';
+  await instance.setTaskViewMode('ordering');
+  await Vue.nextTick();
+  assert.deepEqual(nodesWithClass('task-order-row').map(node => node.props['data-ordering-task-path']),
+    ['queue/before', 'queue/after'], 'Rendered ordering rows must follow dependencies after a task reload');
+  const enabledLabels = nodesWithClass('task-enabled-row').map(node =>
+    flattenNodes(node).find(child => child.type === 'span' && child.props.title?.startsWith('queue / '))?.text);
+  assert.deepEqual(enabledLabels, ['queue / before', 'queue / after'], 'The sidebar renders the same complete queue');
   application.unmount();
   assert.deepEqual(renderErrors, [], 'Vue must not swallow directive or render failures');
 });

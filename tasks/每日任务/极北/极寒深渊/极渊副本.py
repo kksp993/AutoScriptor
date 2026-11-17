@@ -61,6 +61,7 @@ _DEFAULT_BATTLE_CONFIG = TableParam(
     ensure_in="极寒深渊",
     description="根据配置挑战极寒深渊副本。",
     reschedule="daily",
+    params_doc={"lingqi_priority": "灵气优先级", "battle_config": "战斗配置"},
 )
 def task(
     lingqi_priority: tuple[LingQi, ...] = _DEFAULT_LINGQI_PRIORITY,
@@ -120,8 +121,7 @@ def task(
 
     # ── 阶段一：灵气匹配关卡打灵狱（共享3次，只打1个本） ──
     logger.info("====极寒深渊-灵狱====")
-    ensure_in("极寒深渊")
-    Weather = h.check_linggen()
+    Weather = h.check_linggen(entry_ready=True)
     logger.info(f"当前灵气: {Weather}")
     lingyu_candidates = [n for n in JHSY_CHAOS_TABLE if nandu_map.get(n) == JhsyNandu.灵域]
     task_list_for_lingyu = lingyu_candidates if lingyu_candidates else list(JHSY_CHAOS_TABLE)

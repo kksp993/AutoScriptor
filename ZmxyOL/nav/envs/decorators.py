@@ -13,6 +13,8 @@ SHIJIEDITU_CANTO_DICT = {
     "洪荒遗境": T("洪荒遗境"),
 }
 SHIJIEDITU_CANTO=list(SHIJIEDITU_CANTO_DICT.keys())
+# 只放真正的 Env：Loc(HAS_SHEZHI, ...) 会按 env 名查 mm.envs。
+# 「荒古村庄」是「洪荒遗境」下面的 Loc（见 env_locs.py），不属于这里。
 HAS_SHEZHI = ["村庄", "极北村庄"]
 LOC_ENV = "__LOC_ENV__"
 
@@ -36,6 +38,5 @@ def LOC_INDEX_TRAV(env:str, fn:callable):
         for to_loc, to_idx in loc_arr:
             if from_loc == to_loc: continue
             path(from_loc, to_loc)(partial(lambda from_idx, to_idx:fn(from_idx, to_idx), from_idx=from_idx, to_idx=to_idx))
-
 
 

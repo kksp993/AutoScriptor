@@ -156,6 +156,14 @@ def build_specs(version: str) -> tuple[WheelSpec, WheelSpec]:
     return framework, game_layer
 
 
+def read_project_scripts() -> tuple[tuple[str, str], ...]:
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    if "[project.scripts]" not in text:
+        return ()
+    block = text.split("[project.scripts]", 1)[1].split("\n[", 1)[0]
+    return tuple(re.findall(r'^(\w[\w-]*)\s*=\s*"([^"]+)"', block, re.MULTILINE))
+
+
 def read_framework_readme() -> str:
     """The framework README, which ``pyproject.toml`` also declares as ``readme``."""
     declared = read_project_readme_path()
@@ -183,6 +191,9 @@ def collect_archive_entries(spec: WheelSpec, version: str) -> dict[str, bytes]:
     dist_info = f"{spec.distribution}-{version}.dist-info"
     entries[f"{dist_info}/METADATA"] = render_metadata(spec, version).encode("utf-8")
     entries[f"{dist_info}/WHEEL"] = render_wheel_metadata().encode("utf-8")
+    if spec.distribution == "autoscriptor" and read_project_scripts():
+        entry_points = "[console_scripts]\n" + "".join(f"{name} = {target}\n" for name, target in read_project_scripts())
+        entries[f"{dist_info}/entry_points.txt"] = entry_points.encode("utf-8")
     entries[f"{dist_info}/top_level.txt"] = (
         "\n".join(spec.packages) + "\n"
     ).encode("utf-8")

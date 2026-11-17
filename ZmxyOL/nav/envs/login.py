@@ -1,4 +1,6 @@
 from AutoScriptor import *
+import AutoScriptor.core.api as core_api
+from AutoScriptor.utils.cancel import check_cancel_raise
 from ZmxyOL.nav.envs.floating_window import dismiss_floating_window
 import getpass
 import time
@@ -288,6 +290,68 @@ def _finish_account_login(ctx: LoginCtx):
     _handle_post_login_popups()
 
 
+def _announcement_close_on_frame(frame):
+    """Match the blue toolbar's stable navigation icons and X, not weekly text."""
+    matches = locate((I('活动公告页面'), I('公告-关闭')),
+                     screenshot=frame, assure_stable=False, is_simplify=False)
+    if matches and all(matches):
+        return matches[1][0]
+    return None
+
+
+def _finish_character_entry(timeout=60):
+    """Wait for a real game scene, closing the recurring announcement first.
+
+    Loading animations may have finished before the first recognition pass;
+    their absence is not a login failure. Popup disappearance alone is not a
+    successful login either: a registered village must also be visible.
+    """
+    from ZmxyOL.nav.envs.decorators import HAS_SHEZHI
+    from ZmxyOL.nav.map_manager import mm
+
+    entry_identifiers = []
+    for environment_name in HAS_SHEZHI:
+        identifier = mm.envs[environment_name].identifier
+        entry_identifiers.extend(identifier if isinstance(identifier, (list, tuple)) else [identifier])
+    deadline = time.monotonic() + timeout
+    announcement_attempts = 0
+    activity_attempts = 0
+    ready_frames = 0
+    dismiss_floating_window()
+    while time.monotonic() < deadline:
+        check_cancel_raise()
+        frame = core_api.mixctrl.screenshot()
+        close_box = _announcement_close_on_frame(frame)
+        if close_box is not None:
+            if announcement_attempts >= 3:
+                raise RuntimeError('登录公告在关闭后仍存在，停止后续操作')
+            click(B(close_box))
+            announcement_attempts += 1
+            ready_frames = 0
+            sleep(0.5)
+            continue
+        if locate(T('精彩活动'), screenshot=frame, assure_stable=False):
+            if activity_attempts >= 3:
+                raise RuntimeError('登录后的精彩活动弹窗未关闭')
+            click(B(1100, 40, 40, 40))
+            activity_attempts += 1
+            ready_frames = 0
+            sleep(0.5)
+            continue
+        if locate(tuple(entry_identifiers), screenshot=frame, assure_stable=False):
+            if dismiss_floating_window():
+                ready_frames = 0
+            else:
+                ready_frames += 1
+                if ready_frames >= 2:
+                    logger.info('登录完成：已确认游戏场景、公告关闭及4399悬浮窗消失')
+                    return True
+        else:
+            ready_frames = 0
+        sleep(0.5)
+    raise TimeoutError(f'角色进入游戏未完成（{timeout:g}s）：未确认公告关闭后的游戏场景')
+
+
 def _select_character(ctx: LoginCtx):
     """在角色选择页进入游戏；入口参数优先，未传时才读取 cfg。"""
     click(T("开心收下"), if_exist=True, timeout=3)
@@ -309,15 +373,7 @@ def _select_character(ctx: LoginCtx):
     if ui_T(T("确定"), 3):
         click(T("确定"))
         return False  # need to re-login
-    wait_for_appear(I("加载中"), timeout=10)
-    locate(I("活动公告页面"), 30)
-    click(B(1240, 5, 40, 60))
-    sleep(0.5)
-    dismiss_floating_window(max_retries=1, debug=False)
-    if ui_T(T("精彩活动"), 3):
-        click(B(1100, 40, 40, 40))
-    logger.info("登录完成")
-    return True
+    return _finish_character_entry()
 
 
 
@@ -329,8 +385,10 @@ _login = PageRouter()
 @_login.page("角色选择", T("进入游戏", box=Box(543,586,190,62).margin()))
 def _on_character_select(ctx):
     if ctx.login_client() != LoginClient.HZ4399:
-        _select_character(ctx)
-    ctx.done = True
+        dismiss_floating_window()
+        ctx.done = _select_character(ctx)
+    else:
+        ctx.done = True
 
 @_login.page(
     "初始授权",

@@ -7,7 +7,7 @@ from ZmxyOL.nav.envs.decorators import *
 from tasks.task_register import register_task
 from ZmxyOL import *
 @register_task(
-    ensure_in=None,  # 调试当前关卡现场，不得先导航离开。
+    ensure_in=ANYWHERE,  # 调试当前关卡现场，不得先导航离开。
     description='调试角色离开关卡流程',
     debug=True,
 )

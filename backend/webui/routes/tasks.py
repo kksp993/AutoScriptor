@@ -291,7 +291,9 @@ async def run_tasks_api(request: Request):
         activate_sched,
         execution_source or "default",
     )
-    sorted_tasks = orchestrator.tree.sort_task_paths(tasks)
+    # Task-list ranges already carry the complete graph queue shown in the UI.
+    # Reapplying the manual overlay here would put successors before predecessors.
+    ordered_tasks = list(tasks) if skip_character_login else orchestrator.tree.sort_task_paths(tasks)
 
     if activate_sched:
         if direct_busy:
@@ -303,7 +305,7 @@ async def run_tasks_api(request: Request):
             )
         orchestrator.scheduler.activate()
         orchestrator.scheduler.wake()
-        return api_ok(status='ok', tasks=sorted_tasks, mode='scheduler')
+        return api_ok(status='ok', tasks=ordered_tasks, mode='scheduler')
 
     if direct_busy:
         return api_error(
@@ -317,10 +319,10 @@ async def run_tasks_api(request: Request):
         logger.info("========== 所有任务执行完成 ==========")
 
     try:
-        orchestrator.execution.start_direct(_run, sorted_tasks)
+        orchestrator.execution.start_direct(_run, ordered_tasks)
     except RuntimeExecutionBusyError:
         return busy_response("run task")
-    return api_ok(status='ok', tasks=sorted_tasks, mode='direct')
+    return api_ok(status='ok', tasks=ordered_tasks, mode='direct')
 
 
 @router.get("/api/run/status")

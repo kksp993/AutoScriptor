@@ -5,11 +5,14 @@ const TaskPlanningGraph = {
     orderingProjection: { type: Object, default: null },
     executionBusy: { type: Boolean, default: false },
     saving: { type: Boolean, default: false },
+    locationCosts: { type: Object, default: () => ({}) },
+    locations: { type: Array, default: () => [] },
+    loadingLocations: { type: Boolean, default: false },
+    locationError: { type: String, default: '' },
   },
-  emits: ['edit-task', 'save-graph'],
+  emits: ['edit-task', 'save-graph', 'refresh-locations'],
   data() {
     return {
-      locationCosts: {}, locations: [], loadingLocations: false, locationError: '',
       showDisabled: false, zoom: 1, hoveredGroup: '', pinnedGroup: '',
       selectedId: '', draftPredecessors: [], draftLocations: [], inheritPredecessors: false,
       inheritLocations: false, dirty: false, savePending: false, saveError: '',
@@ -50,32 +53,16 @@ const TaskPlanningGraph = {
         this.dirty = false;
       } else if (!this.dirty && !this.savePending) this.readDraft();
     },
+    locationCosts() { this.$nextTick(() => this.fitGraph()); },
   },
-  mounted() { this.loadLocations(); },
+  mounted() { this.fitGraph(); },
   methods: {
     identifier(row) { return window.TaskPlanningLayout.taskId(row); },
     values(row, field) { return window.TaskPlanningLayout.specification(row, field); },
     entryLabel(row) {
-      if (row.item.ensure_in === null) return '当前现场';
       return window.TaskPlanningLayout.entryLocations(row).join(' / ') || '未配置地点';
     },
-    async loadLocations() {
-      this.loadingLocations = true;
-      this.locationError = '';
-      try {
-        const { ok, data } = await window.WebUIApi.request('GET', '/task-planning/locations');
-        if (!ok) throw new Error(window.WebUIApi.errorMessage(data, '无法读取导航距离'));
-        if (!Array.isArray(data.locations) || !data.costs || typeof data.costs !== 'object') {
-          throw new Error('导航距离响应不完整');
-        }
-        this.locations = data.locations;
-        this.locationCosts = data.costs;
-        this.$nextTick(() => this.fitGraph());
-      } catch (error) {
-        this.locationCosts = {};
-        this.locationError = String(error.message || error);
-      } finally { this.loadingLocations = false; }
-    },
+    loadLocations() { this.$emit('refresh-locations'); },
     fitGraph() {
       const width = this.$refs.viewport?.clientWidth || 800;
       this.zoom = Math.max(0.25, Math.min(1, (width - 36) / this.graph.width));

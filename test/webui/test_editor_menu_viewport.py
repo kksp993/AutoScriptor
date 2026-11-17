@@ -43,7 +43,7 @@ class EditorMenuViewportTests(unittest.TestCase):
         self.page.add_script_tag(path=str(STATIC.parent / "vendor/element-plus.full.js"))
         self.page.add_script_tag(path=str(STATIC / "js/components/editor/EditorMenuBar.js"))
         self.page.add_script_tag(content="""
-            const EditorCanvas = {}, EditorControls = {}, PythonCodeEditor = {};
+            const EditorCanvas = {}, EditorControls = {}, PythonCodeEditor = {}, EditorTutorial = {};
             window.WebUIApi = { request: async () => ({ data: { ok: true, info: 12, items: [
                 { name: '村庄', locations: Array.from({ length: 60 }, (_, index) => `位置${index}`) }
             ] } }) };

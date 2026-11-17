@@ -59,7 +59,10 @@
       .stat-label { @apply text-sm text-gray-500 mt-1.5; }
     }
   </style>
-  <link rel="stylesheet" href="/static/css/style.css?v=48" />
+  <link rel="stylesheet" href="/static/css/style.css?v=49" />
+  <link rel="stylesheet" href="/static/css/editor-tutorial.css?v=1" />
+  <link rel="stylesheet" href="/static/css/notifications.css?v=2" />
+  <link rel="stylesheet" href="/static/css/api-docs.css?v=2" />
   <link rel="stylesheet" href="/static/css/task-hierarchy.css?v=2" />
   <link rel="stylesheet" href="/static/css/task-planning.css?v=3" />
 </head>
@@ -217,15 +220,15 @@
 
         <editor-panel v-if="activeTab==='editor'"
           :pending-import-url="pendingEditorImportUrl"
+          @open-api-docs="apiDocumentationVisible=true"
           @imported="onEditorImported"></editor-panel>
+
+        <api-docs-panel v-if="activeTab==='apiDocs'"></api-docs-panel>
 
         <error-archives-panel v-if="activeTab==='errorArchives'"
           @go-to-editor-with-image="goToEditorWithImage"></error-archives-panel>
 
         <update-panel v-if="activeTab==='updater'"></update-panel>
-
-        <notifications-panel v-if="activeTab==='notifications'"
-          :execution-busy="executionBusy"></notifications-panel>
 
         <settings-panel v-if="activeTab==='settings'"
           :filtered-config="filteredConfig"
@@ -255,6 +258,11 @@
 
       </main>
     </div>
+
+    <el-dialog v-model="apiDocumentationVisible" title="API 接口教程" class="api-reference-dialog"
+               width="min(1280px, calc(100vw - 24px))" top="3vh" append-to-body destroy-on-close>
+      <api-docs-panel v-if="apiDocumentationVisible"></api-docs-panel>
+    </el-dialog>
 
     <!-- 编辑任务对话框 -->
     <teleport to="body">
@@ -564,27 +572,30 @@
 
   <!-- Vue 组件 -->
   <script src="/static/js/components/NewsPanel.js?v=5"></script>
-  <script src="/static/js/components/AppSidebar.js?v=18"></script>
-  <script src="/static/js/core/taskStatusTheme.js?v=1"></script>
-  <script src="/static/js/components/TaskTree.js?v=15"></script>
+  <script src="/static/js/components/AppSidebar.js?v=20"></script>
+  <script src="/static/js/core/taskStatusTheme.js?v=2"></script>
+  <script src="/static/js/components/TaskTree.js?v=16"></script>
   <script src="/static/js/components/Overview.js?v=19"></script>
   <script src="/static/js/components/SchedulerPanel.js?v=15"></script>
-  <script src="/static/js/core/taskPlanningLayout.js?v=4"></script>
-  <script src="/static/js/components/TaskPlanningGraph.js?v=4"></script>
-  <script src="/static/js/components/TaskPanel.js?v=25"></script>
-  <script src="/static/js/components/Settings.js?v=13"></script>
-  <script src="/static/js/components/NotificationsPanel.js?v=4"></script>
+  <script src="/static/js/core/taskPlanningLayout.js?v=5"></script>
+  <script src="/static/js/components/TaskPlanningGraph.js?v=5"></script>
+  <script src="/static/js/components/TaskPanel.js?v=26"></script>
+  <script src="/static/js/components/NotificationsTutorial.js?v=1"></script>
+  <script src="/static/js/components/NotificationsPanel.js?v=6"></script>
+  <script src="/static/js/components/Settings.js?v=14"></script>
   <script src="/static/js/components/AboutPanel.js?v=1"></script>
   <script src="/static/js/components/UpdatePanel.js?v=1"></script>
-  <script src="/static/js/components/editor/EditorCanvas.js?v=10"></script>
+  <script src="/static/js/components/ApiDocsPanel.js?v=2"></script>
+  <script src="/static/js/components/editor/EditorCanvas.js?v=11"></script>
   <script src="/static/js/components/editor/EditorControls.js?v=14"></script>
   <script src="/static/js/components/editor/PythonCodeEditor.js?v=3"></script>
   <script src="/static/js/components/editor/EditorMenuBar.js?v=1"></script>
-<script src="/static/js/components/editor/EditorPanel.js?v=39"></script>
+  <script src="/static/js/components/editor/EditorTutorial.js?v=1"></script>
+  <script src="/static/js/components/editor/EditorPanel.js?v=42"></script>
   <script src="/static/js/components/DiagnosticsPanel.js?v=3"></script>
   <script src="/static/js/components/ErrorArchivesPanel.js?v=4"></script>
   <script src="/static/js/core/api.js?v=1"></script>
   <script src="/static/js/stores/runtimeStore.js?v=1"></script>
-  <script src="/static/js/app.js?v=45"></script>
+  <script src="/static/js/app.js?v=47"></script>
 </body>
 </html>

@@ -10,7 +10,6 @@ from ZmxyOL import *
 )
 def task():
     """从荒古万界进入异兽入侵，选择荒古·邪·相柳并完成阻击流程。"""
-    ensure_in("荒古万界")
     click(T("万界穿梭"));sleep(1)
     click(T("异兽入侵", box=Box(192,656,111,53).margin()))
     wait_for_appear(T("异兽入侵", box=Box(533,23,214,55).margin()))

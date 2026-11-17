@@ -542,6 +542,8 @@ def _decorator_ref_is_register_task(expr: ast.expr) -> bool:
 
 def _normalize_editor_task_start(value: object) -> str | list[str]:
     """Validate save metadata against the same registry that supplies the editor menu."""
+    from ZmxyOL.nav.api import ANYWHERE
+
     location_names = [value] if isinstance(value, str) else value
     if not isinstance(location_names, (list, tuple)) or not location_names or any(
         not isinstance(location_name, str) or not location_name.strip()
@@ -549,6 +551,10 @@ def _normalize_editor_task_start(value: object) -> str | list[str]:
     ):
         raise ValueError("ensure_in 必填：请选择已注册的起点名称（字符串或非空列表/元组）")
     normalized_names = [location_name.strip() for location_name in location_names]
+    if ANYWHERE in normalized_names:
+        if any(location_name != ANYWHERE for location_name in normalized_names):
+            raise ValueError("ensure_in: ANYWHERE（任意位置）不能与具体地点混用")
+        return ANYWHERE
     registered_names = set()
     for environment in _build_editor_navigation_options():
         registered_names.add(environment["name"])
@@ -558,12 +564,23 @@ def _normalize_editor_task_start(value: object) -> str | list[str]:
         raise ValueError(f"ensure_in 包含未注册的导航名称: {', '.join(unknown_names)}")
     if isinstance(value, str):
         return normalized_names[0]
-    # The runtime navigation API accepts lists, not tuples, for alternative destinations.
     return list(dict.fromkeys(normalized_names))
 
 
 def _register_task_decorator_info(tree: ast.AST) -> bool:
     """Check every authored task declaration before saving, without executing the file."""
+    from ZmxyOL.nav.api import ANYWHERE
+
+    anywhere_import_lines: dict[str, int] = {}
+    for statement in tree.body:
+        if not isinstance(statement, ast.ImportFrom) or statement.module not in {
+            "ZmxyOL", "ZmxyOL.nav", "ZmxyOL.nav.api",
+        }:
+            continue
+        for imported_name in statement.names:
+            if imported_name.name in {"ANYWHERE", "*"}:
+                binding = "ANYWHERE" if imported_name.name == "*" else imported_name.asname or imported_name.name
+                anywhere_import_lines.setdefault(binding, statement.lineno)
     registration_aliases = {
         imported_name.asname
         for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
@@ -587,20 +604,24 @@ def _register_task_decorator_info(tree: ast.AST) -> bool:
             if "ensure_in" not in arguments:
                 raise ValueError(
                     f"任务 {node.name} 的 @register_task 缺少必填 ensure_in；"
-                    "请声明起点，现场/外部 App 调试例外需显式写 debug=True, ensure_in=None"
+                    "请声明已注册起点，任意位置任务使用 ensure_in=ANYWHERE"
+                )
+            expression = arguments["ensure_in"]
+            uses_anywhere = isinstance(expression, ast.Name) and (
+                expression.id == "ANYWHERE" or expression.id in anywhere_import_lines
+            )
+            if uses_anywhere and anywhere_import_lines.get(expression.id, decorator.lineno) >= decorator.lineno:
+                raise ValueError(
+                    f"任务 {node.name} 的 ensure_in 引用了未导入的 {expression.id}；"
+                    "请在注册前添加 from ZmxyOL import ANYWHERE（可使用别名或星号导入）"
                 )
             try:
-                start = ast.literal_eval(arguments["ensure_in"])
+                start = ANYWHERE if uses_anywhere else ast.literal_eval(expression)
             except (ValueError, TypeError) as exception:
                 raise ValueError(
-                    f"任务 {node.name} 的 ensure_in 无法在保存前验证；请直接填写导航名称字符串或非空列表/元组"
+                    f"任务 {node.name} 的 ensure_in 无法在保存前验证；请填写导航名称字符串、非空列表/元组或 ANYWHERE"
                 ) from exception
-            if start is None:
-                debug = arguments.get("debug")
-                if not isinstance(debug, ast.Constant) or debug.value is not True:
-                    raise ValueError(f"任务 {node.name} 仅在显式 debug=True 时允许 ensure_in=None（现场/外部 App 调试）")
-            else:
-                _normalize_editor_task_start(start)
+            _normalize_editor_task_start(start)
     return has_registered_task
 
 
@@ -645,6 +666,8 @@ def _editor_task_signature(params: list[dict[str, object]]) -> tuple[str, list[s
 
 
 def _build_wrapped_custom_task_source(name: str, code: str, metadata: dict | None = None) -> tuple[str, str]:
+    from ZmxyOL.nav.api import ANYWHERE
+
     clean_name = str(name or "").replace("\\", "/").split("/")[-1].strip()
     if clean_name.lower().endswith(".py"):
         clean_name = clean_name[:-3]
@@ -658,12 +681,12 @@ def _build_wrapped_custom_task_source(name: str, code: str, metadata: dict | Non
     task_doc = str(metadata.get("task_doc") or metadata.get("task_docs") or "").strip()
     params = _normalize_editor_param_specs(metadata.get("params"))
     if any(param["name"] == "ensure_in" for param in params):
-        raise ValueError("参数名称不能是 ensure_in，否则会覆盖任务开头的导航函数")
+        raise ValueError("参数名称不能是 ensure_in，否则会覆盖脚本导航函数")
     final_task_doc = _editor_task_doc_with_param_descriptions(task_doc, params)
     start = _normalize_editor_task_start(metadata.get("ensure_in"))
 
     signature, enum_sources = _editor_task_signature(params)
-    body = f"    ensure_in({start!r})\n" + textwrap.indent(code.rstrip() or "pass", "    ")
+    body = textwrap.indent(code.rstrip() or "pass", "    ")
     imports = [
         "from AutoScriptor import *",
         "from ZmxyOL.battle import h",
@@ -674,7 +697,14 @@ def _build_wrapped_custom_task_source(name: str, code: str, metadata: dict | Non
     if enum_sources:
         imports.insert(0, "import enum")
     # 装饰器里没有路径：自定义任务的显示路径由文件在 custom_task/ 下的位置决定。
-    decorator = "@register_task(\n" f"    ensure_in={start!r},\n" f"    description={description!r},\n" ")"
+    params_doc = {param["name"]: param["description"] for param in params if param["description"]}
+    decorator = (
+        "@register_task(\n"
+        f"    ensure_in={'ANYWHERE' if start == ANYWHERE else repr(start)},\n"
+        f"    description={description!r},\n"
+        + (f"    params_doc={params_doc!r},\n" if params_doc else "")
+        + ")"
+    )
     # 长说明回到函数 docstring，也就是它本该在的地方。
     docstring = ""
     if final_task_doc:
@@ -789,11 +819,12 @@ def _build_editor_navigation_options() -> list[dict]:
     """Return registered environment/location names without touching device state."""
     from ZmxyOL.nav import envs as _registered_navigation_envs  # noqa: F401
     from ZmxyOL.nav.map_manager import mm
+    from ZmxyOL.nav.api import ANYWHERE
 
     if not mm.envs:
         raise RuntimeError("导航环境尚未注册")
 
-    options = []
+    options = [{"name": ANYWHERE, "locations": []}]
     for environment_name, environment in mm.envs.items():
         location_names = []
         for location_name in environment.locs:

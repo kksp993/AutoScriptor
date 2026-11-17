@@ -102,7 +102,7 @@ def item_dict_by_item_name(item_name: str) -> dict:
     raise KeyError(item_name)
 
 
-def wear_shizhuang_choice(choice: list | enum.Enum | None):
+def wear_shizhuang_choice(choice: list | enum.Enum | None, *, entry_ready: bool = False):
     """任务参数：单枚举，或 list 取首项；空则跳过。"""
     if choice is None:
         return
@@ -113,11 +113,12 @@ def wear_shizhuang_choice(choice: list | enum.Enum | None):
             return
         e = choice[0]
     name = e.value if isinstance(e, enum.Enum) else e
-    wear_item(item_dict_by_item_name(name))
+    wear_item(item_dict_by_item_name(name), entry_ready=entry_ready)
 
 
-def wear_item(item_dict: dict):
-    ensure_in("背包")
+def wear_item(item_dict: dict, *, entry_ready: bool = False):
+    if not entry_ready:
+        ensure_in("背包")
     find_in_bag(item_dict["bag_class"], item_dict["item_name"])
     sleep(1)
     click(get_pos_tgt(0,0))

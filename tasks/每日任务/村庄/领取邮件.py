@@ -25,13 +25,13 @@ def _is_single_mail_page() -> bool:
 @register_task(
     description="在村庄循环领取邮件，页码为 1/1 后再补领 5 次。",
     debug=True,
-    ensure_in="村庄",
+    ensure_in=HAS_SHEZHI,
+    params_doc={"claim_interval": "领取间隔（秒）", "timeout": "领取总时限（秒）"},
 )
 def task(claim_interval: float = 3, timeout: float = 600):
     """claim_interval 是每次领取后的等待秒数；timeout 是领取循环的总时限。"""
     if claim_interval <= 0 or timeout <= 0:
         raise ValueError("领取间隔和总时限必须大于 0")
-    ensure_in("村庄")
     click(T("邮件", box=Box(33, 45, 868, 74).margin()))
     claim_target = T("键领取", box=Box(532, 551, 214, 90).margin())
     single_page_claims = 0

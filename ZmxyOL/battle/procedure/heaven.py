@@ -26,7 +26,11 @@ def _collect_bonus_rewards(expected: int):
             logger.warning("关卡奖励入口/确认弹窗未出现，已领取 %s/%s，结束奖励处理", collected, expected)
         break
 
-    click(B(1050, 60, 10, 10))
+    click(B(1150, 30, 68, 56))  # 关闭奖励面板 (=5)
+    click(B(1100, 30, 68, 56))  # 关闭奖励面板（等于4)猜测是这个
+    click(B(1050, 60, 10, 10))  # 关闭奖励面板（小于等于3)
+    sleep(1)
+    click(B(840, 115, 66, 61))  
 
 
 @combo
@@ -291,11 +295,12 @@ def heaven_battle(
         bg.set_signal(BG_SIGNALS.PAUSE_BATTLE, False)
 
 @combo
-def task(self, task_name:str):
+def task(self, task_name:str, *, entry_ready: bool = False):
     from ZmxyOL.battle.tasks import get_task_table
     from ZmxyOL.nav.api import ensure_in
     from ZmxyOL.character.hero import h
-    ensure_in(*get_task_table(task_name)["location"])
+    if not entry_ready:
+        ensure_in(*get_task_table(task_name)["location"])
     logger.info(f"===={task_name}====")
     box = Box(174,253+100*get_task_table(task_name)["idx"],930,75)
     click(get_task_table(task_name)["target"], until=lambda:ui_T(T("每日1次",box=box)))

@@ -53,6 +53,15 @@ def bingku_battle():
     ensure_in="背包",  # 开场先通过 wear_shizhuang_choice / wear_item 换装。
     description="完成幽冥冰窟每周流程。",
     reschedule="weekly",
+    params_doc={
+        "Bingku_WuQi": "冰窟武器",
+        "Bingku_YiFu": "冰窟防具",
+        "Bingku_ChiBang": "冰窟翅膀",
+        "Changgui_WuQi": "常规武器",
+        "Changgui_YiFu": "常规防具",
+        "Changgui_ChiBang": "常规翅膀",
+        "battle_flow": "战斗招式",
+    },
 )
 def task(
     Bingku_WuQi=WuQi.风虎之怒,
@@ -63,7 +72,7 @@ def task(
     Changgui_ChiBang=ChiBang.影蛇风翼,
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):
-    wear_shizhuang_choice(Bingku_WuQi)
+    wear_shizhuang_choice(Bingku_WuQi, entry_ready=True)
     wear_shizhuang_choice(Bingku_YiFu)
     wear_shizhuang_choice(Bingku_ChiBang)
     ensure_in("幽冥冰窟")

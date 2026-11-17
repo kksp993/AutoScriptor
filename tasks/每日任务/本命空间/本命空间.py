@@ -6,12 +6,12 @@ from ZmxyOL.character.hero import h
 
 
 @register_task(
-    ensure_in=["村庄", "极北村庄"],
+    ensure_in=HAS_SHEZHI,
     description="完成本命空间每日流程，领取任务奖励，合成本命法宝。",
     reschedule="daily",
+    params_doc={"clear_all": "一键完成空间任务", "lianbao": "炼制本命法宝"},
 )
 def task(clear_all=False, lianbao=False):
-    ensure_in(HAS_SHEZHI)
     while ui_F(T("仙盟",box=Box(16,30,924,400)), 3):
         click(I("导航-按钮收缩"))
         sleep(4)

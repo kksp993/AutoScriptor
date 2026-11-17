@@ -6,11 +6,11 @@ from AutoScriptor import *
     ensure_in="村庄",
     description="执行荣耀之战每周流程。",
     reschedule="weekly",
+    params_doc={"battle_flow": "战斗招式"},
 )
 def task(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):
-    ensure_in("村庄")
     click(I("导航-挑战"))
     wait_for_appear(T("天选阁"))
     while ui_F(T("荣耀之战")):

@@ -8,7 +8,6 @@ from ZmxyOL import *
 )
 def task():
     """【未完成】完成腾蛇飞升活动流程。"""
-    ensure_in("村庄")
     while ui_T(T("仙盟",box=Box(16,30,924,400))):
         click(I("导航-按钮展开"))
         sleep(2)

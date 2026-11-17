@@ -42,6 +42,8 @@ REQUEST_TIMEOUT_SECONDS = 60
 # 只读本地投影：这些接口的输入全在内存/配置文件里，必须能干净地返回。
 LOCAL_PROJECTION_ENDPOINTS = frozenset({
     "/api/accounts",
+    "/api/ascli/capabilities",
+    "/api/ascli/status",
     "/api/characters",
     "/api/characters/all_tasks_summary",
     "/api/config/export",
@@ -59,6 +61,8 @@ LOCAL_PROJECTION_ENDPOINTS = frozenset({
     "/api/run/status",
     "/api/runtime/snapshot",
     "/api/scheduler/status",
+    "/api/script-api/version",
+    "/api/script-api/reference",
     "/api/task-ordering",
     "/api/task-planning/locations",
     "/api/update/status",
@@ -66,6 +70,7 @@ LOCAL_PROJECTION_ENDPOINTS = frozenset({
 
 # 依赖网络 / 模拟器 / 扫盘：跑测试的机器上未必具备，只要求返回结构化 JSON。
 EXTERNAL_DEPENDENCY_ENDPOINTS = frozenset({
+    "/api/notify/qq/login",
     "/api/device/discover",
     "/api/editor/screenshot",
     "/api/news/gift_codes",
@@ -271,6 +276,37 @@ class WebUIServerSmokeTest(unittest.TestCase):
 
     # ── 断言 ──
 
+    def test_script_api_metadata_is_mounted_without_device_initialization(self):
+        from AutoScriptor.api_version import API_VERSION
+
+        version = self._get_json("/api/script-api/version")
+        reference = self._get_json("/api/script-api/reference")
+        self.assertEqual(version["version"], API_VERSION)
+        self.assertEqual(reference["version"], API_VERSION)
+        self.assertEqual(reference["scope"], "python-script-api")
+        self.assertIn("click", {entry["name"] for entry in reference["entries"]})
+        self.assertFalse(self._get_json("/api/ascli/status")["busy"])
+
+    def test_ascli_is_mounted_without_device_startup_and_execution_requires_credentials(self):
+        catalogue = self._get_json('/api/ascli/capabilities')
+        self.assertIn('click', catalogue['commands'])
+        status = self._get_json('/api/ascli/status')
+        self.assertFalse(status['busy'])
+        source = 'click -B 332 33 22 44 --until -T Done\nwait-disappear -T Loading'
+        for operation in ('check', 'transform', 'runs'):
+            request = urllib.request.Request(self.base_url + '/api/ascli/' + operation, data=json.dumps({'source': source}).encode('utf-8'), headers={'Content-Type': 'application/json'})
+            if operation == 'runs':
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(request, timeout=10)
+                self.assertEqual(caught.exception.code, 403)
+                caught.exception.close()
+            else:
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    payload = json.load(response)
+                self.assertTrue(payload['ok'])
+                self.assertFalse(payload['device_actions_executed'])
+        self.assertFalse(self._get_json('/api/ascli/status')['busy'])
+
     def test_every_get_endpoint_is_classified(self):
         """新增端点必须归入「本地投影」或「外部依赖」，否则这里会失败。"""
         discovered = set(self._discover_get_endpoints())
@@ -344,8 +380,8 @@ class WebUIServerSmokeTest(unittest.TestCase):
             with self.subTest(task=identifier):
                 self.assertIn("ensure_in", leaf)
                 entrypoints = leaf["ensure_in"]
-                if entrypoints is None:
-                    self.assertTrue(leaf["debug_effective"])
+                if entrypoints == ["任意位置"]:
+                    self.assertEqual(leaf["planning_defaults"]["preferred_locations"], [])
                 else:
                     self.assertTrue(entrypoints, "Game entrypoints are mandatory")
                     self.assertTrue(set(entrypoints) <= locations)

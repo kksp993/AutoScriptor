@@ -17,6 +17,9 @@ from .map_manager import mm
 from AutoScriptor.logging.logger import logger
 from typing import Any, Callable
 
+# A navigation condition, not a map node; keep its value stable across reloads/JSON.
+ANYWHERE = "任意位置"
+
 def _flatten_identifiers(idfs: list[Any]) -> tuple[list[Any], list[list[Any]]]:
     """将混合单个或序列的 identifier 展平，并记录分组"""
     groups: list[list[Any]] = []
@@ -125,11 +128,20 @@ def locate_region(cnt = 0, check_only = False) -> tuple[str, str]:
         raise ValueError("无法找到当前位置，请检查环境是否正确")
     return locate_region(cnt + 1)
 
-def ensure_in(tar_loc: str|list[str], idx:int|None|list[int]=None):
+def ensure_in(tar_loc: str | list[str] | tuple[str, ...], idx:int|None|list[int]=None):
     """
     根据当前的env.loc，和目标位置的env.loc
     利用导航工具组装path，到达目的地
+    ANYWHERE 无条件满足，不定位、不启动应用、不修改导航缓存。
     """
+    if tar_loc == ANYWHERE:
+        return
+    if isinstance(tar_loc, (list, tuple)):
+        tar_loc = list(tar_loc)
+        if ANYWHERE in tar_loc:
+            if all(location == ANYWHERE for location in tar_loc):
+                return
+            raise ValueError("ensure_in: ANYWHERE 不能与具体地点混用")
     if tar_loc == LOC_ENV:
         tar_loc = mm.get_region()[0]
     elif idx is not None: 

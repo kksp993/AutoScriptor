@@ -22,6 +22,8 @@ window.TaskPlanningLayout = (() => {
   }
 
   function distanceBetween(origins, targets, costs) {
+    // Anywhere tasks form their own deck, never a fictional route to a map location.
+    if (origins.includes('任意位置') && targets.includes('任意位置')) return 0;
     const distances = origins.flatMap(origin => targets.map(target => costs[origin]?.[target]))
       .filter(distance => typeof distance === 'number' && Number.isFinite(distance) && distance >= 0);
     return distances.length ? Math.min(...distances) : Infinity;
@@ -50,7 +52,7 @@ window.TaskPlanningLayout = (() => {
       visiting.add(identifier);
       const row = rowById.get(identifier);
       if (row.item.planning_status?.error) errors.set(identifier, row.item.planning_status.error);
-      if (row.item.ensure_in !== null && !entryLocations(row).length) {
+      if (!entryLocations(row).length) {
         errors.set(identifier, '起点未配置，请检查任务');
       }
       let level = 1;
@@ -205,10 +207,15 @@ window.TaskPlanningLayout = (() => {
         });
       }
     }
+    const invalidRows = rows.filter(row => visibleIds.has(taskId(row)) && errors.has(taskId(row)));
+    // Read every dependency column, top to bottom, and expand its decks in place.
+    // This is a complete structural queue, not the scheduler's current ready set.
+    const queueGroups = [...groups].sort((left, right) => left.level - right.level
+      || left.top - right.top || orderById.get(left.id) - orderById.get(right.id));
     return {
       groups, edges, width, height,
-      errors: rows.filter((row) => visibleIds.has(taskId(row)) && errors.has(taskId(row)))
-        .map((row) => ({ row, message: errors.get(taskId(row)) })),
+      queueRows: [...queueGroups.flatMap(group => group.rows), ...invalidRows],
+      errors: invalidRows.map(row => ({ row, message: errors.get(taskId(row)) })),
       taskCount: visibleIds.size,
     };
   }

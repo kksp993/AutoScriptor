@@ -396,9 +396,10 @@ def update_equipment():
     click(B(1182,6,76,77), until=lambda: ui_T(T("个人资料", box=Box(1146,179,111,66).margin())))
     click(B(0,0))
 
-def longgong1(exp_lv: int, ensure_drug: bool = False, flow_name: str = "龙宫1"):
+def longgong1(exp_lv: int, ensure_drug: bool = False, flow_name: str = "龙宫1", *, entry_ready: bool = False):
     try:
-        ensure_in("天庭",4)
+        if not entry_ready:
+            ensure_in("天庭",4)
         click(T("龙宮", box=Box(263,423,196,93).margin()))
         click(T("龙宫1"))
         click(T("速率设置", box=Box(207,570,144,80).margin()))

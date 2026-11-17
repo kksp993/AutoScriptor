@@ -7,12 +7,12 @@ from AutoScriptor.logging.logger import logger
     ensure_in="极北#-1",
     description="挑战极北厄难副本。",
     reschedule=12,
+    params_doc={"battle_flow": "战斗招式"},
 )
 def eunan_fuBen(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):
     """目前只打冰狗。"""
-    ensure_in("极北",-1)
     click(I("厄难魔域"),repeat=2,until=lambda: ui_T(I("厄难-右")))
     click(I("厄难-右"), until=lambda: ui_F(I("厄难-右")))
     energy = extract_info(B(960,45,160,50), lambda res: int(res.split("/")[0]))

@@ -10,6 +10,7 @@ import inspect
 import sys
 import time
 from contextlib import contextmanager
+from copy import deepcopy
 from typing import Any, List, Tuple
 from threading import Event, RLock
 
@@ -24,9 +25,11 @@ from tasks.task_register import task_registry
 from AutoScriptor.logging.logger import set_current_task
 from tasks.task_state import (
     clear_task_status,
+    get_requested_next_run_time,
     get_task_status,
     progress_incomplete,
     progress_label,
+    refresh_task_status_cycle,
     set_current_task_path,
 )
 from AutoScriptor.core.runtime_context import runtime_ctx
@@ -125,7 +128,7 @@ class TaskManager:
         attempt_offset: int = 0,
         param_overrides: dict[str, dict[str, Any]] | None = None,
     ) -> Tuple[int, int]:
-        """执行一组任务。返回 (成功数, 失败数)。"""
+        """返回 (完成数, 失败数)；正常让出执行权、等待续跑的任务不计入两者。"""
         if self._cancel_event.is_set():
             logger.info("⏹ 检测到终止请求，跳过本批任务")
             return 0, 0
@@ -134,14 +137,15 @@ class TaskManager:
             if self._cancel_event.is_set():
                 logger.info("⏹ 检测到终止请求，停止后续任务")
                 break
-            if self._execute_single_task(
+            outcome = self._execute_single_task(
                 task,
                 max_attempts=max_attempts,
                 attempt_offset=attempt_offset,
                 param_override=(param_overrides or {}).get(task),
-            ):
+            )
+            if outcome is True:
                 success += 1
-            else:
+            elif outcome is False:
                 failed += 1
         return success, failed
 
@@ -191,8 +195,8 @@ class TaskManager:
         max_attempts: int | None = None,
         attempt_offset: int = 0,
         param_override: dict[str, Any] | None = None,
-    ) -> bool:
-        """执行单个任务（含重试）。返回是否成功。"""
+    ) -> bool | None:
+        """执行单个任务（含重试）；True=完成，False=失败，None=等待续跑。"""
         # ``app.max_attempts`` 是「最多尝试几次」，**含第一次**。它以前叫 ``max_retry``
         # 且表示「失败后再来几次」，同一个数字换了含义，所以配置层按 attempts = retry + 1
         # 迁移（见 app_config._migrate_renamed_app_keys）。
@@ -234,6 +238,15 @@ class TaskManager:
                 clear_action_history()
                 task_video = new_task_video_recorder(task, debug_run)
                 fn(**kwargs)
+                self._check_cancel_requested()
+                continuation_at = get_requested_next_run_time()
+                if continuation_at is not None:
+                    with self._cfg_lock:
+                        self._check_cancel_requested()
+                        self._update_next_exec_time(task, continuation_at=continuation_at)
+                    self._app_start_failure_count = 0
+                    logger.info("任务本阶段结束，等待续跑: %s", task)
+                    return None
                 if self._task_progress_incomplete(task):
                     label = self._task_progress_label(task)
                     raise TaskRequireReTry(f"任务进度未完成: {label}")
@@ -341,6 +354,7 @@ class TaskManager:
             fn = task_registry.get_fn(task)
             if fn is None:
                 raise KeyError("fn")
+            refresh_task_status_cycle(task)
             return fn, self._resolve_params(task, task_data, fn, param_override=param_override)
 
     def _resolve_params(
@@ -408,20 +422,33 @@ class TaskManager:
         task_data["human_takeover_at"] = datetime.datetime.now().timestamp()
         self._update_next_exec_time(task)
 
-    def _update_next_exec_time(self, task: str):
-        """执行成功后写入下次执行时间；一次性任务直接关闭。
+    def _update_next_exec_time(self, task: str, *, continuation_at: float | None = None):
+        """保存续跑时间，或在最终完成后应用原有周期；一次性任务最终关闭。
 
         调度规则来自任务的 ``reschedule``:用户覆盖优先，其次作者声明，都没有就是一次性。
+        continuation_at 只覆盖这一次时间，不覆盖周期；续跑标记与时间一并保存。
         窗口约束在这里夹一次；星期约束留给到期判定，因为它还要处理"到点了但不在允许日"
         这种推迟，而不是只在执行后算一次。
         """
-        now = datetime.datetime.now()
+        now = datetime.datetime.fromtimestamp(time.time())
         task_data = self._task_entry(task)
         if task_data is None:
             raise KeyError(f"任务没有配置条目: {task}")
 
         spec = resolve_reschedule(task, task_data)
-        ts = next_exec_ts_for_spec(now, spec)
+        previous_entry = dict(task_data)
+        status = cfg._config.setdefault("status", {})
+        previous_status = {
+            branch: deepcopy((status.get(branch) or {}).get(task))
+            for branch in ("tasks", "task_cycles")
+        }
+        if continuation_at is not None:
+            ts = max(continuation_at, now.timestamp())
+            task_data["continuation_pending"] = True
+            self._clear_human_takeover_state(task)
+        else:
+            ts = next_exec_ts_for_spec(now, spec)
+            task_data.pop("continuation_pending", None)
         if ts is None:
             task_data["on"] = False   # 一次性任务执行完就关闭
         else:
@@ -430,7 +457,19 @@ class TaskManager:
             task_data["next_exec_time"] = ts
             human = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M')
             logger.info(f"    - 下次执行: {human}")
-        cfg.save_config()
+        try:
+            if continuation_at is None:
+                refresh_task_status_cycle(task, now_ts=now.timestamp(), completed=True)
+            cfg.save_config()
+        except Exception:
+            task_data.clear()
+            task_data.update(previous_entry)
+            for branch, previous_node in previous_status.items():
+                if previous_node is None:
+                    (status.get(branch) or {}).pop(task, None)
+                else:
+                    status.setdefault(branch, {})[task] = previous_node
+            raise
 
     # ── 错误恢复 ──
 

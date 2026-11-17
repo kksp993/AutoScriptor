@@ -15,14 +15,14 @@ class Method(Enum):
 
 
 @register_task(
-    ensure_in=["极北村庄", "法相"],
+    ensure_in="极北村庄",
     description="按配置完成极北村庄点券消费。",
     reschedule="daily",
+    params_doc={"method": "完成方式"},
 )
 def task(method:Method=Method.YAOSHI):
     """【谨慎】会按配置购买指定点券道具。"""
     if method == Method.YAOSHI:
-        ensure_in("极北村庄")
         click(I("导航-寻宝"))
         wait_for_appear(T("符印寻宝"))
         click(B(1043,39,54,56))
@@ -31,7 +31,6 @@ def task(method:Method=Method.YAOSHI):
         sleep(1)
         click(B(1200,30,30,30))
     elif method == Method.QILING:
-        ensure_in("极北村庄")
         click(T("器灵"))
         click(T("普通召唤"))
         click(B(1224,43,23,22))

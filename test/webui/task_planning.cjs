@@ -21,6 +21,14 @@ virtualMachine.runInContext(source('backend/webui/static/js/components/TaskPlann
 const layout = context.window.TaskPlanningLayout;
 const component = virtualMachine.runInContext('TaskPlanningGraph', context);
 
+const continuation = { on: true, _due: false, continuation_pending: true };
+assert.equal(context.window.TaskStatusTheme.getTaskStatus(continuation), 'pending');
+assert.equal(context.window.TaskStatusTheme.getTaskTheme(continuation).label, '等待续跑');
+assert.equal(context.window.TaskStatusTheme.getTaskTheme({ ...continuation, _due: true }).label, '待执行');
+assert.equal(context.window.TaskStatusTheme.getTaskStatus({ ...continuation, on: false }), 'disabled');
+assert.equal(context.window.TaskStatusTheme.getTaskStatus({ ...continuation, error: 'failure' }), 'error');
+assert.equal(context.window.TaskStatusTheme.getTaskStatus({ on: true, _due: false }), 'scheduled');
+
 function row(identifier, after = [], locations = ['home'], enabled = true) {
   return { key: identifier, path: `daily/area/${identifier}`, item: {
     id: identifier, on: enabled, after_tasks: after, ensure_in: locations,
@@ -29,8 +37,12 @@ function row(identifier, after = [], locations = ['home'], enabled = true) {
 }
 const costs = { home: { home: 0, garden: 1, far: 5 }, garden: { home: null, garden: 0 }, far: { far: 0 } };
 const rows = [row('before'), row('peer', [], ['garden']), row('after', ['before']),
-  row('join', ['before', 'after']), row('far', [], ['far']), row('scene', [], null), row('disabled', [], null, false)];
+  row('join', ['before', 'after']), row('far', [], ['far']), row('scene', [], ['任意位置']), row('disabled', [], ['任意位置'], false)];
 const original = plain(rows);
+const anywhereGraph = layout.build([row('anywhere-first', [], ['任意位置']), row('anywhere-second', [], ['任意位置']), row('map-task')], { costs });
+assert.equal(anywhereGraph.groups.length, 2, 'Anywhere cards group only with anywhere, never claim a route to the map');
+assert.equal(anywhereGraph.errors.length, 0);
+assert.equal(layout.build([row('null-entry', [], null)], { costs }).errors.length, 1, 'Legacy null entry declarations must not silently bypass validation');
 const graph = layout.build(rows, { costs });
 const backboneRows = [row('travel', [], ['far']), row('destination', ['travel']), row('independent')];
 const backboneGraph = layout.build(backboneRows, { costs });
@@ -123,6 +135,18 @@ for (const waypoint of longEdge.waypoints) {
 const lateTrunk = layout.build([row('independent'), row('travel', [], ['far']), row('destination', ['travel'])], { costs });
 assert.deepEqual(plain(lateTrunk.groups.find(group => group.id === 'destination').rows.map(entry => entry.key)),
   ['destination', 'independent'], 'Build the whole backbone before assigning any independent task');
+assert.deepEqual(plain(lateTrunk.queueRows.map(entry => entry.key)), ['travel', 'destination', 'independent'],
+  'The complete graph queue must expand every deck after its predecessors, not preserve raw input order');
+const queueRows = [row('join', ['left', 'right']), row('leaf', ['join']), row('right'), row('left')];
+queueRows[0].item.planning_status = { blocked_by: ['left', 'right'] };
+queueRows[1].item._due = false;
+const queueGraph = layout.build(queueRows, { costs });
+assert.deepEqual(plain(queueGraph.queueRows.map(entry => entry.key)), ['right', 'left', 'join', 'leaf'],
+  'AND dependencies, blocked successors and future tasks all belong to the full queue');
+assert.deepEqual(plain(ancestorGraph.queueRows.map(entry => entry.key)), ['off', 'child']);
+assert.deepEqual(plain(invalid.queueRows.map(entry => entry.key)), ['healthy', 'cycle1', 'cycle2', 'missing'],
+  'Invalid tasks remain visible at the end instead of disappearing or blocking healthy branches');
+assert.equal(new Set(queueGraph.queueRows.map(entry => entry.key)).size, queueRows.length);
 const preferenceOverrides = [row('original'), row('overridden')];
 preferenceOverrides[0].item.preferred_locations = [];
 preferenceOverrides[1].item.preferred_locations = ['far'];
@@ -148,7 +172,7 @@ async function testGraphEditing() {
     $emit: (event, payload) => emitted.push({ event, payload }),
   });
   assert.equal(panel.entryLabel(rows[0]), 'home');
-  assert.equal(panel.entryLabel(rows[5]), '当前现场');
+  assert.equal(panel.entryLabel(rows[5]), '任意位置');
   assert.equal(panel.boardStyle['--planning-card-width'], '168px');
   for (const [task, statusName] of [
     [row('done'), 'scheduled'], [{ item: { on: true, _due: true } }, 'pending'],
@@ -207,14 +231,8 @@ async function testGraphEditing() {
   await panel.removeSelectedTask();
   assert.deepEqual(plain(emitted[3].payload.changes), { on: false }, 'Removing a card only disables, never deletes source');
   emitted[3].payload.onComplete(true);
-  context.window.WebUIApi = { request: async () => ({ ok: false, data: { message: 'offline' } }), errorMessage: (data) => data.message };
-  await panel.loadLocations();
-  assert.equal(panel.locationError, 'offline');
-  assert.deepEqual(plain(panel.locationCosts), {});
-  context.window.WebUIApi.request = async () => ({ ok: true, data: { locations: ['home'], costs } });
-  await panel.loadLocations();
-  assert.equal(panel.locationError, '');
-  assert.equal(panel.locationCosts.home.garden, 1);
+  panel.loadLocations();
+  assert.equal(emitted[4].event, 'refresh-locations', 'The parent owns navigation data for all views');
 }
 
 async function testSearchReveal() {
@@ -280,10 +298,25 @@ async function testSaveQueue() {
     applicationDefinition = definition;
     return { component() {}, use() {}, mount() {} };
   };
-  for (const name of ['AppSidebar', 'NewsPanel', 'OverviewPanel', 'SchedulerPanel', 'TaskPanel', 'SettingsPanel', 'EditorPanel', 'DiagnosticsPanel', 'ErrorArchivesPanel', 'NotificationsPanel', 'UpdatePanel', 'AboutPanel', 'TaskTree']) context[name] = {};
+  for (const name of ['AppSidebar', 'NewsPanel', 'OverviewPanel', 'SchedulerPanel', 'TaskPanel', 'SettingsPanel', 'EditorPanel', 'ApiDocsPanel', 'DiagnosticsPanel', 'ErrorArchivesPanel', 'NotificationsPanel', 'UpdatePanel', 'AboutPanel', 'TaskTree']) context[name] = {};
   virtualMachine.runInContext(source('backend/webui/static/js/stores/runtimeStore.js'), context);
   virtualMachine.runInContext(source('backend/webui/static/js/app.js'), context);
   const application = applicationDefinition.setup();
+  application.openEditModal('first', {
+    params: { diff: 15 }, params_doc: { diff: '普通难度' },
+  }, 'weekly/first');
+  assert.equal(application.paramLabel('diff'), '普通难度');
+  application.openEditModal('second', {
+    params: { diff: 6 }, params_doc: { diff: '混沌难度' },
+  }, 'weekly/second');
+  assert.equal(application.paramLabel('diff'), '混沌难度', 'Labels belong to each task, not the parameter key globally');
+  application.openEditModal('legacy', { params: { diff: 1 } }, 'custom/legacy');
+  assert.equal(application.paramLabel('diff'), 'diff', 'Old custom tasks fall back to their parameter names');
+  assert.equal(application.paramLabel('constructor'), 'constructor', 'Inherited object properties are not labels');
+  application.editTaskData.value.params_doc = { diff: '' };
+  assert.equal(application.paramLabel('diff'), 'diff');
+  application.editTaskData.value.params_doc = { diff: '重新加载的难度' };
+  assert.equal(application.paramLabel('diff'), '重新加载的难度');
   application.currentAccount.value = 'test-account';
   Object.assign(application.activeCharacter, { server: 'test', name: 'role' });
   application.configData.tasks = { daily: { area: { before: { id: 'before', on: false, next_exec_time: 100, params: { keep: 7 } } } } };

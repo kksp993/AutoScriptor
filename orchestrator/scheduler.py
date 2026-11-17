@@ -17,7 +17,8 @@ AutoScriptor 后台定时调度器
 import os
 import time
 import threading
-from datetime import date, datetime
+from contextlib import nullcontext
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Callable
@@ -48,8 +49,8 @@ class SchedulerState(Enum):
 
 CHECK_INTERVAL = 3600
 MAX_CONSECUTIVE_ERRORS = 3
-# 连续错误进入 ERROR 后，等这么久自动重来一轮。没有它，一次夜间故障（模拟器
-# 起不来之类）会让之后所有到期任务都不跑，直到有人发现并点「恢复调度」。
+# 连续错误进入 ERROR 后，冷却结束继续调度，但不重置任务的尝试上限。
+# 否则一个确定性失败的任务会每半小时重新获得一轮尝试。
 ERROR_AUTO_RECOVER_SECONDS = 30 * 60
 # ERROR 期间多久醒一次检查冷却。不能沿用「睡到下一个任务时间」，否则可能一觉
 # 睡到明天的任务点，冷却形同虚设。
@@ -115,9 +116,6 @@ class Scheduler:
         self._reload_deferred = threading.Event()
         self._consecutive_errors = 0
         self._logged_in_character: tuple[str, str] | None = None  # (server, name)
-        # 最近一次「每日重启」所属的游戏日（本地日期的 date）。只放内存：
-        # status 是角色级数据，写进去会让多角色账号在 5 点后每个角色各重启一次。
-        self._daily_restart_day: date | None = None
         # key -> 打标记的时刻。存时刻而不是只存 key，见 _is_retry_exhausted：
         # 标记只在「同一份计划」内有效，任务被排到更晚的时间点后它就该失效。
         self._retry_exhausted_tasks: dict[tuple[str, str, str], float] = {}
@@ -174,25 +172,22 @@ class Scheduler:
             self._task_manager._reset_cancel()
 
     def _maybe_recover_from_error(self) -> bool:
-        """错误态不是终点：冷却结束后自动清账重来一轮。
-
-        ERROR 由「连续错误」触发，语义是环境成片出问题（模拟器起不来、断网）。
-        以前它只能靠人工点「恢复调度」，于是一次夜间故障会让之后**所有**到期
-        任务都不跑，直到有人发现——用户看到的就是「任务到期了却不继续」。
-        冷却结束后自动重试：环境恢复了调度自己接着跑；没恢复也只是再等一个
-        冷却期，代价可控。
-        """
+        """冷却后恢复环境检查，保留同一计划内已经耗尽的任务尝试额度。"""
         if self._error_at is None:
             return False
         waited = time.time() - self._error_at
         if waited < ERROR_AUTO_RECOVER_SECONDS:
             return False
         logger.warning(
-            "📅 错误态已静默 %.0f 分钟，自动恢复调度并重试（环境若仍异常会再次进入错误态）",
+            "📅 错误态已静默 %.0f 分钟，自动恢复调度（保留任务尝试耗尽标记）",
             waited / 60,
         )
-        self.reset()
-        self.activate()
+        # reset()/activate() 是人工开启新一轮的入口，会清空任务重试标记。
+        # 自动恢复仍属于原计划，只恢复环境故障额度；当前调度线程继续工作。
+        self._restore_error_recovery_budget(clear_task_retries=False)
+        self._transition(SchedulerState.RUNNING)
+        if self._task_manager:
+            self._task_manager._reset_cancel()
         self.wake()
         return True
 
@@ -348,10 +343,13 @@ class Scheduler:
     def _clear_retry_exhaustion(self) -> None:
         self._retry_exhausted_tasks.clear()
 
-    def _restore_error_recovery_budget(self) -> None:
-        """Restore consecutive-error and retry-exhaustion recovery budgets."""
+    def _restore_error_recovery_budget(self, *, clear_task_retries: bool = True) -> None:
+        """Automatic environment recovery must not replenish task attempts."""
+        self._error_at = None
         self._consecutive_errors = 0
-        self._clear_retry_exhaustion()
+        self._last_failed_task = None
+        if clear_task_retries:
+            self._clear_retry_exhaustion()
 
     def _is_retry_exhausted(self, char_key: tuple[str, str], task_key: str, *, task_table: dict | None = None) -> bool:
         """这个任务在本轮计划里是否已耗尽重试。
@@ -749,12 +747,14 @@ class Scheduler:
         """
         import inspect
         from AutoScriptor.utils.app_config import cfg
+        from tasks.task_register import task_registry
 
         if not cfg._config.get("game", {}).get("character_name", ""):
             logger.warning("⚠️ 账号未验证，跳过执行")
             return
 
         total_success = total_failed = 0
+        total_continuations = 0
         # ``app.max_attempts`` 是「一个任务最多尝试几次」，含第一遍。调度把它拆成
         # 「主跑 + 若干轮重试」：retry_round=0 是主跑，也就是第 1 次尝试。所以
         # 「还能不能重试」的判据是 ``retry_round + 1 < max_attempts``。
@@ -929,10 +929,10 @@ class Scheduler:
                     logger.info("📅 debug_mode: 跳过自动登录与任务前重启: %s", task_key)
                 elif task_debug_mode:
                     logger.info("📅 debug_mode: 跳过任务前重启，但按本次请求执行自动登录: %s", task_key)
-                elif not skip_character_login and not mixed_lifecycle:
-                    self._maybe_daily_restart(cfg)
 
                 try:
+                    if not task_debug_mode and not skip_character_login and not mixed_lifecycle:
+                        self._maybe_daily_restart(cfg)
                     # 与 api.init() 不同：ensure_app_running 的返回值必须写入 runtime_ctx，
                     # 否则 mixctrl 仅存在于栈上，runtime_ctx.mixctrl 仍为 None（例如关机清理后）。
                     runtime_ctx.refresh(cancel_check=self._check_cancel_requested)
@@ -951,9 +951,7 @@ class Scheduler:
                         task_debug_mode = is_task_debug_mode(task_key)
                         if mixed_lifecycle:
                             if not task_debug_mode and not skip_character_login:
-                                previous_restart = self._daily_restart_day
-                                self._maybe_daily_restart(cfg)
-                                if previous_restart != self._daily_restart_day:
+                                if self._maybe_daily_restart(cfg):
                                     runtime_ctx.refresh(cancel_check=self._check_cancel_requested)
                             if force_login or not (skip_character_login or task_debug_mode):
                                 self._ensure_character_logged_in(cfg)
@@ -1015,6 +1013,10 @@ class Scheduler:
                     success, failed = _execute_task_attempt(task_key, retry_round, param_override)
                     if not self._task_manager._cancel_event.is_set():
                         outcome = "success" if success else ("failed" if failed else "pending")
+                        task_entry = cfg["tasks"].get(task_registry.id_of(task_key)) or {}
+                        if not success and not failed and task_entry.get("continuation_pending"):
+                            outcome = "deferred"
+                            total_continuations += 1
                         character_reports.record(char_key, run_id, task_key, outcome)
                     if success:
                         total_success += success
@@ -1036,7 +1038,7 @@ class Scheduler:
                             if scheduled_mode and not task_debug_mode:
                                 self._mark_retry_exhausted(char_key, task_key, max_attempts)
                             total_failed += failed
-                            self.record_result(0, failed * (retry_round + 1), task_key=None)
+                            self.record_result(0, failed, task_key=task_key)
                 except KeyboardInterrupt:
                     logger.info("⏹ 任务执行被中断")
                     if self._task_manager:
@@ -1053,7 +1055,7 @@ class Scheduler:
                         if scheduled_mode and not task_debug_mode:
                             self._mark_retry_exhausted(char_key, task_key, max_attempts)
                         total_failed += 1
-                        self.record_result(0, retry_round + 1, task_key=None)
+                        self.record_result(0, 1, task_key=task_key)
                         if self.state == SchedulerState.ERROR:
                             break
 
@@ -1082,9 +1084,13 @@ class Scheduler:
         if total_success > 0 or total_failed > 0:
             logger.info("📅 执行完成: 成功 %d, 失败 %d", total_success, total_failed)
             title = "AutoScriptor 任务失败" if total_failed > 0 else "AutoScriptor 任务完成"
+            summary = f"执行完成: 成功 {total_success}, 失败 {total_failed}"
+            if total_continuations:
+                title = "AutoScriptor 本轮执行结束"
+                summary = f"本轮结束: 成功 {total_success}, 失败 {total_failed}, 待续执行 {total_continuations}"
             notify_runtime_event(
                 title=title,
-                content=f"执行完成: 成功 {total_success}, 失败 {total_failed}"
+                content=summary,
             )
             if only_debug_tasks_executed:
                 logger.info("📅 debug_mode: 跳过 post_execution 收尾动作")
@@ -1200,7 +1206,7 @@ class Scheduler:
             logger.warning("%s 模拟器安全关闭失败: %s", tag, e)
             return False
 
-    def _maybe_daily_restart(self, cfg):
+    def _maybe_daily_restart(self, cfg) -> bool:
         """每日 05:00 后首次执行前重启模拟器，让游戏用当天的新会话重新登录。
 
         游戏跨日结算后会随机把客户端踢回 4399 登录/授权页。停在那个页面时，重开
@@ -1209,17 +1215,41 @@ class Scheduler:
 
         旧实现要求「最早的下一次执行时间正好是今天 05:00」，可调度器醒来时那个
         时间已经 <= now，不在「未来时间」集合里，所以从未触发。这里改成按游戏日
-        边界判断：本地时间过了 05:00，每个进程只在第一次执行前重启一次。
+        边界判断：本地时间过了 05:00，每天只在第一次执行前尝试一次。
+        全局 runtime_state 持久化该日期，不随 WebApp 重启、角色切换或调度重置清空。
         """
         now = datetime.now()
-        if now.hour < 5 or self._daily_restart_day == now.date():
-            return
-        self._daily_restart_day = now.date()
+        if now.hour < 5:
+            return False
+        restart_day = now.date().isoformat()
+        transaction = self._task_manager.config_transaction() if self._task_manager else nullcontext()
+        with transaction:
+            previous_state = cfg._config.get("runtime_state")
+            if previous_state is not None and not isinstance(previous_state, dict):
+                raise ValueError("runtime_state 必须是字典")
+            if (previous_state or {}).get("daily_restart_day") == restart_day:
+                return False
+            self._check_cancel_requested()
+            previous_global_state = cfg._mgr.global_cfg.get("runtime_state")
+            # 先持久化本日尝试，关闭失败/进程中断也不会再次触发每日重启。
+            cfg._config["runtime_state"] = {**(previous_state or {}), "daily_restart_day": restart_day}
+            try:
+                cfg.save_global_config()
+            except Exception:
+                for configuration, previous in (
+                    (cfg._config, previous_state), (cfg._mgr.global_cfg, previous_global_state),
+                ):
+                    if previous is None:
+                        configuration.pop("runtime_state", None)
+                    else:
+                        configuration["runtime_state"] = previous
+                raise
         logger.info("📅 今日 05:00 后首次执行，先重启模拟器以清理跨日登录态")
         # 就算关闭没确认成功，登录缓存也要失效：当天的新会话不能继续沿用旧的。
         self.invalidate_login()
         if not self._safe_shutdown_emulator(cfg, reason="每日重启"):
             logger.warning("📅 每日重启未能确认模拟器关闭，交给后面的设备启动检查处理")
+        return True
 
     @staticmethod
     def _release_nemu_ipc():

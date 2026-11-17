@@ -1,11 +1,12 @@
 """Exercise the recorded task without importing the registry or touching a device."""
 
 import ast
+import builtins
 import runpy
 import unittest
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from unittest.mock import Mock, call, patch
+from unittest.mock import Mock, call
 
 from AutoScriptor.errors import TaskRequireReTry
 from AutoScriptor.utils.text import postnum
@@ -44,9 +45,25 @@ class TiandaoTreeTaskTests(unittest.TestCase):
             wait_for_appear=self.wait,
         )
         game = ModuleType("ZmxyOL")
-        game.__dict__.update(ensure_in=self.navigation, register_task=register_task)
-        with patch.dict("sys.modules", {"AutoScriptor": automation, "ZmxyOL": game}):
-            self.namespace = runpy.run_path(str(TASK_FILE))
+        self.entry_locations = ["world-map-entry", "another-world-map-entry"]
+        game.__dict__.update(
+            HAS_SHIJIEDITU=self.entry_locations,
+            ensure_in=self.navigation,
+            register_task=register_task,
+        )
+        task_dependencies = {"AutoScriptor": automation, "ZmxyOL": game}
+
+        def import_task_dependency(module_name, global_namespace=None, local_namespace=None,
+                                   imported_names=(), level=0):
+            if level == 0 and module_name in task_dependencies:
+                return task_dependencies[module_name]
+            return builtins.__import__(module_name, global_namespace, local_namespace,
+                                       imported_names, level)
+
+        # Keep task doubles local: restoring sys.modules can remove concurrent OCR imports.
+        self.namespace = runpy.run_path(str(TASK_FILE), init_globals={
+            "__builtins__": {**vars(builtins), "__import__": import_task_dependency},
+        })
 
     def watering_sequences(self):
         return [invocation for invocation in self.sequence.call_args_list
@@ -63,16 +80,16 @@ class TiandaoTreeTaskTests(unittest.TestCase):
         ]
         self.assertEqual(hoisted_targets, [], "Write targets directly where they are used")
 
-    def test_daily_task_enters_and_returns_to_village_for_every_initial_amount(self):
-        self.assertEqual(self.registration["ensure_in"], "村庄")
+    def test_daily_task_opens_world_map_before_tree_and_returns_for_every_initial_amount(self):
+        self.assertEqual(self.registration["ensure_in"], "世界地图")
         self.assertEqual(self.registration["reschedule"], "daily")
         for initial_amount, expected_clicks in ((1, 2), (5, 1), (10, 0)):
             with self.subTest(initial_amount=initial_amount):
                 self.actions.reset_mock()
                 self.extract.side_effect = [initial_amount, 10]
                 self.namespace["task"]()
-                self.assertEqual(self.navigation.call_args_list, [call("村庄"), call("村庄")])
-                self.assertEqual(self.actions.mock_calls[0], call.ensure_in("村庄"))
+                self.assertEqual(self.navigation.call_args_list, [call("村庄")])
+                self.assertEqual(self.actions.mock_calls[0].args[0][0].text, "天道树")
                 self.assertEqual(self.actions.mock_calls[-1], call.ensure_in("村庄"))
                 switches = [invocation for invocation in self.click.call_args_list
                             if invocation.args[0] == (1163, 630, 61, 53)]
@@ -91,7 +108,7 @@ class TiandaoTreeTaskTests(unittest.TestCase):
                 with self.assertRaises(TaskRequireReTry):
                     self.namespace["task"]()
                 self.assertEqual(self.watering_sequences(), [])
-                self.navigation.assert_called_once_with("村庄")
+                self.navigation.assert_not_called()
 
     def test_switch_waits_for_ten_instead_of_accepting_a_stale_nonempty_value(self):
         self.extract.side_effect = [1, 10]
@@ -107,7 +124,7 @@ class TiandaoTreeTaskTests(unittest.TestCase):
         with self.assertRaises(TaskRequireReTry):
             self.namespace["task"]()
         self.assertEqual(self.watering_sequences(), [])
-        self.navigation.assert_called_once_with("村庄")
+        self.navigation.assert_not_called()
 
     def test_failed_confirmation_stops_before_the_next_watering(self):
         self.extract.return_value = 10
@@ -120,7 +137,7 @@ class TiandaoTreeTaskTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "confirmation timed out"):
             self.namespace["task"]()
         self.assertEqual(len(self.watering_sequences()), 1)
-        self.navigation.assert_called_once_with("村庄")
+        self.navigation.assert_not_called()
 
 
 if __name__ == "__main__":

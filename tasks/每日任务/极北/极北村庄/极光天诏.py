@@ -7,7 +7,6 @@ from AutoScriptor import *
     ensure_in="极北村庄",
 )
 def task():
-    ensure_in("极北村庄")
     while(ui_F((I("青莲炎"),T("青莲炎")))):
         click(I("导航-极光天诏"), if_exist=True)
         sleep(0.5)

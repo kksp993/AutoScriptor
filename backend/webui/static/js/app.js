@@ -1,10 +1,11 @@
 const { createApp, ref, reactive, computed, nextTick, watch } = Vue;
 
 const app = createApp({
-  components: { AppSidebar, NewsPanel, OverviewPanel, SchedulerPanel, TaskPanel, SettingsPanel, EditorPanel, DiagnosticsPanel, ErrorArchivesPanel, NotificationsPanel, UpdatePanel, AboutPanel },
+  components: { AppSidebar, NewsPanel, OverviewPanel, SchedulerPanel, TaskPanel, SettingsPanel, EditorPanel, ApiDocsPanel, DiagnosticsPanel, ErrorArchivesPanel, UpdatePanel, AboutPanel },
   setup() {
     const configData = reactive({});
     const activeTab = ref('news');
+    const apiDocumentationVisible = ref(false);
     const newsRefreshKey = ref(0);
     const logs = ref([]);
     const characterName = ref('');
@@ -56,44 +57,10 @@ const app = createApp({
     function resetPlanningValue(field) {
       delete editTaskData.value[field];
     }
-    const PARAM_KEY_LABELS = {
-      battle_config: '战斗配置',
-      battle_flow: '战斗招式',
-      battle_loop:'战斗循环次数',
-      battle_times: '战斗轮数',
-      speed_x: '战斗加速',
-      has_cd: '关卡有CD',
-      difficulty: '难度选择',
-      diff: '难度',
-      preference: '关卡偏好',
-      conquer_TianMo: '天魔挑战',
-      method: '完成方式',
-      Bingku_WuQi: '冰窟武器',
-      Bingku_YiFu: '冰窟防具',
-      Bingku_ChiBang: '冰窟翅膀',
-      Changgui_WuQi: '常规武器',
-      Changgui_YiFu: '常规防具',
-      Changgui_ChiBang: '常规翅膀',
-      HuShenZhiYa: '虎神之崖',
-      CangLongYouGu: '苍龙幽谷',
-      MingHaiZhiYuan: '溟海之渊',
-      lingqi: '灵气',
-      lingqi_priority: '灵气优先级',
-      YanHao: '岩貉星宫',
-      QuanShen: '犬神星宫',
-      LangWang: '狼王星宫',
-      HuWang: '虎王星宫',
-      ZhangWang: '獐王星宫',
-      AnShen: '犴神星宫',
-      TuShen: '兔神星宫',
-      ZhuWang: '猪王星宫',
-      cancel_on_failed: '不用点券复活',
-      claim_past: '是否解锁过去',
-      buy_spirit_liquid: '购买灵力滴液',
-      buy_spirit_brew: '购买灵力真酿',
-    };
     function paramLabel(key) {
-      return PARAM_KEY_LABELS[key] || key;
+      const labels = editTaskData.value?.params_doc;
+      const label = labels && Object.prototype.hasOwnProperty.call(labels, key) ? labels[key] : undefined;
+      return typeof label === 'string' && label.trim() ? label : key;
     }
     const addDialogVisible = ref(false);
     const addForm = reactive({ account: '', password: '', security_key: '' });
@@ -211,8 +178,8 @@ const app = createApp({
     const pageTitle = computed(() => {
       const map = {
         news: '资讯', overview: '总览', scheduler: '调度', editor: '编辑器',
+        apiDocs: 'API 文档',
         errorArchives: '错误汇总', updater: '检查更新', settings: '设置', about: '关于',
-        notifications: 'QQ 通知',
         tasks: '1. 任务列表',
       };
       return map[activeTab.value] || '';
@@ -1584,6 +1551,7 @@ const app = createApp({
 
     return {
       configData, activeTab, newsRefreshKey, logs, characterName, filteredConfig, currentTasks,
+      apiDocumentationVisible,
       customTaskLoadErrors,
       rescheduleModeLabels, editTaskRescheduleMode, editTaskRescheduleHours,
       editPlanningValue, resetPlanningValue,

@@ -5,7 +5,7 @@ from ZmxyOL import *
 from ZmxyOL.character.hero import h, combo
 from AutoScriptor.utils.cancel import TaskCancelled
 from ZmxyOL.nav.api import ensure_in
-from AutoScriptor.logging.logger import logger
+from AutoScriptor.logging.logger import logger, summarize_webui_logs
 
 _ZHUQUE_EXIT_DELAY = 30.0
 _ZHUQUE_TOKEN_SIGNAL = "kunlunshan_zhuque_token"
@@ -26,24 +26,26 @@ def back_to_map():
     wait_for_disappear(I("加载中"))
     return
 
-def kls_yxd_callback(registry=bg):
+def kls_yxd_callback(registry=bg, *, task_path: str | None = None):
     """玉虚殿流程：内场被压回 1 倍速，按压时长必须按 1 倍速换算。"""
-    # 消耗玉虚殿门票，设置为False并保存
-    cfg.set("status.kunlunshan.has_YuxuDian_ticket", False)
+    from tasks.task_state import set_task_status
 
     previous_has_cd, previous_speed_x = h.has_cd, h.speed_x
     # 先暂停 battle_loop 再改倍速，避免主线程带着 1 倍速时长继续按 3 倍速移动
     bg.set_signal(BG_SIGNALS.PAUSE_BATTLE, True)
     try:
+        # 识别到玉虚殿才记录消耗；后续失败或重进不能把本周期的门票恢复。
+        set_task_status("yuxu_ticket_consumed", True, task_path=task_path)
         logger.info("玉虚殿内游戏为 %d 倍速，hero 倍速 %s → %d", _YXD_GAME_SPEED_X, previous_speed_x, _YXD_GAME_SPEED_X)
         h.set(has_cd=previous_has_cd, speed_x=_YXD_GAME_SPEED_X)
         h.move_right().travel()
         cur, pre = 0,99999
-        while True:
-            cur = extract_info(B(990,114,238,62), lambda x: int(x.strip().replace("：", ":").split(":")[1][:-1]))
-            if cur == pre: break
-            pre = cur
-            h.battle()
+        with summarize_webui_logs("自动战斗中..."):
+            while True:
+                cur = extract_info(B(990,114,238,62), lambda x: int(x.strip().replace("：", ":").split(":")[1][:-1]))
+                if cur == pre: break
+                pre = cur
+                h.battle()
         [h.move_right(5, directly=True) for _ in range(2)]
         h.move_left(1280)
         h.way_to_exit(until=I("加载中"), exit_loc=300, no_travel=True)
@@ -123,7 +125,6 @@ def enter_kunlunshan() -> None:
         logger.info("task_num: %s", task_num)
         click(B(int(513.1 + 252.3 * (400 / task_num)), 405, 0, 25))
         click(T("确定", color="绿色"))
-        cfg.set("status.kunlunshan.has_YuxuDian_ticket", True)
     else:
         click(T("继续挑战"))
     wait_for_disappear(I("加载中"))
@@ -131,6 +132,8 @@ def enter_kunlunshan() -> None:
 
 def _run_kunlunshan_round(round_idx: int, num: int, flow_name: str, equipment: str) -> None:
     """执行一轮昆仑山；玉虚殿等环节失败时抛出异常，由 kunlunshan_battle 负责恢复重进。"""
+    from tasks.task_state import current_task_path, get_task_status
+
     logger.info("昆仑山轮次 %d/%d 开始", round_idx, num)
     h.set(has_cd=False, speed_x=3)
     bg.set_signal(BG_SIGNALS.TRY_EXIT, False)
@@ -152,14 +155,14 @@ def _run_kunlunshan_round(round_idx: int, num: int, flow_name: str, equipment: s
                 once=False,
                 allow_concurrent=True,
             )
-            # 每次迭代开始时重新读取门票状态，只有在config中has_YuxuDian_ticket为True时才添加玉虚殿监控
-            has_ticket = cfg.get("status.kunlunshan.has_YuxuDian_ticket", False)
-            if has_ticket:
+            # 后台线程不继承任务上下文，注册时捕获身份；周期到期后恢复监控。
+            task_path = current_task_path()
+            if not get_task_status("yuxu_ticket_consumed", False, task_path=task_path):
                 scope.add(
                     name="玉虚殿",
                     identifier=I("昆仑山-玉虚殿"),
-                    callback=lambda: kls_yxd_callback(scope),
-                    once=False
+                    callback=lambda owner=task_path: kls_yxd_callback(scope, task_path=owner),
+                    once=True,
                 )
 
             scope.add(
@@ -289,9 +292,11 @@ def xumiding(equipment:str="诛仙剑阵"):
 
 
 @combo
-def kunlunshan_task(self, battle_loop: int = 7, equipment: str = "诛仙剑阵"):
+def kunlunshan_task(self, battle_loop: int = 7, equipment: str = "诛仙剑阵", *, entry_ready: bool = False):
+    """entry_ready 仅跳过注册任务已完成的开场定位，不影响恢复与领奖。"""
     logger.info("====昆仑山====")
-    ensure_in(*("天庭",1))
+    if not entry_ready:
+        ensure_in("天庭", 1)
     enter_kunlunshan()
     kunlunshan_battle(num=battle_loop, equipment=equipment)
     sleep(2)

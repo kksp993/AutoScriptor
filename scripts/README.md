@@ -22,6 +22,11 @@
 
 ## 维护工具
 
+文档预算与本地链接检查：`.venv\Scripts\python.exe -X utf8 scripts/check_docs_budget.py --details`。
+覆盖 `docs/` 全部维护文件（含隐藏文件），仅排除第三方副本 `docs/refs/`；
+总计不超过 10000 words、单篇不超过 500，汉字逐字、其他字母数字词计数，含代码。
+超限、无效 UTF-8 或本地链接目标缺失时返回非零退出码；不联网检查外链或标题锚点。
+
 | 脚本 | 作用 |
 | --- | --- |
 | `collect_zmxy_redeem_2026.py` | 4399 官方公告礼包码增量采集器，写入 `logs/zmxy_redeem_codes.json`；WebUI 资讯页兑换码弹窗会调用它 |
@@ -40,7 +45,7 @@
 
 - 安装脚本负责依赖，不启动应用。
 - `install.bat qq` 安装校验后的官方 NapCat 独立包，生成本机 HTTP 配置；`run.bat qq` 单独启动，
-  首次登录需人工扫码。在 WebUI 的 QQ 通知页点击“使用本机配置”完成地址和令牌交接。
+  首次登录需人工扫码。在 WebUI“设置 → QQ 结果通知”中点击“使用本机配置”完成地址和令牌交接。
   详细边界见 [QQ 通知](../docs/AutoScriptor/operations/qq-notifications.md)。
 - 运行脚本负责启动，不安装依赖。
 - 更新脚本负责 Git 快进，不 stash/reset、不安装依赖、不启动应用。

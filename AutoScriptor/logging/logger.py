@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 import threading
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path, PureWindowsPath
 
@@ -85,6 +86,7 @@ def _make_console() -> Console:
 
 _console = _make_console()
 _task_ctx = threading.local()
+_webui_log_ctx = threading.local()
 _AUTOSCRIPTOR_PACKAGE_ROOT = os.path.normcase(
     os.path.realpath(os.path.join(os.path.dirname(__file__), os.pardir))
 )
@@ -139,6 +141,35 @@ def _find_external_project_caller():
 def set_current_task(name: str | None):
     """Set the task name attached to current-thread log records."""
     _task_ctx.name = name
+
+
+def is_webui_log_summarized() -> bool:
+    """Browser-sink hint only; file and terminal handlers must ignore it."""
+    return getattr(_webui_log_ctx, "summarized", False)
+
+
+@contextmanager
+def summarize_webui_logs(message: str):
+    """Show one summary for nested action scopes, preserving diagnostic records."""
+    previous = is_webui_log_summarized()
+    if not previous:
+        logger.info(message)
+    _webui_log_ctx.summarized = True
+    try:
+        yield
+    finally:
+        _webui_log_ctx.summarized = previous
+
+
+@contextmanager
+def show_webui_logs():
+    """Keep a key phase visible even when called from a summarized action scope."""
+    previous = is_webui_log_summarized()
+    _webui_log_ctx.summarized = False
+    try:
+        yield
+    finally:
+        _webui_log_ctx.summarized = previous
 
 
 class _TaskFilter(logging.Filter):

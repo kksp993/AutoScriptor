@@ -124,6 +124,29 @@ class TestLocalBotInstall(unittest.TestCase):
 
         launch.assert_called_once_with(self.root, account="1480755330")
 
+    def test_explicit_qr_launch_does_not_reuse_old_auto_login_or_password(self):
+        self.prepare_runtime()
+        webui_path = self.root / "napcat/config/webui.json"
+        original = qq_bot.read_document(webui_path)
+        original["autoLoginAccount"] = "123456789"
+        qq_bot.write_document(webui_path, original)
+        inherited = {
+            "ACCOUNT": "123456789", "NAPCAT_QUICK_ACCOUNT": "123456789",
+            "NAPCAT_QUICK_PASSWORD": "test-password", "NAPCAT_QUICK_PASSWORD_MD5": "a" * 32,
+        }
+        with patch.dict(qq_bot.os.environ, inherited), \
+                patch.object(qq_bot, "running_bot_pid", return_value=None), \
+                patch.object(qq_bot.socket, "socket"), \
+                patch.object(qq_bot.subprocess, "Popen", return_value=Mock(pid=4321)) as launch:
+            qq_bot.launch_bot(self.root, force_qr=True)
+        environment = launch.call_args.kwargs["env"]
+        self.assertFalse(set(inherited) & environment.keys())
+        self.assertNotIn("-q", launch.call_args.args[0])
+        configuration = qq_bot.read_document(webui_path)
+        self.assertEqual(configuration["autoLoginAccount"], "")
+        self.assertEqual(configuration["token"], original["token"])
+        self.assertEqual(configuration["port"], original["port"])
+
     def test_ensure_bot_running_is_noop_without_a_cached_account(self):
         with patch.object(qq_bot, "load_local_settings", return_value={"http_port": 3010}), \
                 patch.object(qq_bot, "bot_is_running", return_value=False), \
@@ -260,7 +283,9 @@ class TestLocalBotProcess(unittest.TestCase):
         """The port is the fact both start paths share; the pid file is not."""
         with patch.object(qq_bot, "_listening_pid", return_value=7777), \
                 patch.object(qq_bot, "_is_our_node_process", return_value=True), \
-                patch.object(qq_bot.subprocess, "run") as taskkill:
+                patch.object(qq_bot, "owns_bot_process", return_value=True), \
+                patch.object(qq_bot, "_wait_for_process_exit", return_value=True), \
+                patch.object(qq_bot.subprocess, "run", return_value=Mock(returncode=0)) as taskkill:
             self.assertTrue(qq_bot.stop_bot(self.root))
         taskkill.assert_called_once()
         self.assertEqual(list(taskkill.call_args.args[0][:3]), ["taskkill", "/PID", "7777"])
@@ -278,6 +303,54 @@ class TestLocalBotProcess(unittest.TestCase):
                 patch.object(qq_bot.subprocess, "run") as taskkill:
             self.assertFalse(qq_bot.stop_bot(self.root))
         taskkill.assert_not_called()
+
+    @unittest.skipUnless(os.name == "nt", "Windows process exit semantics")
+    def test_nonzero_taskkill_result_with_exited_target_does_not_break_restart(self):
+        """Tree termination can report an error although the managed root has exited."""
+        process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        qq_bot._pid_file(self.root).write_text(str(process.pid), encoding="ascii")
+
+        def terminate_owned_fixture(*arguments, **keywords):
+            process.terminate()
+            process.wait(timeout=5)
+            return Mock(returncode=128, stdout="", stderr="private process details")
+
+        try:
+            with patch.object(qq_bot, "owns_bot_process", return_value=True), \
+                    patch.object(qq_bot.subprocess, "run", side_effect=terminate_owned_fixture):
+                self.assertTrue(qq_bot.stop_bot(self.root))
+            self.assertFalse(qq_bot._pid_file(self.root).exists())
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=5)
+
+    def test_stop_rejects_unowned_pid_and_failed_termination_keeps_record(self):
+        qq_bot._pid_file(self.root).write_text("4321", encoding="ascii")
+        with patch.object(qq_bot, "bot_process_pid", return_value=4321), \
+                patch.object(qq_bot, "owns_bot_process", return_value=False), \
+                patch.object(qq_bot.subprocess, "run") as terminate:
+            with self.assertRaises(OSError):
+                qq_bot.stop_bot(self.root)
+            terminate.assert_not_called()
+        with patch.object(qq_bot, "bot_process_pid", return_value=4321), \
+                patch.object(qq_bot, "owns_bot_process", return_value=True), \
+                patch.object(qq_bot, "_wait_for_process_exit", return_value=False), \
+                patch.object(qq_bot.subprocess, "run", return_value=Mock(returncode=1)):
+            with self.assertRaises(OSError):
+                qq_bot.stop_bot(self.root)
+        self.assertTrue(qq_bot._pid_file(self.root).exists())
+
+    def test_zero_taskkill_result_is_not_success_if_target_is_still_alive(self):
+        qq_bot._pid_file(self.root).write_text("4321", encoding="ascii")
+        with patch.object(qq_bot, "bot_process_pid", return_value=4321), \
+                patch.object(qq_bot, "owns_bot_process", return_value=True), \
+                patch.object(qq_bot, "_wait_for_process_exit", return_value=False) as wait, \
+                patch.object(qq_bot.subprocess, "run", return_value=Mock(returncode=0)):
+            with self.assertRaisesRegex(OSError, "尚未退出"):
+                qq_bot.stop_bot(self.root)
+        wait.assert_called_once_with(4321, timeout_ms=5000)
+        self.assertTrue(qq_bot._pid_file(self.root).exists())
 
     def test_status_reports_whether_the_bot_is_running(self):
         with patch.object(qq_bot, "_listening_pid", return_value=None):

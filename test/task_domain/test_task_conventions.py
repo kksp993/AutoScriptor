@@ -190,6 +190,27 @@ class TestTaskRegistration(unittest.TestCase):
                     f"{path} must declare description",
                 )
 
+    def test_every_task_parameter_declares_a_chinese_label(self):
+        for path in task_script_paths():
+            with self.subTest(task=path.name):
+                registration, task_function = registration_of(path)[0]
+                parameters = {
+                    argument.arg for argument in (
+                        task_function.args.posonlyargs + task_function.args.args + task_function.args.kwonlyargs
+                    )
+                }
+                declarations = {argument.arg: argument.value for argument in registration.keywords}
+                if not parameters and "params_doc" not in declarations:
+                    continue
+                self.assertIn("params_doc", declarations, "Parameter labels belong to the task source")
+                labels = ast.literal_eval(declarations["params_doc"])
+                self.assertIsInstance(labels, dict)
+                self.assertEqual(set(labels), parameters)
+                for parameter_name, label in labels.items():
+                    self.assertIsInstance(label, str)
+                    self.assertTrue(label.strip(), parameter_name)
+                    self.assertTrue(any("\u4e00" <= character <= "\u9fff" for character in label), parameter_name)
+
     def test_derived_path_starts_with_its_section(self):
         for path in task_script_paths():
             with self.subTest(task=path.name):

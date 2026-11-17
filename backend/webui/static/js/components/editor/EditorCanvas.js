@@ -49,6 +49,7 @@ const EditorCanvas = {
     const canvasStyleH = computed(() => Math.floor(props.imgHeight * scale.value));
 
     let imgEl = null;
+    let imageLoadGeneration = 0;
     let drawing = false;
     let startX = 0, startY = 0;
     let curX = 0, curY = 0;
@@ -240,9 +241,14 @@ const EditorCanvas = {
     }
 
     function loadImage(src) {
+      const generation = ++imageLoadGeneration;
       if (!src) { imgEl = null; redraw(); return; }
       const img = new Image();
-      img.onload = () => { imgEl = img; redraw(); };
+      img.onload = () => {
+        if (generation !== imageLoadGeneration) return;
+        imgEl = img;
+        redraw();
+      };
       img.src = src;
     }
 
@@ -266,7 +272,11 @@ const EditorCanvas = {
       else redraw();
     });
 
-    onBeforeUnmount(() => { if (ro) ro.disconnect(); });
+    onBeforeUnmount(() => {
+      imageLoadGeneration += 1;
+      imgEl = null;
+      if (ro) ro.disconnect();
+    });
 
     return {
       wrapper, canvas, canvasStyleW, canvasStyleH,

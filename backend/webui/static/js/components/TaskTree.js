@@ -17,6 +17,7 @@ function buildDisplayParams(params) {
 }
 
 function resetTaskActivation(taskItem) {
+  delete taskItem.continuation_pending;
   delete taskItem.human_takeover;
   delete taskItem.human_takeover_error;
   delete taskItem.human_takeover_at;
@@ -358,10 +359,7 @@ const TaskTree = {
       else item._due = false;
     },
     getTaskStatus(item) {
-      if (!item.on) return 'disabled';
-      if (item.error) return 'error';
-      if ((item.human_takeover || item.human_takeover_error) && !item._due) return 'error';
-      return item._due ? 'pending' : 'scheduled';
+      return window.TaskStatusTheme?.getTaskStatus(item) || 'disabled';
     },
     countStatus(section) {
       const c = { disabled: 0, pending: 0, scheduled: 0, error: 0 };

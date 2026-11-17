@@ -116,14 +116,16 @@ def challenge_task_daily():
 
 
 @combo
-def battle_tasks(self:"Hero", task_table:list[str], speed_x:int=1, flow_name: str | None = None):#type: ignore
+def battle_tasks(self:"Hero", task_table:list[str], speed_x:int=1, flow_name: str | None = None, *, entry_ready: bool = False):#type: ignore
     if isinstance(task_table, str): task_table = [task_table]
     if flow_name is None:
         flow_name = getattr(self, "task_context_battle_flow", None) or "战斗循环"
     for task_name, v in get_task_table(task_table).items():
         from AutoScriptor.logging.logger import logger
         logger.info(f"开始挑战 {task_name} @ {v['location']}")
-        ensure_in(*v["location"])
+        if not entry_ready:
+            ensure_in(*v["location"])
+        entry_ready = False  # Only the first selected stage can reuse the registered entry.
         click(v["target"])
         wait_for_appear(v["target"].set_box(Box(136,0,988,84)))
         click(B(253,271+100*v["idx"],104,37),delay=1)

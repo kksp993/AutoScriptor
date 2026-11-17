@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const requests = [];
 const notifications = [];
 const context = vm.createContext({
-  EditorCanvas: {}, EditorControls: {}, PythonCodeEditor: {}, EditorMenuBar: {},
+  EditorCanvas: {}, EditorControls: {}, PythonCodeEditor: {}, EditorMenuBar: {}, EditorTutorial: {},
   Vue: {
     ref: value => ({ value }),
     computed: getter => ({ get value() { return getter(); } }),

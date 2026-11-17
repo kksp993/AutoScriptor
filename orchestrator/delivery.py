@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import subprocess
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from threading import Lock, Thread
@@ -87,15 +88,7 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 
 
 def _endpoint_is_loopback(endpoint: str) -> bool:
-    """Whether the endpoint points at this machine.
-
-    The distinction matters for the failure message: a loopback address that
-    refuses the connection means our own robot is not running -- something the
-    user can fix in one step -- while a remote address failing can be any of
-    address, certificate or service. Saying "check address/certificate/service"
-    for a robot that is simply switched off sends people looking in the wrong
-    place, which is exactly what happened here.
-    """
+    """Local connection failures may mean not started, not logged in, or not ready."""
     try:
         hostname = urlsplit(endpoint).hostname or ""
     except ValueError:
@@ -123,8 +116,8 @@ def send_message(settings: QQSettings, message: str) -> None:
     except requests.RequestException:
         if _endpoint_is_loopback(settings.endpoint):
             raise DeliveryError(
-                "本机 QQ 机器人没有在运行，通知发不出去。"
-                "运行 scripts\\qq-notify\\2-start.cmd 启动机器人后重试。"
+                "本机 QQ 发送接口不可用：机器人可能未启动、未登录或服务未就绪。"
+                "请在设置中的 QQ 结果通知区域检查机器人账号和登录状态。"
             ) from None
         raise DeliveryError("无法连接 QQ 接口，请检查地址、证书和机器人服务") from None
     try:
@@ -153,6 +146,30 @@ class QQNotifier:
         self._pending = deque()
         self._history = deque(maxlen=20)
         self._worker: Thread | None = None
+        self._active_deliveries = 0
+        self._login_changing = False
+        self._login_unconfirmed = False
+
+    def require_login_confirmation(self) -> None:
+        with self._lock:
+            self._login_unconfirmed = True
+
+    def confirm_login(self) -> None:
+        with self._lock:
+            self._login_unconfirmed = False
+
+    @contextmanager
+    def login_operation(self):
+        """Do not switch sender identities underneath queued or in-flight deliveries."""
+        with self._lock:
+            if self._worker is not None or self._pending or self._active_deliveries or self._login_changing:
+                raise DeliveryError("QQ 通知仍在发送或登录操作未结束，请稍后切换账号")
+            self._login_changing = True
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._login_changing = False
 
     def history(self) -> list[dict]:
         with self._lock:
@@ -170,10 +187,19 @@ class QQNotifier:
         return record
 
     def deliver(self, settings: QQSettings, message: str) -> dict:
+        with self._lock:
+            blocked = self._login_changing or (self._login_unconfirmed and _endpoint_is_loopback(settings.endpoint))
+            if not blocked:
+                self._active_deliveries += 1
+        if blocked:
+            return self._record(message, False, "机器人账号正在切换或等待确认，本条未发送；不会自动重发")
         try:
             send_message(settings, message)
         except DeliveryError as error:
             return self._record(message, False, str(error))
+        finally:
+            with self._lock:
+                self._active_deliveries -= 1
         return self._record(message, True)
 
     def submit(self, settings: QQSettings, message: str) -> None:
@@ -181,7 +207,9 @@ class QQNotifier:
             return
         error = ""
         with self._lock:
-            if len(self._pending) >= 100:
+            if self._login_changing or (self._login_unconfirmed and _endpoint_is_loopback(settings.endpoint)):
+                error = "机器人账号正在切换或等待确认，本条未发送；不会自动重发"
+            elif len(self._pending) >= 100:
                 error = "QQ 发送队列已满，本条未发送"
             else:
                 self._pending.append((settings, message))
@@ -226,11 +254,14 @@ class CharacterReport:
         server, name = self.character
         success_count = sum(state == "success" for _, state in self.outcomes.values())
         failed_count = sum(state == "failed" for _, state in self.outcomes.values())
+        has_continuations = any(state == "deferred" for _, state in self.outcomes.values())
         interrupted = interrupted or any(state == "pending" for _, state in self.outcomes.values())
         status = "已中断" if interrupted else ("部分失败" if failed_count else "任务完成")
+        if not interrupted and not failed_count and has_continuations:
+            status = "待续执行"
         prefix = f"{self.position}:" if self.position is not None else ""
         lines = [f"{prefix}({name}){status}-成功:{success_count},失败:{failed_count}"]
-        labels = {"success": "完成", "failed": "失败", "pending": "未完成"}
+        labels = {"success": "完成", "failed": "失败", "pending": "未完成", "deferred": "待续执行"}
         details = [f"{path.rsplit('/', 1)[-1]}{labels[state]}" for path, state in self.outcomes.values()]
         lines.append("、".join(details[:6]) + (f" 等{len(details)}项" if len(details) > 6 else ""))
         failed_tasks = [path for path, state in self.outcomes.values() if state == "failed"]
@@ -248,7 +279,7 @@ class CharacterReports:
         self._reports: dict[CharacterKey, CharacterReport] = {}
 
     def record(self, character: CharacterKey, run_id: str, task_path: str, state: str) -> None:
-        if state not in ("success", "failed", "pending"):
+        if state not in ("success", "failed", "pending", "deferred"):
             raise ValueError(f"Invalid task outcome: {state}")
         report = self._reports.setdefault(character, CharacterReport(character, self._positions.get(character)))
         # A successful retry replaces its failed attempt; it is not a second task.

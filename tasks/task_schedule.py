@@ -15,10 +15,11 @@
 ``{"mode", "hours", "window", "weekdays"}``。非法写法抛 ``RescheduleError``，消息里带
 具体取值，注册任务时抛出即中断该任务的注册。
 
-本模块只管「下次什么时候」这个声明本身。把规则换算成时间戳、按 window 与 weekdays 推迟、
-以及用户配置覆盖作者默认值，都在 ``orchestrator.model``。
+本模块统一声明、用户覆盖和基础周期时间；执行窗口与星期限制由
+``orchestrator.model`` 处理，不改变状态刷新边界。
 """
 
+import datetime
 import numbers
 
 # 四种调度模式，构成 reschedule 的全部取值。
@@ -98,3 +99,32 @@ def normalize_reschedule(value) -> dict:
             "weekdays": _normalized_weekdays(value.get("weekdays")),
         }
     raise RescheduleError(f"reschedule 不支持的形态：{value!r}")
+
+
+def resolve_reschedule(task_path: str, entry: dict | None) -> dict:
+    """Resolve user override, author default, then one-shot for all consumers."""
+    from tasks.task_register import task_registry
+
+    raw = entry["reschedule"] if isinstance(entry, dict) and "reschedule" in entry else task_registry.get_reschedule_default(task_path)
+    return normalize_reschedule(raw)
+
+
+def next_regular_execution_time(now: datetime.datetime, spec: dict) -> float | None:
+    """Unconstrained cycle boundary, independent of a script's continuation time."""
+    mode = spec["mode"]
+    if mode == "once":
+        return None
+    if mode == "offset":
+        return (now + datetime.timedelta(hours=spec["hours"])).timestamp()
+    if mode == "daily":
+        boundary = now.replace(hour=5, minute=0, second=0, microsecond=0)
+        if boundary <= now:
+            boundary += datetime.timedelta(days=1)
+        return boundary.timestamp()
+    if mode == "weekly":
+        boundary = now.replace(hour=5, minute=0, second=0, microsecond=0)
+        boundary += datetime.timedelta(days=(-now.weekday()) % 7)
+        if boundary <= now:
+            boundary += datetime.timedelta(days=7)
+        return boundary.timestamp()
+    raise ValueError(f"Unknown reschedule mode: {mode!r}")

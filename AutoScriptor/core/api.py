@@ -1,11 +1,30 @@
 import os
 import time
 from typing import Any, Callable, Iterable, Literal
+from AutoScriptor.api_version import API_VERSION, get_api_version
 from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
 from AutoScriptor.core.control import MixControl, ControlModeProxy
 from AutoScriptor.core.background import bg
 from AutoScriptor.core.targets import Target, B
 from AutoScriptor.core.targets import ImageTarget,TextTarget,BoxTarget
+from AutoScriptor.core.utils import (
+    _first_hit_path,
+    _flatten_target_paths,
+    _format_match_path,
+    _generate_target_source,
+    _normalize_dynamic_arguments,
+    _validate_swipe_duration,
+    _validate_target,
+    _validate_timeout,
+    contains_information as _contains_information,
+    make_deadline_check as _make_deadline_check,
+    first,
+    simple,
+    full,
+    count,
+    index,
+    stable,
+)
 from AutoScriptor.recognition.ocr_rec import ocr_for_box
 from AutoScriptor.recognition.locate import get_box_color
 from AutoScriptor.logging.recognition_trace import (
@@ -18,7 +37,12 @@ from AutoScriptor.logging.logger import logger, setup_logfile
 from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.mumu_discovery import resolve_mumu_adb_addr, validate_mumu_connection_parameters
 from AutoScriptor.control.MumuAdaptor.mumu import Mumu
-from AutoScriptor.utils.cancel import TaskCancelled, check_cancel_raise, cancellable_sleep
+from AutoScriptor.utils.cancel import (
+    TaskCancelled,
+    check_cancel_raise,
+    cancellable_sleep,
+    sleep_with_cancel,
+)
 
 
 # Package-name resolution is pluggable; register one with
@@ -272,41 +296,6 @@ def go_home() -> None:
     _require_mixctrl().androidEvent.go_home()
 
 
-def _validate_timeout(timeout, caller: str) -> None:
-    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
-        hint = ""
-        if isinstance(timeout, Target):
-            hint = "；多个目标请用 tuple/list 包起来，例如 wait_for_appear((T(...), T(...)))"
-        raise TypeError(
-            f"{caller} 的 timeout 必须是数字秒数，收到 {type(timeout).__name__}: {timeout!r}{hint}"
-        )
-
-
-def _validate_target(target, caller: str) -> None:
-    """裸 Box 不是识别目标：Box 是 namedtuple，会被当成多目标元组逐元素解析。
-
-    真实事故：任务里的 ``portrait()`` 返回裸 Box，``click(portrait(Box(...)))``
-    直到识别阶段才报 ``Unsupported target type: <class 'int'>``（第一个元素是坐标数字）。
-    在入口拦下，错误就直接出现在调用点。
-    """
-    if isinstance(target, Box):
-        raise TypeError(
-            f"{caller} 的 target 收到裸 Box({target})：Box 是 namedtuple，会被当成多目标"
-            "元组逐元素解析。要点击/识别一块区域请用 B(...) 包一层：B(Box(...)) 或"
-            " B(x, y, w, h)；只要文本或图片时用 T(...)/I(...)。"
-        )
-
-
-def _validate_swipe_duration(duration_s: float, caller: str) -> None:
-    if isinstance(duration_s, bool) or not isinstance(duration_s, (int, float)):
-        raise TypeError(
-            f"{caller} 的 duration_s 必须是数字秒数，收到 "
-            f"{type(duration_s).__name__}: {duration_s!r}"
-        )
-    if duration_s <= 0:
-        raise ValueError(f"{caller} 的 duration_s 必须大于 0，收到 {duration_s!r}")
-
-
 def ui_idx(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->int:
     _validate_timeout(timeout, "ui_idx")
     target = [t for t in target]
@@ -324,95 +313,8 @@ def ui_T(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, *, sc
         return first(boxes) is not None
     
 
-def ui_F(target: Target|list[Target]|tuple[Target, ...], timeout: float=0)->bool:
-    return not ui_T(target, timeout)
-
-def first(box_matrixes: list[list[Box]|list[Box]|None])->Box|None:
-    """返回第一个找到的Box，如果没有找到返回None"""
-    if not box_matrixes: return None
-    if not any(isinstance(box_matrix, list) for box_matrix in box_matrixes): return first([box_matrixes])
-    for box_matrix in box_matrixes:
-        if not box_matrix: continue
-        for box in box_matrix:
-            if box: return box
-    return None
-
-def simple(box_matrixes: list[list[Box]]|list[Box]|None)->list[Box]:
-    if not box_matrixes: return None
-    for i in range(len(box_matrixes)):
-        if box_matrixes[i] and len(box_matrixes[i]) > 1:
-            box_matrixes[i] = box_matrixes[i][:1]
-    return [b[0] if b else None for b in box_matrixes]
-
-def full(box_matrixes: list[list[Box]])->bool:
-    for i in range(len(box_matrixes)):
-        if not box_matrixes[i]: return False
-    return True
-
-def count(box_matrixes: list[list[Box]])->list[int]:
-    return [0 if not box_matrix else len(box_matrix) if not isinstance(box_matrix, Box) else 1 for box_matrix in box_matrixes]
-
-def index(box_matrixes: list[list[Box]])-> int:
-    if not box_matrixes: return -1
-    for i, box in enumerate(box_matrixes):
-        if box: return i
-    return -1
-
-
-def stable(boxes1: list[list[Box]], boxes2: list[list[Box]])->bool:
-    if not boxes1 or not boxes2: return False
-    assert len(boxes1) == len(boxes2)
-    for i in range(len(boxes1)):
-        list1, list2 = boxes1[i], boxes2[i]
-        if bool(list1) != bool(list2): return False
-        if not list1 or not list2: continue
-        for b1, b2 in zip(list1, list2):
-            if not b1.sim_box(b2): return False
-        if len(list1) != len(list2): return False
-    return True
-
-
-def _format_match_path(path: tuple[int, ...]) -> str:
-    """嵌套索引路径格式化为 [1.0]、[2] 等（与 locate 目标树结构一致）。"""
-    if not path:
-        return "[?]"
-    return "[" + ".".join(str(p) for p in path) + "]"
-
-
-def _flatten_target_paths(target: Target|list[Target]|tuple[Target, ...]) -> list[tuple[tuple[int, ...], Target]]:
-    """将嵌套 tuple/list of Target 展平为 (从根到叶的索引路径, 叶子 Target)。
-
-    例：(A, (B, C), D) -> [((0,), A), ((1, 0), B), ((1, 1), C), ((2,), D)]，
-    对应标注 [0]、[1.0]、[1.1]、[2]。
-    """
-    if isinstance(target, Target):
-        return [((), target)]
-    if isinstance(target, (tuple, list)):
-        out: list[tuple[tuple[int, ...], Target]] = []
-        for i, child in enumerate(target):
-            if isinstance(child, Target):
-                out.append(((i,), child))
-            elif isinstance(child, (tuple, list)):
-                for subpath, t in _flatten_target_paths(child):
-                    out.append(((i,) + subpath, t))
-            else:
-                raise TypeError(f"locate 目标必须是 Target 或嵌套序列，收到 {type(child)!r}: {child!r}")
-        return out
-    raise TypeError(f"locate 目标类型不支持: {type(target)!r}")
-
-
-def _first_hit_path(boxes: list, target: Target|list[Target]|tuple[Target, ...]) -> str | None:
-    """与 first(boxes) 顺序一致：第一个有命中的槽位在 target 树中的路径（[x.x.x]）。"""
-    paths = _flatten_target_paths(target)
-    if len(paths) != len(boxes):
-        for i, b in enumerate(boxes):
-            if b and first([b]) is not None:
-                return _format_match_path((i,))
-        return None
-    for i, b in enumerate(boxes):
-        if b and first([b]) is not None:
-            return _format_match_path(paths[i][0])
-    return None
+def ui_F(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, *, screenshot=None)->bool:
+    return not ui_T(target, timeout, screenshot=screenshot)
 
 
 def match(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, *, screenshot=None) -> dict | None:
@@ -553,18 +455,6 @@ def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=No
     a match, text targets are skipped — significantly reducing latency for
     "any-match" (tuple) queries that mix I() and T() targets.
     """
-    def genertate_source(target):
-        if isinstance(target, ImageTarget|TextTarget):
-            return target.get_source(),target.ui.box,target.ui.color
-        elif isinstance(target, BoxTarget):
-            return target.box, target.box, target.color
-        else:
-            raise ValueError(
-                f"Unsupported target type: {type(target)}"
-                "；识别目标只能是 T()/I()/B() 的返回值（裸 Box 是 namedtuple，"
-                "会被当成多目标元组逐元素解析）"
-            )
-
     boxes: list[list[Box] | None] = [None] * len(target)
     frame_source = "injected" if screenshot is not None else "live"
 
@@ -573,7 +463,7 @@ def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=No
         rest_items = [(idx, t) for idx, t in enumerate(target) if not isinstance(t, ImageTarget)]
 
         if img_items:
-            img_triples = [genertate_source(t) for _, t in img_items]
+            img_triples = [_generate_target_source(t) for _, t in img_items]
             frame = screenshot if screenshot is not None else mixctrl.screenshot()
             img_targets = [target_item for _, target_item in img_items]
             img_boxes = _locate_targets_with_trace(
@@ -589,7 +479,7 @@ def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=No
             screenshot = frame
 
         if rest_items:
-            rest_triples = [genertate_source(t) for _, t in rest_items]
+            rest_triples = [_generate_target_source(t) for _, t in rest_items]
             rest_targets = [target_item for _, target_item in rest_items]
             rest_boxes = _locate_targets_with_trace(
                 rest_targets,
@@ -601,7 +491,7 @@ def _locate_all(target: Target|list[Target]|tuple[Target, ...], *, screenshot=No
                 boxes[orig_idx] = rest_boxes[j]
     else:
         target_items = list(target)
-        target_triples = [genertate_source(target_item) for target_item in target_items]
+        target_triples = [_generate_target_source(target_item) for target_item in target_items]
         return _locate_targets_with_trace(
             target_items,
             target_triples,
@@ -694,7 +584,73 @@ def locate(target: Target|list[Target]|tuple[Target, ...], timeout: float=0, ass
     # 单个Target对象，转换为元组处理
     if isinstance(target, Target):
         return locate((target,), timeout, assure_stable=assure_stable, screenshot=screenshot)
-    
+
+def locate_dyn(
+    target: Target | list[Target], min_area: tuple[int, int] | int, *,
+    interval: float = 0.2, threshold: int = 20, timeout: float = 5,
+) -> list[Box]:
+    """固定第 0 帧作差，返回首个命中帧内全部变化框；超时抛 TimeoutError。
+
+    min_area 是最小边长或 (宽, 高)，两边各允许少 5 像素，不是像素面积。
+    T/I/带颜色 B 先 locate 全部命中；定位与采样共用 timeout，interval 为采样起点间隔。
+    任意颜色通道差值 >= threshold 的像素按 8 连通分组，不合并断开的动效部分。
+    """
+    import cv2
+
+    targets, minimum_size = _normalize_dynamic_arguments(target, min_area, interval, threshold, timeout)
+    check_cancel_raise()
+    deadline = time.monotonic() + timeout
+    check_deadline = _make_deadline_check(
+        deadline, f"locate_dyn 未找到符合尺寸的变化区域 ({timeout}s)",
+        clock=time.monotonic, cancel_check=check_cancel_raise,
+    )
+
+    control = _require_mixctrl()
+    if not all(isinstance(item, BoxTarget) and not item.color for item in targets):
+        located = locate(targets, check_deadline(), assure_stable=False, is_simplify=False)
+        check_deadline()
+        if not located or not full(located):
+            raise TimeoutError(f"locate_dyn 定位目标超时 ({timeout}s)")
+        boxes = locate_dyn([B(box) for matches in located for box in matches], min_area,
+                           interval=interval, threshold=threshold, timeout=check_deadline())
+        check_deadline()
+        return boxes
+
+    next_capture = time.monotonic() + interval
+    frame = control.screenshot()
+    check_deadline()
+    frame_shape = frame.shape
+    screen = Box(0, 0, frame_shape[1], frame_shape[0])
+    reference_crops = []
+    for box in dict.fromkeys(item.box for item in targets):
+        if min(box.width, box.height) <= 0 or not box.is_in(screen):
+            raise ValueError(f"locate_dyn 区域无效或超出截图: {box}")
+        region = (slice(box.top, box.top + box.height), slice(box.left, box.left + box.width))
+        # 截图通道可能复用缓冲区，固定基准必须独立持有像素。
+        reference_crops.append((box, region, frame[region].copy()))
+    minimum_width, minimum_height = (side - 5 for side in minimum_size)
+
+    while True:
+        cancellable_sleep(max(0, min(next_capture, deadline) - time.monotonic()))
+        check_deadline()
+        next_capture = time.monotonic() + interval
+        frame = control.screenshot()
+        check_deadline()
+        if frame.shape != frame_shape:
+            raise ValueError("locate_dyn 采样期间截图尺寸发生变化")
+        boxes = []
+        for box, region, reference in reference_crops:
+            check_deadline()
+            difference = cv2.absdiff(reference, frame[region]).max(axis=2)
+            changed = (difference >= threshold).astype("uint8")
+            components = cv2.connectedComponentsWithStats(changed, connectivity=8)[2][1:, :4]
+            components = components[(components[:, 2] >= minimum_width) & (components[:, 3] >= minimum_height)]
+            boxes.extend(Box(box.left + left, box.top + top, width, height)
+                         for left, top, width, height in components)
+        check_deadline()
+        if boxes:
+            return sorted(set(boxes), key=lambda box: (box.top, box.left))
+
 def wait_for_appear(target: Target|tuple[Target, ...], timeout: float=30) -> Box:
     """等待目标出现并返回 Box。超时抛 TimeoutError（与 wait_for_disappear 对称）。"""
     if not isinstance(target, (Target, tuple, list)):
@@ -1375,15 +1331,6 @@ def extract_info(
 
     target_layout = BoxTargetLayout.from_target(target)
 
-    def contains_information(value: Any) -> bool:
-        if isinstance(value, (list, tuple)):
-            return any(contains_information(item) for item in value)
-        if value is None:
-            return False
-        if isinstance(value, str):
-            return bool(value.strip())
-        return True
-
     started_at = time.perf_counter()
     result = None
     recognition_frame = None
@@ -1433,13 +1380,13 @@ def extract_info(
                 )
                 continue
 
-        if not ensure_not_empty or contains_information(result):
+        if not ensure_not_empty or _contains_information(result):
             break
 
     record_recognition_result(
         create_recognition_result(
             operation="extract_info",
-            success=contains_information(result),
+            success=_contains_information(result),
             target=target,
             result=result,
             started_at=started_at,

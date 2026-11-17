@@ -7,6 +7,7 @@ from AutoScriptor.logging.logger import logger
     ensure_in="天庭#4",  # battle_tasks 按 TASK_TABLE 固定顺序筛选，首项是龙宫。
     description="依次处理造化烘炉和机缘大集。",
     reschedule="daily",
+    params_doc={"battle_flow": "战斗招式"},
 )
 def task(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
     """【未完成】依次处理造化烘炉和机缘大集。"""
@@ -25,4 +26,4 @@ def task(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
         "朝会殿",
         "凌霄宝殿",
     ]
-    h.battle_tasks(task_table=list(set(TASK_TABLE_LIST).union(set(JIYUAN_TASK_TABLE))))
+    h.battle_tasks(task_table=list(set(TASK_TABLE_LIST).union(set(JIYUAN_TASK_TABLE))), entry_ready=True)

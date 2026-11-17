@@ -2079,6 +2079,102 @@ html.light .bg-white {
   font-weight: 700;
   color: #334155;
 }
+.settings-unified {
+  container-type: inline-size;
+}
+.settings-unified > .settings-hero {
+  padding: 16px 20px;
+  box-shadow: none;
+}
+.settings-save-status,
+.settings-section-note {
+  color: var(--as-text-muted);
+  font-size: var(--as-text-sm);
+}
+.settings-save-status {
+  text-align: right;
+}
+.settings-primary-grid {
+  align-items: stretch;
+}
+.settings-primary-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.settings-primary-card .settings-card-head {
+  align-items: center;
+  min-height: 28px;
+}
+.settings-unified .settings-field-grid > *,
+.settings-unified .el-form-item__content {
+  min-width: 0;
+}
+.settings-primary-card .el-input-number {
+  width: 100%;
+}
+.settings-details > summary {
+  cursor: pointer;
+  color: var(--as-text-primary);
+  font-size: var(--as-text-sm);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.settings-details > summary span {
+  margin-left: 10px;
+  font-size: var(--as-text-xs);
+  font-weight: 400;
+  color: var(--as-text-muted);
+}
+.settings-details > summary:focus-visible {
+  outline: 2px solid #16a34a;
+  outline-offset: 4px;
+}
+.settings-details[open] > summary {
+  margin-bottom: 16px;
+}
+.settings-card-footer {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid #f1f5f9;
+}
+.settings-card-footer .el-form-item,
+.settings-card-footer .settings-help {
+  margin-top: 12px;
+}
+.settings-access,
+.settings-diagnostics {
+  margin-top: 16px;
+  padding: 16px 20px;
+  box-shadow: none;
+}
+.settings-diagnostics .diagnostics-panel {
+  border: 0;
+  padding: 0;
+  box-shadow: none;
+}
+.settings-deploy-actions {
+  margin-top: 16px;
+}
+@container (max-width: 720px) {
+  .settings-unified .settings-primary-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@container (max-width: 480px) {
+  .settings-unified > .settings-hero {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .settings-unified .settings-field-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-details > summary span {
+    display: block;
+    margin: 4px 0 0;
+  }
+}
 .diagnostics-panel {
   margin-top: 18px;
   padding: 18px;

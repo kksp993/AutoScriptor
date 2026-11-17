@@ -9,9 +9,9 @@ from time import time
     description="完成东天王殿组队流程。",
     reschedule="daily",
     ensure_in="天庭#-1",
+    params_doc={"battle_flow": "战斗招式"},
 )
 def zudui_task(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
-    ensure_in("天庭",-1)
     click(ui["彩虹楼"].i)
     click(T("东天王殿"),delay=0.5)
     click(T("普通难度"))

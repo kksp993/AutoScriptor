@@ -480,6 +480,12 @@ function Install-PythonDeps {
         throw "Failed to install $SetuptoolsRequirement with exit code $LASTEXITCODE"
     }
 
+    Write-Host "Registering the ascli command in the project virtualenv ..."
+    & $uv pip install --python $VenvPy --no-deps --editable $Root
+    if ($LASTEXITCODE -ne 0) {
+        throw "AutoScriptor CLI registration failed with exit code $LASTEXITCODE"
+    }
+
     Set-Step "校验 Python 依赖与原生运行库" @(
         "此步骤会实际导入 WebUI、OpenCV 和 PaddleOCR，但不会连接模拟器或写入账号配置",
         "GPU 校验失败时检查 NVIDIA 驱动；无 NVIDIA GPU 的电脑请使用 CPU 配置"

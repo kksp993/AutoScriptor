@@ -10,8 +10,8 @@ from orchestrator import catalog
 from tasks import task_register
 
 
-TASK_FILE = Path(__file__).resolve().parents[2] / "tasks/其他任务/特殊功能/领取邮件.py"
-TASK_PATH = "其他任务/特殊功能/领取邮件"
+TASK_FILE = Path(__file__).resolve().parents[2] / "tasks/每日任务/村庄/领取邮件.py"
+TASK_PATH = "每日任务/村庄/领取邮件"
 
 
 class MailTaskTests(unittest.TestCase):
@@ -25,6 +25,15 @@ class MailTaskTests(unittest.TestCase):
         ), patch.object(task_register, "registration_counter", 0):
             exec(compile(TASK_FILE.read_text(encoding="utf-8"), str(TASK_FILE), "exec"), self.namespace)
         self.navigate = Mock()
+        for patcher in (
+            patch("ZmxyOL.nav.api.ensure_in", self.navigate),
+            patch.object(task_register, "_apply_task_battle_startup"),
+            patch.object(task_register, "_clear_task_battle_startup"),
+            patch("AutoScriptor.core.background.bg.clear"),
+            patch("AutoScriptor.logging.tracer.clear_debug_screenshots"),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.click = Mock(return_value=True)
         self.sleep = Mock()
         self.page_check = Mock(return_value=True)
@@ -52,7 +61,7 @@ class MailTaskTests(unittest.TestCase):
 
     def test_initial_single_page_receives_five_claims_and_final_check(self):
         self.namespace["task"]()
-        self.navigate.assert_called_once_with("村庄")
+        self.navigate.assert_called_once_with(self.registry.get_ensure_in(TASK_PATH))
         self.assertEqual(len(self.claim_clicks()), 5)
         self.assertEqual(self.page_check.call_count, 6)
         self.assertEqual(self.sleep.call_args_list, [call(3)] * 5)

@@ -55,6 +55,7 @@ def FTT_battle_one_round():
     ensure_in="极北#-1",
     description="领取梵天塔每日 5 张度牒并扫荡梵天塔。",
     reschedule="daily",
+    params_doc={"battle_times": "战斗轮数", "claim_past": "是否解锁过去", "battle_flow": "战斗招式"},
 )
 def fanTianTa(
     battle_times=1,
@@ -62,7 +63,6 @@ def fanTianTa(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):
     """claim_past：每日领取时是否也点「过去」；账号未解锁过去时设为 False。"""
-    ensure_in("极北",-1)
     click(B(0,120,90,100))
     for diff in (["现在", "过去"] if claim_past else ["现在"]):
         click(T(diff),offset=(0,100))

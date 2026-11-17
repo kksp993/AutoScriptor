@@ -11,9 +11,6 @@ requires-python = ">=3.10,<3.11"
 license = { text = "See LICENSE" }
 authors = [{ name = "Kksp993" }]
 
-[project.urls]
-Repository = "https://github.com/kksp993/AutoScriptor"
-
 # 只列 AutoScriptor 自己 import 的第三方包；WebUI/游戏层/测试的依赖
 # （fastapi、uvicorn、cryptography、dpath、openpyxl…）不在这里，见 extras。
 dependencies = [
@@ -35,6 +32,12 @@ dependencies = [
     "setuptools<81",
 ]
 
+[project.urls]
+Repository = "https://github.com/kksp993/AutoScriptor"
+
+[project.scripts]
+ascli = "AutoScriptor.cli:main"
+
 [project.optional-dependencies]
 # OCR 运行时二选一，与 data/config.json -> ocr.use_gpu 保持一致。
 cpu = ["paddlepaddle==3.2.0", "mkl>=2023.0.0"]
@@ -47,6 +50,7 @@ web = [
     "websockets",
     "dpath",
     "requests",
+    "qrcode>=8.2",
     "onepush>=1.3.0",
 ]
 

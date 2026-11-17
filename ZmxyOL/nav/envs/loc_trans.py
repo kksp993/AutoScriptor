@@ -4,6 +4,22 @@ from ZmxyOL.nav import mm
 from ZmxyOL.nav import path
 from ZmxyOL.nav.envs.decorators import *
 
+"=======================    村庄    ======================="
+@path(LOC_ENV, "活动")
+def way():
+    while ui_F(T("仙盟", box=Box(16, 30, 130, 400)), 3):
+        click(I("导航-按钮收缩"))
+        if ui_T(T("精彩活动"), 2):
+            click(B(1100, 40, 40, 40))
+        sleep(2)
+    click(I("导航-活动"))
+    mm.set_loc("活动")
+
+@path("活动", LOC_ENV)
+def way():
+    click(B(1100, 40, 40, 40))
+    mm.set_loc(mm.get_region()[0])
+
 
 @path(LOC_ENV, "法相")
 def way():

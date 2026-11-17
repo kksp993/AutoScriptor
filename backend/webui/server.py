@@ -209,6 +209,24 @@ configure_editor_custom_task_save_controls(
 )
 app.include_router(editor_router)
 
+from AutoScriptor.cli import AutomationService
+from backend.webui.routes.ascli import create_router as create_ascli_router
+from backend.webui.security import require_credential_unlock
+
+ascli_service = AutomationService(
+    acquire_execution=lambda: orchestrator.scheduler.acquire_execution("ascli", blocking=False),
+    release_execution=lambda: orchestrator.scheduler.release_execution("ascli"),
+    request_cancel=orchestrator.task_manager.request_cancel,
+    reset_cancel=orchestrator.task_manager.reset_cancel,
+)
+orchestrator.execution.set_external_status_getter("ascli", ascli_service.status)
+app.include_router(create_ascli_router(
+    ascli_service,
+    require_unlock=require_credential_unlock,
+    identity=lambda: {"account": cfg.current_account(), "character": cfg.active_character()},
+    execution_ready=lambda: _init_done and not _init_error,
+))
+
 # ── 领域路由 ──
 # server.py 只负责应用壳（日志、安全中间件、静态挂载、生命周期）与需要
 # 直接操作进程的少数端点；其余按域拆分，各自只依赖 api_context / security。
@@ -217,6 +235,7 @@ from backend.webui.routes import news as news_routes
 from backend.webui.routes import notifications as notifications_routes
 from backend.webui.routes import ops as ops_routes
 from backend.webui.routes import overview as overview_routes
+from backend.webui.routes import script_api as script_api_routes
 from backend.webui.routes import tasks as tasks_routes
 
 for domain_router in (
@@ -226,6 +245,7 @@ for domain_router in (
     news_routes.router,
     ops_routes.router,
     notifications_routes.router,
+    script_api_routes.router,
 ):
     app.include_router(domain_router)
 
@@ -458,7 +478,12 @@ def shutdown_webui():
 
     _silent(orchestrator.scheduler.deactivate)
     _silent(lambda: orchestrator.scheduler.stop(timeout=3))
-    _silent(_shutdown_runtime)
+    try:
+        ascli_service.shutdown(timeout=10)
+    except TimeoutError:
+        logger.error("ascli worker is still stopping; do not release its live device session")
+    else:
+        _silent(_shutdown_runtime)
     _silent(lambda: setattr(_server, "should_exit", True) if _server else None)
 
 

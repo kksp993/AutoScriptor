@@ -4,16 +4,16 @@ from AutoScriptor.logging.logger import logger
 
 
 @register_task(
-    ensure_in=["村庄", "仙盟"],
+    ensure_in=HAS_SHEZHI,
     description="执行每日竞技场挑战。",
     deprecated=True,
     reschedule="daily",
+    params_doc={"battle_flow": "战斗招式"},
 )
 def daily_arena_task(
     battle_flow: BattleFlowName = DEFAULT_JJC_BATTLE_FLOW,
 ):
     """【弃用】该任务保留旧每日竞技场挑战流程。"""
-    ensure_in(["村庄","仙盟"])
     logger.info("====斗兽场====")
     click(I("导航-竞技"), delay=0.5)
     click(I("竞技-斗兽场"))

@@ -23,6 +23,7 @@ python-multipart>=0.0.9
 uvicorn[standard]
 dpath
 requests
+qrcode>=8.2
 lxml
 pyyaml
 onepush>=1.3.0

@@ -1,4 +1,4 @@
-"""Task entry declarations describe source navigation without performing it.
+"""Task declarations own the execution precondition, never import-time navigation.
 
 Before this contract, ensure_in was accepted as private cfg data and missing
 entries were indistinguishable from current-scene debug tasks. Source audits
@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import ast
 import copy
+import inspect
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -75,9 +77,9 @@ class TestTaskEntryRegistration(unittest.TestCase):
                     self.assertEqual(self.registry.all_paths(), [])
                     self.assertEqual(self.task_register.registration_counter, 0)
 
-    def test_none_requires_explicit_debug_true_even_for_deprecated_tasks(self):
+    def test_none_is_rejected_including_debug_and_deprecated_tasks(self):
         configuration_before = copy.deepcopy(self.configuration)
-        for debug in (False, None, "true"):
+        for debug in (False, True, None, "true"):
             for deprecated in (False, True):
                 with self.subTest(debug=debug, deprecated=deprecated):
                     with self.assertRaisesRegex(ValueError, "ensure_in"):
@@ -127,23 +129,23 @@ class TestTaskEntryRegistration(unittest.TestCase):
                 )
                 self.assertEqual(self.registry.get_ensure_in("test_group/entry_fixture"), [VILLAGE])
 
-    def test_declaration_never_navigates_or_changes_task_body(self):
+    def test_registration_does_not_navigate_and_returns_the_registered_wrapper(self):
         returned_function = self.task_register.register_task(ensure_in=HEAVEN_LEFT)(self.task_body)
-        self.assertIs(returned_function, self.task_body)
+        self.assertIs(returned_function, self.registry.get_fn("test_group/entry_fixture"))
+        self.assertIs(returned_function.__wrapped__, self.task_body)
         self.navigation.assert_not_called()
-        returned_function()
-        self.navigation.assert_called_once_with()
         self.assertEqual(self.registry.get_ensure_in("test_group/entry_fixture"), [HEAVEN_LEFT])
 
-    def test_registered_execution_does_not_prepend_navigation(self):
+    def test_registered_execution_navigates_once_before_body_on_every_attempt(self):
         from AutoScriptor.core.background import bg
         from AutoScriptor.logging import tracer
         from ZmxyOL.nav import api as navigation_api
 
-        unexpected_navigation = Mock(side_effect=AssertionError("Metadata must not trigger navigation"))
+        events = []
+        self.navigation.side_effect = lambda: events.append("body")
+        navigate = Mock(side_effect=lambda target: events.append(target))
         with (
-            patch.object(self.task_register, "ensure_in", unexpected_navigation, create=True),
-            patch.object(navigation_api, "ensure_in", unexpected_navigation),
+            patch.object(navigation_api, "ensure_in", navigate),
             patch.object(bg, "clear"),
             patch.object(tracer, "clear_debug_screenshots"),
             patch.object(self.task_register, "_apply_task_battle_startup"),
@@ -151,20 +153,25 @@ class TestTaskEntryRegistration(unittest.TestCase):
         ):
             self.task_register.register_task(self.task_body, ensure_in=HEAVEN_LEFT)
             self.registry.get_fn("test_group/entry_fixture")()
-        self.navigation.assert_called_once_with()
-        unexpected_navigation.assert_not_called()
+            self.registry.get_fn("test_group/entry_fixture")()
+        self.assertEqual(events, [HEAVEN_LEFT, "body", HEAVEN_LEFT, "body"])
+        self.assertEqual(navigate.call_count, 2)
 
-    def test_scene_debug_task_has_explicit_non_applicable_entry(self):
-        self.task_register.register_task(self.task_body, ensure_in=None, debug=True)
-        self.assertIsNone(self.registry.get_ensure_in("test_group/entry_fixture"))
+    def test_anywhere_is_explicit_and_not_a_map_preference(self):
+        from ZmxyOL import ANYWHERE
+
+        self.task_register.register_task(self.task_body, ensure_in=ANYWHERE)
+        self.assertEqual(self.registry.get_ensure_in("test_group/entry_fixture"), [ANYWHERE])
         self.assertEqual(self.registry.get_planning_defaults("test_group/entry_fixture"), {
             "preferred_locations": [], "after_tasks": [],
         })
         self.navigation.assert_not_called()
 
     def test_internal_fixture_registration_remains_compatible(self):
+        from ZmxyOL import ANYWHERE
+
         self.registry.register("test_group/internal_fixture", self.task_body)
-        self.assertIsNone(self.registry.get_ensure_in("test_group/internal_fixture"))
+        self.assertEqual(self.registry.get_ensure_in("test_group/internal_fixture"), [ANYWHERE])
         self.assertIsNone(self.registry.get_ensure_in("missing"))
         self.assertEqual(self.registry.get_planning_defaults("test_group/internal_fixture"), {
             "preferred_locations": [], "after_tasks": [],
@@ -180,6 +187,81 @@ class TestTaskEntryRegistration(unittest.TestCase):
                 self.task_register.register_task(self.task_body, ensure_in=VILLAGE)
         self.assertEqual(self.registry.get_ensure_in("test_group/entry_fixture"), ["reloaded-entry"])
 
+    def test_navigation_failure_and_cancellation_skip_body_and_clear_context(self):
+        from AutoScriptor.core.background import bg
+        from AutoScriptor.logging import tracer
+        from AutoScriptor.utils.cancel import TaskCancelled
+        from ZmxyOL.nav import api as navigation_api
+
+        for failure in (RuntimeError("unreachable"), TaskCancelled("stop")):
+            with self.subTest(failure=type(failure).__name__), ExitStack() as patches:
+                patches.enter_context(patch.object(bg, "clear"))
+                patches.enter_context(patch.object(tracer, "clear_debug_screenshots"))
+                patches.enter_context(patch.object(self.task_register, "_apply_task_battle_startup"))
+                clear_context = patches.enter_context(patch.object(self.task_register, "_clear_task_battle_startup"))
+                navigate = patches.enter_context(patch.object(navigation_api, "ensure_in", side_effect=failure))
+                wrapped = self.task_register.register_task(self.task_body, ensure_in=HEAVEN_LEFT, debug=True)
+                with self.assertRaises(type(failure)):
+                    wrapped()
+                self.navigation.assert_not_called()
+                navigate.assert_called_once_with(HEAVEN_LEFT)
+                clear_context.assert_called_once_with()
+
+    def test_alternatives_preserve_signature_arguments_and_return_value(self):
+        from AutoScriptor.core.background import bg
+        from AutoScriptor.logging import tracer
+        from ZmxyOL.nav import api as navigation_api
+
+        def parameterized_task(amount: int = 2, *, enabled: bool = True):
+            return amount, enabled
+
+        with ExitStack() as patches:
+            patches.enter_context(patch.object(bg, "clear"))
+            patches.enter_context(patch.object(tracer, "clear_debug_screenshots"))
+            patches.enter_context(patch.object(self.task_register, "_apply_task_battle_startup"))
+            patches.enter_context(patch.object(self.task_register, "_clear_task_battle_startup"))
+            navigate = patches.enter_context(patch.object(navigation_api, "ensure_in"))
+            locations = [VILLAGE, NORTH_VILLAGE]
+            wrapped = self.task_register.register_task(parameterized_task, ensure_in=locations)
+            locations.clear()
+            self.assertEqual(inspect.signature(wrapped), inspect.signature(parameterized_task))
+            self.assertEqual(wrapped(5, enabled=False), (5, False))
+            navigate.assert_called_once_with([VILLAGE, NORTH_VILLAGE])
+
+    def test_anywhere_execution_calls_same_api_without_touching_device_or_map(self):
+        from AutoScriptor.core.background import bg
+        from AutoScriptor.logging import tracer
+        from ZmxyOL import ANYWHERE
+        from ZmxyOL.nav import api as navigation_api
+
+        with ExitStack() as patches:
+            patches.enter_context(patch.object(bg, "clear"))
+            patches.enter_context(patch.object(tracer, "clear_debug_screenshots"))
+            patches.enter_context(patch.object(self.task_register, "_apply_task_battle_startup"))
+            patches.enter_context(patch.object(self.task_register, "_clear_task_battle_startup"))
+            navigate = patches.enter_context(patch.object(navigation_api, "ensure_in", wraps=navigation_api.ensure_in))
+            locate_region = patches.enter_context(patch.object(navigation_api, "locate_region"))
+            navigation_map = patches.enter_context(patch.object(navigation_api, "mm"))
+            wrapped = self.task_register.register_task(self.task_body, ensure_in=ANYWHERE)
+            wrapped()
+            navigate.assert_called_once_with(ANYWHERE)
+            self.navigation.assert_called_once_with()
+            for target in (ANYWHERE, [ANYWHERE], (ANYWHERE,)):
+                self.assertIsNone(navigation_api.ensure_in(target))
+            locate_region.assert_not_called()
+            self.assertEqual(navigation_map.mock_calls, [])
+
+    def test_anywhere_must_not_silently_discard_specific_destinations(self):
+        from ZmxyOL import ANYWHERE
+        from ZmxyOL.nav import api as navigation_api
+
+        for target in ([ANYWHERE, VILLAGE], [VILLAGE, ANYWHERE]):
+            with self.subTest(target=target), self.assertRaisesRegex(ValueError, "ANYWHERE"):
+                self.task_register.register_task(self.task_body, ensure_in=target)
+            with self.assertRaisesRegex(ValueError, "ANYWHERE"), patch.object(navigation_api, "locate_region") as locate_region:
+                navigation_api.ensure_in(target)
+            locate_region.assert_not_called()
+
 
 class TestBuiltinTaskEntryDeclarations(unittest.TestCase):
     """Read source only: this audit never imports tasks or initializes a device."""
@@ -187,6 +269,15 @@ class TestBuiltinTaskEntryDeclarations(unittest.TestCase):
     def test_all_builtin_decorators_declare_registered_entries(self):
         navigation_source = ROOT / "ZmxyOL/nav/envs/env_locs.py"
         navigation_tree = ast.parse(navigation_source.read_text(encoding="utf-8-sig"))
+        groups_source = ROOT / "ZmxyOL/nav/envs/decorators.py"
+        groups_tree = ast.parse(groups_source.read_text(encoding="utf-8-sig"))
+        entry_groups = {
+            node.targets[0].id: ast.literal_eval(node.value)
+            for node in groups_tree.body
+            if isinstance(node, ast.Assign)
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id in {"HAS_SHEZHI", "HAS_SHIJIEDITU"}
+        }
         registered_names = set()
         for node in ast.walk(navigation_tree):
             if not isinstance(node, ast.Call):
@@ -214,11 +305,22 @@ class TestBuiltinTaskEntryDeclarations(unittest.TestCase):
                         self.assertIsInstance(decorator, ast.Call)
                         keywords = {keyword.arg: keyword.value for keyword in decorator.keywords}
                         self.assertIn("ensure_in", keywords, "Entry metadata must never be inferred from a directory")
-                        entry = ast.literal_eval(keywords["ensure_in"])
+                        entry_expression = keywords["ensure_in"]
+                        if isinstance(entry_expression, ast.Name):
+                            if entry_expression.id == "ANYWHERE":
+                                self.assertTrue(any(
+                                    isinstance(import_node, ast.ImportFrom)
+                                    and import_node.module in {"ZmxyOL", "ZmxyOL.nav", "ZmxyOL.nav.api"}
+                                    and any(imported.name in {"ANYWHERE", "*"} for imported in import_node.names)
+                                    for import_node in task_tree.body
+                                ), "ANYWHERE must be imported by the task, not assumed from AutoScriptor")
+                                continue
+                            self.assertIn(entry_expression.id, entry_groups, "Unknown shared entry group")
+                            entry = entry_groups[entry_expression.id]
+                        else:
+                            entry = ast.literal_eval(entry_expression)
                         declarations[relative_path] = entry
-                        if entry is None:
-                            self.assertIs(ast.literal_eval(keywords.get("debug", ast.Constant(False))), True)
-                            continue
+                        self.assertIsNotNone(entry, "Use explicit ANYWHERE instead of None")
                         names = [entry] if isinstance(entry, str) else entry
                         self.assertIsInstance(names, (list, tuple))
                         self.assertTrue(names, "Empty entry declarations are not non-applicable entries")

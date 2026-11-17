@@ -8,7 +8,7 @@ import unittest
 from contextlib import ExitStack, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from orchestrator import projection
 from tasks.task_register import task_registry
@@ -218,6 +218,28 @@ class TestPlanningPersistence(unittest.TestCase):
         self.assertNotIn("ensure_in", stored)
         self.assertEqual(task_registry.get_ensure_in("group/before"), ["home"])
 
+    def test_inactive_character_editor_reads_source_labels_and_never_persists_them(self):
+        from tasks.task_params import describe_signature
+
+        def task_body(difficulty=1):
+            return difficulty
+
+        task_registry.register(
+            "group/before", task_body, describe_signature(task_body),
+            params_doc={"difficulty": "\u96be\u5ea6"},
+        )
+        stored = self.config._account_data["characters"]["server"]["inactive"]["tasks"]["before"]
+        stored["params"] = {"difficulty": 7}
+        public_task = self.tree.get_character_task_public("server", "inactive", "group/before")
+        self.assertEqual(public_task["params_doc"], {"difficulty": "\u96be\u5ea6"})
+        public_task["params_doc"]["difficulty"] = "Forged label"
+        public_task["params"]["difficulty"] = 9
+        self.lifecycle.save_character_task("server", "inactive", "group/before", public_task)
+        stored = self.config._account_data["characters"]["server"]["inactive"]["tasks"]["before"]
+        self.assertNotIn("params_doc", stored)
+        self.assertEqual(stored["params"], {"difficulty": 9})
+        self.assertEqual(task_registry.get_params_doc("group/before"), {"difficulty": "\u96be\u5ea6"})
+
     def test_legacy_order_save_preserves_policy_and_explicit_policy_roundtrips(self):
         self.lifecycle.save_task_ordering({"user_order": ["group/after", "group/before"]})
         self.assertEqual(self.config._config["task_ordering"]["selection_policy"], "list_ready")
@@ -244,6 +266,71 @@ class TestPlanningPersistence(unittest.TestCase):
         renamed = retarget_ordering_overlay(stored, {"after": "moved/after", "before": "moved/before"}, "path")
         self.assertEqual(renamed["user_order"], ["moved/after", "moved/before"])
         self.assertEqual(renamed["selection_policy"], "nearest_ready")
+
+
+class TestTaskListQueueExecution(unittest.TestCase):
+    """A graph-derived range must reach the executor without being sorted again."""
+
+    def setUp(self):
+        from backend.webui.routes import tasks as tasks_routes
+
+        self.routes = tasks_routes
+        self.paths = ["group/before", "group/after", "group/peer"]
+        self.execution = SimpleNamespace(
+            direct_run_alive=Mock(return_value=False),
+            is_busy=Mock(return_value=False), start_direct=Mock(),
+        )
+        self.tree = SimpleNamespace(sort_task_paths=Mock(return_value=list(reversed(self.paths))))
+        self.scheduler = Mock()
+        patches = ExitStack()
+        self.addCleanup(patches.close)
+        patches.enter_context(patch.object(tasks_routes, "orchestrator", SimpleNamespace(
+            execution=self.execution, scheduler=self.scheduler, tree=self.tree,
+        )))
+        patches.enter_context(patch.object(tasks_routes, "cfg", SimpleNamespace(
+            _config={"game": {"character_name": "test-character"}},
+        )))
+        self.credentials = patches.enter_context(patch.object(
+            tasks_routes, "require_credential_unlock", return_value=None,
+        ))
+
+    def request_run(self, execution_source):
+        request = SimpleNamespace(json=AsyncMock(return_value={
+            "tasks": self.paths, "activate_scheduler": False,
+            "execution_source": execution_source,
+        }))
+        return asyncio.run(self.routes.run_tasks_api(request))
+
+    def test_task_list_preserves_graph_queue_in_response_and_execution(self):
+        response = self.request_run("task_list")
+
+        self.assertEqual(response["tasks"], self.paths)
+        self.tree.sort_task_paths.assert_not_called()
+        self.credentials.assert_called_once()
+        runner, paths = self.execution.start_direct.call_args.args
+        self.assertEqual(paths, self.paths)
+        runner(paths)
+        self.scheduler.run_direct.assert_called_once_with(self.paths, skip_character_login=True)
+        self.scheduler.activate.assert_not_called()
+
+    def test_other_direct_sources_keep_existing_sorting(self):
+        response = self.request_run("")
+
+        self.tree.sort_task_paths.assert_called_once_with(self.paths)
+        self.assertEqual(response["tasks"], list(reversed(self.paths)))
+
+    def test_task_list_still_requires_credentials_and_idle_gate(self):
+        from fastapi.responses import JSONResponse
+
+        self.credentials.return_value = JSONResponse(status_code=403, content={"error": "locked"})
+        self.assertEqual(self.request_run("task_list").status_code, 403)
+        self.execution.start_direct.assert_not_called()
+        self.credentials.return_value = None
+        self.execution.is_busy.return_value = True
+        with patch.object(self.routes, "busy_response", return_value=JSONResponse(
+                status_code=409, content={"error": "busy"})):
+            self.assertEqual(self.request_run("task_list").status_code, 409)
+        self.execution.start_direct.assert_not_called()
 
 
 class TestPlanningFrontend(unittest.TestCase):

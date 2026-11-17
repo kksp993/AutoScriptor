@@ -15,9 +15,10 @@ def reset_task():
 
 
 @register_task(
-    ensure_in="村庄",
+    ensure_in=HAS_SHEZHI,
     description="处理天选阁每日领取或挑战。",
     reschedule="daily",
+    params_doc={"battle_flow": "战斗招式"},
 )
 def task(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
@@ -26,7 +27,6 @@ def task(
     if cfg["weekday"] in [1,2,3,4]:
         logger.info(f"今日{cfg['weekday']}为周一至周四，不进行天选阁任务")
         return
-    ensure_in("村庄")
     click(I("导航-挑战"))
     click(T("天选阁"),repeat=1)
     if ui_T(T("没有报名"),timeout=2):

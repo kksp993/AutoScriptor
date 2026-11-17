@@ -27,9 +27,10 @@ def sort_stage_lingqi_pairs(
     return sorted(pairs, key=_key)
 
 @combo
-def check_linggen(self:Hero):
+def check_linggen(self:Hero, *, entry_ready: bool = False):
     from ZmxyOL.nav.api import ensure_in
-    ensure_in(["极北","极寒深渊"],[-1,None])
+    if not entry_ready:
+        ensure_in(["极北","极寒深渊"],[-1,None])
     click(B(50,50,40,40))
     store_as = extract_info(B(245,90,100,30), lambda res: next((char for char in "金寄寒火岩时电月无" if char in res.strip())).replace("电", "雷").replace("岩", "土").replace("无", "天").replace("寄", "木").replace("寒", "水"))
     logger.info(f"今日灵气: {store_as}")

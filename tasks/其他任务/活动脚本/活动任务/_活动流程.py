@@ -8,8 +8,7 @@ from ZmxyOL import *
 
 
 def run_activity(name: str, entry, do_task) -> None:
-    """进入 ``entry`` 指定的活动，执行 ``do_task``，无论成败都退出活动页。"""
-    ensure_in("村庄")
+    """注册任务已定位村庄；进入活动、执行 do_task，无论成败都退出活动页。"""
 
     # 仙盟面板展开时会盖住“活动”入口，先收起来
     while ui_F(T("仙盟", box=Box(16, 30, 130, 400)), 3):

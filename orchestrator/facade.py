@@ -141,7 +141,7 @@ class Orchestrator:
         self.scheduler.run_direct_sequence(runs, force_login=force_login)
 
 
-RuntimeReason = Literal["direct_run", "scheduler", "editor"]
+RuntimeReason = Literal["direct_run", "scheduler", "editor", "ascli"]
 
 
 class RuntimeExecutionBusyError(RuntimeError):
@@ -239,7 +239,7 @@ class RuntimeController:
     def busy_conflict(self, action: str = "modify runtime config") -> dict[str, Any]:
         """Describe what is blocking a config mutation or a new execution."""
         reason = self.busy_reason() or "runtime"
-        reason_label = {"direct_run": "直接执行任务", "scheduler": "调度器", "editor": "编辑器代码"}.get(reason, "运行任务")
+        reason_label = {"direct_run": "直接执行任务", "scheduler": "调度器", "editor": "编辑器代码", "ascli": "ascli 流程"}.get(reason, "运行任务")
         if reason == "scheduler":
             message = "当前调度任务正在执行，请等待本轮结束后再继续；无需停止已启用的调度。"
         else:

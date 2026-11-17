@@ -34,6 +34,10 @@ const TaskPanel = {
       taskSearchFocused: false,
       taskSearchHighlightedIndex: 0,
       taskSearchBlurTimer: null,
+      locationCosts: {},
+      locations: [],
+      loadingLocations: false,
+      locationError: '',
     };
   },
   computed: {
@@ -92,7 +96,7 @@ const TaskPanel = {
         : []);
       return collectPaths(this.taskHierarchy);
     },
-    orderedTaskRows() {
+    baseOrderedTaskRows() {
       const rowByPath = new Map(this.taskRows.map((row) => [row.path, row]));
       const projectionOrder = Array.isArray(this.orderingProjection?.effective_order)
         ? this.orderingProjection.effective_order
@@ -107,8 +111,21 @@ const TaskPanel = {
       }
       return orderedRows;
     },
-    orderingItems() {
+    planningGraph() {
+      return window.TaskPlanningLayout.build(this.baseOrderedTaskRows, { costs: this.locationCosts });
+    },
+    orderedTaskRows() {
+      const queueRows = this.planningGraph.queueRows;
+      const graphPaths = new Set(queueRows.map(row => row.path));
+      let queueIndex = 0;
+      // Unreferenced disabled tasks keep their browsing slots, without entering the queue.
+      return this.baseOrderedTaskRows.map(row => graphPaths.has(row.path) ? queueRows[queueIndex++] : row);
+    },
+    manualOrderingItems() {
       return this.buildOrderingItemsFromProjection();
+    },
+    orderingItems() {
+      return this.projectOrderingItemsOntoQueue(this.manualOrderingItems);
     },
     visibleOrderingNodes() {
       return this.flattenOrderingItemsForDisplay(this.orderingItems);
@@ -148,11 +165,30 @@ const TaskPanel = {
       return this.taskSearchFocused && !!this.normalizeTaskSearchText(this.taskSearchQuery);
     },
   },
+  mounted() { this.loadLocations(); },
   beforeUnmount() {
     if (this.guidedOrderingTaskTimer) window.clearTimeout(this.guidedOrderingTaskTimer);
     if (this.taskSearchBlurTimer) window.clearTimeout(this.taskSearchBlurTimer);
   },
   methods: {
+    async loadLocations() {
+      if (this.loadingLocations) return;
+      this.loadingLocations = true;
+      this.locationError = '';
+      try {
+        const { ok, data } = await window.WebUIApi.request('GET', '/task-planning/locations');
+        if (!ok) throw new Error(window.WebUIApi.errorMessage(data, '无法读取导航距离'));
+        if (!Array.isArray(data.locations) || !data.costs || typeof data.costs !== 'object') {
+          throw new Error('导航距离响应不完整');
+        }
+        this.locations = data.locations;
+        this.locationCosts = data.costs;
+      } catch (error) {
+        this.locations = [];
+        this.locationCosts = {};
+        this.locationError = String(error.message || error);
+      } finally { this.loadingLocations = false; }
+    },
     async setTaskViewMode(viewMode) {
       if (!['hierarchy', 'ordering', 'graph'].includes(viewMode)) return;
       const graphEditor = this.$refs.taskPlanningGraph;
@@ -281,6 +317,10 @@ const TaskPanel = {
     },
     runSelectedEnabledTaskRange() {
       if (this.executionBusy) return;
+      if (this.loadingLocations || this.locationError) {
+        ElementPlus.ElMessage.info('请等待计算图队列加载完成，或重试导航距离加载');
+        return;
+      }
       if (!this.selectedEnabledTaskRows.length) {
         ElementPlus.ElMessage.info(this.selectedEnabledTaskPath ? '选中位置之后没有已启用任务' : '请先选择一个任务');
         return;
@@ -427,7 +467,7 @@ const TaskPanel = {
       return this.makeTaskOrderingNode(path);
     },
     buildOrderingItemsFromProjection() {
-      const rowByPath = new Map(this.orderedTaskRows.map((row) => [row.path, row]));
+      const rowByPath = new Map(this.baseOrderedTaskRows.map((row) => [row.path, row]));
       const seenPaths = new Set();
       const sourceItems = Array.isArray(this.orderingProjection?.overlay?.items)
         ? this.orderingProjection.overlay.items
@@ -440,13 +480,26 @@ const TaskPanel = {
         if (cleanedItem) normalizedItems.push(cleanedItem);
       };
       for (const item of sourceItems) appendItem(item);
-      for (const row of this.orderedTaskRows) {
+      for (const row of this.baseOrderedTaskRows) {
         if (!seenPaths.has(row.path)) {
           seenPaths.add(row.path);
           normalizedItems.push(this.makeTaskOrderingNode(row.path));
         }
       }
       return this.collapseSingletonGroups(normalizedItems);
+    },
+    projectOrderingItemsOntoQueue(items) {
+      const queueIndex = new Map(this.orderedTaskRows.map((row, index) => [row.path, index]));
+      const firstIndex = item => Math.min(...this.flattenOrderingPaths([item]).map(path => queueIndex.get(path)));
+      const project = nodes => nodes.flatMap(item => {
+        if (item.type !== 'group') return [item];
+        const children = project(item.items);
+        const indices = this.flattenOrderingPaths(children).map(path => queueIndex.get(path));
+        const contiguous = Math.max(...indices) - Math.min(...indices) + 1 === indices.length;
+        // Split groups are unwrapped for display only: keeping them together would reorder the queue.
+        return contiguous ? [{ ...item, items: children }] : children;
+      }).sort((left, right) => firstIndex(left) - firstIndex(right));
+      return project(items);
     },
     removeMissingAndDuplicateTasks(item, rowByPath, seenPaths) {
       if (!item || typeof item !== 'object') return null;
@@ -587,7 +640,7 @@ const TaskPanel = {
       return this.taskRows.find((row) => row.path === path) || null;
     },
     cloneOrderingItems() {
-      return JSON.parse(JSON.stringify(this.orderingItems));
+      return JSON.parse(JSON.stringify(this.manualOrderingItems));
     },
     nodeDragRef(node) {
       if (node.type === 'group') return `group:${node.item.id}`;
@@ -819,7 +872,7 @@ const TaskPanel = {
       <i class="fa fa-save mr-1.5"></i>保存任务配置
     </button>
     <button class="px-4 py-2.5 bg-white border border-slate-200 text-primary rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium shrink-0 disabled:opacity-50 disabled:pointer-events-none"
-            @click="$emit('refresh-config')" :disabled="executionBusy">
+            @click="$emit('refresh-config'); loadLocations()" :disabled="executionBusy">
       <i class="fa fa-refresh mr-1.5"></i>刷新
     </button>
     <span v-if="characterName" class="px-3 py-1.5 bg-secondary/10 text-secondary rounded text-sm shrink-0">角色ID：{{ characterName }}</span>
@@ -905,17 +958,22 @@ const TaskPanel = {
        :class="{ 'task-workbench-graph-mode': taskViewMode === 'graph' }">
     <task-planning-graph v-if="taskViewMode === 'graph'"
                          ref="taskPlanningGraph"
-                         :rows="orderedTaskRows"
+                         :rows="baseOrderedTaskRows"
                          :ordering-projection="orderingProjection"
                          :execution-busy="executionBusy"
                          :saving="orderingSaving"
+                         :location-costs="locationCosts"
+                         :locations="locations"
+                         :loading-locations="loadingLocations"
+                         :location-error="locationError"
+                         @refresh-locations="loadLocations"
                          @edit-task="openTaskEditor"
                          @save-graph="(payload) => $emit('save-task-graph', payload)" />
     <section v-else class="task-management-panel xl:col-span-8 min-w-0 bg-white rounded-xl shadow-md p-4 flex flex-col overflow-hidden min-h-0">
       <div class="task-panel-view-heading flex justify-between items-start gap-3 mb-3 flex-shrink-0">
         <div class="min-w-0">
           <h2 class="page-panel-title">{{ taskViewMode === 'hierarchy' ? '分层管理' : '任务顺序' }}</h2>
-          <p class="task-panel-view-description">{{ taskViewMode === 'hierarchy' ? '按原生目录浏览；分类展开仅保留在本页，不改变手动执行顺序。' : '拖拽调整手动执行顺序与分组，修改后自动保存。' }}</p>
+          <p class="task-panel-view-description">{{ taskViewMode === 'hierarchy' ? '按原生目录浏览；分类展开仅保留在本页，不改变计算图队列。' : '计算图完整队列：先前置、后后继，组内依次展开；拖拽修改参考顺序与分组。' }}</p>
         </div>
         <div class="task-panel-view-controls flex items-center gap-3">
           <template v-if="taskViewMode === 'hierarchy'">
@@ -1098,11 +1156,16 @@ const TaskPanel = {
           分类只用于浏览，不改变任务路径和执行顺序。范围执行沿用下方列表，单跑只执行所选任务；调整顺序请切换“顺序编排”。
         </p>
         <p v-else class="text-sm text-slate-600 leading-relaxed">
-          按住任务或分组拖到想要的位置，松开后自动保存。下方列表是手动执行顺序，不是自动调度的整轮预测。
+          按住任务或分组拖到想要的位置，松开后自动保存参考顺序。列表始终按计算图完整展开，前置关系优先；跨队列位置的手工分组仅在显示时展开，原分组保留。
         </p>
         <p class="text-xs text-slate-500 leading-relaxed">
-          自动调度先满足前置约束，再按所选策略选择任务。就近策略：同距先前序就绪，再按列表；未知距离之间也按此规则决胜，排在已知可达距离之后。
+          计算图按依赖层级从左到右、同层从上到下，组内任务依次展开，包含未到期和等待前置的任务；异常项列在末尾。自动调度先满足前置约束，再按实时位置、所选策略和保存的参考顺序选择任务，不承诺整轮执行顺序。
         </p>
+        <div v-if="loadingLocations" class="text-xs text-slate-500" role="status">正在加载计算图队列的导航距离…</div>
+        <div v-else-if="locationError" class="text-xs text-amber-700" role="alert">
+          队列地点归组未完成：{{ locationError }}，当前仅显示依赖顺序。
+          <button type="button" class="underline" @click="loadLocations">重试</button>
+        </div>
         <label class="text-xs text-slate-600">自动调度策略</label>
         <el-select :model-value="orderingProjection?.overlay?.selection_policy || 'nearest_ready'"
                    :disabled="executionBusy || orderingSaving" @change="setSelectionPolicy">
@@ -1136,15 +1199,15 @@ const TaskPanel = {
             <span class="text-xs text-slate-500">{{ enabledTaskRows.length }} 个</span>
             <button type="button"
                     class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary text-white text-xs font-semibold hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:pointer-events-none"
-                    :disabled="executionBusy || !selectedEnabledTaskRows.length"
+                    :disabled="executionBusy || loadingLocations || !!locationError || !selectedEnabledTaskRows.length"
                     @click="runSelectedEnabledTaskRange"
-                    title="从选中任务开始，按此手动执行列表运行到末尾，不按目录顺序">
+                    title="从选中任务开始，按计算图完整队列运行到末尾，不按目录顺序">
               <i class="fa fa-play text-[10px]"></i>
               从选中处执行
             </button>
           </div>
         </div>
-        <p class="text-xs text-slate-500 mb-2 shrink-0">手动执行顺序，不随目录展开或视图切换改变</p>
+        <p class="text-xs text-slate-500 mb-2 shrink-0">计算图完整队列（仅列已启用任务），不只显示当前就绪任务</p>
         <div class="flex-1 min-h-0 overflow-y-auto pr-1">
           <ol class="space-y-1 text-xs text-slate-600">
             <li v-for="(row, index) in enabledTaskRows"

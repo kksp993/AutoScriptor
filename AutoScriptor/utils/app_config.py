@@ -1,7 +1,7 @@
 """通用配置（data/config.json）读写层。
 
 只负责通用配置段：app / ocr / emulator / deploy / notify / update /
-task_ordering / accounts / news，以及同目录临时文件 + 原子替换的持久化。
+task_ordering / accounts / news / runtime_state，以及同目录临时文件 + 原子替换的持久化。
 
 ``_GLOBAL_KEYS`` 决定哪些顶层段会被写回，因此模板里存在的段必须同时登记在这里，
 否则用户设置会在下一次保存时被静默丢弃。
@@ -30,7 +30,7 @@ from AutoScriptor.utils.mumu_discovery import default_mumu_adb_addr
 
 _GLOBAL_KEYS = (
     "app", "ocr", "emulator", "deploy", "notify",
-    "update", "task_ordering", "accounts", "news",
+    "update", "task_ordering", "accounts", "news", "runtime_state",
 )
 
 # 曾经属于全局配置、现在已经没有功能的段。加载时直接丢弃：保存路径只写

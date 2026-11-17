@@ -17,4 +17,4 @@ from tasks.其他任务.开号._创号战斗流程 import register_account_battl
 def task():
     """需要角色已进入游戏。按「速刷1」战斗流程练级，到 91 级停止。"""
     register_account_battle_flow()
-    longgong1(91, ensure_drug=False, flow_name="速刷1")
+    longgong1(91, ensure_drug=False, flow_name="速刷1", entry_ready=True)

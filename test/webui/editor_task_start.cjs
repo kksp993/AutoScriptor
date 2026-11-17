@@ -8,12 +8,13 @@ const requests = [];
 const warnings = [];
 const errors = [];
 let navigationResponse = { ok: true, items: [
+  { name: '任意位置', locations: [] },
   { name: 'Town', locations: ['Mail', 'Inventory'] },
   { name: 'Heaven', locations: [] },
 ] };
 let saveResponse = { ok: true, message: 'Saved' };
 const context = virtualMachine.createContext({
-  EditorCanvas: {}, EditorControls: {}, PythonCodeEditor: {}, EditorMenuBar: {},
+  EditorCanvas: {}, EditorControls: {}, PythonCodeEditor: {}, EditorMenuBar: {}, EditorTutorial: {},
   Vue: {
     ref: value => ({ value }),
     computed: getter => ({ get value() { return getter(); } }),
@@ -42,7 +43,8 @@ async function main() {
   assert.deepEqual(plain(panel.saveScriptForm.value.ensureIn), [], 'No implicit starting location is allowed');
   assert.match(template, /v-model="saveScriptForm\.ensureIn"/);
   assert.match(template, /emitPath:\s*false/);
-  assert.match(template, /debug=True,\s*ensure_in=None/);
+  assert.match(template, /ANYWHERE/);
+  assert.match(template, /注册入口统一导航/);
 
   panel.recordedCode.value = 'click(B(10, 20))';
   panel.saveScriptForm.value.taskPathTail = 'UnrelatedFolder/Example';
@@ -51,6 +53,7 @@ async function main() {
   assert.equal(panel.saveScriptSelfRegistered.value, false);
   assert.deepEqual(plain(panel.saveScriptForm.value.ensureIn), [], 'Folder names must not infer a start');
   assert.deepEqual(plain(panel.saveScriptStartOptions.value), [
+    { value: '任意位置', label: '任意位置' },
     { value: 'Town', label: 'Town', children: [
       { value: 'Mail', label: 'Mail' }, { value: 'Inventory', label: 'Inventory' },
     ] },
@@ -63,6 +66,9 @@ async function main() {
   panel.saveScriptForm.value.ensureIn = ['NotRegistered'];
   await panel.submitSaveCustomScript();
   assert.equal(saveRequests().length, 0, 'Arbitrary location names must not be submitted');
+  panel.saveScriptForm.value.ensureIn = ['任意位置', 'Mail'];
+  await panel.submitSaveCustomScript();
+  assert.equal(saveRequests().length, 0, 'Anywhere cannot be mixed with a real destination');
 
   panel.saveScriptForm.value.ensureIn = ['Mail', 'Heaven'];
   panel.saveScriptForm.value.description = ' Summary ';
@@ -83,7 +89,7 @@ async function main() {
   assert.equal(panel.saveScriptDialogVisible.value, false);
 
   panel.recordedCode.value = '\nfrom tasks.task_register import register_task as author_task\n'
-    + '@author_task(debug=True, ensure_in=None)\ndef task():\n    pass\n\n';
+    + '@author_task(debug=True, ensure_in=ANYWHERE)\ndef task():\n    pass\n\n';
   panel.saveScriptForm.value.ensureIn = [];
   panel.saveScriptForm.value.params[0].enum_options = 'Invalid stale form field';
   await panel.saveCustomScript();

@@ -49,7 +49,7 @@ class EditorMapLocationTests(unittest.TestCase):
                     exec(compile(source, "<saved-map-task>", "exec"), namespace)
                     namespace["ensure_in"] = Mock()
                     self.assertIs(namespace["task"](), target)
-                    namespace["ensure_in"].assert_called_once_with("Mail")
+                    namespace["ensure_in"].assert_not_called()
         self.assertEqual(controller.virtual_clicks, [])
 
 

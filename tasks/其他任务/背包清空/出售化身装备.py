@@ -7,13 +7,12 @@ from AutoScriptor import *
 
 
 @register_task(
-    ensure_in=["村庄", "极北村庄"],
+    ensure_in=HAS_SHEZHI,
     description="一键清空化身装备背包",
     reschedule='daily',
 )
 def test_task():
     """【特别注意】：在使用此功能前，请先确认化身装备背包中没有需要保留的装备，否则会被清空！"""
-    ensure_in(HAS_SHEZHI)
     click(I("导航-菜单"), delay=1)
     click(T("身外化身", box=Box(294,21,98,119).margin()))
     click(T("化身背包", box=Box(118,614,119,96).margin()))

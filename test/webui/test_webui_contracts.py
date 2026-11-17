@@ -390,6 +390,9 @@ class TestTaskTreeServiceContract(unittest.TestCase):
             def get_param_keys(self, path):
                 return []
 
+            def get_params_doc(self, path):
+                return {}
+
             def get_custom(self, path):
                 return False
 
@@ -430,6 +433,9 @@ class TestTaskTreeServiceContract(unittest.TestCase):
         )
         task_state = types.ModuleType("tasks.task_state")
         task_state.progress_label = lambda value: value if isinstance(value, str) else None
+        from tasks.task_state import task_status_snapshot
+
+        task_state.task_status_snapshot = task_status_snapshot
         return {
             "AutoScriptor": types.ModuleType("AutoScriptor"),
             "AutoScriptor.utils": types.ModuleType("AutoScriptor.utils"),
@@ -459,6 +465,7 @@ class TestTaskTreeServiceContract(unittest.TestCase):
                     "params": {"x": 1},
                     "param_meta": {"x": "enum"},
                     "param_keys": ["x"],
+                    "params_doc": {"x": "Parameter label"},
                     "task_description": "desc",
                     "task_doc_flow": "flow",
                     "fn": "callable-name",
@@ -1691,7 +1698,7 @@ class TestWebUIFrontendContract(unittest.TestCase):
         self.assertIn("restart_required: '需要重启'", component)
         self.assertIn("grid-template-columns: minmax(0, 112px) minmax(0, 1fr)", style)
         self.assertIn("overflow-wrap: anywhere", style)
-        self.assertIn("style.css?v=48", index)
+        self.assertIn("style.css?v=49", index)
         self.assertIn("DiagnosticsPanel.js?v=3", index)
 
 
@@ -2318,12 +2325,11 @@ print("OK")
         self.assertIn('"enum_options": ["普通", "困难"]', api_contract)
         self.assertIn('custom_task/背包清空/进阶仙宝.py', api_contract)
         self.assertIn('POST /api/editor/save-custom-task', api_contract)
-        self.assertIn('WebUI Editor 的“保存脚本”接口', authoring)
         self.assertIn('/api/editor/save-custom-task', authoring)
         self.assertNotIn('文件名称', authoring)
-        self.assertIn('脚本名称', authoring)
-        self.assertIn('Enum(单选)', authoring)
-        self.assertIn('Enum(多选)', authoring)
+        self.assertIn('script name determines path', authoring)
+        self.assertIn('enum/enum_multi payloads', authoring)
+        self.assertIn('params_doc from parameter descriptions', authoring)
         self.assertIn("自定义任务/", authoring)
 
     def test_editor_navigation_menu_contract(self):
@@ -2339,7 +2345,7 @@ print("OK")
         self.assertIn("label: '导航到...'", frontend)
         self.assertLess(frontend.index("key: 'navigation'"), frontend.index("key: 'grid'"))
         self.assertIn("appendEnsureInAction", frontend)
-        self.assertIn("ensure_in(${JSON.stringify", frontend)
+        self.assertIn("targetName === '任意位置' ? 'ANYWHERE'", frontend)
         self.assertEqual(frontend.count("<editor-menu-bar "), 2)
         self.assertIn("label: '地图位置'", frontend)
         self.assertIn("mm.locs[${JSON.stringify(targetName)}].identifier", frontend)
@@ -2380,7 +2386,7 @@ print("OK")
         # 路径不在装饰器里：显示路径由文件写到 custom_task/ 的哪个位置决定。
         self.assertNotIn("path_cn", source)
         self.assertIn("ensure_in=['村庄']", source)
-        self.assertIn("ensure_in(['村庄'])", source)
+        self.assertNotIn("ensure_in(['村庄'])", source)
         self.assertIn("description='一句话描述'", source)
         # 长说明就是函数 docstring。
         self.assertIn('"""补充说明正文', source)
@@ -2507,12 +2513,10 @@ print("OK")
         self.assertIn("h.zhenwu()", frontend)
         self.assertIn("h.zhenling()", frontend)
 
-        self.assertIn("代码编辑器式 Tab 缩进", trajectories)
-        self.assertIn("`ui_T()`", trajectories)
-        self.assertIn("后台菜单", trajectories)
-        self.assertIn("角色技能", trajectories)
-        self.assertIn("有框选时复用 click 的 T/I/B 目标", trajectories)
-        self.assertIn("右侧按钮列内部滚动", trajectories)
+        self.assertIn("Tab=4 spaces", trajectories)
+        self.assertIn("Shift-Tab=outdent", trajectories)
+        self.assertIn("Selected-region `ui_T()` reuses click's T/I/B", trajectories)
+        self.assertIn("Verify scrolling inside background menus, character skills and right-side buttons", trajectories)
 
     def test_editor_custom_executor_uses_current_target_helpers(self):
         backend = (ROOT / "backend/webui/routes/editor.py").read_text(encoding="utf-8")
@@ -3345,7 +3349,7 @@ class TestTaskOrderingStaticContract(unittest.TestCase):
 
         self.assertIn("<task-panel v-if=\"activeTab==='tasks'\"", index_html)
         self.assertNotIn("activeTab==='tasks' || activeTab==='task-graph'", index_html)
-        self.assertIn("AppSidebar.js?v=18", index_html)
+        self.assertRegex(index_html, r"AppSidebar\.js\?v=\d+")
         self.assertIn("style.css?v=48", index_html)
         self.assertRegex(index_html, r"TaskPanel\.js\?v=\d+")
         self.assertRegex(index_html, r"app\.js\?v=\d+")

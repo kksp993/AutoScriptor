@@ -9,7 +9,6 @@ from AutoScriptor.logging.logger import logger
 )
 def daily_qujing_task():
     """【弃用】该任务保留旧每日取经流程。"""
-    ensure_in("村庄")
     logger.info("====取经====")
     click(B(10,10,10,10))
     click(I("导航-挑战"))

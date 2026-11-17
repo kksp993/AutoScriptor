@@ -92,6 +92,7 @@ def plan_tasks(
     costs: dict[str, float | None] | None = None,
     policy: str = "nearest_ready",
     errors: dict[str, str] | None = None,
+    unfinished_ids: set[str] | None = None,
 ) -> PlanningDecision:
     """Filter *after* deriving blockers; exhausted tasks must not release successors."""
     normalize_selection_policy(policy)
@@ -106,8 +107,9 @@ def plan_tasks(
         if not added:
             break
         diagnostics.update(added)
+    blocking_ids = due_ids | (unfinished_ids or set())
     blocked = {
-        task_id: sorted(set(specs[task_id].after_tasks) & due_ids)
+        task_id: sorted(set(specs[task_id].after_tasks) & blocking_ids)
         for task_id in sorted(due_ids) if task_id in specs
     }
     order_map = {task_id: index for index, task_id in enumerate(base_order)}

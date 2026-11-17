@@ -6,14 +6,12 @@ from ZmxyOL import ensure_in, register_task
 
 
 @register_task(
-    ensure_in="村庄",
+    ensure_in="世界地图",
     description="处理天道觉醒，以10档浇水两次后返回村庄。",
     reschedule="daily",
 )
 def task():
-    """从村庄进入天道树，按录制流程觉醒、切到10档、浇水两次并返回村庄。"""
-    ensure_in("村庄")
-
+    """经世界地图进入天道树，觉醒、切到10档、浇水两次并返回村庄。"""
     seq_click([
         T("天道树", box=Box(466, 602, 97, 87).margin()),
         T("天道觉", box=Box(18, 227, 273, 96).margin()),

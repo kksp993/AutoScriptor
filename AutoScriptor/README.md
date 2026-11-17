@@ -74,9 +74,10 @@ go_home()
 
 | 类别 | 名称 |
 | --- | --- |
+| 脚本 API 版本（独立于软件版本） | `API_VERSION`、`get_api_version` |
 | 目标 | `B`、`I`、`T`、`Box`、`box_cell_in_grid`、`Target`、`ui` |
 | 操作 | `click`、`seq_click`、`click_all`、`swipe`、`swipe_precise`、`input`、`key_event`、`sleep` |
-| 定位 | `locate`、`match`、`ui_T`、`ui_F`、`ui_idx`、`wait_for_appear`、`wait_for_disappear`、`wait_for_signal` |
+| 定位 | `locate`、`locate_dyn`、`match`、`ui_T`、`ui_F`、`ui_idx`、`wait_for_appear`、`wait_for_disappear`、`wait_for_signal` |
 | 结果处理 | `first`、`simple`、`full`、`count` |
 | 识别 | `extract_info`、`get_colors`、`coloris` |
 | 文字后处理 | `pretext`、`posttext`、`prenum`、`postnum` |
@@ -92,13 +93,38 @@ go_home()
 
 几处容易踩的语义：
 
+- `from AutoScriptor import get_api_version` 可只读查询脚本 API 版本，不加载 OCR、配置或设备。WebUI「API 文档」提供分类教程、源码签名和版本记录；[维护约定](../docs/AutoScriptor/reference/API.md)。
 - `locate()` 的三种形态：单个 `Target` 查一个；`tuple[Target, ...]` 是 **OR**（任一命中即成功）；`list[Target]` 是 **AND**（全部命中才算）。`match()` 在同样语义上返回带 `box`/`index`/`path` 的 dict。
+- `locate_dyn(target, min_area, *, interval=0.2, threshold=20, timeout=5)` 接收单目标或列表，`T/I` 及带颜色的 `B` 先定位全部框，再统一与固定第 0 帧作差。`min_area` 是边长或 `(宽, 高)`，8 连通块的宽高须分别达到对应最小边长减 5；首个命中帧有几个返回几个，始终返回 `list[Box]`，不要求每个区域都变化。定位与采样共用超时，未命中抛 `TimeoutError`；变化框不等于对象框或可领取状态，断开的动效不会自动合并。
 - `click(..., if_exist=True)` 找不到目标返回 `False`，不抛错；`click_all(target)` 点一帧内该目标的**全部**命中框并返回数量；`click(..., repeat=N)` 是反复点同一个框。
 - `seq_click([T("入口"), T("确认")])` 按顺序点击，每项点击到下一项出现，外层 `until` 只用于最后一项；空列表返回 `True`。参数沿用 `click`，但 `timeout` 默认 **每项 10 秒**，不是整条序列共用。衔接检测得到的 Box 直接交给下一次点击，只有 `assure_stable=True` 时额外检测稳定性；重试仍重新定位，不持续点击旧框。无颜色条件的 `B(...)` 自身视为已存在，`ui_T(B(...))` 恒为 `True`，不表示页面已切换。
 - `sleep()` 是可取消等待，任务里不要用 `time.sleep()`。
 - `extract_info(B(...), post_process=prenum)` 可直接提取前缀整数；`postnum` 提取后缀整数，`pretext/posttext` 提取首尾连续非数字文本。四个函数先 `strip()` 再做首尾锚定正则，数字转 `int`（含 0）；无匹配抛 `ValueError`，由提取流程重试，耗尽返回 `None`，不补 0。它们也可直接调用，无需设备初始化。
 - `click()` 返回只表示输入事件已发送，**不表示画面已更新**；要紧跟着读取数据时，先等可观察状态变化。
 - **`mixctrl` / `mumu` 是运行态对象，别存星号导入的快照。** `from AutoScriptor import *` 在导入时就把这两个名字绑成了当时的值（通常是 `None`），`init()` 之后那个名字不会变。要拿当前设备控制，用 `import AutoScriptor.core.api as core_api; core_api.mixctrl.screenshot()`，或 `from AutoScriptor.core.runtime_context import runtime_ctx; runtime_ctx.mixctrl`。任务脚本不受影响：它们是在设备会话建立之后才导入的。
+
+## ascli 流程命令
+
+安装后的入口是 `ascli`；源码可直接用 `scripts\ascli.bat` 或 `python -m AutoScriptor.cli`。连接已有 WebUI 后端，不在每条命令里初始化 OCR/设备。
+
+```powershell
+ascli help click
+ascli check flow.as
+ascli transform flow.as -o flow.py
+ascli run flow.as --timeout 300
+ascli status RUN_ID
+ascli artifacts RUN_ID
+```
+
+`.as` 每行一个指令，支持 `-B/-T/-I`、`--until`、`--next`、固定截图引用、ADB、录屏及多指操作。整段预校验、整段占用、失败即停；默认保存录像和错误证据。`--until` 会重复点击，单次点击后等待须写两行。生成 Python 保持目标内联、一个指令一行，不自动初始化。
+
+```python
+from AutoScriptor.cli import AscliClient, AutomationService, parse_script, transform_script
+
+code = transform_script('click -B 332 33 22 44 --until -T "完成" --timeout 20')
+```
+
+`AscliClient.run(source)` 一次提交并等待；`submit/get_run/stop` 支持异步管理。宿主可以实例化 `AutomationService`，注入已有执行锁和取消钩子；包内不 import 后端或游戏层。完整语法和安全边界见 [ascli](../docs/AutoScriptor/reference/ascli.md)。设备动作需平台凭据解锁；单步完成不等于完整流程验收。
 
 ## 主机桌面控制（Windows）
 

@@ -12,12 +12,14 @@ from typing import TYPE_CHECKING, Any
 
 
 if TYPE_CHECKING:
+    from AutoScriptor.api_version import API_VERSION as API_VERSION, get_api_version as get_api_version
     from AutoScriptor.core.api import (
         click_all as click_all,
         close_app as close_app,
         go_home as go_home,
         init as init,
         launch_app as launch_app,
+        locate_dyn as locate_dyn,
         seq_click as seq_click,
         swipe_precise as swipe_precise,
     )
@@ -51,6 +53,9 @@ _ERROR_EXPORTS = [
 
 
 _EXPORTS: dict[str, tuple[str, str]] = {
+    # Version reads must stay independent of the device API module.
+    "API_VERSION": ("AutoScriptor.api_version", "API_VERSION"),
+    "get_api_version": ("AutoScriptor.api_version", "get_api_version"),
     # targets
     "Box": ("AutoScriptor.core.box", "Box"),
     "box_cell_in_grid": ("AutoScriptor.core.box", "box_cell_in_grid"),
@@ -85,6 +90,7 @@ for _name in [
     "seq_click",
     "click_all",
     "locate",
+    "locate_dyn",
     "match",
     "input",
     "get_colors",
@@ -130,6 +136,8 @@ for _name in _ERROR_EXPORTS:
 
 
 __all__ = [
+    "API_VERSION",
+    "get_api_version",
     # targets
     "Box",
     "box_cell_in_grid",
@@ -158,6 +166,7 @@ __all__ = [
     "seq_click",
     "click_all",
     "locate",
+    "locate_dyn",
     "match",
     "input",
     "get_colors",

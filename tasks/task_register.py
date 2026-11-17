@@ -8,8 +8,9 @@
 - ``reschedule``：下次什么时候再来，见 ``tasks.task_schedule``。不写就是一次性。
 - ``debug``：调试直跑的默认值，用户在 WebUI 里可以覆盖。
 - ``description``：一句话简介。长说明写在函数 docstring 里，不用参数。
+- ``params_doc``：函数参数名到中文标签的映射，仅存元数据，供 WebUI 渲染。
 - ``deprecated``：系统属性。源码和元数据保留，但不写配置、不进 UI。
-- ``ensure_in``：必填的真实导航入口声明，仅存元数据，不替任务执行导航。
+- ``ensure_in``：必填入口，每次执行任务正文前统一导航；ANYWHERE 表示任意位置。
 - ``preferred_locations`` / ``after_tasks``：自动调度地点偏好和稳定 ID 前置约束，支持用户覆盖。
 
 声明落在两张表里，边界是「能不能进 JSON」：
@@ -26,11 +27,29 @@
 """
 import inspect
 import os
+from functools import wraps
 
 from ZmxyOL import *
+from ZmxyOL.nav.api import ANYWHERE
 from AutoScriptor.utils.app_config import cfg
 from tasks.task_params import ParamSpec, describe_signature, hydrate_params
 from tasks.task_schedule import RescheduleError, normalize_reschedule
+
+
+def _normalize_params_doc(value, param_specs: dict[str, ParamSpec]) -> dict[str, str]:
+    """Validate task-local labels before registration can change user configuration."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("params_doc: expected a mapping of parameter names to labels")
+    normalized_labels = {}
+    for parameter_name, label in value.items():
+        if not isinstance(parameter_name, str) or parameter_name not in param_specs:
+            raise ValueError(f"params_doc: unknown task parameter: {parameter_name!r}")
+        if not isinstance(label, str) or not label.strip():
+            raise ValueError(f"params_doc: {parameter_name!r} requires a non-empty label")
+        normalized_labels[parameter_name] = label.strip()
+    return normalized_labels
 
 
 def _normalize_planning_names(value, field_name: str) -> tuple[str, ...]:
@@ -42,13 +61,17 @@ def _normalize_planning_names(value, field_name: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(name.strip() for name in value))
 
 
-def _normalize_ensure_in(value) -> tuple[str, ...] | None:
+def _normalize_ensure_in(value) -> tuple[str, ...]:
     """Normalize declared entries against the currently registered navigation map."""
     if value is None:
-        return None
+        raise ValueError("ensure_in: 请声明已注册地点或 ANYWHERE，不再接受 None")
     names = _normalize_planning_names([value] if isinstance(value, str) else value, "ensure_in")
     if not names:
         raise ValueError("ensure_in: expected at least one registered navigation name")
+    if ANYWHERE in names:
+        if len(names) != 1:
+            raise ValueError("ensure_in: ANYWHERE 不能与具体地点混用")
+        return names
 
     # task_register survives reloads, while the navigation singleton is rebuilt.
     from ZmxyOL.nav.map_manager import mm as navigation_map
@@ -84,10 +107,11 @@ class TaskRegistry:
         custom: bool = False,
         doc_flow: str = "",
         description: str = "",
+        params_doc: dict[str, str] | None = None,
         reschedule: dict | None = None,
         debug: bool = False,
         deprecated: bool = False,
-        ensure_in: str | list[str] | tuple[str, ...] | None = None,
+        ensure_in: str | list[str] | tuple[str, ...] = ANYWHERE,
         preferred_locations=None,
         after_tasks=(),
     ):
@@ -107,6 +131,7 @@ class TaskRegistry:
             "custom": bool(custom),
             "doc_flow": (doc_flow or "").strip(),
             "description": (description or "").strip(),
+            "params_doc": _normalize_params_doc(params_doc, param_specs or {}),
             "reschedule": reschedule,
             "debug": bool(debug),
             "deprecated": bool(deprecated),
@@ -186,6 +211,11 @@ class TaskRegistry:
         """当前任务函数签名中的参数名（不含 * / **），用于丢弃 cfg 中已迁移的旧键。"""
         return list(self.get_param_specs(path))
 
+    def get_params_doc(self, path: str) -> dict[str, str]:
+        """任务源码提供的参数中文标签副本；未声明的参数由前端回退到原名。"""
+        entry = self._visible_entry(path)
+        return dict(entry.get("params_doc", {})) if entry else {}
+
     def get_custom(self, path: str) -> bool:
         entry = self._visible_entry(path)
         return bool(entry.get("custom")) if entry else False
@@ -209,7 +239,7 @@ class TaskRegistry:
         return bool(entry.get("debug")) if entry else False
 
     def get_ensure_in(self, path: str) -> list[str] | None:
-        """源码声明的真实入口；None 表示不适用或任务不可见，不触发导航。"""
+        """源码入口列表副本；ANYWHERE 为任意位置，None 只表示任务不可见。"""
         entry = self._visible_entry(path) or {}
         locations = entry.get("ensure_in")
         return list(locations) if locations is not None else None
@@ -218,7 +248,7 @@ class TaskRegistry:
         entry = self._visible_entry(path) or {}
         preferred_locations = entry.get("preferred_locations")
         if preferred_locations is None:
-            preferred_locations = entry.get("ensure_in") or ()
+            preferred_locations = tuple(location for location in entry.get("ensure_in", ()) if location != ANYWHERE)
         return {
             "preferred_locations": list(preferred_locations),
             "after_tasks": list(entry.get("after_tasks", ())),
@@ -254,7 +284,7 @@ registration_counter = 0
 _CUSTOM_TASK_ROOT_KEY = "自定义任务"
 
 # 官方字段：只能出现在装饰器形参里，不许走私有 key=value。
-OFFICIAL_TASK_FIELDS = ("id", "reschedule", "debug", "description", "deprecated", "ensure_in", "preferred_locations", "after_tasks")
+OFFICIAL_TASK_FIELDS = ("id", "reschedule", "debug", "description", "params_doc", "deprecated", "ensure_in", "preferred_locations", "after_tasks")
 
 # 用户数据字段：cfg 条目里允许存在的键（系统写或用户在 WebUI 覆盖）。
 USER_TASK_FIELDS = ("on", "next_exec_time", "params", "reschedule", "debug", "preferred_locations", "after_tasks")
@@ -269,6 +299,7 @@ LEGACY_TASK_FIELDS = (
     "order",
     "param_meta",
     "param_keys",
+    "params_doc",
     "task_description",
     "task_doc_flow",
     "fn",
@@ -281,11 +312,12 @@ LEGACY_TASK_FIELDS = (
 def register_task(
     func=None,
     *,
-    ensure_in: str | list[str] | tuple[str, ...] | None,
+    ensure_in: str | list[str] | tuple[str, ...],
     id=None,
     reschedule=None,
     debug=False,
     description=None,
+    params_doc: dict[str, str] | None = None,
     deprecated=False,
     preferred_locations=None,
     after_tasks=(),
@@ -311,12 +343,16 @@ def register_task(
         若本轮只执行 debug 任务，也跳过 post_execution 收尾动作。用户可在 WebUI 里覆盖。
       - description (str): 一句话简介，显示在任务列表。不传时取函数 docstring 首行；
         长说明直接写在函数 docstring 里，不需要额外参数。
+      - params_doc (dict[str, str]): 函数参数名到中文标签，如 {"diff": "难度"}。
+        只存注册表并投影到 WebUI，不写 cfg；缺省或漏填的参数显示原名。
+        未知参数名、空标签在修改 cfg 前拒绝。表格列名仍用 TableParam.column_labels。
       - deprecated (bool): 系统属性。源码和注册元数据保留，但不写配置、不出现在 WebUI 或
         调度列表；已存在的旧条目由加载末尾的 catalog.prune_stale_tasks() 清理。
-      - ensure_in (str | list[str] | tuple[str, ...] | None): 必填的真实起始导航目标。
-        使用已注册的完整名字（如 ``"天庭#-1"``），多分支入口声明非空集合。没有地图起点的
-        现场或外部 App 任务必须显式写 ``None`` 且 ``debug=True``。只存注册表，不进 cfg，
-        不自动导航；任务体和 helper 中原有的 ensure_in 调用仍负责实际导航。
+      - ensure_in (str | list[str] | tuple[str, ...]): 必填的执行前置条件。
+        使用已注册的完整名字（如 ``"天庭#-1"``）；非空集合表示任一入口即可。
+        每次执行（含 debug/重试/续跑）先导航再调用正文，正文不重复入口导航。
+        ``ANYWHERE`` 表示任意位置，导航立即返回；不可与具体地点混用，不再接受 None。
+        声明只存注册表，不进 cfg。任务中途切换位置仍显式调用 ensure_in。
       - preferred_locations (list[str]): 多个推荐导航地点，只影响自动排序，不触发导航；
         不声明时继承 ensure_in，显式空列表清除偏好。
       - after_tasks (list[str]): 前置任务稳定 ID；仅当前仍待执行的前置阻塞自动调度。
@@ -329,8 +365,6 @@ def register_task(
       def task():
           ...
     """
-    if ensure_in is None and debug is not True:
-        raise ValueError("ensure_in: None is only allowed with debug=True")
     normalized_ensure_in = _normalize_ensure_in(ensure_in)
 
     if func is None:
@@ -342,6 +376,7 @@ def register_task(
                 reschedule=reschedule,
                 debug=debug,
                 description=description,
+                params_doc=params_doc,
                 deprecated=deprecated,
                 preferred_locations=preferred_locations,
                 after_tasks=after_tasks,
@@ -357,6 +392,8 @@ def register_task(
             f"{list(OFFICIAL_TASK_FIELDS)}，其余 key=value 只用于任务私有数据"
         )
 
+    param_specs = describe_signature(func)
+    normalized_params_doc = _normalize_params_doc(params_doc, param_specs)
     normalized_reschedule = normalize_reschedule(reschedule)   # 非法写法当场报错
     if preferred_locations is not None:
         preferred_locations = _normalize_planning_names(preferred_locations, "preferred_locations")
@@ -425,22 +462,23 @@ def register_task(
 
     # 参数分两处：specs 是运行时契约（表单描述 + 执行解码），params 是用户在 cfg 里的值。
     # 两者的换算全部由 tasks.task_params 承担，这里不按参数类型分支。
-    param_specs = describe_signature(func)
     if task_cfg is not None:
         saved_params = task_cfg.get("params")
         task_cfg["params"] = hydrate_params(
             param_specs, saved_params if isinstance(saved_params, dict) else {}
         )
 
+    registered_function = task_wrapper(func, normalized_ensure_in)
     task_registry.register(
         task_path,
-        task_wrapper(func),
+        registered_function,
         param_specs,
         task_id=task_id,
         sequence=registration_counter,
         custom=is_custom,
         doc_flow=doc_flow,
         description=desc,
+        params_doc=normalized_params_doc,
         reschedule=normalized_reschedule,
         debug=debug_default,
         deprecated=deprecated,
@@ -449,8 +487,7 @@ def register_task(
         after_tasks=after_tasks,
     )
 
-    # The decorator must return the original function
-    return func
+    return registered_function
 
 
 def _apply_task_battle_startup(kwargs: dict) -> None:
@@ -469,9 +506,12 @@ def _clear_task_battle_startup() -> None:
     h.task_context_battle_flow = None
 
 
-def task_wrapper(func):
+def task_wrapper(func, entry_locations: tuple[str, ...]):
+    @wraps(func)
     def wrapper(*args, **kwargs):
         from AutoScriptor.core.background import bg
+        from AutoScriptor.utils.cancel import check_cancel_raise
+        from ZmxyOL.nav.api import ensure_in
         bg.clear(clear_signals=True)
 
         # 每个任务开始前清空调试截图目录，这样归档里的 debug_screenshots/
@@ -479,8 +519,11 @@ def task_wrapper(func):
         from AutoScriptor.logging.tracer import clear_debug_screenshots
         clear_debug_screenshots()
 
-        _apply_task_battle_startup(kwargs)
         try:
+            check_cancel_raise()
+            _apply_task_battle_startup(kwargs)
+            ensure_in(entry_locations[0] if len(entry_locations) == 1 else list(entry_locations))
+            check_cancel_raise()
             return func(*args, **kwargs)
         finally:
             _clear_task_battle_startup()

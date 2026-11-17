@@ -2,7 +2,7 @@ from ZmxyOL import *
 from AutoScriptor import *
 
 @register_task(
-    ensure_in=None,  # 从任意设备状态恢复；末尾的登录导航不是起点。
+    ensure_in=ANYWHERE,  # 从任意设备状态恢复；末尾的登录导航不是起点。
     description="重启所有设备，mumu、adb、nemuipc、模拟器等。",
     debug=True,
 )

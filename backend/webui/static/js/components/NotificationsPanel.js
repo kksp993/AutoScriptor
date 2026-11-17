@@ -1,7 +1,9 @@
 const NotificationsPanel = {
   name: 'NotificationsPanel',
+  components: { NotificationsTutorial },
   props: {
     executionBusy: { type: Boolean, default: false },
+    embedded: { type: Boolean, default: false },
   },
   data() {
     return {
@@ -14,26 +16,57 @@ const NotificationsPanel = {
       saving: false,
       testing: false,
       error: '',
-      preview: '',
       history: [],
+      tutorialVisible: false,
       localBot: null,
       localError: '',
+      robotAccount: '',
+      loginStatus: null,
+      loginError: '',
+      loginLoading: false,
+      loginActing: false,
+      loginTimer: null,
+      loginController: null,
+      loginPollingUntil: 0,
+      disposed: false,
     };
   },
   mounted() {
     this.loadSettings(true);
     this.loadLocalBot();
   },
+  beforeUnmount() {
+    this.disposed = true;
+    clearTimeout(this.loginTimer);
+    this.loginController?.abort();
+    this.loginStatus = null;
+    this.token = '';
+    this.tutorialVisible = false;
+  },
   computed: {
-    /** Whether the saved connection already points at the local robot. */
+    /** Configuration alignment is not QQ login or successful delivery. */
     localBotReady() {
       const bot = this.localBot;
-      return !!(bot && bot.installed && bot.running && bot.token_matches && bot.endpoint_matches);
+      return !!(bot && bot.installed && bot.token_matches && bot.endpoint_matches);
     },
-    /** Installed and running, but the saved address/token are not this robot's. */
+    /** Installed, but the saved address/token are not this robot's. */
     needsLocalSync() {
       const bot = this.localBot;
-      return !!(bot && bot.installed && bot.running && (!bot.token_matches || !bot.endpoint_matches));
+      return !!(bot && bot.installed && (!bot.token_matches || !bot.endpoint_matches));
+    },
+    canQuickLogin() {
+      return !!this.loginStatus?.cached_accounts?.includes(this.robotAccount.trim());
+    },
+    canRememberAccount() {
+      return !!(this.loginStatus?.logged_in && this.loginStatus.account === this.robotAccount.trim());
+    },
+    loginStateLabel() {
+      if (this.loginActing) return '处理中';
+      if (this.loginError || this.localError) return '状态未知';
+      if (!this.localBot) return '检测中';
+      if (!this.localBot.installed) return '未安装';
+      if (!this.loginStatus) return this.loginLoading ? '查询中' : '待查询';
+      return this.loginStatus.logged_in ? '已登录' : '未登录';
     },
     endpointIsLoopback() {
       return /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(String(this.form.endpoint || '').trim());
@@ -51,21 +84,94 @@ const NotificationsPanel = {
         const result = await window.WebUIApi.request('GET', '/notify/qq/local');
         if (!result.ok) throw new Error(window.WebUIApi.errorMessage(result.data));
         this.localBot = result.data;
+        if (this.localBot.installed) await this.loadLoginStatus();
       } catch (error) {
         this.localError = error.message;
       }
     },
+    async loadLoginStatus() {
+      if (this.disposed || this.loginLoading || this.loginActing) return;
+      clearTimeout(this.loginTimer);
+      this.loginLoading = true;
+      this.loginError = '';
+      const controller = new AbortController();
+      this.loginController = controller;
+      try {
+        const result = await window.WebUIApi.request('GET', '/notify/qq/login', null, {
+          signal: controller.signal, cache: 'no-store', headers: { 'X-QQ-Login': '1' },
+        });
+        if (this.disposed || controller.signal.aborted) return;
+        if (!result.ok) throw new Error(window.WebUIApi.errorMessage(result.data));
+        this.loginStatus = result.data;
+        if (!this.robotAccount) {
+          this.robotAccount = result.data.requested_account || result.data.account || result.data.remembered_account || '';
+        }
+        if (!result.data.logged_in && Date.now() < this.loginPollingUntil) {
+          this.loginTimer = setTimeout(() => this.loadLoginStatus(), 2500);
+        }
+      } catch (error) {
+        if (error.name !== 'AbortError' && !this.disposed) {
+          this.loginStatus = null;
+          this.loginError = error.message;
+        }
+      } finally {
+        this.loginLoading = false;
+        if (this.loginController === controller) this.loginController = null;
+      }
+    },
+    async loginAction(action) {
+      if (this.executionBusy || this.loginActing || this.testing || this.saving) return;
+      const account = this.robotAccount.trim();
+      if (['qr', 'quick', 'remember'].includes(action) && !/^[1-9][0-9]{4,19}$/.test(account)) {
+        this.loginError = '请填写发送通知的小号 QQ 号';
+        return;
+      }
+      this.loginActing = true;
+      try {
+        let confirmSwitch = false;
+        if (action === 'qr' || action === 'quick') {
+          await ElementPlus.ElMessageBox.confirm(
+            '登录机器人 ' + account + '？现有机器人将重新登录，确认账号前暂停通知。桌面 QQ 和接收号码不受影响。',
+            '登录 / 切换机器人账号', { type: 'warning', confirmButtonText: '确认登录', cancelButtonText: '取消' },
+          );
+          confirmSwitch = true;
+        }
+        if (this.disposed) return;
+        clearTimeout(this.loginTimer);
+        this.loginController?.abort();
+        this.loginStatus = null;
+        this.loginError = '';
+        const result = await window.WebUIApi.request('POST', '/notify/qq/login', {
+          action, account, confirm_switch: confirmSwitch,
+        }, { cache: 'no-store', headers: { 'X-QQ-Login': '1' } });
+        if (this.disposed) return;
+        if (!result.ok) throw new Error(window.WebUIApi.errorMessage(result.data));
+        ElementPlus.ElMessage.success(result.data.message);
+        this.loginPollingUntil = Date.now() + 120000;
+      } catch (error) {
+        if (error !== 'cancel' && error !== 'close' && !this.disposed) this.loginError = error.message;
+      } finally {
+        this.loginActing = false;
+        if (!this.disposed && !this.loginError) await this.loadLoginStatus();
+      }
+    },
     async useLocalBot() {
-      if (this.executionBusy || this.saving || this.testing || this.loading || !this.loaded) return;
+      if (this.executionBusy || this.loginActing || this.saving || this.testing || this.loading || !this.loaded) return;
       this.saving = true;
       this.error = '';
       try {
+        await ElementPlus.ElMessageBox.confirm(
+          '将连接本机机器人并重新加载设置，未保存的修改将丢失。继续吗？',
+          '使用本机配置', { confirmButtonText: '继续', cancelButtonText: '取消' },
+        );
+        if (this.disposed) return;
         const result = await window.WebUIApi.request('POST', '/notify/qq/local', {});
         if (!result.ok) throw new Error(window.WebUIApi.errorMessage(result.data));
         await this.loadSettings(true);
-        ElementPlus.ElMessage.success('本机地址和令牌已保存，请填写接收号码并测试');
+        await this.loadLocalBot();
+        ElementPlus.ElMessage.success('已使用本机配置');
       } catch (error) {
-        this.error = error.message;
+        if (error !== 'cancel' && error !== 'close') this.error = error.message;
       } finally {
         this.saving = false;
       }
@@ -93,7 +199,6 @@ const NotificationsPanel = {
           this.tokenCleared = false;
           this.loaded = true;
         }
-        this.preview = result.data.preview;
         this.history = result.data.history;
       } catch (error) {
         this.error = error.message;
@@ -102,7 +207,7 @@ const NotificationsPanel = {
       }
     },
     async saveSettings() {
-      if (this.executionBusy || this.saving || this.testing || !this.loaded) return;
+      if (this.executionBusy || this.loginActing || this.saving || this.testing || !this.loaded) return;
       this.saving = true;
       this.error = '';
       try {
@@ -117,7 +222,7 @@ const NotificationsPanel = {
       }
     },
     async testSettings() {
-      if (this.testing || this.saving || !this.loaded) return;
+      if (this.loginActing || this.testing || this.saving || !this.loaded) return;
       this.testing = true;
       this.error = '';
       let deliveryError = '';
@@ -142,74 +247,82 @@ const NotificationsPanel = {
     },
   },
   template: `
-<section class="settings-page h-full overflow-y-auto">
+<section class="settings-page notifications-page" :class="embedded ? 'notifications-page--embedded' : 'h-full overflow-y-auto'">
   <div class="settings-hero">
     <div>
       <h2 class="settings-title">QQ 结果通知</h2>
-      <p class="text-sm text-gray-500 mt-1">一个角色，一条结果。不转发运行日志，不打断游戏任务。</p>
     </div>
-    <el-tag type="info">OneBot HTTP</el-tag>
+    <div class="notifications-actions">
+      <el-button @click="tutorialVisible = true"><i class="fa fa-play-circle-o" aria-hidden="true"></i>新手教程</el-button>
+    </div>
   </div>
 
-  <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon class="mb-4"></el-alert>
-  <el-alert v-if="executionBusy" title="任务执行中可查看与测试通知；保存配置请等待任务结束。"
-    type="warning" :closable="false" show-icon class="mb-4"></el-alert>
+  <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon></el-alert>
+  <el-alert v-if="executionBusy" title="任务执行中，请结束后再登录或保存。"
+    type="warning" :closable="false" show-icon></el-alert>
 
-  <article class="settings-card mb-4">
-    <div class="settings-card-head"><h3>本机机器人</h3></div>
-    <p v-if="localError" class="text-sm text-red-600">{{ localError }}</p>
-    <template v-if="localBot && localBot.installed">
-      <p class="text-sm text-gray-600">NapCat {{ localBot.version }} 已安装（不代表已登录）。</p>
-
-      <!-- 三态说清"还要不要做事"：本机机器人的令牌是安装时自动生成的，
-           用户不可能知道也不需要知道它是什么，所以这里必须给出结论而不是一个输入框。 -->
-      <p v-if="localBotReady" class="text-sm text-emerald-700 mt-2">
-        <i class="fa fa-check-circle"></i>
-        已连接：地址和令牌都用本机机器人的，不需要你填写或查找。
-      </p>
-      <p v-else-if="!localBot.running" class="text-sm text-amber-700 mt-2">
-        <i class="fa fa-exclamation-triangle"></i>
-        机器人当前没有运行，通知发不出去。
-      </p>
-      <p v-else class="text-sm text-amber-700 mt-2">
-        <i class="fa fa-exclamation-triangle"></i>
-        通知配置还没指向本机机器人，点下面的按钮一键同步即可。
-      </p>
-
-      <p v-if="!localBot.running" class="text-sm text-gray-600 mt-1">
-        启动：双击 <code>scripts\\qq-notify\\2-start.cmd</code>（后台运行，可关窗口）。停止用 <code>3-stop.cmd</code>。
-      </p>
-      <p class="text-sm text-gray-600 mt-1">首次登录需要扫码：在本机登录页完成登录后，机器人会记住账号，之后启动无需再扫。</p>
-      <div class="flex gap-2 mt-3">
-        <el-button :type="needsLocalSync ? 'primary' : ''"
-          :disabled="executionBusy || saving || testing || loading || !loaded" @click="useLocalBot">
-          {{ needsLocalSync ? '一键同步本机地址和令牌' : '使用本机配置' }}
-        </el-button>
-        <a :href="localBot.login_url" target="_blank" rel="noopener noreferrer" class="text-blue-600">本机登录页（请在运行机器打开）</a>
+  <div class="settings-grid settings-grid--two notifications-grid">
+    <article class="settings-card notifications-main-card" aria-label="机器人登录">
+      <div class="settings-card-head">
+        <h3><span class="notifications-step">1</span>机器人登录</h3>
+        <el-tag :type="loginStateLabel === '已登录' ? 'success' : 'info'" size="small">{{ loginStateLabel }}</el-tag>
       </div>
-      <p class="text-xs text-gray-500 mt-2">会替换已保存的地址和令牌并重新加载表单；接收号码和推送开关保留服务器已保存值。</p>
-    </template>
-    <p v-else-if="localBot" class="text-sm text-gray-600">尚未安装。运行 <code>scripts\\install.bat qq</code> 即可安装并自动生成本机 HTTP 配置。也可继续使用已有的外部 OneBot 服务。</p>
-    <el-button text @click="loadLocalBot">重新检测安装</el-button>
-  </article>
+      <div class="notifications-card-body">
+        <el-alert v-if="localError" :title="localError" type="error" :closable="false" show-icon></el-alert>
+        <el-alert v-if="loginError" :title="loginError" type="error" :closable="false" show-icon></el-alert>
+        <template v-if="localBot && localBot.installed">
+          <el-form label-position="top" :disabled="executionBusy || loginActing || testing || saving">
+            <el-form-item label="机器人 QQ 号">
+              <el-input v-model="robotAccount" aria-label="机器人 QQ 号" placeholder="发送通知的小号"
+                inputmode="numeric" maxlength="20" autocomplete="off"></el-input>
+            </el-form-item>
+          </el-form>
+          <details v-if="loginStatus?.cached_accounts.length" class="notifications-history-accounts">
+            <summary>历史账号</summary>
+            <div class="notifications-actions">
+              <el-button v-for="account in loginStatus.cached_accounts" :key="account" size="small"
+                :disabled="executionBusy || loginActing || testing || saving" @click="robotAccount = account">{{ account }}</el-button>
+            </div>
+          </details>
+          <div v-if="loginStatus?.logged_in" class="notifications-login-result">
+            <p>当前已登录：<strong>{{ loginStatus.account }}</strong></p>
+            <p v-if="!canRememberAccount" class="notifications-warning">账号不一致，请核对左侧号码或重新扫码。</p>
+            <el-button type="success" :disabled="executionBusy || loginActing || testing || saving || !canRememberAccount"
+              @click="loginAction('remember')">确认账号</el-button>
+          </div>
+          <p v-else-if="loginStatus?.running && !loginActing" class="notifications-status" role="status">{{ loginStatus.message }}</p>
+          <div v-if="loginStatus && !loginStatus.logged_in && loginStatus.qr_image" class="notifications-qr">
+            <img :src="loginStatus.qr_image" alt="QQ 登录二维码" width="192" height="192" referrerpolicy="no-referrer">
+            <p>用 {{ robotAccount || '小号' }} 的手机 QQ 扫码</p>
+          </div>
+          <el-button v-if="loginStatus?.running && !loginStatus.logged_in" text
+            :disabled="executionBusy || loginActing || testing || saving" @click="loginAction('refresh_qr')">刷新二维码</el-button>
+        </template>
+        <div v-else-if="localBot" class="notifications-install">
+          <p>先安装机器人，再登录 QQ。</p>
+          <code>scripts\\install.bat qq</code>
+        </div>
+      </div>
+      <div class="notifications-card-actions notifications-actions">
+        <template v-if="localBot?.installed">
+          <el-button type="primary" :loading="loginActing" :disabled="executionBusy || testing || saving"
+            @click="loginAction('qr')">{{ loginStatus?.logged_in ? '切换账号' : '扫码登录' }}</el-button>
+          <el-button v-if="canQuickLogin" :disabled="executionBusy || loginActing || testing || saving"
+            @click="loginAction('quick')">快捷登录</el-button>
+          <el-button text :loading="loginLoading" :disabled="loginActing" aria-label="刷新登录状态"
+            @click="loadLoginStatus">刷新状态</el-button>
+        </template>
+        <el-button v-else @click="loadLocalBot">重新检测</el-button>
+      </div>
+    </article>
 
-  <div class="settings-grid settings-grid--two">
-    <article class="settings-card">
-      <div class="settings-card-head"><h3><i class="fa fa-qq"></i> 接收设置</h3></div>
-      <el-form label-position="top" :model="form" :disabled="loading || saving || testing || !loaded">
-        <el-form-item label="自动推送">
-          <el-switch v-model="form.enabled" active-text="角色执行结束后发送"></el-switch>
-        </el-form-item>
-        <el-form-item label="机器人 HTTP 地址">
-          <el-input v-model="form.endpoint" placeholder="http://127.0.0.1:3000"></el-input>
-          <p v-if="endpointIsLoopback" class="text-xs text-gray-500 mt-1">
-            本机机器人地址。不是 WebUI 的 6099，两者不同。
-          </p>
-          <p v-else class="text-xs text-gray-500 mt-1">填写 NapCat / OneBot 的正向 HTTP 服务地址，不是 WebUI 地址。</p>
-        </el-form-item>
+    <article class="settings-card notifications-main-card" aria-label="接收通知">
+      <div class="settings-card-head"><h3><span class="notifications-step">2</span>接收通知</h3></div>
+      <el-form class="notifications-card-body" label-position="top" :model="form"
+        :disabled="loginActing || loading || saving || testing || !loaded">
         <el-form-item label="接收对象">
-          <div class="flex gap-2 w-full">
-            <el-select v-model="form.target_type" style="width:120px; flex-shrink:0" aria-label="接收类型">
+          <div class="notifications-recipient">
+            <el-select v-model="form.target_type" aria-label="接收类型">
               <el-option label="QQ 好友" value="private"></el-option>
               <el-option label="QQ 群" value="group"></el-option>
             </el-select>
@@ -217,67 +330,54 @@ const NotificationsPanel = {
               aria-label="接收号码" inputmode="numeric" maxlength="20"></el-input>
           </div>
         </el-form-item>
-        <el-form-item :label="localBotReady ? '访问令牌（已自动配置）' : '访问令牌（选填）'">
-          <el-input v-model="token" type="password" show-password autocomplete="new-password"
-            :placeholder="tokenPlaceholder"></el-input>
-          <!-- 令牌是安装时生成的 64 位随机串，用户不可能知道它。本机机器人已经对齐时
-               必须明说"不用管"，否则这个输入框本身就在暗示要去找一个东西填进来。 -->
-          <p v-if="localBotReady" class="text-xs text-emerald-700 mt-1">
-            <i class="fa fa-check"></i> 已与机器人一致，留空即可，不需要查找或修改。
-          </p>
-          <el-button v-if="tokenSet && !tokenCleared" text size="small" @click="clearToken">清除已保存令牌</el-button>
-          <span v-if="tokenCleared" class="text-xs text-amber-600 mt-1">保存后清除原令牌；输入新令牌可替换。</span>
+        <el-form-item label="自动推送">
+          <el-switch v-model="form.enabled" aria-label="自动推送" active-text="角色结束后通知我"></el-switch>
         </el-form-item>
-        <div class="flex gap-2">
-          <el-button type="primary" :loading="saving" :disabled="executionBusy" @click="saveSettings">保存配置</el-button>
-          <el-button :loading="testing" @click="testSettings">发送测试消息</el-button>
+        <div v-if="needsLocalSync && endpointIsLoopback" class="notifications-sync">
+          <span>尚未连接本机机器人</span>
+          <el-button size="small" :disabled="executionBusy" @click="useLocalBot">使用本机配置</el-button>
         </div>
-        <p class="text-xs text-gray-500 mt-2">测试使用当前填写值，不会保存，也不受自动推送开关影响。</p>
+        <details class="notifications-advanced">
+          <summary>高级设置</summary>
+          <el-form-item label="机器人 HTTP 地址">
+            <el-input v-model="form.endpoint" aria-label="机器人 HTTP 地址" placeholder="http://127.0.0.1:3000"></el-input>
+          </el-form-item>
+          <el-form-item label="发送令牌">
+            <el-input v-model="token" aria-label="发送令牌" type="password" show-password autocomplete="new-password"
+              :placeholder="tokenPlaceholder"></el-input>
+            <el-button v-if="tokenSet && !tokenCleared" text size="small" @click="clearToken">清除已保存令牌</el-button>
+            <span v-if="tokenCleared" class="notifications-warning">保存后清除原令牌</span>
+          </el-form-item>
+          <div v-if="localBot?.installed" class="notifications-actions">
+            <el-tag v-if="localBotReady" type="info" size="small">本机配置已匹配</el-tag>
+            <el-button v-if="!needsLocalSync || !endpointIsLoopback" :disabled="executionBusy" @click="useLocalBot">使用本机配置</el-button>
+          </div>
+        </details>
       </el-form>
-      <el-button v-if="!loaded" class="mt-2" :loading="loading" @click="loadSettings(true)">重新加载</el-button>
-    </article>
-
-    <article class="settings-card">
-      <div class="settings-card-head"><h3><i class="fa fa-comment-o"></i> 消息示例</h3></div>
-      <div class="rounded-xl bg-gray-100 p-5">
-        <div class="text-xs text-gray-500 mb-2">示例数据，非实际执行结果</div>
-        <pre class="rounded-lg bg-white p-4 text-sm whitespace-pre-wrap break-words">{{ preview }}</pre>
+      <div class="notifications-card-actions notifications-actions">
+        <el-button type="primary" :loading="saving" :disabled="executionBusy || loginActing || loading || testing || !loaded"
+          @click="saveSettings">保存设置</el-button>
+        <el-button :loading="testing" :disabled="loginActing || loading || saving || !loaded" @click="testSettings">发送测试</el-button>
+        <el-button v-if="!loaded" :loading="loading" @click="loadSettings(true)">重新加载</el-button>
       </div>
-      <ul class="text-sm text-gray-600 mt-4 space-y-2">
-        <li>角色编号沿用调度队列；不在队列中的手动任务仅显示角色名。</li>
-        <li>重试合并为最终结果；失败、停止和中断会明确标注。</li>
-        <li>当前报告任务结果，不虚构战力、活跃值或玉虚完成状态。</li>
-      </ul>
-      <details class="mt-5 text-sm text-gray-600">
-        <summary class="cursor-pointer font-medium">首次连接怎么做？</summary>
-        <ol class="mt-2 space-y-2 list-decimal pl-5">
-          <li>安装时选装 QQ 机器人，或运行 scripts\\install.bat qq；再双击 scripts\\qq-notify\\2-start.cmd 启动。</li>
-          <li>首次登录在本机登录页扫码；登录一次后机器人会记住账号，之后启动无需再扫。</li>
-          <li>点“一键同步本机地址和令牌”。<strong>令牌是安装时自动生成的，不用你查找或填写</strong>——
-              只有接外部已有的 OneBot 服务时才需要手工填它。</li>
-          <li>填写接收者的好友 QQ 号，或机器人已加入的群号。</li>
-          <li>发送测试消息，确认 QQ 收到后开启自动推送并保存。</li>
-        </ol>
-        <p class="mt-2">安装是可选的，不代登录 QQ。第三方机器人存在账号风控风险，建议使用专用小号。本机服务只监听回环地址；远程服务应使用 HTTPS 和令牌，WebUI 应启用访问密码。</p>
-      </details>
     </article>
   </div>
 
-  <article class="settings-card mt-4">
-    <div class="settings-card-head flex justify-between items-center">
-      <h3><i class="fa fa-history"></i> 最近发送</h3>
+  <details class="settings-card notifications-history">
+    <summary>发送记录<span>{{ history.length }}</span></summary>
+    <div class="notifications-actions">
       <el-button text :loading="loading" :disabled="testing || saving" @click="loadSettings()">刷新记录</el-button>
     </div>
-    <p class="text-xs text-gray-500 mb-3">仅保留本次进程最近 20 条。发送失败不会重跑游戏任务；超时不自动重发，避免重复消息。</p>
     <el-empty v-if="!history.length" description="暂无发送记录" :image-size="60"></el-empty>
-    <div v-for="(record, index) in history" :key="index" class="border-b border-gray-100 py-3">
-      <div class="flex items-center gap-2 mb-2">
+    <div v-for="(record, index) in history" :key="index" class="notifications-record">
+      <div class="notifications-actions">
         <el-tag :type="record.success ? 'success' : 'danger'" size="small">{{ record.success ? '接口确认成功' : '发送失败' }}</el-tag>
-        <span class="text-xs text-gray-500">{{ record.time }}</span>
+        <span>{{ record.time }}</span>
       </div>
-      <pre class="text-sm whitespace-pre-wrap break-words">{{ record.message }}</pre>
-      <p v-if="record.error" class="text-sm text-red-600 mt-1">{{ record.error }}</p>
+      <pre>{{ record.message }}</pre>
+      <p v-if="record.error" class="notifications-error">{{ record.error }}</p>
     </div>
-  </article>
+  </details>
+  <notifications-tutorial v-if="tutorialVisible" @close="tutorialVisible = false" />
 </section>`,
 };

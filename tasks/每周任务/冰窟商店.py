@@ -21,7 +21,6 @@ def buy(item):
 )
 def task():
     switch_base("mumu")
-    ensure_in("幽冥冰窟")
 
     click(T("奖励",box=Box(37,232,84,89)),offset=(0,-30), until=lambda:ui_T(T("领取奖励")))
     click(T("领取奖励"))

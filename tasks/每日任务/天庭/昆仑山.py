@@ -9,9 +9,10 @@ _KLS_DEFAULT_FLOW = BattleFlowName["昆仑山循环"]
     ensure_in="天庭#1",
     description="挑战夺回昆仑山并领取奖励。",
     reschedule="daily",
+    params_doc={"battle_loop": "战斗循环次数", "battle_flow": "战斗招式", "equipment": "须弥鼎进阶装备"},
 )
 def task(battle_loop: int = 7, battle_flow: BattleFlowName = _KLS_DEFAULT_FLOW, equipment: str = "万千花篮"):
     """目前可能无法进入玉虚殿，请需要时手动检查该步骤。"""
     from ZmxyOL.character.hero import h
     h.set(has_cd=False, speed_x=3)
-    h.kunlunshan_task(battle_loop=battle_loop, equipment=equipment)
+    h.kunlunshan_task(battle_loop=battle_loop, equipment=equipment, entry_ready=True)

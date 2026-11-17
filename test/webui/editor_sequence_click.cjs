@@ -9,7 +9,7 @@ const refreshDelays = [];
 let remoteResponse = { ok: true };
 let pendingClick = null;
 const context = vm.createContext({
-  EditorCanvas: {}, EditorControls: {}, PythonCodeEditor: {}, EditorMenuBar: {},
+  EditorCanvas: {}, EditorControls: {}, PythonCodeEditor: {}, EditorMenuBar: {}, EditorTutorial: {},
   Vue: {
     ref: value => ({ value }),
     computed: getter => ({ get value() { return getter(); } }),

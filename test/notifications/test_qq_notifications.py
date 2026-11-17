@@ -121,12 +121,8 @@ class TestQQTransport(unittest.TestCase):
         self.assertEqual(post.call_count, 1)
         self.assertEqual(notifier.history()[0], result)
 
-    def test_loopback_failure_names_the_robot_instead_of_certificates(self):
-        """本机地址连不上只有一个原因：机器人没开。
-
-        真实事故的报错是「无法连接 QQ 接口，请检查地址、证书和机器人服务」——
-        用户照这句话去查证书和地址，而真正要做的事是启动机器人。
-        """
+    def test_loopback_failure_does_not_mistake_unlogged_bot_for_stopped_process(self):
+        """NapCat can serve its management panel while OneBot is unavailable before login."""
         settings = QQSettings.parse({
             "enabled": True, "target_id": "12345",
             "endpoint": "http://127.0.0.1:3000", "access_token": "test-only-token",
@@ -137,8 +133,9 @@ class TestQQTransport(unittest.TestCase):
                 send_message(settings, "test")
 
         message = str(raised.exception)
-        self.assertIn("机器人没有在运行", message)
-        self.assertIn("2-start.cmd", message)
+        self.assertIn("未登录", message)
+        self.assertIn("设置中的 QQ 结果通知", message)
+        self.assertNotIn("机器人没有在运行", message)
         self.assertNotIn("证书", message)
         self.assertNotIn("test-only-token", message)
 
@@ -171,6 +168,9 @@ class TestQQTransport(unittest.TestCase):
                 self.assertTrue(started.wait(1))
                 worker = notifier._worker
                 self.assertTrue(worker.is_alive())
+                with self.assertRaises(DeliveryError):
+                    with notifier.login_operation():
+                        self.fail("Cannot switch sender during an in-flight notification")
             finally:
                 release.set()
                 worker = notifier._worker
@@ -411,42 +411,6 @@ class TestLocalBotMatchReporting(NotificationEndpointMixin, unittest.TestCase):
     def test_neither_token_is_ever_echoed(self):
         response = self.read_local_status(self.LOCAL)
         self.assertNotIn(self.LOCAL["access_token"], json.dumps(response))
-
-
-class TestNotificationsPanelWording(unittest.TestCase):
-    """界面必须替用户说出「令牌不用你管」。
-
-    真实反馈：「token 要登陆是吧？你的 token 能自己获取吗？不要我来找，我是用户真不
-    知道 token」。令牌是安装时自动生成的 64 位随机串，用户不可能知道它；只要页面还
-    摆着一个中性的输入框又不给结论，用户就会以为必须自己去找一个填进来。
-    """
-
-    def setUp(self):
-        root = Path(__file__).resolve().parents[2]
-        self.panel = (root / "backend/webui/static/js/components/NotificationsPanel.js").read_text(
-            encoding="utf-8", errors="ignore",
-        )
-
-    def test_the_ready_state_states_there_is_nothing_to_do(self):
-        self.assertIn("不需要你填写或查找", self.panel)
-
-    def test_the_token_field_renames_itself_when_it_is_already_configured(self):
-        self.assertIn("访问令牌（已自动配置）", self.panel)
-
-    def test_the_placeholder_tells_a_loopback_user_not_to_fill_it(self):
-        self.assertIn("本机机器人会自动带上，不用填", self.panel)
-
-    def test_the_help_text_says_the_token_is_generated_not_found(self):
-        self.assertIn("令牌是安装时自动生成的，不用你查找或填写", self.panel)
-
-    def test_the_sync_button_says_what_it_does_when_out_of_sync(self):
-        self.assertIn("一键同步本机地址和令牌", self.panel)
-
-    def test_readiness_depends_on_the_backend_comparison_not_a_guess(self):
-        """就绪判断必须用后端给的比对结果，不能在页面上猜。"""
-        for signal in ("token_matches", "endpoint_matches", "localBotReady"):
-            with self.subTest(signal=signal):
-                self.assertIn(signal, self.panel)
 
 
 if __name__ == "__main__":

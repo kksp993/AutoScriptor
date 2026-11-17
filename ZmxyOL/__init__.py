@@ -38,6 +38,7 @@ if _TYPE_CHECKING:
         h as h,
     )
     from ZmxyOL.nav import (
+        ANYWHERE as ANYWHERE,
         Env as Env,
         Loc as Loc,
         LoginClient as LoginClient,
@@ -49,7 +50,10 @@ if _TYPE_CHECKING:
         path as path,
         try_close_via_x as try_close_via_x,
     )
+    from ZmxyOL.nav.envs.decorators import HAS_SHEZHI as HAS_SHEZHI
+    from ZmxyOL.nav.envs.decorators import HAS_SHIJIEDITU as HAS_SHIJIEDITU
     from ZmxyOL.nav.envs.decorators import LOC_ENV as LOC_ENV
+    from tasks.task_state import set_task_next_run as set_task_next_run
     from tasks import (
         BattleFlowName as BattleFlowName,
         DEFAULT_BATTLE_FLOW as DEFAULT_BATTLE_FLOW,
@@ -76,10 +80,13 @@ _EXPORTS: dict[str, str] = {
     "mm": "ZmxyOL.nav",
     "path": "ZmxyOL.nav",
     "ensure_in": "ZmxyOL.nav",
+    "ANYWHERE": "ZmxyOL.nav",
     "try_close_via_x": "ZmxyOL.nav",
     "dismiss_system_dialogs": "ZmxyOL.nav",
     "LoginClient": "ZmxyOL.nav",
     "login": "ZmxyOL.nav",
+    "HAS_SHEZHI": "ZmxyOL.nav.envs.decorators",
+    "HAS_SHIJIEDITU": "ZmxyOL.nav.envs.decorators",
     "LOC_ENV": "ZmxyOL.nav.envs.decorators",
     # 4399 平台悬浮窗业务
     "detect_floating_window": "ZmxyOL.nav.envs.floating_window",
@@ -95,6 +102,7 @@ _EXPORTS: dict[str, str] = {
     # runtime task state helpers
     "get_task_status": "tasks.task_state",
     "set_task_status": "tasks.task_state",
+    "set_task_next_run": "tasks.task_state",
 }
 
 # Subpackages / modules addressable as attributes, e.g. ``ZmxyOL.nav.mm``.
@@ -115,10 +123,10 @@ _PUBLIC_NAMES = [
     "detect_floating_window", "detect_floating_window_on_frame", "dismiss_floating_window",
     # task
     'register_task', "task_registry", "get_task_table",
-    "get_task_status", "set_task_status",
+    "get_task_status", "set_task_status", "set_task_next_run",
     "BattleFlowName", "DEFAULT_BATTLE_FLOW", "DEFAULT_JJC_BATTLE_FLOW", "get_battle_profile",
     # loc env
-    "LOC_ENV"  
+    "HAS_SHEZHI", "HAS_SHIJIEDITU", "LOC_ENV", "ANYWHERE"
 ]
 
 

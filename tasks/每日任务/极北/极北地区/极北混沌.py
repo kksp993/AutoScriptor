@@ -9,12 +9,12 @@ from AutoScriptor.logging.logger import logger
     ensure_in="极北#-1",
     description="按灵气和难度选择极北混沌并挑战。",
     reschedule="daily",
+    params_doc={"battle_flow": "战斗招式"},
 )
 def task(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):
-    ensure_in("极北",-1)
-    Weather = h.check_linggen()
+    Weather = h.check_linggen(entry_ready=True)
     logger.info(f"当前灵气: {Weather}")
     JIBEI_CHAOS  = []
     for name in JIBEI_CHAOS_TABLE:

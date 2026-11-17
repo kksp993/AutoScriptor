@@ -11,12 +11,12 @@ const EDITOR_DRAFT_CACHE = {
 
 const EditorPanel = {
   name: 'EditorPanel',
-  components: { EditorCanvas, EditorControls, PythonCodeEditor, EditorMenuBar },
+  components: { EditorCanvas, EditorControls, PythonCodeEditor, EditorMenuBar, EditorTutorial },
   props: {
     /** 由错误汇总等页设置：切换到编辑器后从此 URL 拉取图片并走 /ingest-image */
     pendingImportUrl: { type: String, default: '' },
   },
-  emits: ['imported'],
+  emits: ['imported', 'open-api-docs'],
   template: `
 <div class="h-full min-h-0">
 <div class="flex flex-col lg:flex-row gap-3 h-full min-h-0">
@@ -31,13 +31,29 @@ const EditorPanel = {
           <el-tooltip placement="top" :show-after="0">
             <template #content>
               <div class="max-w-[280px] text-xs leading-relaxed text-left">
-                可将图片<strong>拖入右侧画布</strong>加载，用于离线标注与调试图；也可使用「刷新截图」获取当前模拟器画面。
+                可将图片<strong>拖入右侧画布</strong>加载，用于离线标注与调试图；「播放」持续更新模拟器画面，「暂停」保留最后一帧并恢复静态标注。
               </div>
             </template>
             <i class="fa fa-info-circle editor-help-icon shrink-0" tabindex="0" aria-label="说明" role="img"></i>
           </el-tooltip>
         </div>
+        <el-button size="small" :type="screenshotPlaying ? 'warning' : 'primary'" plain
+          :disabled="loadingImport || executingVirtualCode"
+          :aria-pressed="screenshotPlaying" @click="toggleScreenshotPlayback">
+          <i class="fa mr-1" :class="screenshotPlaying ? 'fa-pause' : 'fa-play'"></i>{{ screenshotPlaying ? '暂停' : '播放' }}
+        </el-button>
       </div>
+      <button ref="tutorialEntry" type="button" class="editor-tutorial-entry" aria-haspopup="dialog"
+        :disabled="remoteLoading || execCustomLoading || loadingImport || tutorialOpening"
+        title="7 步本地演练，不操作真机；打开时暂停实时预览，退出后可手动播放"
+        @click="openEditorTutorial">
+        <span><i class="fa fa-graduation-cap mr-1" aria-hidden="true"></i>新手教程 · 7 步上手</span>
+        <i class="fa" :class="tutorialOpening ? 'fa-spinner fa-spin' : 'fa-angle-right'" aria-hidden="true"></i>
+      </button>
+      <button type="button" class="text-primary text-xs text-left mb-2 disabled:opacity-50" aria-haspopup="dialog"
+        :disabled="remoteLoading || execCustomLoading || loadingImport" @click="openApiDocumentation">
+        <i class="fa fa-book mr-1" aria-hidden="true"></i>API 接口教程 · 参数与示例
+      </button>
       <div class="flex flex-nowrap gap-1.5 mb-2">
         <el-button type="primary" size="small" class="!flex-1 min-w-0" @click="refreshScreenshot" :loading="loadingScreenshot">
           <i class="fa fa-camera mr-0.5"></i><span class="truncate">刷新截图</span>
@@ -49,7 +65,7 @@ const EditorPanel = {
           <i class="fa fa-save mr-0.5"></i><span class="truncate">保存选区</span>
         </el-button>
       </div>
-      <div class="flex-1 overflow-y-auto pr-1">
+      <div class="flex-1 overflow-y-auto pr-1" @mousedown.capture="pauseScreenshotPlayback">
         <editor-controls
           v-model:name="name"
           v-model:freeze-name="freezeName"
@@ -193,6 +209,7 @@ const EditorPanel = {
         :virtual-swipe-lines="virtualSwipeLines"
         :img-width="imgWidth"
         :img-height="imgHeight"
+        @mousedown.capture="pauseScreenshotPlayback"
         @selection-change="onSelectionChange"
         @canvas-remote-click="onCanvasRemoteClick"
         @canvas-remote-swipe="onCanvasRemoteSwipe" />
@@ -253,7 +270,7 @@ const EditorPanel = {
           :disabled="navigationOptionsLoading" filterable clearable collapse-tags class="w-full"
           placeholder="请选择已注册的环境或位置，可多选" />
         <div class="text-xs text-slate-500">
-          保存时同步生成起点声明和函数开头的 ensure_in(...)，运行时先导航再执行片段；多个起点满足任意一个即可。
+          保存时生成起点声明，任务执行前统一导航，正文不重复添加 ensure_in(...)；多个起点满足任意一个即可。“任意位置”不执行导航，不能与具体地点混选。
         </div>
         <div v-if="navigationOptionsError" class="text-xs text-red-600">{{ navigationOptionsError }}</div>
         <el-button v-if="!saveScriptStartOptions.length" size="small" :loading="navigationOptionsLoading" @click="loadNavigationOptions">
@@ -262,8 +279,9 @@ const EditorPanel = {
       </div>
     </el-form-item>
     <div v-else class="text-xs text-slate-600 leading-relaxed">
-      完整任务文件保持原样：每个 @register_task 必须直接填写 ensure_in 起点名称（字符串或非空列表/元组）。
-      代码自行负责真实导航；仅现场/外部 App 调试可显式使用 debug=True, ensure_in=None。
+      完整任务文件保持原样：每个 @register_task 必须填写 ensure_in 起点名称（字符串或非空列表/元组），或 ANYWHERE（任意位置）。
+      使用 ANYWHERE 前需从 ZmxyOL 导入。
+      注册入口统一导航；正文只保留中途切换场景或收尾导航。debug 不绕过入口条件，ensure_in=None 不再有效。
       保存表单只决定脚本名称，其他声明沿用原文件。
     </div>
     <el-form-item label="description（描述）">
@@ -322,10 +340,11 @@ const EditorPanel = {
     <el-button type="primary" @click="applyFunctionEditorChanges">保存函数</el-button>
   </template>
 </el-dialog>
+<editor-tutorial v-if="tutorialVisible" @close="closeEditorTutorial" />
 </div>`,
 
   setup(props, { emit }) {
-    const { ref, computed, watch, onMounted } = Vue;
+    const { ref, computed, watch, onMounted, onBeforeUnmount } = Vue;
 
     // ── state ──
     const imageSrc = ref('');
@@ -334,6 +353,15 @@ const EditorPanel = {
     const loadingScreenshot = ref(false);
     const loadingImport = ref(false);
     const canvasDropActive = ref(false);
+    const screenshotPlaying = ref(false);
+    const tutorialVisible = ref(false);
+    const tutorialOpening = ref(false);
+    const tutorialEntry = ref(null);
+    let screenshotTimer = null;
+    let screenshotRequest = null;
+    let playbackGeneration = 0;
+    let imageSourceVersion = 0;
+    let editorDisposed = false;
 
     /** 当前画面是否来自导入图片（离线标注）；刷新截图为 false */
     const imageFromImport = ref(false);
@@ -364,6 +392,7 @@ const EditorPanel = {
     const remoteLoading = ref(false);
     const customExecCode = ref(EDITOR_DRAFT_CACHE.customExecCode || '');
     const execCustomLoading = ref(false);
+    const executingVirtualCode = ref(false);
     const stopCustomLoading = ref(false);
     const extractPreviewLoading = ref(false);
     const saveScriptLoading = ref(false);
@@ -711,7 +740,7 @@ const EditorPanel = {
     }
 
     function appendEnsureInAction(targetName) {
-      appendCode(`ensure_in(${JSON.stringify(String(targetName || ''))})`);
+      appendCode(`ensure_in(${targetName === '任意位置' ? 'ANYWHERE' : JSON.stringify(String(targetName || ''))})`);
       ElementPlus.ElMessage.success(`已添加「导航到 ${targetName}」`);
     }
 
@@ -1116,7 +1145,7 @@ const EditorPanel = {
           action: loadNavigationOptions,
         }];
       }
-      return navigationOptions.value.map((environment) => {
+      return navigationOptions.value.filter(environment => prefix !== 'map-location' || environment.name !== '任意位置').map((environment) => {
         const environmentName = String(environment.name || '');
         const locationNames = Array.isArray(environment.locations) ? environment.locations : [];
         if (!locationNames.length) {
@@ -1263,8 +1292,11 @@ const EditorPanel = {
 
     // ── actions ──
     /** 与 GET /screenshot、POST /ingest-image 返回结构一致时更新画布与校验状态 */
-    async function applyEditorImageData(data, fromImport = false) {
-      if (data.error) { ElementPlus.ElMessage.error(data.error); return false; }
+    async function applyEditorImageData(data, fromImport = false, { preserveRemoteMode = false, validateFrame = true } = {}) {
+      if (!data || data.error || data.ok === false || !data.image) {
+        ElementPlus.ElMessage.error(apiErrorMessage(data, '截图响应缺少图片'));
+        return false;
+      }
       imageSrc.value = 'data:image/jpeg;base64,' + data.image;
       imgWidth.value = data.width || 1280;
       imgHeight.value = data.height || 720;
@@ -1272,29 +1304,116 @@ const EditorPanel = {
       virtualClickMarkers.value = [];
       virtualSwipeLines.value = [];
       imageFromImport.value = fromImport;
-      virtualRemoteOnly.value = fromImport;
+      if (!preserveRemoteMode) virtualRemoteOnly.value = fromImport;
       nameOk.value = {};
       imageOk.value = {};
-      await validateAll();
+      if (validateFrame) await validateAll();
       return true;
     }
 
-    async function refreshScreenshot() {
+    function requestScreenshot(options = {}) {
+      if (editorDisposed || tutorialVisible.value || loadingImport.value || executingVirtualCode.value) return Promise.resolve(false);
+      if (screenshotRequest) return screenshotRequest;
+      const sourceVersion = imageSourceVersion;
       loadingScreenshot.value = true;
-      try {
-        const data = await apiGet('/screenshot');
-        await applyEditorImageData(data, false);
-      } catch (e) {
-        ElementPlus.ElMessage.error('截图失败: ' + e);
-      } finally {
+      screenshotRequest = (async () => {
+        try {
+          const data = await apiGet('/screenshot');
+          if (editorDisposed || sourceVersion !== imageSourceVersion) return false;
+          return await applyEditorImageData(data, false, options);
+        } catch (error) {
+          if (!editorDisposed && sourceVersion === imageSourceVersion) {
+            ElementPlus.ElMessage.error('截图失败: ' + error);
+          }
+          return false;
+        }
+      })().finally(() => {
         loadingScreenshot.value = false;
+        screenshotRequest = null;
+      });
+      return screenshotRequest;
+    }
+
+    function refreshScreenshot() {
+      return requestScreenshot({
+        preserveRemoteMode: screenshotPlaying.value,
+        validateFrame: !screenshotPlaying.value,
+      });
+    }
+
+    function stopScreenshotPlayback() {
+      screenshotPlaying.value = false;
+      playbackGeneration += 1;
+      if (screenshotTimer !== null) clearTimeout(screenshotTimer);
+      screenshotTimer = null;
+    }
+
+    async function pauseScreenshotPlayback(validateFrame = true) {
+      const wasPlaying = screenshotPlaying.value;
+      stopScreenshotPlayback();
+      // Let the final frame settle so the displayed image and backend OCR cache agree.
+      await screenshotRequest;
+      if (wasPlaying && validateFrame && !editorDisposed && !loadingImport.value) await validateAll();
+    }
+
+    async function playScreenshotFrame(generation) {
+      const captured = await requestScreenshot({ preserveRemoteMode: true, validateFrame: false });
+      if (editorDisposed || generation !== playbackGeneration || !screenshotPlaying.value) return;
+      if (!captured) {
+        stopScreenshotPlayback();
+        return;
+      }
+      // Serial polling bounds device load and avoids per-frame OCR/template matching.
+      screenshotTimer = setTimeout(() => {
+        screenshotTimer = null;
+        void playScreenshotFrame(generation);
+      }, 500);
+    }
+
+    async function toggleScreenshotPlayback() {
+      if (screenshotPlaying.value) return pauseScreenshotPlayback();
+      if (editorDisposed || tutorialVisible.value || loadingImport.value || executingVirtualCode.value) return;
+      screenshotPlaying.value = true;
+      return playScreenshotFrame(++playbackGeneration);
+    }
+
+    async function openEditorTutorial() {
+      if (tutorialOpening.value || remoteLoading.value || execCustomLoading.value || loadingImport.value) return;
+      tutorialOpening.value = true;
+      try {
+        await pauseScreenshotPlayback(false);
+        if (!editorDisposed) tutorialVisible.value = true;
+      } finally {
+        tutorialOpening.value = false;
       }
     }
 
+    function closeEditorTutorial() {
+      tutorialVisible.value = false;
+      Vue.nextTick(() => tutorialEntry.value?.focus());
+    }
+
+    async function openApiDocumentation() {
+      if (remoteLoading.value || execCustomLoading.value || loadingImport.value) return;
+      await pauseScreenshotPlayback(false);
+      if (!editorDisposed) emit('open-api-docs');
+    }
+
+    onBeforeUnmount(() => {
+      editorDisposed = true;
+      imageSourceVersion += 1;
+      stopScreenshotPlayback();
+    });
+
     async function ingestFromDataUrl(dataUrl) {
+      stopScreenshotPlayback();
+      const sourceVersion = ++imageSourceVersion;
       loadingImport.value = true;
       try {
+        await screenshotRequest;
+        if (editorDisposed || sourceVersion !== imageSourceVersion) return;
         const data = await apiPost('/ingest-image', { image: dataUrl });
+        if (editorDisposed || sourceVersion !== imageSourceVersion) return;
         const ok = await applyEditorImageData(data, true);
         if (ok) ElementPlus.ElMessage.success('已导入图片');
       } catch (e) {
@@ -1307,6 +1426,7 @@ const EditorPanel = {
     /** 从同源 URL（如 /api/error-archives/file?…）拉取图片并导入编辑器 */
     async function importFromUrl(url) {
       if (!url) return;
+      stopScreenshotPlayback();
       try {
         const r = await fetch(url, { credentials: 'same-origin' });
         if (!r.ok) throw new Error(r.statusText || '请求失败');
@@ -1338,6 +1458,7 @@ const EditorPanel = {
         ElementPlus.ElMessage.warning('请选择图片文件');
         return;
       }
+      stopScreenshotPlayback();
       const reader = new FileReader();
       reader.onload = () => {
         const url = reader.result;
@@ -1374,9 +1495,12 @@ const EditorPanel = {
     }
 
     /** 输入完成不代表页面渲染完成；给遥控器、画布和序列录制统一留出 1.5s。 */
-    async function refreshScreenshotAfterRemote() {
+    async function refreshScreenshotAfterRemote(options = {}) {
+      const sourceVersion = imageSourceVersion;
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      await refreshScreenshot();
+      await screenshotRequest;
+      if (editorDisposed || sourceVersion !== imageSourceVersion) return;
+      await requestScreenshot({ ...options, validateFrame: !screenshotPlaying.value });
     }
 
     function clearVirtualOverlays() {
@@ -1385,6 +1509,8 @@ const EditorPanel = {
     }
 
     async function onSelectionChange(sel) {
+      await pauseScreenshotPlayback(false);
+      if (editorDisposed || loadingImport.value) return;
       selection.value = { ...sel };
       try {
         const opt = await apiPost('/optimize-rect', {
@@ -1419,10 +1545,12 @@ const EditorPanel = {
     }
 
     async function validateAll() {
+      if (editorDisposed || screenshotPlaying.value) return;
       await Promise.all([validateLocate(), validateImage()]);
     }
 
     async function validateLocate() {
+      if (editorDisposed || screenshotPlaying.value) return;
       const b = effectiveBox();
       const t = (name.value || '').trim();
       if (!b || !t) { nameOk.value = {}; locateBoxes.value = []; return; }
@@ -1431,6 +1559,7 @@ const EditorPanel = {
         const data = await apiPost('/locate', {
           text: t, left: b.left, top: b.top, width: b.width, height: b.height, color,
         });
+        if (editorDisposed || screenshotPlaying.value) return;
         if (data.scale_results) {
           const ok = {};
           for (const [s, r] of Object.entries(data.scale_results)) ok[s] = r.found ? '√' : 'X';
@@ -1446,6 +1575,7 @@ const EditorPanel = {
     }
 
     async function validateImage() {
+      if (editorDisposed || screenshotPlaying.value) return;
       if (!useImage.value) { imageOk.value = {}; return; }
       const b = effectiveBox();
       if (!b) { imageOk.value = {}; return; }
@@ -1453,6 +1583,7 @@ const EditorPanel = {
         const data = await apiPost('/locate-image', {
           left: b.left, top: b.top, width: b.width, height: b.height,
         });
+        if (editorDisposed || screenshotPlaying.value) return;
         if (data.scale_results) {
           const ok = {};
           for (const [s, r] of Object.entries(data.scale_results)) ok[s] = r.found ? '√' : 'X';
@@ -1775,6 +1906,10 @@ const EditorPanel = {
           ElementPlus.ElMessage.warning('ensure_in 必须选择已注册的导航名称，请重新选择起点');
           return;
         }
+        if (form.ensureIn.includes('任意位置') && form.ensureIn.length > 1) {
+          ElementPlus.ElMessage.warning('ensure_in 的任意位置不能与具体地点混选');
+          return;
+        }
         metadata.ensure_in = [...form.ensureIn];
       }
 
@@ -1868,20 +2003,31 @@ const EditorPanel = {
 
     /** 自定义代码：不写入操作录制区；以返回值 repr 为主展示，失败才提示错误 */
     async function executeCustomCode() {
+      if (execCustomLoading.value || editorDisposed || loadingImport.value) return;
       const code = (customExecCode.value || '').trim();
       if (!code) { ElementPlus.ElMessage.warning('请输入代码'); return; }
+      const virtualOnly = virtualRemoteOnly.value;
+      const sourceVersion = imageSourceVersion;
+      let executionCompleted = false;
       execCustomLoading.value = true;
+      executingVirtualCode.value = virtualOnly;
       try {
-        const res = await apiPost('/execute-code', {
+        if (virtualOnly) await pauseScreenshotPlayback(false);
+        if (editorDisposed) return;
+        const response = await window.WebUIApi.request('POST', '/editor/execute-code', {
           code,
-          virtual_only: virtualRemoteOnly.value,
+          virtual_only: virtualOnly,
         });
+        const res = response.data;
+        executionCompleted = response.ok !== false && !!res && typeof res.ok === 'boolean'
+          && !['runtime_busy', 'editor_execution_busy', 'credential_locked'].includes(res.code);
+        if (editorDisposed) return;
         if (!res || res.ok === false) {
           const err = (res && res.error) ? String(res.error) : '执行失败';
           ElementPlus.ElMessage.error(err.length > 800 ? err.slice(0, 800) + '…' : err);
           return;
         }
-        if (virtualRemoteOnly.value) {
+        if (virtualOnly && sourceVersion === imageSourceVersion) {
           let added = false;
           if (res.virtual_clicks && res.virtual_clicks.length) {
             virtualClickMarkers.value = [...virtualClickMarkers.value, ...res.virtual_clicks];
@@ -1923,16 +2069,22 @@ const EditorPanel = {
       } catch (e) {
         ElementPlus.ElMessage.error('请求失败: ' + e);
       } finally {
+        if (executionCompleted && !virtualOnly && !editorDisposed && sourceVersion === imageSourceVersion) {
+          await refreshScreenshotAfterRemote({ preserveRemoteMode: true });
+        }
+        executingVirtualCode.value = false;
         execCustomLoading.value = false;
       }
     }
 
     return {
       imageSrc, imgWidth, imgHeight, loadingScreenshot, loadingImport,
+      tutorialVisible, tutorialOpening, tutorialEntry, openEditorTutorial, closeEditorTutorial,
+      openApiDocumentation,
       selection, optimizedSel, locateBoxes,
       name, freezeName, freeX, freeY, useImage, onlyOcr, lockColor, threshold,
       centerText, boxText, tCode, iCode, colorText, nameOk, imageOk,
-      swipeDir, remoteLoading, customExecCode, execCustomLoading, stopCustomLoading, extractPreviewLoading,
+      swipeDir, remoteLoading, customExecCode, execCustomLoading, executingVirtualCode, stopCustomLoading, extractPreviewLoading,
       saveScriptLoading, saveScriptDisabled, saveScriptDialogVisible, saveScriptForm, saveScriptParamTypes,
       saveScriptParamIsEnum, addSaveScriptParam, removeSaveScriptParam, submitSaveCustomScript,
       saveScriptSelfRegistered, saveScriptStartOptions, navigationOptionsLoading, navigationOptionsError, loadNavigationOptions,
@@ -1942,7 +2094,7 @@ const EditorPanel = {
       recordedCodeInput, recordedCode, recordedLines, isLandscape, canvasCellStyle,
       recorderMenuGroups,
       canvasDropActive, clearVirtualOverlays,
-      refreshScreenshot,
+      refreshScreenshot, screenshotPlaying, toggleScreenshotPlayback, pauseScreenshotPlayback,
       onCanvasDragOver, onCanvasDragLeave, onCanvasDrop,
       onSelectionChange, onThresholdRelease,
       saveSelection, insertCurrentTargetObject, onCopy, remoteClick, remoteSwipe,

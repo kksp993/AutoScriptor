@@ -9,7 +9,6 @@ from AutoScriptor import *
 )
 def task():
     """【bug】注意不会消耗祝福，如果有需求不要开启。"""
-    ensure_in("极北",-1)
     click(B(40,400,40,40))
     wait_for_appear(I("一键碾压-月"))
     click(B(190,155,10,10))

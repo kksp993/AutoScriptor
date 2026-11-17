@@ -15,7 +15,7 @@ from logging.handlers import RotatingFileHandler
 from queue import Empty, Full, Queue
 from typing import Any, Set
 
-from AutoScriptor.logging.logger import logger, _TaskFilter
+from AutoScriptor.logging.logger import logger, _TaskFilter, is_webui_log_summarized
 from AutoScriptor.utils.app_config import cfg
 from AutoScriptor.utils.paths import get_logs_root
 
@@ -52,6 +52,9 @@ class QueueHandler(logging.Handler):
         self.q = q
 
     def emit(self, record: logging.LogRecord) -> None:
+        # Condense only the browser sink; the same record still reaches file/terminal sinks.
+        if is_webui_log_summarized() and record.levelno < logging.WARNING and not record.exc_info:
+            return
         try:
             msg = self.format(record)
         except Exception:

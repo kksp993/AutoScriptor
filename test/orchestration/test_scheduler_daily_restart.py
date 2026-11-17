@@ -1,9 +1,14 @@
 import copy
 import importlib
+import json
+import tempfile
 import unittest
 from datetime import datetime
+from contextlib import nullcontext
+from pathlib import Path
 from threading import Event
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from AutoScriptor.utils.app_config import cfg
 from orchestrator.scheduler import Scheduler
@@ -36,6 +41,108 @@ class FakeTaskManager:
 
 
 class TestDailyRestartTrigger(unittest.TestCase):
+    def setUp(self):
+        self.configuration = copy.deepcopy(cfg._config)
+        self.global_configuration = copy.deepcopy(cfg._mgr.global_cfg)
+        self.original_path = cfg.CONFIG_PATH
+        self.original_manager_path = cfg._mgr.config_path
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.addCleanup(self._restore_configuration)
+        cfg.CONFIG_PATH = str(Path(self.directory.name) / "config.json")
+        cfg._config.pop("runtime_state", None)
+        cfg._mgr.global_cfg.pop("runtime_state", None)
+
+    def _restore_configuration(self):
+        cfg._config = self.configuration
+        cfg._mgr.global_cfg = self.global_configuration
+        cfg.CONFIG_PATH = self.original_path
+        cfg._mgr.config_path = self.original_manager_path
+
+    def test_new_scheduler_after_config_reload_does_not_restart_again(self):
+        moment = datetime(2026, 10, 25, 12, 0)
+        with patch.object(scheduler_module, "datetime", _frozen_datetime(moment)), patch.object(
+            Scheduler, "_safe_shutdown_emulator", return_value=True,
+        ) as shutdown:
+            Scheduler()._maybe_daily_restart(cfg)
+            saved = json.loads(Path(cfg.CONFIG_PATH).read_text(encoding="utf-8"))
+            self.assertEqual(saved["runtime_state"]["daily_restart_day"], "2026-10-25")
+            cfg._mgr.load_global()
+            cfg._refresh_flat_config()
+            Scheduler()._maybe_daily_restart(cfg)
+        shutdown.assert_called_once()
+
+    def test_character_switch_and_manual_reset_do_not_clear_global_marker(self):
+        moment = datetime(2026, 10, 25, 12, 0)
+        with patch.object(scheduler_module, "datetime", _frozen_datetime(moment)), patch.object(
+            Scheduler, "_safe_shutdown_emulator", return_value=True,
+        ) as shutdown:
+            Scheduler()._maybe_daily_restart(cfg)
+            cfg._config["status"] = {}
+            cfg._config["game"] = {"character_name": "another-character"}
+            scheduler = Scheduler()
+            scheduler.reset()
+            scheduler._maybe_daily_restart(cfg)
+        shutdown.assert_called_once()
+
+    def test_save_failure_does_not_shutdown_or_leave_a_false_marker(self):
+        moment = datetime(2026, 10, 25, 12, 0)
+        scheduler = Scheduler()
+        with patch.object(scheduler_module, "datetime", _frozen_datetime(moment)), patch.object(
+            scheduler, "_safe_shutdown_emulator", return_value=True,
+        ) as shutdown, patch.object(cfg._mgr, "persist_global", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                scheduler._maybe_daily_restart(cfg)
+            shutdown.assert_not_called()
+        self.assertNotIn("runtime_state", cfg._config)
+        self.assertNotIn("runtime_state", cfg._mgr.global_cfg)
+
+    def test_midnight_does_not_reset_marker_but_next_5am_does(self):
+        with patch.object(Scheduler, "_safe_shutdown_emulator", return_value=True) as shutdown:
+            for moment, expected_calls in (
+                (datetime(2026, 10, 25, 23, 59), 1),
+                (datetime(2026, 10, 26, 0, 1), 1),
+                (datetime(2026, 10, 26, 4, 59), 1),
+                (datetime(2026, 10, 26, 5, 0), 2),
+            ):
+                with patch.object(scheduler_module, "datetime", _frozen_datetime(moment)):
+                    Scheduler()._maybe_daily_restart(cfg)
+                self.assertEqual(shutdown.call_count, expected_calls)
+
+    def test_cancelled_execution_never_consumes_the_day(self):
+        from AutoScriptor.utils.cancel import TaskCancelled
+
+        scheduler = Scheduler()
+        with patch.object(scheduler_module, "datetime", _frozen_datetime(datetime(2026, 10, 25, 12))), patch.object(
+            scheduler, "_check_cancel_requested", side_effect=TaskCancelled("stop"),
+        ), patch.object(scheduler, "_safe_shutdown_emulator") as shutdown:
+            with self.assertRaises(TaskCancelled):
+                scheduler._maybe_daily_restart(cfg)
+            shutdown.assert_not_called()
+        self.assertNotIn("runtime_state", cfg._config)
+
+    def test_settings_saves_and_imports_cannot_overwrite_machine_checkpoint(self):
+        from orchestrator.projection import TaskTreeService, WebUILifecycleService
+
+        checkpoint = {"daily_restart_day": "2026-10-25"}
+        cfg._config["runtime_state"] = copy.deepcopy(checkpoint)
+        manager = SimpleNamespace(config_transaction=nullcontext)
+        tree = TaskTreeService()
+        lifecycle = WebUILifecycleService(cfg, manager, Mock(), tree, Mock(return_value=1))
+        incoming = {key: copy.deepcopy(cfg._config[key]) for key in ("app", "ocr", "emulator")}
+        incoming["runtime_state"] = {"daily_restart_day": "1900-01-01"}
+        with patch.object(lifecycle, "_apply_log_level"), patch.object(lifecycle, "mark_config_changed"):
+            lifecycle.save_runtime_config(incoming)
+            with patch.object(cfg, "save_config"), patch.object(lifecycle, "_mark_tasks_updated"):
+                lifecycle.import_config({"runtime_state": incoming["runtime_state"]})
+        self.assertEqual(cfg._config["runtime_state"], checkpoint)
+        saved = json.loads(Path(cfg.CONFIG_PATH).read_text(encoding="utf-8"))
+        self.assertEqual(saved["runtime_state"], checkpoint)
+        with patch.object(tree, "characters_summary", return_value={}), patch.object(
+            tree, "game_professions_by_character", return_value={},
+        ):
+            self.assertNotIn("runtime_state", tree.public_config())
+
     def _restart_with_frozen_clock(self, moment, shutdown_ok=True):
         scheduler = Scheduler()
         scheduler._logged_in_character = ("s1", "c1")
@@ -118,7 +225,7 @@ class TestDailyRestartTrigger(unittest.TestCase):
             patch.object(scheduler, "_safe_shutdown_emulator", return_value=False) as shutdown,
         ):
             scheduler._maybe_daily_restart(cfg)
-            scheduler._maybe_daily_restart(cfg)
+            Scheduler()._maybe_daily_restart(cfg)
 
         # 关闭失败不重复尝试：同一个任务批次里反复关模拟器只会多等 30 秒，
         # 真正的恢复交给设备启动检查和 MuMu 重启阶梯。

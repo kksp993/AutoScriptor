@@ -35,6 +35,7 @@ for _name in [
     "seq_click",
     "click_all",
     "locate",
+    "locate_dyn",
     "match",
     "wait_for_appear",
     "wait_for_disappear",

@@ -8,7 +8,6 @@ from AutoScriptor import *
 )
 def task():
     """每隔一段时间完成战令任务（仅领取不帮助完成）。"""
-    ensure_in("村庄")
     click((I("导航-战令"),T("战令", box=Box(37,237,870,106).margin())))   # 概率失败 （T仅0.75缩放可成）
     wait_for_appear((T("购买等级"), T("请添加", box=Box(926,507,136,79).margin())))
     if ui_T(T("请添加", box=Box(926,507,136,79).margin())):

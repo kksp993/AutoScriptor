@@ -4,14 +4,13 @@ from AutoScriptor import *
 
 
 @register_task(
-    ensure_in="村庄",
+    ensure_in=HAS_SHEZHI,
     description="购买灵力滴液和灵力真酿",
     reschedule="daily",
+    params_doc={"buy_spirit_liquid": "购买灵力滴液", "buy_spirit_brew": "购买灵力真酿"},
 )
 def task(buy_spirit_liquid=True, buy_spirit_brew=True):
     """在兑换豪礼页购买灵力滴液、灵力真酿。"""
-    ensure_in("村庄")
-
     # 仙盟面板展开时先收起，否则“活动”入口被遮挡
     while ui_F(T("仙盟", box=Box(16, 30, 130, 400)), 3):
         click(I("导航-按钮收缩"))
@@ -26,7 +25,8 @@ def task(buy_spirit_liquid=True, buy_spirit_brew=True):
         if ui_T(T("兑换豪礼", box=Box(0, 112, 1280, 100).margin())):
             break
         swipe(B(989, 170), B(345, 160), duration_s=0.1)
-    click(T("兑换豪礼", box=Box(0, 112, 1280, 100).margin()))
+    click(T("兑换豪礼", box=Box(0, 112, 1280, 100).margin()));sleep(1)
+    swipe(B(312,626), B(312,328), duration_s=1)
     click(T("星之结晶", box=Box(202, 280, 217, 306).margin()))
 
     # 列表滚到顶，让两行商品位置固定

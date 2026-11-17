@@ -144,7 +144,6 @@ def _buy_shop_items() -> int:
 )
 def hundunlianyaota():
     """领取混沌炼妖塔挂机奖励，并且自动购置功绩、6级灵域。"""
-    ensure_in("联盟")
     click(T("魔渊之界"))
     click((I("混沌炼狱塔"),T("确定")))
     shop_tmp = wait_for_appear(T("妖魄商铺",box=Box(20,230,120,50)))

@@ -1,209 +1,27 @@
-# WebUI 验收轨迹
+# 验收轨迹
 
-这些轨迹用于回归测试和手工验收，覆盖 WebUI、配置生命周期和设备边界，不保证具体游戏业务脚本能打完。
+Offline checks != business success; spending/QQ requires approval.
 
-## 首次打开
+- Await init-status before config; snapshot stays device-free. Character status isolated; queues deduplicated/persisted.
+- Saves strip projections/params_doc, retain debug/reschedule; reject unknown/cyclic dependencies. Graph stacking preserves constraints; search/layout never persist. FIFO isolates characters/drafts. Labels follow current task metadata, never stale previous-task labels.
+- task_list skips relogin, not declared entry navigation; dispatch/redemption verify login. Manual idle only, busy=409. Shared stopDispatch; cancellation≠failure.
+- Settings: aligned connection/runtime cards; fold paths/performance/access/diagnostics. Autosave validates ADB, preserves addresses, pauses busy; no refresh loops. QQ/deploy save independently; diagnostics mounts on expansion.
+- Embedded QQ: aligned cards, folded advanced/history, no preview/sidebar. Tutorial preserves drafts; skip/replay/narrow-screen safe. Sync confirms discard, never login. Confirm switching/identity before tests; no passwords/session. [Offline tests](../../../test/webui/test_qq_login_interface.py) aren't delivery proof.
 
-1. 启动 WebUI 或源码 Electron。
-2. `/api/init-status` 从未完成变为完成。
-3. 默认不启动 MuMu、不初始化 `mixctrl/mumu`。
-4. 页面通过 `/api/refresh` 和 `/api/runtime/snapshot` 得到配置与状态。
+## Editor 安全合同
 
-## 任务编辑保存
+Import/cached recognition/preview are device-free; simulation uses virtual mixctrl, real actions require unlock/shared gate. Click/preview/save use native coordinates; non1280x720 T/I retain `.margin(frame_size=(width, height))`.
 
-1. 打开任务树。
-2. 编辑一个关闭任务，打开开关并保存。
-3. 弹窗关闭，任务仍为启用。
-4. 刷新页面后状态仍为启用。
-5. `next_exec_time=0` 时显示为待执行。
-6. 保存后的账号 JSON 不包含 `fn/param_meta/param_keys/custom/task_description/task_doc_flow/_due/progress/progress_display/id` 等投影字段（`id` 由 `cfg["tasks"]` 的键本身表达）；用户自己的 `debug` 和 `reschedule` 会保留。
+preview-extract post_process: only strip/pretext/posttext/prenum/postnum, never expressions; integer 0 valid, failures never fabricate 0. execute-code restricts builtins/imports/dangerous AST, exposes h/navigation APIs, is not a security sandbox; stop via execute-code/stop.
 
-## 任务调度与调试编辑
+save-custom-task: traversal validation, atomic save/full reload. Required ensure_in/ANYWHERE; static checks never execute. Wrapper navigates, generated bodies don't. None/mixed/unimported ANYWHERE rejected before writes. Parameter descriptions generate params_doc.
 
-1. 打开一个内置任务（例如 `每日任务/村庄/战令领取`），弹窗的「调度」默认显示作者声明的生效值（该任务是「每隔 N 小时」），不是「一次性」。
-2. 把「调度」改成「每天 05:00」并保存；账号 JSON 的该任务条目出现 `reschedule="daily"`。
-3. 重新打开弹窗，仍显示「每天 05:00」，说明用户覆盖已生效。
-4. 把「调度」改回「一次性」并保存；该条目的 `reschedule` 键消失，弹窗重新显示作者声明的生效值。
-5. 打开「调试直跑」并保存；该条目出现 `debug=true`，调度的自动登录与失败恢复跳过。
-6. 任务弹窗里没有 `debug_effective` / `reschedule_effective` 落盘：它们只出现在公开配置投影里。
+Playback: serial captures, 500ms after responses, no per-frame OCR; pause retains settled frame. Import/unmount cancels; errors stop visibly. Real completion recaptures after 1.5s; virtual/rejected/transport-failed runs never do. Imports invalidate delayed captures.
 
-## 未注册任务隐藏
+Tutorial: seven optional local steps; shared Canvas/Menu, simulated recognition/execution/save. No device/Python/draft changes. Entry pauses preview; exit never resumes; busy blocks entry. Skip/replay/close/unmount cancel timers; narrow navigation remains usable. [Tests](../../../test/webui/test_editor_tutorial.py),[editor](../../../test/webui/),[routes](../../../backend/webui/routes/editor.py).
 
-1. 在账号 JSON 中保留一个已经不存在的任务条目（键不匹配任何已注册任务的 `id`）。
-2. 启动 WebUI 并刷新。
-3. 该条目不会显示在任务树或总览汇总中。
-4. 保存任务后不会把未注册条目重新写回。
+Editor: Tab=4 spaces, Shift-Tab=outdent; double-click edits functions. Selected-region `ui_T()` reuses click's T/I/B. Verify scrolling inside background menus, character skills and right-side buttons.
 
-## 手动刷新任务列表
+API docs: sidebar/editor-dialog, example-first; search/filter/copy, folded source. No execution/draft changes. Entry pauses preview; abort stale/unmounted requests; visible auth/network/schema failures. [Tests](../../../test/webui/test_api_docs_interface.py).
 
-1. 在 runtime idle 时新增、删除或修改一个任务脚本。
-2. 在任务列表页点击“刷新”，任务注册表、任务树和运行时汇总全部重新加载。
-3. 再次修改任务脚本，在总览页点击“刷新”，同样重新加载任务列表并更新总览汇总。
-4. 执行任务期间点击刷新时拒绝完整重载，并提示先终止当前任务。
-
-## 任务列表直接执行
-
-1. 完成安全密码和账号验证，保持游戏停留在任意当前角色或当前页面。
-2. 在任务列表页分别触发“开始运行”、单任务运行和“从选中处执行”。
-3. 三种入口都直接从当前游戏状态执行，不核对游戏内角色是否等于 WebUI 配置角色，也不触发自动登录。
-4. credential unlock、runtime busy、任务排序、retry、状态持久化和执行后动作保持不变。
-5. 从调度页启动、自动跨角色调度或执行兑换码时仍按原规则校验并登录目标角色。
-
-## 自动依赖与就近调度
-
-1. 在任务弹窗选择多个推荐地点与前置任务；保存后刷新确认保留。清空选择是明确覆盖，点击恢复作者默认后字段不落盘。
-2. A 为 B 的前置，两者待执行时 B 显示等待 A；关闭 A 或推迟其执行时间后 B 立即可参与调度。重新把 A 设为待执行则再次阻塞。
-3. A 完成后 B 与无依赖 C 同距离，即使 C 列表更靠前也先选择 B；若 C 更近仍先 C。不必等完某一静态拓扑层。策略切为列表优先后仅就绪任务按列表选择。
-4. A 重试成功后 B 从自己的第一次开始；A 普通失败耗尽且仍到期时 B 保持阻塞，无关任务/角色继续，全部阻塞时不空转。
-5. 保存自依赖、环、未知前置/地点返回明确错误且不改配置；手动直跑 B 仍允许。
-6. 查看最近实际决策，未知距离组内仍先已就绪后继再列表决胜，不自动导航；列表排序及策略保存仍走同一 FIFO。多个子地点同时命中时位置应为未知，而不是第一个注册地点。
-
-## 分层管理与计算图
-
-1. 打开任务页默认看到分类概览而非所有任务；展开分类进入任意深度目录，计数展示启用/到期/异常。搜索后展开完整祖先路径并定位，清除搜索和折叠全部恢复简洁视图。
-2. “顺序编排”保留拖拽排序/分组；“分层管理”的展开和目录顺序不修改手动执行列表。“从选中处执行”始终按既有有效顺序取范围。
-3. 切换计算图，直接依赖组成从左向右的思维导图主干，无虚拟登录节点。链条对齐，多前序共享同一后继，省略传递冗余边但不删保存约束；跨级连线不得穿过中间卡片。卡片为 168×76px，仅任务名、彩色状态圆点、地点图标和文字。
-4. 建立异地前序到村庄后继的主干，再加入 20 个村庄独立任务：它们应附到第二层村庄主干后，而非挤在第一层。无 0 距离时选最近可达主干，附牌按距离/有效顺序排序，不生成依赖；改动推荐地点不影响归堆。无主干时保留整堆共同零距离合并，未知/不可达不强行挂靠，缺失起点报错，显式现场任务单独展示。hover、聚焦、数量角标都能访问长牌组。
-5. 加入未启用任务，成功后图自动重排，刷新配置后仍启用；停用任务不删源码/配置，有后继时展示解除阻塞提示并保留灰色参考节点。
-6. 编辑多个前序或地点并保存，图按新拓扑重排；清空是显式覆盖，恢复默认删除覆盖字段。自依赖/环/未知引用被拒绝，原配置不变且草稿可继续编辑。
-7. 模拟距离 API 失败，展示错误和重试入口，只绘依赖，不伪造距离。运行中可浏览/展开，不能修改任务；保存失败不显示成功状态。
-8. 图保存与排序保存交错时保持 FIFO；排队期间切换账号/角色则拒绝旧图提交。测试不写真实账号、不触发设备；前端离线检查运行 `node test/webui/task_planning.cjs`。
-9. 编辑器保存裸片段必须选起点，漏填或未知地点不能写文件；生成的注册声明和函数入口导航值一致。完整任务源码缺少必填 `ensure_in` 时保存前报错，不留一份无法注册的新文件。
-10. 三视图顶部只用一个搜索框。搜索后台卡片后应固定展开所属堆、滚动并选中该卡，不高亮主干的虚假依赖；未启用/配置异常任务同样可定位。测试连续搜索、无匹配、清空、键盘选择；重新聚焦不能被上次失焦计时器隐藏结果。未保存草稿取消时保留原选中卡和草稿，搜索不得写配置。
-
-## 进度与人工接管展示
-
-1. 任务运行中写入 `progress=5/6`。
-2. 未完成进度在黄色待执行、重试期间显示 `5/6`。
-3. retry 耗尽后显示红色 `5/6` 和 `human_takeover_error`。
-4. `next_exec_time` 到期后该任务重新显示为待执行，可自动再试。
-
-## 跨角色调度队列
-
-1. 在总览页添加多个角色到调度队列。
-2. 调整顺序并刷新页面。
-3. 顺序保持不变，重复和不存在的角色被过滤。
-4. 开始调度后只执行队列内角色，按队列顺序寻找到期任务。
-5. 当前活动角色在队列末尾时，其他队列角色仍能被切换并执行。
-
-## QQ 结果通知
-
-1. 安装时选装 QQ 机器人，或运行 `scripts\install.bat qq`；再 `scripts\run.bat qq` 并扫码登录。
-   打开侧栏“QQ 通知”，确认显示已安装，点击“使用本机配置”自动保存 HTTP 地址与令牌，填写好友/群号。
-   已有外部机器人也可不安装，手工填写连接配置。“已安装”不代表 QQ 已登录。
-2. 自动推送保持关闭，发送测试；仅产生测试消息，不改变已保存配置、不启动模拟器。
-3. 开启并保存，刷新页面确认保留；令牌不回显，留空再保存保留原值，显式清除后才删除。
-4. 多角色任务正常完成时分别收到结果；任务失败后重试成功只计一次成功。
-5. 中途停止时未完成角色显示“已中断”，不误报整批完成；没有任务时不发送。
-6. 机器人离线/鉴权失败/业务拒绝/超时时，页面记录可见错误，游戏执行和重试不受通知影响。
-7. 运行中可测试，但保存按钮禁用，直接保存 API 返回 409；刷新记录不覆盖表单草稿。
-8. 离线验收使用模拟 OneBot，不向真实 QQ 发送；真实发送须由用户确认接收目标并点击测试。
-9. 重复安装不能改变令牌或删除登录缓存；重复启动被拒绝，安装不直接覆盖运行中的 `data/config.json`。
-   运行中“使用本机配置”也被拒绝；未安装提示安装命令，损坏安装返回可见错误而不是假装未安装。
-
-## 停止执行
-
-1. 开始调度或直接执行任务，并制造连续错误或任务 retry 耗尽状态。
-2. 在启动模拟器、等待登录、脚本 `sleep()` 或 retry 等阶段，从总览、调度或任务列表任一页面点击终止。
-3. 三个页面都进入总览同一个 `stop-dispatch` / `stopDispatch()` 前端入口。
-4. WebUI 快速进入停止中或待运行，调度状态恢复为 `pending`，连续错误次数归零，retry exhaustion 清除。
-5. 按钮回调只等待 `/api/stop` 控制响应，不同步等待完整 `/api/runtime/snapshot` 或 `/api/refresh`。
-6. cooperative cancel 保持到任务退出；退出期间产生的失败不重新计入连续错误。
-7. 再次启动后重新拥有默认 3 次连续错误恢复额度，后续任务链不会延续上次终止前的错误状态。
-
-## 模拟器启动失败
-
-1. 用离线夹具让设备启动连续失败三次；pipeline 尚活跃时也应结束，不出现第四次调用或 `(4/3)`。
-2. 调度切为 `error`，释放执行占用；保留原有 30 分钟冷却恢复，用户终止则立即回到 `pending`。
-3. MuMu 报 `is_process_started=true`、`is_android_started=false` 且 `launch_err_code/launch_err_msg`
-   非空时，即便 `player_state=start_finished`，也应直接显示原始 Android 启动错误，不只显示 ADB 超时。
-4. 错误归档页出现“设备启动失败”；日志包含待执行任务、实例/地址和原始原因，没有游戏截图是正常的。
-5. 故障不消耗未执行任务的尝试次数；不推进任务计划，不对未执行任务发送成功通知。
-
-## Debug 任务直跑
-
-1. 任务声明 `@register_task(ensure_in=None, debug=True)` 明确保留现场，或在 WebUI 里把已有任务的 debug 打开（原有入口导航仍由任务自己执行）。
-2. 从当前游戏画面直接运行。
-3. 不强制回登录页重新登录。
-4. 失败后不关闭/重启游戏。
-5. 本轮只执行 debug 任务时不执行 `post_execution`。
-
-## 设备诊断
-
-1. 打开设置页中的“启动诊断”。
-2. 默认刷新只检查 Manager、ADB、App、OCR、UI Map 状态，不触发 NemuIpc 截图。
-3. 点击“截图探测”后才检查 NemuIpc。
-4. MuMuManager `version` 失败但 ADB 可用时，Manager 显示 warning，整体按 ADB/App/NemuIpc 结果判断。
-5. 当 MuMu 路径仍是 `YOUR_*` 或无效路径时，点击设置页“自动定位 MuMu”；找到完整路径后写入全局配置，页面刷新后显示真实路径。
-6. 自动定位同时把实例号对齐到正在运行的实例：模板默认是「实例 0 + `127.0.0.1:16384`」，实际开的是实例 1 时，`index` 与作为其镜像的 `adb_addr` 一起落到实例 1（`127.0.0.1:16416`），不会留下两个字段各说一个实例的配置；用户手填的地址（局域网主机、自定义端口）原样保留，不被覆盖。
-7. 自动定位未找到完整路径时只提示手动填写，不覆盖用户已有有效路径。
-
-## 运行配置自动保存
-
-1. 修改“运行方式”“模拟器连接”任一字段后停顿约 0.5 秒，页面自动保存并显示“配置已同步到本地文件”。
-2. 保存过程中继续修改字段时，最终以最后一次改动为准，不会出现界面已改而 `data/config.json` 仍是旧值。
-3. 服务端刷新（轮询或保存后回推）只更新基线，不会把同一份配置再次写盘，也不产生保存回环。
-4. 任务执行中所有设置字段禁用并提示“执行中暂停自动保存”；终止当前任务后修改才会保存。
-5. 修改“MuMu 多开编号”会把 ADB 端口同步为 `16384 + index*32`，保留主机部分。
-
-## ADB 连接地址
-
-1. “ADB 连接地址”可直接编辑，用于局域网或远程 ADB；默认值由“MuMu 多开编号”推导。
-2. 地址必须是 `主机:端口`，端口为 1-65535 的纯数字且不以 `0` 开头。
-3. 非法值（空、`YOUR_*` 占位、缺少 `:`、端口非数字或越界）在字段下方显示红色原因，并暂停自动保存，不会写坏配置文件。
-4. 合法值（如 `192.168.1.50:16416`、`localhost:5555`）原样保存，后端不做改写。
-5. 保存后的地址会成为设备控制通道的 `adb -s <主机:端口>` 目标；诊断页“ADB 地址”显示同一值。
-
-## Editor 离线与实时
-
-1. 导入图片或已有截图后运行 OCR、颜色、模板定位。
-2. 这些离线操作不启动模拟器。
-3. 点击实时截图、遥控点击/滑动、真实执行代码时才申请设备会话。
-4. 没有 credential unlock 时，真实设备动作被拒绝。
-5. 操作录制区和自定义执行区使用代码编辑器式 Tab 缩进。左侧“生成对象”把当前选区对应的 T/I/B 目标插入代码光标；“判断存在/判断不在”也在光标处插入 `ui_T(...)` / `ui_F(...)`，有框选时复用 click 的 T/I/B 目标，无框选时生成 `ui_T()` / `ui_F()` 并把光标放入空括号。
-6. Editor 以当前截图真实宽高生成坐标。非 1280x720 截图上的 T/I 目标会生成 `.margin(frame_size=(width, height))`；遥控点击、左侧执行和保存脚本使用同一原生坐标，不做隐式缩放。
-7. “操作 > 点击”提供普通点击、直到出现、直到消失和下一步直到；条件点击使用 `until=lambda: ui_T/ui_F(...)`，可先生成空条件，再框选并用“生成对象”补入目标。“等待”菜单显示“阻塞等待 / 等待出现 / 等待消失”。“操作 > 提取”依次显示文字、前缀文本、后缀文本、前缀数字、后缀数字、颜色，旧“定位 > 区域识别”中只保留 match。四个预设分别生成 `post_process=pretext/posttext/prenum/postnum`，预览与执行均先 strip 再首尾正则，数字返回 int；函数编辑和保存脚本同样可用，0 不是空值，解析失败不补 0。颜色片段仍调用 `get_colors((B(...),))`。
-8. 后台菜单可插入 `with bg.scope(...) as scope:`、`scope.add(...)`、信号量、`wait_for_signal(...)`、`bg.interval(...)` 和 `bg.clear_signals()`；带“# 在这里...”占位的块会作为后续片段的缩进插入点。
-9. 自定义函数监听生成 `def bg_listener(): ...`；在录制区双击 `def` 行或函数体可打开带完整菜单栏的函数编辑子窗口，保存后替换主录制区函数块。
-10. “角色技能”菜单生成 `h.move_left(0)`、`h.move_right(0)`、`h.skill(1..6)`、`h.prop(...)`、`h.huashen()`、`h.huashen_long()`、`h.zhenwu()` 和 `h.zhenling()` 等默认片段；即时执行命名空间已内置运行时 `h`，保存为自定义任务时也会自动导入 `h`，无需用户另写初始化代码。
-11. 录制区右侧按钮列内部滚动，按钮增多时不撑出编辑区。
-12. “操作 > 序列点击”无需框选即可插入 `seq_click([])`，光标位于 `[]` 内。框选后点击“生成对象”，目标自动带逗号，同时点选区中心一次并在成功后刷新截图，光标仍留在列表里，便于框选下一项；函数编辑窗口同样可用。模拟模式只标红点不请求设备；真实动作仍要求解锁和空闲，请求在途禁止重复生成，失败不重试、不刷新。光标移到 `until=lambda: ui_T()` 内时仅生成对象，不补逗号也不点击。序列执行默认每步 10 秒，纯坐标 `ui_T(B(...))` 条件恒为 True。
-13. “工具 > 地图位置”与“导航到...”列出相同的环境和位置；选择后在光标处插入 `mm.locs["目标名称"].identifier`，不写死识别值、不执行导航。主录制区和函数窗口均可填入 `ui_T()` 或 until；修改地图识别定义后脚本使用更新后的对象。
-14. 缩小窗口、把工具栏放到右下边缘后，“提取 > 后缀数字”等末项仍完整可点；菜单自动避让边界，长列表可滚动，多级位置目录不受父级裁剪。按 Escape、点外部或关闭函数窗口后无残留面板。
-15. 真实点击/滑动成功后，自动截图前等待从 0.5 秒延长至 1.5 秒，覆盖遥控器、画布右键和序列录制；模拟模式仍不申请截图或触控设备。
-
-## 邮件任务
-
-1. 任务加载后，“其他任务 > 特殊功能 > 领取邮件”可见，稳定 id 为 `领取邮件`；新条目默认关闭，不自动开启。
-2. 保留原任务的一次性、默认 debug 语义：进入村庄，打开邮件，一键领取，等待后关闭面板。重载任务或重启后注册，无需手工改账号 JSON。
-
-## 天道树任务
-
-1. 空闲时刷新任务列表，`每日任务/村庄/天道树` 可见，入口为村庄、默认每日调度，首次注册不自动启用。
-2. 离线回归覆盖初始档位 1、5、10，确认仅切换必要次数；未识别/非法档位或切档未到 10 时不浇水。
-3. 用户允许实际消耗后再做现场验收：进入天道树和觉醒页，返回后切至 10 档，浇水确认两次，关闭两层面板并确认回村庄。确认超时停止后续步骤，不把未确认操作记为成功；离线测试不能替代该现场验收。
-
-## 错误归档
-
-1. 任务失败后在错误归档页出现新条目。
-2. 详情页能看到摘要、日志段和截图。
-3. Shift 多选可选中连续归档。
-4. 批量删除只删除选中目录。
-5. zip 导入写入新的 `import` 归档目录，不覆盖已有归档。
-6. 设备启动失败也有归档；仅含日志时正常展示，不调用截图补全或触发设备初始化。
-
-## 源码更新页
-
-1. Git 工作区中显示源码 updater 状态，可检查并执行源码更新。
-2. 非 Git 工作区或非源码运行环境显示 disabled。
-3. 检查更新固定比较当前 `HEAD` 与 `origin/main`；本地领先时显示远端无可拉取提交和领先提交数，而不是显示刚完成更新。
-4. 执行更新只做 fast-forward pull；不会安装依赖，完成后按后端重启支持情况刷新服务或提示手动重启。
-
-## 资讯与兑换码
-
-1. 打开资讯页后立即请求 `/api/news/posts?force=1`，不等待缓存。
-2. 礼包码弹窗打开就用不透明遮罩压住 iframe，等它 load 完成由那次 load 触发刷新；刷新成功换 key 重载出新表格，失败收掉遮罩并提示。中断期间用户读不到也点不到上一次采集的表格。
-3. 刷新兑换码只查官方公告近 10 天、最多 15 个帖子，并跳过已检查帖子；`/api/news/gift_codes/page` 每次重建都取盘上当前内容（响应禁缓存）。
-4. 批量兑换需要 credential unlock 或安全密码。
-5. 兑换时先切换到目标账号/角色，再执行内置任务 `其他任务/活动脚本/兑换豪礼礼品兑换`。
-6. 公告正文遇登录墙时自动尝试一次登录；若 4399 返回 HTTP 202/429，窗口明确提示暂未接受登录，可稍后点击“重新加载正文”或打开论坛原文，不连续自动重登。资讯页“可尝试通行证代拉”不表示已登录成功。
+News forces entry refresh; redemption iframe load refreshes, mask blocks stale-table interaction, pages use no-store. Official incremental collection: last 10 days/15 posts. Redemption switches identity/forces login. Proxy retries login wall once; 202/429 never cache success or retry login. Only public plaintext exception: news 85rwm3janyyc/123456; other credentials remain sensitive and proxy access requires unlock.

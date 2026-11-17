@@ -10,7 +10,6 @@ from AutoScriptor import *
 )
 def daily_qianghua_task():
     """【弃用】该任务已不推荐使用，保留旧强化装备流程。"""
-    ensure_in("村庄")
     if ui_T(T("仙盟",box=Box(16,30,924,400)), 3):
         click(B(40,40,60,60))
         sleep(4)

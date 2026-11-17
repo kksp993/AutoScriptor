@@ -72,12 +72,14 @@ _DIFF_ORDER = {"初难": 1, "灾厄": 2, "浩劫": 3}
     ensure_in="洪荒遗境",
     description="完成遗境副本挑战，根据配置自行选择挑战难度和关卡。",
     reschedule="daily",
+    params_doc={"battle_config": "战斗配置"},
 )
 def task(
     battle_config: TableParam = _DEFAULT_BATTLE_CONFIG,
     **kwargs,
 ):
     _ = kwargs
+    entry_ready = True
     for name, row in battle_config.items():
         nandu = row["difficulty"]
         nandu_value = getattr(nandu, "value", nandu)
@@ -89,7 +91,9 @@ def task(
         flow_name = getattr(row.get("battle_flow"), "value", None)
         target = _CLICK_TARGETS[name]
         for _ in range(2):
-            ensure_in("洪荒遗境")
+            if not entry_ready:
+                ensure_in("洪荒遗境")
+            entry_ready = False
             click(target)
 
             remains = extract_info(B(853, 390, 220, 51), post_process=lambda s: int(s.strip()[-2]), ensure_not_empty=True)
@@ -110,7 +114,7 @@ def task(
                     raise RuntimeError(f"{name} 遗境难度选择失败: 期望 {nandu_value}，当前 {diff_text!r}")
 
             bonus_x = extract_info(B(241, 592, 103, 53), post_process=lambda s: 1 if s.strip() == "普通" else int(s.strip()[-1]), ensure_not_empty=True)
-            bonus_repeat = (remains - bonus_x) % 3
+            bonus_repeat = (remains - bonus_x) % 5
             click(B(344, 577, 73, 81), repeat=bonus_repeat)
             sleep(1)    # 等待倍战生效
             bonus_x = extract_info(B(241, 592, 103, 53), post_process=lambda s: 1 if s.strip() == "普通" else int(s.strip()[-1]), ensure_not_empty=True)

@@ -141,16 +141,17 @@ def _run_bonus_and_handle_settlement(start_game: bool = True) -> str:
     ensure_in="外域区域",
     description="按配置挑战荒古万界固定副本关卡。",
     reschedule="daily",
+    params_doc={"battle_flow": "战斗招式"},
 )
 def task2(battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
     task(battle_flow=battle_flow)
+    ensure_in("外域区域")
     task(battle_flow=battle_flow)
 
 
 def task(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
 ):
-    ensure_in("外域区域")
     click(T("信标定位", box=Box(1045,654,113,54).margin()), until=lambda: ui_T(T("定位完成")))
     click(B(630, 360))
     wait_for_appear(T("总灵根值"))

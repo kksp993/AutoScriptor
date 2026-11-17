@@ -24,6 +24,7 @@ def _build_overview_payload(now_ts: float | None = None) -> dict:
         resolve_reschedule,
     )
     from tasks.task_register import task_registry
+    from tasks.task_state import task_status_snapshot
 
     now_ts = now_ts or _time.time()
     total = enabled = pending = scheduled = error = disabled = 0
@@ -45,15 +46,17 @@ def _build_overview_payload(now_ts: float | None = None) -> dict:
             enabled += 1
             blocked = is_human_takeover_blocked(val, now_ts) or bool(val.get("error"))
             due = False if blocked else is_task_due(val, path, now_ts)
+            unfinished = due or bool(val.get("continuation_pending"))
             if blocked:
                 error += 1
-            elif due:
+            elif unfinished:
                 pending += 1
             else:
                 scheduled += 1
-            status = 'error' if blocked else ('pending' if due else 'scheduled')
-            task_status = ((cfg._config.get("status") or {}).get("tasks") or {}).get(path, {})
-            progress = task_status.get("progress") if isinstance(task_status, dict) else None
+            status = 'error' if blocked else ('pending' if unfinished else 'scheduled')
+            specification = resolve_reschedule(path, val)
+            task_status = task_status_snapshot(cfg._config.get("status") or {}, path, specification, now_ts)
+            progress = task_status.get("progress")
             progress_display = None
             if progress is not None:
                 from tasks.task_state import progress_label
@@ -62,8 +65,9 @@ def _build_overview_payload(now_ts: float | None = None) -> dict:
             upcoming.append({
                 'path': path,
                 'on': True,
-                'next_exec_time': calc_effective_next_time(val, now_ts, resolve_reschedule(path, val)),
+                'next_exec_time': calc_effective_next_time(val, now_ts, specification),
                 'status': status,
+                'continuation_pending': bool(val.get('continuation_pending')),
                 'progress': progress,
                 'progress_display': progress_display,
                 'human_takeover_error': val.get('human_takeover_error'),

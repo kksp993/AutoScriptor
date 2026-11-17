@@ -3,9 +3,10 @@ from AutoScriptor import *
 from AutoScriptor.logging.logger import logger
 
 @register_task(
-    ensure_in="村庄",
+    ensure_in=HAS_SHEZHI,
     description="在开放时段挑战灵域妖兽。",
     reschedule={"mode": "daily", "window": (10, 22), "weekdays": [5, 6, 7]},
+    params_doc={"battle_flow": "战斗招式"},
 )
 def task(
     battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW,
@@ -15,7 +16,6 @@ def task(
     if cfg["weekday"] in [1,2,3,4]:
         logger.info(f"今日{cfg['weekday']}为周一至周四，不进行妖兽任务")
         return
-    ensure_in("村庄")
     click(ui["导航-挑战"].i)
     click(ui["挑战-妖兽"].i)
     sleep(1)

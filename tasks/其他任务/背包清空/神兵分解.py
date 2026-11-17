@@ -11,7 +11,6 @@ from tasks.task_register import register_task
 )
 def task():
     """会依次选择普通、精良、史诗品质神兵并执行批量分解，请确认背包中没有需要保留的神兵。"""
-    ensure_in("荒古村庄")
     idx = ui_idx((T('莫邪'),T('干将')),timeout=2)
     if idx == 0:
         click(T('莫邪'),offset=(430,140),resize=(0,0))

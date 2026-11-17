@@ -7,6 +7,7 @@ from AutoScriptor.logging.logger import logger
     ensure_in="天庭#4",
     description="处理造化烘炉活动。",
     reschedule="daily",
+    params_doc={"battle_loop": "战斗循环次数", "battle_flow": "战斗招式"},
 )
 def task(battle_loop: int = 1000, battle_flow: BattleFlowName = DEFAULT_BATTLE_FLOW):
     """【未完成】处理造化烘炉活动。"""
@@ -24,4 +25,4 @@ def task(battle_loop: int = 1000, battle_flow: BattleFlowName = DEFAULT_BATTLE_F
         # "朝会殿",
         "凌霄宝殿",
     ]
-    h.battle_tasks(task_table=TASK_TABLE_LIST)
+    h.battle_tasks(task_table=TASK_TABLE_LIST, entry_ready=True)

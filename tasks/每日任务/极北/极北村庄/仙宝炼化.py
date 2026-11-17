@@ -64,7 +64,6 @@ def make_more_for_destroy(nums: int=1):
 )
 def lianqishi_destroy():
     """材料不够会自行合成。"""
-    ensure_in("炼器师")
     res = extract_info(B(1000,430,130,42), lambda x: x)
     cur, limit = int(res.split("/")[0]), int(res.split("/")[1][:-1])
     click(T("+", box=Box(259,374,101,112).margin()))

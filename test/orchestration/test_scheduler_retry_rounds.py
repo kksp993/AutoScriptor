@@ -4,6 +4,7 @@ from threading import Event, Thread
 from unittest.mock import PropertyMock, patch
 
 from AutoScriptor.utils.app_config import cfg
+from orchestrator.scheduler import Scheduler
 
 
 class FakeRoundTaskManager:
@@ -24,6 +25,9 @@ class FakeRoundTaskManager:
     def reload_tasks(self):
         self.reload_calls += 1
         return None
+
+    def _reset_cancel(self):
+        self._cancel_event.clear()
 
     def switch_character(self, server, character):
         self.character_switches.append((server, character))
@@ -125,7 +129,7 @@ class TestSchedulerExecutionGate(unittest.TestCase):
 class TestSchedulerRetryRounds(unittest.TestCase):
     def setUp(self):
         # These lifecycle tests stub collection with symbolic paths, not registered tasks.
-        planning_patch = patch("orchestrator.scheduler.Scheduler._rank_ready_paths", side_effect=lambda paths, **kwargs: list(paths))
+        planning_patch = patch.object(Scheduler, "_rank_ready_paths", side_effect=lambda paths, **kwargs: list(paths))
         planning_patch.start()
         self.addCleanup(planning_patch.stop)
         self._cfg_backup = copy.deepcopy(cfg._config)
@@ -354,7 +358,7 @@ class TestSchedulerRetryRounds(unittest.TestCase):
 
         self.assertEqual(tm.calls, [("A", 0), ("B", 0), ("A", 1), ("A", 2)])
 
-    def test_scheduled_task_exhaustion_survives_next_pipeline_scan(self):
+    def test_scheduled_task_exhaustion_survives_reload_and_next_pipeline_scan(self):
         from orchestrator.scheduler import Scheduler
 
         tm = FakeRoundTaskManager({
@@ -366,9 +370,68 @@ class TestSchedulerRetryRounds(unittest.TestCase):
         sched.set_task_manager(tm)
 
         self._run_scheduled_with_fake_manager(sched, ["A"])
+        self.assertTrue(sched._reload_tasks_from_disk(reason="test configuration reload"))
         self._run_scheduled_with_fake_manager(sched, ["A"])
 
         self.assertEqual(tm.calls, [("A", 0), ("A", 1), ("A", 2)])
+
+    def test_one_exhausted_task_counts_as_one_scheduler_failure(self):
+        """2026-11-16: three star-crystal attempts were counted as three failed tasks."""
+        from orchestrator.scheduler import Scheduler, SchedulerState
+
+        manager = FakeRoundTaskManager({("A", attempt): (0, 1) for attempt in range(3)})
+        scheduler = Scheduler()
+        scheduler.set_task_manager(manager)
+
+        self._run_scheduled_with_fake_manager(scheduler, ["A"])
+
+        self.assertEqual(manager.calls, [("A", 0), ("A", 1), ("A", 2)])
+        self.assertEqual(scheduler._consecutive_errors, 1)
+        self.assertEqual(scheduler.state, SchedulerState.RUNNING)
+        self.assertTrue(scheduler._is_retry_exhausted(("s1", "c1"), "A"))
+
+    def test_executor_exceptions_do_not_multiply_scheduler_failures(self):
+        from orchestrator.scheduler import Scheduler, SchedulerState
+
+        manager = FakeRoundTaskManager({})
+        scheduler = Scheduler()
+        scheduler.set_task_manager(manager)
+        with patch.object(manager, "execute_tasks", side_effect=RuntimeError("executor failed")) as execute:
+            self._run_scheduled_with_fake_manager(scheduler, ["A"])
+
+        self.assertEqual(execute.call_count, 3)
+        self.assertEqual(scheduler._consecutive_errors, 1)
+        self.assertEqual(scheduler.state, SchedulerState.RUNNING)
+
+    def test_automatic_recovery_preserves_exhausted_tasks_across_pipeline_runs(self):
+        """Cooling down the scheduler must not grant the same plan three new attempts."""
+        from orchestrator.scheduler import ERROR_AUTO_RECOVER_SECONDS, Scheduler, SchedulerState
+
+        manager = FakeRoundTaskManager({
+            (task, attempt): (0, 1)
+            for task in ("A", "B", "C")
+            for attempt in range(3)
+        })
+        scheduler = Scheduler()
+        scheduler.set_task_manager(manager)
+        self._run_scheduled_with_fake_manager(scheduler, ["A", "B", "C"])
+        self.assertEqual(scheduler.state, SchedulerState.ERROR)
+        self.assertEqual(scheduler._consecutive_errors, 3)
+        self.assertEqual(len(manager.calls), 9)
+        exhausted_before_recovery = dict(scheduler._retry_exhausted_tasks)
+
+        with (
+            patch("orchestrator.scheduler.time.time", return_value=scheduler._error_at + ERROR_AUTO_RECOVER_SECONDS + 1),
+            patch.object(scheduler, "_loop"),
+        ):
+            self.assertTrue(scheduler._maybe_recover_from_error())
+        self.addCleanup(scheduler.stop, timeout=1)
+        self._run_scheduled_with_fake_manager(scheduler, ["A", "B", "C", "healthy-task"])
+
+        self.assertEqual(len(manager.calls), 10, "Only the healthy task may run after automatic recovery")
+        self.assertEqual(manager.calls[-1], ("healthy-task", 0))
+        self.assertEqual(scheduler._retry_exhausted_tasks, exhausted_before_recovery)
+        self.assertEqual(scheduler.state, SchedulerState.RUNNING)
 
     def test_exhausted_scheduled_task_does_not_force_zero_wait_spin(self):
         from orchestrator.scheduler import CHECK_INTERVAL, Scheduler

@@ -97,7 +97,7 @@ class TaskTree:
             if not isinstance(value, dict):
                 continue
             if TaskTree.is_leaf(value) and value.get("on", False):
-                if now_ts >= value.get("next_exec_time", 0):
+                if value.get("continuation_pending") or now_ts >= value.get("next_exec_time", 0):
                     return True
             elif TaskTree.branch_uncompleted(value, now_ts):
                 return True
@@ -135,6 +135,8 @@ class TaskTree:
         base = f"[✔] {key}"
         if node.get("params"):
             base += " [可编辑]"
+        if node.get("continuation_pending"):
+            return base, " 等待续跑"
         done = now_ts < node.get("next_exec_time", 0)
         suffix = " ✅已完成" if done else " ❌未完成"
         return base, suffix
@@ -540,12 +542,17 @@ def plan_task_table(task_table: dict, raw_overlay: dict, now_ts: float, *, eligi
         task_id for task_id, entry in task_table.items()
         if isinstance(entry, dict) and is_task_due(entry, task_registry.get_path(task_id) or "", now_ts)
     }
+    unfinished_ids = {
+        task_id for task_id, entry in task_table.items()
+        if isinstance(entry, dict) and entry.get("on") and entry.get("continuation_pending")
+    }
     eligible_ids = due_ids if eligible_paths is None else {task_registry.id_of(path) for path in eligible_paths}
     ordering = sort_paths_by_task_ordering(collect_task_paths(task_table), task_table, raw_overlay)
     decision = plan_tasks(
         specifications, due_ids, eligible_ids,
         [task_registry.id_of(path) for path in ordering], costs=costs,
         policy=raw_overlay.get("selection_policy", "nearest_ready"), errors=errors,
+        unfinished_ids=unfinished_ids,
     )
     return decision, specifications
 
@@ -560,14 +567,9 @@ def resolve_reschedule(task_path: str, entry: dict | None) -> dict:
     用户覆盖优先：cfg 里有 ``reschedule`` 就用它；没有才用作者声明的默认值；
     两者都没有就是一次性。所以同一个字段既让作者定默认，也让用户改。
     """
-    from tasks.task_register import task_registry
-    from tasks.task_schedule import normalize_reschedule
+    from tasks.task_schedule import resolve_reschedule as resolve_task_schedule
 
-    if isinstance(entry, dict) and "reschedule" in entry:
-        raw = entry["reschedule"]
-    else:
-        raw = task_registry.get_reschedule_default(task_path)
-    return normalize_reschedule(raw)
+    return resolve_task_schedule(task_path, entry)
 
 
 def is_task_debug_mode(task_path: str) -> bool:
@@ -584,33 +586,11 @@ def is_task_debug_mode(task_path: str) -> bool:
     return task_registry.get_debug_default(task_path)
 
 
-# 周期型规则 -> 下一个执行日。当天 5 点前算今天，5 点后算下一轮。
-def _next_daily_day(now: datetime.datetime) -> datetime.date:
-    return (now + datetime.timedelta(days=1 if now.hour >= 5 else 0)).date()
-
-
-def _next_weekly_day(now: datetime.datetime) -> datetime.date:
-    days = (7 - now.weekday()) % 7 or 7
-    return (now + datetime.timedelta(days=days if now.hour >= 5 else 0)).date()
-
-
-_PERIODIC_NEXT_DAY = {
-    "daily": _next_daily_day,
-    "weekly": _next_weekly_day,
-}
-
-
 def next_exec_ts_for_spec(now: datetime.datetime, spec: dict) -> float | None:
     """按调度规则算出执行后的下一个时间点。一次性任务返回 None，表示不排下一次。"""
-    mode = spec["mode"]
-    if mode == "once":
-        return None
-    if mode == "offset":
-        return (now + datetime.timedelta(hours=int(spec["hours"]))).timestamp()
-    next_day_of = _PERIODIC_NEXT_DAY.get(mode)
-    if next_day_of is None:
-        raise ValueError(f"调度模式没有对应的时间规则: {mode!r}")
-    return datetime.datetime.combine(next_day_of(now), datetime.time(5, 0)).timestamp()
+    from tasks.task_schedule import next_regular_execution_time
+
+    return next_regular_execution_time(now, spec)
 
 
 def calc_next_allowed_weekday_ts(now: datetime.datetime, allowed: list[int]) -> float:

@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const mountedCallbacks = [];
 let finishNavigationRequest;
 const context = vm.createContext({
-  EditorCanvas: {}, EditorControls: {}, PythonCodeEditor: {}, EditorMenuBar: {},
+  EditorCanvas: {}, EditorControls: {}, PythonCodeEditor: {}, EditorMenuBar: {}, EditorTutorial: {},
   Vue: {
     ref: value => ({ value }),
     computed: getter => ({ get value() { return getter(); } }),
@@ -53,12 +53,15 @@ async function main() {
   mountedCallbacks.forEach(callback => callback());
   assert.equal(findMap().children[0].disabled(), true);
   finishNavigationRequest({ data: { ok: true, items: [
+    { name: '任意位置', locations: [] },
     { name: '村庄', locations: ['邮件', '法相'] },
     { name: '天庭', locations: [] },
   ] } });
   await new Promise(resolve => setImmediate(resolve));
   const navigation = findTools().find(item => item.key === 'navigation');
-  assert.deepEqual(labels(findMap().children), labels(navigation.children));
+  assert.deepEqual(labels(findMap().children), labels(navigation.children).filter(item => item.label !== '任意位置'));
+  navigation.children[0].action();
+  assert.equal(panel.recordedCode.value, 'ensure_in(ANYWHERE)\n');
 
   const snippets = [];
   for (const inFunction of [false, true]) {

@@ -1,0 +1,291 @@
+/* Tutorial styles stay scoped so the working editor is not restyled. */
+.editor-tutorial-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  background: #f0fdf4;
+  color: #166534;
+  font-size: var(--as-text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+.editor-tutorial-entry:disabled { opacity: 0.55; cursor: not-allowed; }
+.editor-tutorial-entry:focus-visible,
+.editor-tutorial-dialog button:focus-visible,
+.editor-tutorial-dialog summary:focus-visible {
+  outline: 2px solid #16a34a;
+  outline-offset: 3px;
+}
+.editor-tutorial-dialog {
+  --tutorial-surface: #f8fafc;
+  --tutorial-border: #e2e8f0;
+  --tutorial-muted: #64748b;
+  --tutorial-ink: #334155;
+  --tutorial-accent: #15803d;
+  --tutorial-soft: #f0fdf4;
+  display: flex;
+  flex-direction: column;
+  max-height: 94vh;
+  margin-bottom: 3vh;
+  border-radius: 16px;
+}
+.editor-tutorial-dialog .el-dialog__header { flex-shrink: 0; }
+.editor-tutorial-dialog .el-dialog__body {
+  overflow: auto;
+  min-height: 0;
+  padding-top: 8px;
+  color: var(--tutorial-ink);
+  overscroll-behavior: contain;
+}
+.editor-tutorial-dialog .el-dialog__footer { flex-shrink: 0; padding-top: 12px; }
+.editor-tutorial-safety {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  border-radius: 8px;
+  color: var(--tutorial-accent);
+  background: var(--tutorial-soft);
+  font-size: 12px;
+}
+.editor-tutorial-layout {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 24px;
+}
+.editor-tutorial-steps { align-self: start; }
+.editor-tutorial-eyebrow { font-size: 11px; letter-spacing: 0.06em; color: var(--tutorial-muted); }
+.editor-tutorial-steps > p { margin: 0 8px 12px; }
+.editor-tutorial-steps > button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 5px;
+  padding: 12px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--tutorial-ink);
+  text-align: left;
+  cursor: pointer;
+}
+.editor-tutorial-steps > button:hover { background: var(--tutorial-surface); }
+.editor-tutorial-steps > button.is-current { border-color: #86c99b; background: var(--tutorial-soft); }
+.editor-tutorial-step-number {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--tutorial-surface);
+  border: 1px solid var(--tutorial-border);
+  font-size: 12px;
+}
+.is-current > .editor-tutorial-step-number,
+.is-complete > .editor-tutorial-step-number {
+  color: #fff;
+  background: #15803d;
+  border-color: #15803d;
+}
+.editor-tutorial-steps strong { display: block; font-size: 13px; font-weight: 600; }
+.editor-tutorial-steps small {
+  display: block;
+  color: var(--tutorial-muted);
+  font-size: 11px;
+  margin-top: 3px;
+}
+.editor-tutorial-progress {
+  color: var(--tutorial-muted);
+  font-size: 11px;
+  line-height: 1.8;
+  padding-top: 12px;
+}
+.editor-tutorial-content { min-width: 0; }
+.editor-tutorial-heading h3 {
+  margin: 3px 0 8px;
+  font-size: 22px;
+  line-height: 1.4;
+  font-weight: 650;
+}
+.editor-tutorial-heading p { margin: 0 0 8px; }
+.editor-tutorial-location { color: var(--tutorial-muted); font-size: 12px; }
+.editor-tutorial-assignment {
+  margin: 16px 0 12px;
+  padding: 12px;
+  border-left: 3px solid #22c55e;
+  background: var(--tutorial-surface);
+}
+.editor-tutorial-assignment > .editor-tutorial-actions { margin-top: 10px; }
+.editor-tutorial-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.editor-tutorial-actions > .el-button + .el-button { margin-left: 0; }
+.editor-tutorial-workbench { border: 1px solid var(--tutorial-border); border-radius: 10px; min-width: 0; }
+.editor-tutorial-workbench-label {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--tutorial-border);
+  background: var(--tutorial-surface);
+  font-size: 11px;
+  color: var(--tutorial-muted);
+  border-radius: 10px 10px 0 0;
+}
+.editor-tutorial-controls { border: 0; margin: 0; padding: 12px; min-width: 0; }
+.editor-tutorial-muted { color: var(--tutorial-muted); font-size: 12px; }
+.editor-tutorial-controls p { margin: 4px 0; }
+.editor-tutorial-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  min-width: 0;
+}
+.editor-tutorial-controls input,
+.editor-tutorial-controls select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--tutorial-border);
+  border-radius: 6px;
+  background: var(--el-bg-color, white);
+  color: var(--tutorial-ink);
+  font: inherit;
+}
+.editor-tutorial-mode {
+  font-size: 11px;
+  color: var(--tutorial-accent);
+  background: var(--tutorial-soft);
+  border-radius: 5px;
+  padding: 4px 7px;
+}
+.editor-tutorial-scene {
+  aspect-ratio: 16 / 9;
+  width: min(calc(100% - 24px), 50vh);
+  margin: 0 auto 12px;
+  border-radius: 6px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.editor-tutorial-scene.is-interactive { pointer-events: auto; }
+.editor-tutorial-scene .editor-canvas-wrapper { height: 100%; }
+.editor-tutorial-scene-empty {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  height: 100%;
+  background: #182c29;
+  color: #d2e5df;
+}
+.editor-tutorial-scene-empty > i { font-size: 32px; color: #6f9b83; }
+.editor-tutorial-scene-empty > small { color: #a4c8b7; }
+.editor-tutorial-workbench.is-demonstrating .editor-tutorial-scene,
+.editor-tutorial-workbench.is-demonstrating .editor-menubar { pointer-events: none; }
+.editor-tutorial-coordinate {
+  padding: 0 12px 12px;
+  color: var(--tutorial-muted);
+  font-size: 11px;
+}
+.editor-tutorial-code { padding: 12px; border-top: 1px solid var(--tutorial-border); }
+.editor-tutorial-code > span { font-size: 11px; color: var(--tutorial-muted); }
+.editor-tutorial-dialog pre {
+  margin: 8px 0 0;
+  padding: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 12px/1.7 var(--as-font-mono);
+  color: #d5f1e1;
+  background: #182c29;
+  border-radius: 6px;
+}
+.editor-tutorial-execution,
+.editor-tutorial-save {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+.editor-tutorial-save > .el-button { align-self: start; }
+.editor-tutorial-result {
+  display: block;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--tutorial-surface);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.editor-tutorial-feedback {
+  margin: 10px 0;
+  min-height: 22px;
+  font-size: 12px;
+  color: var(--tutorial-muted);
+}
+.editor-tutorial-feedback.is-complete { color: var(--tutorial-accent); }
+.editor-tutorial-caution {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 12px;
+}
+.editor-tutorial-caution > i { margin-top: 3px; }
+.editor-tutorial-details {
+  padding: 10px 0;
+  border-top: 1px solid var(--tutorial-border);
+  font-size: 12px;
+}
+.editor-tutorial-details summary { cursor: pointer; color: var(--tutorial-ink); }
+.editor-tutorial-details dt { font-weight: 600; margin-top: 12px; }
+.editor-tutorial-details dd { margin: 3px 0 0; color: var(--tutorial-muted); line-height: 1.7; }
+.editor-tutorial-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--tutorial-border);
+  padding-top: 12px;
+}
+.editor-tutorial-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+html.dark .editor-tutorial-dialog {
+  --tutorial-surface: #17232b;
+  --tutorial-border: #354550;
+  --tutorial-muted: #abbac6;
+  --tutorial-ink: #e2e8f0;
+  --tutorial-soft: #163329;
+  --tutorial-accent: #86efac;
+}
+html.dark .editor-tutorial-entry { background: #163329; color: #86efac; border-color: #30684b; }
+html.dark .editor-tutorial-caution { background: #362b16; color: #f5cf8b; }
+@media (max-width: 760px) {
+  .editor-tutorial-layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .editor-tutorial-steps { display: flex; overflow-x: auto; gap: 6px; padding: 3px; }
+  .editor-tutorial-steps > button { flex: 0 0 auto; width: auto; padding: 8px; }
+  .editor-tutorial-steps > p, .editor-tutorial-steps small { display: none; }
+  .editor-tutorial-step-number { width: 24px; height: 24px; }
+  .editor-tutorial-steps strong { font-size: 12px; }
+  .editor-tutorial-footer { flex-wrap: wrap; }
+  .editor-tutorial-footer > .editor-tutorial-muted { display: none; }
+  .editor-tutorial-heading h3 { font-size: 18px; }
+}

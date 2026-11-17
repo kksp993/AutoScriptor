@@ -211,6 +211,17 @@ class TaskTreeService:
 
     def public_config(self) -> dict:
         config_data = deepcopy(cfg._config)
+        # Machine lifecycle checkpoints are not editable/exportable settings.
+        config_data.pop("runtime_state", None)
+        from tasks.task_register import task_registry
+        from tasks.task_schedule import resolve_reschedule
+        from tasks.task_state import task_status_snapshot
+
+        status_tree = config_data.get("status") or {}
+        now_ts = time.time()
+        for task_path in list(status_tree.get("tasks") or {}):
+            entry = (config_data.get("tasks") or {}).get(task_registry.id_of(task_path))
+            status_tree["tasks"][task_path] = task_status_snapshot(status_tree, task_path, resolve_reschedule(task_path, entry), now_ts)
         qq_settings = config_data.get("notify", {}).get("qq")
         if isinstance(qq_settings, dict):
             qq_settings["token_set"] = bool(qq_settings.pop("access_token", ""))
@@ -313,8 +324,11 @@ class TaskTreeService:
         leaf["ensure_in"] = task_registry.get_ensure_in(path)
         leaf["task_description"] = task_registry.get_description(path)
         leaf["task_doc_flow"] = task_registry.get_doc_flow(path)
-        task_status = ((cfg._config.get("status") or {}).get("tasks") or {}).get(path, {})
-        progress = task_status.get("progress") if isinstance(task_status, dict) else None
+        leaf["params_doc"] = task_registry.get_params_doc(path)
+        from tasks.task_state import task_status_snapshot
+
+        task_status = task_status_snapshot(cfg._config.get("status") or {}, path, leaf["reschedule_effective"], now_ts)
+        progress = task_status.get("progress")
         if progress is not None:
             from tasks.task_state import progress_label
 
@@ -496,13 +510,18 @@ class TaskTreeService:
             return "disabled"
         if node.get("error") or is_human_takeover_blocked(node, now_ts):
             return "error"
+        if node.get("continuation_pending"):
+            return "pending"
         return "pending" if is_task_due(node, path, now_ts) else "scheduled"
 
-    def flatten_tasks(self, task_table: dict, now_ts: float) -> list:
+    def flatten_tasks(self, task_table: dict, now_ts: float, *, status_tree: dict | None = None) -> list:
         """One row per registered task in a flat cfg table, with its display path."""
         from tasks.task_register import task_registry
-        from orchestrator.model import is_task_debug_mode
+        from tasks.task_state import task_status_snapshot
+        from orchestrator.model import is_task_debug_mode, resolve_reschedule
 
+        if status_tree is None:
+            status_tree = cfg._config.get("status") or {}
         result = []
         for task_id, val in (task_table or {}).items():
             if not isinstance(val, dict) or "on" not in val or "next_exec_time" not in val:
@@ -518,9 +537,10 @@ class TaskTreeService:
                 "debug": is_task_debug_mode(path),
                 "task_description": task_registry.get_description(path),
                 "task_doc_flow": task_registry.get_doc_flow(path),
+                "continuation_pending": bool(val.get("continuation_pending")),
             }
-            task_status = ((cfg._config.get("status") or {}).get("tasks") or {}).get(path, {})
-            progress = task_status.get("progress") if isinstance(task_status, dict) else None
+            task_status = task_status_snapshot(status_tree, path, resolve_reschedule(path, val), now_ts)
+            progress = task_status.get("progress")
             if progress is not None:
                 from tasks.task_state import progress_label
 
@@ -541,12 +561,18 @@ class TaskTreeService:
             return cfg._config.get("tasks", {})
         return cfg._account_data.get("characters", {}).get(server, {}).get(char_name, {}).get("tasks", {}) or {}
 
+    def _character_status_tree(self, server: str, char_name: str) -> dict:
+        active = cfg.active_character()
+        if server == active.get("server", "") and char_name == active.get("name", ""):
+            return cfg._config.get("status") or {}
+        return cfg._account_data.get("characters", {}).get(server, {}).get(char_name, {}).get("status", {}) or {}
+
     def aggregate_stats_all_characters(self, now_ts: float) -> dict:
         chars = cfg._account_data.get("characters", {})
         total = pending = scheduled = error = disabled = 0
         for srv, srv_chars in chars.items():
             for char_name in srv_chars.keys():
-                flat = self.flatten_tasks(self._character_task_table(srv, char_name), now_ts)
+                flat = self.flatten_tasks(self._character_task_table(srv, char_name), now_ts, status_tree=self._character_status_tree(srv, char_name))
                 for t in flat:
                     total += 1
                     st = t["status"]
@@ -597,7 +623,7 @@ class TaskTreeService:
             srv_result = {}
             for char_name in srv_chars.keys():
                 task_table = self._character_task_table(srv, char_name)
-                flat = self.flatten_tasks(task_table, now_ts)
+                flat = self.flatten_tasks(task_table, now_ts, status_tree=self._character_status_tree(srv, char_name))
                 counts = {"total": 0, "pending": 0, "scheduled": 0, "error": 0, "disabled": 0}
                 for t in flat:
                     counts["total"] += 1
@@ -738,9 +764,13 @@ class WebUILifecycleService:
             self.cfg._config["tasks"] = cleaned
             if reset_paths:
                 from tasks.task_state import clear_task_status
+                from tasks.task_register import task_registry
 
                 for path in reset_paths:
                     self.task_manager._clear_human_takeover_state(path)
+                    reset_leaf = cleaned[task_registry.id_of(path)]
+                    reset_leaf.pop("continuation_pending", None)
+                    reset_leaf["next_exec_time"] = 0
                     clear_task_status(None, task_path=path, save=False)
             self.cfg.save_config()
             self.scheduler.wake()
@@ -805,7 +835,7 @@ class WebUILifecycleService:
             resolve_planning_specs(task_table, locations=set(mm.locs), strict=True)
             reset_paths = [task_path] if self.task_tree_service.task_leaf_needs_reset(old_leaf, new_leaf) else []
             if reset_paths:
-                for key in ("human_takeover", "human_takeover_error", "human_takeover_at", "error"):
+                for key in ("human_takeover", "human_takeover_error", "human_takeover_at", "error", "continuation_pending"):
                     new_leaf.pop(key, None)
                 new_leaf["next_exec_time"] = 0
 
@@ -822,9 +852,10 @@ class WebUILifecycleService:
                 self.cfg.save_config()
             else:
                 if reset_paths:
-                    status_tasks = char_node.setdefault("status", {}).setdefault("tasks", {})
+                    status = char_node.setdefault("status", {})
                     for path in reset_paths:
-                        status_tasks.pop(path, None)
+                        status.setdefault("tasks", {}).pop(path, None)
+                        status.setdefault("task_cycles", {}).pop(path, None)
                 self.cfg._save_account_file()
             self.scheduler.wake()
             return self._refresh_task_projection("save character task")

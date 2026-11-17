@@ -6,7 +6,6 @@ from AutoScriptor import *
     reschedule="daily",
 )
 def bingkuTanXian():
-    ensure_in("极北",-1)
     click(I("冰霜遗迹"),delay=1)
     sleep(1)
     ice_cave_energy = extract_info(B(970,500,100,22), lambda res: int(res.split("/")[0]) if res else 0)

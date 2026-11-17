@@ -1,4 +1,4 @@
-"""Editor task starts are validated before persistence and executed by generated bodies."""
+"""Editor validates entry declarations; the shared wrapper, not generated bodies, navigates."""
 
 import ast
 import asyncio
@@ -39,7 +39,7 @@ class EditorTaskStartTests(unittest.TestCase):
             with self.subTest(metadata=metadata), self.assertRaisesRegex(ValueError, "ensure_in"):
                 editor._prepare_editor_custom_task_source("Town/example", "pass", metadata)
 
-    def test_generated_declaration_and_first_action_use_the_same_start(self):
+    def test_generated_declaration_does_not_duplicate_wrapper_navigation(self):
         for start in ("Mail", ["Mail", "Heaven"], ("Mail", "Heaven")):
             with self.subTest(start=start):
                 expected_start = list(start) if isinstance(start, tuple) else start
@@ -57,8 +57,7 @@ class EditorTaskStartTests(unittest.TestCase):
                 )
                 self.assertEqual(ast.literal_eval(declaration), expected_start)
                 self.assertEqual(ast.get_docstring(task_function), "Task explanation")
-                self.assertEqual(task_function.body[1].value.func.id, "ensure_in")
-                self.assertEqual(ast.literal_eval(task_function.body[1].value.args[0]), expected_start)
+                self.assertEqual(task_function.body[1].value.func.id, "record_body")
 
                 # Execute only the generated function, without imports, task registration or devices.
                 task_function.decorator_list = []
@@ -69,22 +68,41 @@ class EditorTaskStartTests(unittest.TestCase):
                 }
                 exec(compile(ast.Module(body=[task_function], type_ignores=[]), "<generated-task>", "exec"), namespace)
                 self.assertEqual(namespace["task"](), 7)
-                self.assertEqual(events, [("navigate", expected_start), ("body", None)])
+                self.assertEqual(events, [("body", None)])
 
     def test_existing_navigation_is_not_guessed_or_removed(self):
         source, _, _ = editor._prepare_editor_custom_task_source(
             "example", "ensure_in('Heaven')\nrecord_body()", {"ensure_in": "Mail"},
         )
         task_function = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef))
-        self.assertEqual(ast.literal_eval(task_function.body[0].value.args[0]), "Mail")
-        self.assertEqual(ast.literal_eval(task_function.body[1].value.args[0]), "Heaven")
+        self.assertEqual(ast.literal_eval(task_function.body[0].value.args[0]), "Heaven")
+        self.assertEqual(task_function.body[1].value.func.id, "record_body")
+
+    def test_generated_parameter_labels_are_registration_metadata(self):
+        label = "\u6311\u6218\u6b21\u6570"
+        source, _, _ = editor._prepare_editor_custom_task_source("example", "pass", {
+            "ensure_in": "Mail",
+            "params": [
+                {"name": "times", "type": "int", "description": label},
+                {"name": "enabled", "type": "bool"},
+                {"name": "mode", "type": "enum", "enum_options": ["Normal", "Hard"],
+                 "description": "Mode's label"},
+            ],
+        })
+        task_function = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef))
+        labels = next(argument.value for argument in task_function.decorator_list[0].keywords
+                      if argument.arg == "params_doc")
+        self.assertEqual(ast.literal_eval(labels), {"times": label, "mode": "Mode's label"})
+        self.assertIn(f"times: {label}", ast.get_docstring(task_function))
 
     def test_full_task_files_preserve_their_source(self):
         for declaration in (
             "ensure_in='Mail'", "ensure_in=['Mail', 'Heaven']",
-            "ensure_in=('Mail', 'Heaven')", "debug=True, ensure_in=None",
+            "ensure_in=('Mail', 'Heaven')", "debug=True, ensure_in=ANYWHERE",
+            "ensure_in=ANYWHERE",
+            "ensure_in='Mail', params_doc={}",
         ):
-            code = f"\n# Keep author formatting.\n@register_task({declaration})\ndef task():\n    pass\n\n"
+            code = f"\n# Keep author formatting.\nfrom ZmxyOL import *\n@register_task({declaration})\ndef task():\n    pass\n\n"
             with self.subTest(declaration=declaration):
                 source, wrapped, task_path = editor._prepare_editor_custom_task_source("example", code)
                 self.assertFalse(wrapped)
@@ -96,6 +114,7 @@ class EditorTaskStartTests(unittest.TestCase):
             "@register_task", "@register_task()", "@task_register.register_task(debug=True)",
             "@register_task(ensure_in=None)", "@register_task(debug=False, ensure_in=None)",
             "@register_task(debug=1, ensure_in=None)", "@register_task(ensure_in=[])",
+            "@register_task(debug=True, ensure_in=None)",
             "@register_task(ensure_in='NotRegistered')",
         ):
             code = f"{decorator}\ndef task():\n    pass"
@@ -109,8 +128,8 @@ class EditorTaskStartTests(unittest.TestCase):
             editor._prepare_editor_custom_task_source("example", code)
 
     def test_imported_decorator_aliases_are_checked_without_rewriting(self):
-        prefix = "from tasks.task_register import register_task as author_task\n"
-        code = prefix + "@author_task(debug=True, ensure_in=None)\ndef task():\n    pass\n"
+        prefix = "from tasks.task_register import register_task as author_task\nfrom ZmxyOL import ANYWHERE\n"
+        code = prefix + "@author_task(debug=True, ensure_in=ANYWHERE)\ndef task():\n    pass\n"
         source, wrapped, _ = editor._prepare_editor_custom_task_source("example", code)
         self.assertEqual(source, code)
         self.assertFalse(wrapped)
@@ -118,6 +137,30 @@ class EditorTaskStartTests(unittest.TestCase):
         code = prefix + "@author_task()\ndef task():\n    pass\n"
         with self.assertRaisesRegex(ValueError, "ensure_in"):
             editor._prepare_editor_custom_task_source("example", code)
+
+    def test_anywhere_declarations_require_a_module_level_navigation_import(self):
+        for imports in (
+            "",
+            "from AutoScriptor import *\n",
+            "from unrelated_module import ANYWHERE\n",
+            "from ZmxyOL import ANYWHERE as START\n",
+            "def import_later():\n    from ZmxyOL import ANYWHERE\n",
+        ):
+            code = imports + "@register_task(ensure_in=ANYWHERE)\ndef task():\n    pass\n"
+            with self.subTest(imports=imports), self.assertRaisesRegex(ValueError, "ANYWHERE"):
+                editor._prepare_editor_custom_task_source("example", code)
+        code = "@register_task(ensure_in=ANYWHERE)\ndef task():\n    pass\nfrom ZmxyOL import ANYWHERE\n"
+        with self.assertRaisesRegex(ValueError, "ANYWHERE"):
+            editor._prepare_editor_custom_task_source("example", code)
+
+    def test_anywhere_imports_and_aliases_preserve_full_source(self):
+        for module_name in ("ZmxyOL", "ZmxyOL.nav", "ZmxyOL.nav.api"):
+            for import_name, expression in (("*", "ANYWHERE"), ("ANYWHERE", "ANYWHERE"), ("ANYWHERE as START", "START")):
+                code = f"from {module_name} import {import_name}\n@register_task(ensure_in={expression})\ndef task():\n    pass\n"
+                with self.subTest(module=module_name, expression=expression):
+                    source, wrapped, _ = editor._prepare_editor_custom_task_source("example", code)
+                    self.assertEqual(source, code)
+                    self.assertFalse(wrapped)
 
     def test_save_preflight_never_executes_dynamic_declarations(self):
         code = "@register_task(ensure_in=choose_location())\ndef task():\n    pass"
@@ -137,6 +180,7 @@ class EditorTaskStartTests(unittest.TestCase):
             {"code": "pass", "metadata": ["Mail"]},
             {"code": "@register_task()\ndef task():\n    pass", "metadata": {"ensure_in": "Mail"}},
             {"code": "@register_task(ensure_in=None)\ndef task():\n    pass"},
+            {"code": "@register_task(ensure_in=ANYWHERE)\ndef task():\n    pass"},
         ]
         for payload in payloads:
             request = Mock(json=AsyncMock(return_value=payload))
@@ -175,7 +219,7 @@ class EditorTaskStartTests(unittest.TestCase):
             self.assertEqual(response["config_version"], 73)
             source = (root / "Folder" / "example.py").read_text(encoding="utf-8")
             self.assertIn("ensure_in=['Mail', 'Heaven']", source)
-            self.assertIn("ensure_in(['Mail', 'Heaven'])", source)
+            self.assertNotIn("ensure_in(['Mail', 'Heaven'])", source)
             self.assertIn("times: int = 0", source)
             self.assertIn("description='Example'", source)
             self.assertIn('"""Details"""', source)
@@ -183,7 +227,7 @@ class EditorTaskStartTests(unittest.TestCase):
             runtime.assert_not_called()
 
     def test_full_debug_file_uses_the_requested_path_and_is_not_wrapped(self):
-        code = "\n@register_task(debug=True, ensure_in=None)\ndef task():\n    pass\n\n"
+        code = "\nfrom ZmxyOL import *\n@register_task(debug=True, ensure_in=ANYWHERE)\ndef task():\n    pass\n\n"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             request = Mock(json=AsyncMock(return_value={
@@ -198,6 +242,18 @@ class EditorTaskStartTests(unittest.TestCase):
             self.assertFalse(response["wrapped"])
             self.assertEqual((root / "ExternalApp" / "example.py").read_text(encoding="utf-8"), code)
             self.navigation_options.assert_not_called()
+
+    def test_anywhere_snippets_use_the_exported_constant_and_reject_mixed_locations(self):
+        from ZmxyOL import ANYWHERE
+
+        source, wrapped, _ = editor._prepare_editor_custom_task_source("example", "pass", {"ensure_in": [ANYWHERE]})
+        self.assertTrue(wrapped)
+        self.assertIn("ensure_in=ANYWHERE", source)
+        self.assertNotIn("ensure_in(ANYWHERE)", source)
+        with self.assertRaisesRegex(ValueError, "ensure_in"):
+            editor._prepare_editor_custom_task_source("example", "pass", {"ensure_in": [ANYWHERE, "Mail"]})
+        code = "from ZmxyOL import ANYWHERE as location\n@register_task(ensure_in=location)\ndef task():\n    pass\n"
+        self.assertEqual(editor._prepare_editor_custom_task_source("example", code)[0], code)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is required for editor form checks")
     def test_editor_form_start_choices_and_save_payload(self):

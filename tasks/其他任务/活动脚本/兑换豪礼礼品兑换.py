@@ -9,10 +9,10 @@ from ZmxyOL import *
     ensure_in="村庄",
     description="输入兑换码并记录兑换返回提示。",
     debug=True,
+    params_doc={"redeem_code": "兑换码"},
 )
 def task(redeem_code: str | list[str] = "1111"):
     redeem_codes = [redeem_code] if isinstance(redeem_code, str) else redeem_code
-    ensure_in("村庄")
 
     # 仙盟面板展开时会盖住「活动」入口，先收起来——`_活动流程.run_activity()` 和
     # `每日任务/村庄/星之结晶消耗` 都先做这一步，这里原本漏了。

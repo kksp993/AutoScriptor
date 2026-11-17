@@ -22,6 +22,7 @@ const SETTINGS_LOG_LEVELS = [
 
 const SettingsPanel = {
   name: 'SettingsPanel',
+  components: { NotificationsPanel },
   props: {
     filteredConfig: { type: Object, required: true },
     executionBusy: { type: Boolean, default: false },
@@ -43,6 +44,7 @@ const SettingsPanel = {
       savedAt: 0,
       discovering: false,
       discoveryMessage: '',
+      diagnosticsOpened: false,
       // deploy 段不走自动保存：密码涉及安全，必须显式点保存。
       deployBase: {},
       deployForm: { log_level: 'info', password: '', current_password: '' },
@@ -316,12 +318,13 @@ const SettingsPanel = {
     },
   },
   template: `
-<section class="settings-page h-full overflow-y-auto">
+<section class="settings-page settings-unified h-full overflow-y-auto">
   <div class="settings-hero">
     <div>
-      <h2 class="settings-title">运行配置</h2>
-      <p class="text-sm text-gray-500 mt-1">{{ syncStatusText }}</p>
+      <h2 class="settings-title">设置</h2>
+      <p class="settings-help">连接设备、运行任务、接收通知。</p>
     </div>
+    <span class="settings-save-status" role="status">{{ syncStatusText }}</span>
   </div>
 
   <el-alert v-if="executionBusy" type="warning" :closable="false" show-icon class="settings-busy-alert"
@@ -329,111 +332,90 @@ const SettingsPanel = {
     description="请先停止当前任务，再保存运行配置。"></el-alert>
 
   <el-form :model="filteredConfig" :disabled="executionBusy" label-position="top" class="settings-form">
-    <div class="settings-grid settings-grid--two">
-      <article class="settings-card">
+    <div class="settings-grid settings-grid--two settings-primary-grid">
+      <article class="settings-card settings-primary-card" aria-label="模拟器连接">
         <div class="settings-card-head">
-          <div>
-            <h3><i class="fa fa-play-circle"></i>运行方式</h3>
-          </div>
+          <h3><i class="fa fa-desktop" aria-hidden="true"></i>模拟器连接</h3>
+          <el-button size="small" type="primary" plain :loading="discovering" @click="autoDiscoverMumu">自动定位 MuMu</el-button>
         </div>
-
-        <div class="settings-field-row">
-          <div class="settings-field-text">
-            <div class="settings-field-title">模拟器后台运行</div>
-            <div class="settings-help">任务开始时自动启动模拟器和游戏；它不是“兼容性越高越慢”的开关。</div>
-          </div>
-          <el-switch v-model="appConfig.run_in_background" />
-        </div>
-
-        <div class="settings-field-row">
-          <div class="settings-field-text">
-            <div class="settings-field-title">失败后重启模拟器</div>
-          </div>
-          <el-switch v-model="appConfig.restart_on_error" />
-        </div>
-
-        <div class="settings-field-grid">
-          <el-form-item label="最多尝试次数">
-            <el-input-number v-model="appConfig.max_attempts" :min="1" :max="10" controls-position="right" />
-            <div class="settings-help">一个任务最多跑几遍（含第一遍）。3 表示最多跑 3 次。</div>
-          </el-form-item>
-          <el-form-item label="执行结束后">
-            <el-select v-model="emulatorConfig.post_execution" style="width:100%">
-              <el-option v-for="opt in postExecutionOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
-            </el-select>
-          </el-form-item>
-        <el-form-item label="MuMu 多开编号">
-          <el-input-number v-model="emulatorConfig.index" :min="0" :max="99" controls-position="right" @change="syncAdbPortFromIndex" />
-        </el-form-item>
-        
-        <el-form-item label="ADB 连接地址">
-          <el-input v-model="emulatorConfig.adb_addr" placeholder="例如 127.0.0.1:16416" clearable />
-          <div v-if="adbAddrError" class="settings-help settings-help--error">{{ adbAddrError }}</div>
-          <div v-else class="settings-help">默认由“MuMu 多开编号”推导；改成局域网或远程 ADB 时直接填写 主机:端口。</div>
-        </el-form-item>
-        </div>
-        <el-form-item label="CPU 核心限制">
-          <el-input-number v-model="appConfig.cpu_cores" :min="0" :max="64" controls-position="right" />
-        </el-form-item>
-
-        <div class="settings-field-row">
-          <div class="settings-field-text">
-            <div class="settings-field-title">OCR 使用 GPU</div>
-            <div class="settings-help">
-              需要先运行 scripts\\install.bat python gpu。保存后重启 AutoScriptor，普通、线程局部和数字 OCR 才会统一切换设备。
-            </div>
-          </div>
-          <el-switch v-model="ocrConfig.use_gpu" />
-        </div>
-      </article>
-
-      <article class="settings-card">
-        <div class="settings-card-head">
-          <div>
-            <h3><i class="fa fa-desktop"></i>模拟器连接</h3>
-          </div>
-          <el-button size="small" type="primary" plain :loading="discovering" @click="autoDiscoverMumu">
-            <i class="fa fa-search mr-1"></i>自动定位 MuMu
-          </el-button>
-        </div>
-        <el-alert v-if="discoveryMessage" type="info" :closable="false" :title="discoveryMessage" class="mb-3"></el-alert>
-
+        <el-alert v-if="discoveryMessage" type="info" :closable="false" :title="discoveryMessage"></el-alert>
         <div class="settings-field-grid">
           <el-form-item label="游戏服务器">
-            <el-select v-model="appConfig.app_to_start" placeholder="请选择服务器" style="width:100%">
+            <el-select v-model="appConfig.app_to_start" aria-label="游戏服务器" style="width:100%">
               <el-option v-for="opt in serverOptionsFor(appConfig.app_to_start)" :key="opt.value" :label="opt.label" :value="opt.value" />
             </el-select>
           </el-form-item>
-
+          <el-form-item label="MuMu 多开编号">
+            <el-input-number v-model="emulatorConfig.index" aria-label="MuMu 多开编号" :min="0" :max="99" controls-position="right" @change="syncAdbPortFromIndex" />
+          </el-form-item>
         </div>
-
-
-        <el-form-item label="MuMu 安装目录">
-          <el-input v-model="emulatorConfig.mumu_folder" placeholder="例如 C:\\Program Files\\Netease\\MuMu" />
-          <div class="settings-help">截图探测会用到 MuMu 安装目录下的 NemuIpc 组件。</div>
+        <el-form-item label="ADB 连接地址">
+          <el-input v-model="emulatorConfig.adb_addr" aria-label="ADB 连接地址" placeholder="127.0.0.1:16416" clearable />
+          <div v-if="adbAddrError" class="settings-help settings-help--error">{{ adbAddrError }}</div>
+          <div v-else class="settings-help">按多开编号推导，也可手动填写主机:端口。</div>
         </el-form-item>
-
-        <el-form-item label="MuMuManager 路径">
-          <el-input v-model="emulatorConfig.emu_path" placeholder="例如 ...\\nx_main\\MuMuManager.exe" />
-          <div class="settings-help">只负责启动、关闭、窗口等官方管理动作；日常点击输入不会依赖它。</div>
-        </el-form-item>
-
-        <el-form-item label="ADB 程序路径">
-          <el-input v-model="emulatorConfig.adb_path" placeholder="例如 ...\\nx_main\\adb.exe" />
-          <div class="settings-help">这是最关键的控制通道，路径错误会直接导致无法点击、无法检测 App。</div>
-        </el-form-item>
+        <details class="settings-details settings-card-footer">
+          <summary>手动配置路径<span>自动定位失败时使用</span></summary>
+          <el-form-item label="MuMu 安装目录">
+            <el-input v-model="emulatorConfig.mumu_folder" aria-label="MuMu 安装目录" placeholder="MuMu 安装目录" />
+          </el-form-item>
+          <el-form-item label="MuMuManager 路径">
+            <el-input v-model="emulatorConfig.emu_path" aria-label="MuMuManager 路径" placeholder="MuMuManager.exe 完整路径" />
+            <div class="settings-help">只负责启动、关闭、窗口等官方管理动作。</div>
+          </el-form-item>
+          <el-form-item label="ADB 程序路径">
+            <el-input v-model="emulatorConfig.adb_path" aria-label="ADB 程序路径" placeholder="adb.exe 完整路径" />
+          </el-form-item>
+        </details>
       </article>
 
-      <article class="settings-card">
+      <article class="settings-card settings-primary-card" aria-label="任务运行">
         <div class="settings-card-head">
-          <div>
-            <h3><i class="fa fa-lock"></i>WebUI 访问</h3>
-          </div>
-          <el-tag size="small" :type="deployHasPassword ? 'success' : 'info'">
-            {{ deployHasPassword ? '已启用密码保护' : '未启用密码保护' }}
-          </el-tag>
+          <h3><i class="fa fa-play-circle" aria-hidden="true"></i>任务运行</h3>
+          <span class="settings-section-note">自动保存</span>
         </div>
+        <div class="settings-field-grid">
+          <el-form-item label="最多尝试次数">
+            <el-input-number v-model="appConfig.max_attempts" aria-label="最多尝试次数" :min="1" :max="10" controls-position="right" />
+            <div class="settings-help">含首次执行。</div>
+          </el-form-item>
+          <el-form-item label="执行结束后">
+            <el-select v-model="emulatorConfig.post_execution" aria-label="执行结束后" style="width:100%">
+              <el-option v-for="opt in postExecutionOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+            </el-select>
+          </el-form-item>
+        </div>
+        <div class="settings-field-row">
+          <span class="settings-field-title">模拟器后台运行</span>
+          <el-switch v-model="appConfig.run_in_background" aria-label="模拟器后台运行" />
+        </div>
+        <div class="settings-field-row">
+          <span class="settings-field-title">失败后自动恢复</span>
+          <el-switch v-model="appConfig.restart_on_error" aria-label="失败后自动恢复" />
+        </div>
+        <details class="settings-details settings-card-footer">
+          <summary>识别与性能<span>GPU、CPU 选项</span></summary>
+          <div class="settings-field-row">
+            <span class="settings-field-title">OCR 使用 GPU</span>
+            <el-switch v-model="ocrConfig.use_gpu" aria-label="OCR 使用 GPU" />
+          </div>
+          <p class="settings-help">先运行 scripts\\install.bat python gpu，保存后重启 AutoScriptor。</p>
+          <el-form-item label="CPU 核心限制">
+            <el-input-number v-model="appConfig.cpu_cores" aria-label="CPU 核心限制" :min="0" :max="64" controls-position="right" />
+          </el-form-item>
+          <p class="settings-help">后台运行：任务开始时自动启动模拟器和游戏；它不是“兼容性越高越慢”的开关。</p>
+        </details>
+      </article>
+    </div>
+  </el-form>
 
+  <notifications-panel embedded :execution-busy="executionBusy"></notifications-panel>
+
+  <details class="settings-card settings-details settings-access">
+    <summary>WebUI 访问与日志<span>{{ deployHasPassword ? '密码保护已开启' : '仅浏览器设置' }}</span></summary>
+    <el-button v-if="!deployLoaded" size="small" @click="loadDeploySettings">重新加载访问设置</el-button>
+    <el-form :disabled="executionBusy || !deployLoaded" label-position="top">
+      <div class="settings-field-grid">
         <el-form-item label="日志级别">
           <el-select v-model="deployForm.log_level" style="width:100%">
             <el-option v-for="opt in logLevelOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
@@ -452,22 +434,20 @@ const SettingsPanel = {
           <div class="settings-help">设置密码后打开 WebUI 需要登录；忘记密码可在 data/config.json 里清空 deploy.password。</div>
         </el-form-item>
 
-        <div class="settings-field-row">
-          <div class="settings-field-text">
-            <div class="settings-field-title">保存方式</div>
-            <div class="settings-help">这一栏不参与自动保存：密码涉及安全，改完必须点保存。</div>
-          </div>
-          <div class="settings-deploy-actions">
-            <el-button size="small" :disabled="executionBusy || !deployHasPassword || deploySaving"
-              @click="clearDeployPassword">清除密码</el-button>
-            <el-button type="primary" :loading="deploySaving" :disabled="executionBusy || !deployLoaded"
-              @click="saveDeploySettings">保存访问设置</el-button>
-          </div>
-        </div>
-      </article>
-    </div>
-  </el-form>
+      </div>
+      <p class="settings-help">访问密码和日志级别需手动保存，不影响运行设置与 QQ 通知。</p>
+      <div class="settings-deploy-actions">
+        <el-button size="small" :disabled="executionBusy || !deployHasPassword || deploySaving"
+          @click="clearDeployPassword">清除密码</el-button>
+        <el-button type="primary" :loading="deploySaving" :disabled="executionBusy || !deployLoaded"
+          @click="saveDeploySettings">保存访问设置</el-button>
+      </div>
+    </el-form>
+  </details>
 
-  <diagnostics-panel embedded></diagnostics-panel>
+  <details class="settings-card settings-details settings-diagnostics" @toggle="diagnosticsOpened = $event.target.open">
+    <summary>连接诊断<span>遇到连接问题时展开</span></summary>
+    <diagnostics-panel embedded v-if="diagnosticsOpened"></diagnostics-panel>
+  </details>
 </section>`,
 };

@@ -28,6 +28,7 @@ from ZmxyOL.character.profession import DEFAULT_GAME_PROFESSION, normalize_game_
 INJECTED_TASK_FIELDS = (
     "param_meta",
     "param_keys",
+    "params_doc",
     "custom",
     "debug_effective",
     "reschedule_effective",

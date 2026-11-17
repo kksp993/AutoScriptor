@@ -63,7 +63,7 @@ class EditorTextExtractionTests(unittest.TestCase):
                     exec(compile(source, "<saved-text-task>", "exec"), namespace)
                     namespace["ensure_in"] = Mock()
                     self.assertEqual(namespace["task"](), expected)
-                    namespace["ensure_in"].assert_called_once_with("Mail")
+                    namespace["ensure_in"].assert_not_called()
                 self.assertEqual(controller.virtual_clicks, [])
 
     def test_preview_uses_the_same_processor_on_the_cached_frame(self):

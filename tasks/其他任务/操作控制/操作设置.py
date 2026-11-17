@@ -2,10 +2,11 @@
 from AutoScriptor.control.MumuAdaptor.constant import AndroidKey
 from tasks.task_register import register_task
 from AutoScriptor import *
+from ZmxyOL import ANYWHERE
 
 
 @register_task(
-    ensure_in=None,  # 必须保留用户手动打开的操作按钮设置页面。
+    ensure_in=ANYWHERE,  # 必须保留用户手动打开的操作按钮设置页面。
     description="在操作按钮设置页面运行此程序，可以自动配置按钮位置",
     debug=True,
 )

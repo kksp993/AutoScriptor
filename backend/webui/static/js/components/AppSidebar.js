@@ -17,8 +17,8 @@ const APP_MENU = [
     group: 'TOOLS',
     items: [
       { id: 'editor',   label: '编辑器',   icon: 'fa-pencil-square-o' },
+      { id: 'apiDocs',  label: 'API 文档', icon: 'fa-book' },
       { id: 'errorArchives', label: '错误汇总', icon: 'fa-exclamation-triangle' },
-      { id: 'notifications', label: 'QQ 通知', icon: 'fa-qq' },
       { id: 'updater',  label: '检查更新', icon: 'fa-cloud-download' },
       { id: 'settings', label: '设置',     icon: 'fa-cog' },
       { id: 'about',    label: '关于',     icon: 'fa-info-circle' },

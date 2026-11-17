@@ -59,11 +59,16 @@ class TaskVideoRecorder:
         enabled: bool = ENABLE_TASK_VIDEO_RECORDING,
         segment_seconds: int = _SEGMENT_SECONDS,
         keep_segments: int = _KEEP_SEGMENTS,
+        retain_all: bool = False,
     ):
         self.task_path = task_path
         self.enabled = bool(enabled) and ENABLE_TASK_VIDEO_RECORDING
         self.segment_seconds = min(180, max(1, int(segment_seconds)))
         self.keep_segments = max(1, int(keep_segments))
+        self.retain_all = retain_all
+        self.errors: list[str] = []
+        self._valid_segments = 0
+        self._segment_started_at = 0.0
         # 设备端路径，旧→新。
         self.segments: list[str] = []
         self.local_dir: Path | None = None
@@ -76,6 +81,26 @@ class TaskVideoRecorder:
         self._rotate_thread: threading.Thread | None = None
 
     # ── Lifecycle ──
+
+    @property
+    def is_recording(self) -> bool:
+        """Rotation gaps are expected; early encoder exits are not."""
+        with self._lock:
+            if not self.enabled or self.errors or self._stopped.is_set():
+                return False
+            process = self._proc
+            if process is not None:
+                returncode = process.poll()
+                return returncode is None or (returncode == 0 and time.monotonic() - self._segment_started_at >= self.segment_seconds)
+            return self._rotate_thread is not None and self._rotate_thread.is_alive()
+
+    def recording_status(self) -> dict:
+        return {
+            "complete": self._stopped.is_set() and bool(self.segments) and not self.errors and self._valid_segments == len(self.segments),
+            "segments": len(self.segments), "valid_segments": self._valid_segments,
+            "errors": list(self.errors), "segmented": True,
+            "rotation_gap_seconds": _ROTATE_MARGIN_S,
+        }
 
     def start(self) -> "TaskVideoRecorder":
         """Start the first segment synchronously, then rotate in the background."""
@@ -116,6 +141,7 @@ class TaskVideoRecorder:
             if keep:
                 self.local_dir = self._pull_segments()
         except Exception as exc:
+            self.errors.append(f"stop: {exc}")
             logger.warning("debug video stop failed: %s", exc)
         finally:
             self.cleanup_device()
@@ -143,6 +169,9 @@ class TaskVideoRecorder:
 
     def _start_segment(self) -> bool:
         """Start one screenrecord segment; report why when it refuses to run."""
+        if self.retain_all and self._segment_index >= self.keep_segments:
+            self.errors.append("Full-flow recording reached its segment budget")
+            return False
         device_path = self._segment_device_path()
         command = [
             "shell",
@@ -155,6 +184,7 @@ class TaskVideoRecorder:
             "500000",
             device_path,
         ]
+        segment_started_at = time.monotonic()
         try:
             process = subprocess.Popen(
                 adb_base_args() + command,
@@ -166,6 +196,7 @@ class TaskVideoRecorder:
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except (OSError, subprocess.SubprocessError) as exc:
+            self.errors.append(f"start: {exc}")
             logger.warning("debug video segment start failed: %s", exc)
             return False
 
@@ -184,12 +215,16 @@ class TaskVideoRecorder:
                 process.returncode,
                 reason or "screenrecord 未给出原因",
             )
+            self.errors.append(f"encoder exited {process.returncode}: {reason}")
+            if process.stdout is not None:
+                process.stdout.close()
             return False
 
         with self._lock:
             self._proc = process
             self._current_device_path = device_path
             self.segments.append(device_path)
+            self._segment_started_at = segment_started_at
         self._trim_device_segments()
         return True
 
@@ -201,6 +236,8 @@ class TaskVideoRecorder:
             self._current_device_path = None
         if process is None:
             return
+        if process.poll() is not None and (process.returncode != 0 or time.monotonic() - self._segment_started_at < self.segment_seconds):
+            self.errors.append(f"Encoder stopped before segment deadline (rc={process.returncode})")
         if process.poll() is None:
             try:
                 process.terminate()
@@ -221,16 +258,22 @@ class TaskVideoRecorder:
         self._wait_for_device_idle()
 
     def _rotate_loop(self) -> None:
-        while not self._stopped.wait(self.segment_seconds + _ROTATE_MARGIN_S):
-            self._finish_current_segment()
-            if self._stopped.is_set():
-                return
-            if not self._start_segment():
-                logger.warning("debug video rotation stopped: 无法启动新的分段")
-                return
+        try:
+            while not self._stopped.wait(self.segment_seconds + _ROTATE_MARGIN_S):
+                self._finish_current_segment()
+                if self._stopped.is_set():
+                    return
+                if not self._start_segment():
+                    logger.warning("debug video rotation stopped: 无法启动新的分段")
+                    return
+        except Exception as error:
+            self.errors.append(f"rotation: {error}")
+            logger.warning("debug video rotation failed: %s", error)
 
     def _trim_device_segments(self) -> None:
         """Delete older device segments so /sdcard keeps only the newest few."""
+        if self.retain_all:
+            return
         stale = self.segments[: -self.keep_segments]
         if not stale:
             return
@@ -259,11 +302,15 @@ class TaskVideoRecorder:
         for index, device_path in enumerate(self.segments, start=1):
             local_path = local_dir / f"segment_{index:03d}.mp4"
             if not self._pull_one(device_path, local_path):
+                self.errors.append(f"Missing segment: {device_path}")
                 continue
             if not _is_decodable(local_path):
                 # Keep it: a damaged but present file still tells the user the
                 # recording ran, and some players recover more than OpenCV does.
                 logger.warning("debug video segment is not decodable: %s", local_path)
+                self.errors.append(f"Undecodable segment: {local_path.name}")
+            else:
+                self._valid_segments += 1
             pulled.append(local_path)
 
         if not pulled:

@@ -34,11 +34,16 @@
     if (!taskItem || !taskItem.on) return 'disabled';
     if (taskItem.error) return 'error';
     if ((taskItem.human_takeover || taskItem.human_takeover_error) && !taskItem._due) return 'error';
+    if (taskItem.continuation_pending) return 'pending';
     return taskItem._due ? 'pending' : 'scheduled';
   }
 
   function getTaskTheme(taskItem) {
-    return STATUS_THEME[getTaskStatus(taskItem)] || STATUS_THEME.disabled;
+    const status = getTaskStatus(taskItem);
+    const theme = STATUS_THEME[status] || STATUS_THEME.disabled;
+    return status === 'pending' && taskItem.continuation_pending && !taskItem._due
+      ? { ...theme, label: '等待续跑' }
+      : theme;
   }
 
   global.TaskStatusTheme = {
